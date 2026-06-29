@@ -1,9 +1,11 @@
 "use client";
 
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { useMemo } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -15,10 +17,16 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
+import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import {
+  buildRateMap,
+  estimateCost,
+  formatCost,
   storageQueryOptions,
   storageSpacesQueryOptions,
-  tokenUsageQueryOptions
+  tokenUsageQueryOptions,
+  userTokenUsageQueryOptions,
+  type UserTokenUsage
 } from "@/features/admin/usage/usage";
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
@@ -113,6 +121,79 @@ function StorageTab() {
   );
 }
 
+function userCost(
+  user: UserTokenUsage["users"][number],
+  rates: ReturnType<typeof buildRateMap>
+): number | null {
+  let total: number | null = null;
+  for (const model of user.models_used) {
+    const cost = estimateCost(
+      model.input_token_usage,
+      model.output_token_usage,
+      rates.get(model.model_id)
+    );
+    if (cost != null) total = (total ?? 0) + cost;
+  }
+  return total;
+}
+
+function UsersTab() {
+  const t = useTranslations();
+  const { data, isPending } = useQuery(userTokenUsageQueryOptions(browserApi));
+  const { data: models } = useQuery(adminModelsQueryOptions(browserApi));
+  const rates = useMemo(() => buildRateMap(models?.completion_models ?? []), [models]);
+
+  if (isPending || !data) return <Skeleton className="h-64 w-full" />;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Stat label={t("resource_users")} value={NUMBER.format(data.total_users)} />
+        <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_tokens)} />
+        <Stat label={t("requests")} value={NUMBER.format(data.total_requests)} />
+      </div>
+      {data.users.length === 0 ? (
+        <p className="text-muted-foreground text-sm">{t("no_user_token_usage_data")}</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("user")}</TableHead>
+              <TableHead className="text-right">{t("input_tokens")}</TableHead>
+              <TableHead className="text-right">{t("output_tokens")}</TableHead>
+              <TableHead className="text-right">{t("total_tokens")}</TableHead>
+              <TableHead className="text-right">{t("requests")}</TableHead>
+              <TableHead className="text-right">{t("estimated_cost")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.users.map((user) => (
+              <TableRow key={user.user_id}>
+                <TableCell className="font-medium">{user.username || user.email}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {NUMBER.format(user.total_input_tokens)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {NUMBER.format(user.total_output_tokens)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {NUMBER.format(user.total_tokens)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {NUMBER.format(user.total_requests)}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-right tabular-nums">
+                  {formatCost(userCost(user, rates))}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
 export function UsagePage() {
   const t = useTranslations();
   return (
@@ -121,10 +202,14 @@ export function UsagePage() {
       <Tabs defaultValue="tokens">
         <TabsList>
           <TabsTrigger value="tokens">{t("tokens")}</TabsTrigger>
+          <TabsTrigger value="users">{t("resource_users")}</TabsTrigger>
           <TabsTrigger value="storage">{t("storage")}</TabsTrigger>
         </TabsList>
         <TabsContent value="tokens" className="pt-4">
           <TokensTab />
+        </TabsContent>
+        <TabsContent value="users" className="pt-4">
+          <UsersTab />
         </TabsContent>
         <TabsContent value="storage" className="pt-4">
           <StorageTab />
