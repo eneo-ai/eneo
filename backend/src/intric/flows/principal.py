@@ -89,14 +89,6 @@ class FlowPrincipal:
             actor_api_key_id=actor_api_key_id,
         )
 
-    def run_create_fields(self) -> dict[str, object | None]:
-        return {
-            "principal_type": self.principal_type.value,
-            "principal_user_id": self.principal_user_id,
-            "principal_service_id": self.principal_service_id,
-            "created_by_api_key_id": self.actor_api_key_id,
-        }
-
     def file_owner_fields(self) -> dict[str, object | None]:
         return {
             "owner_type": self.principal_type.value,

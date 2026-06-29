@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
-from intric.flows.domain.flow import Flow, FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_name import normalize_flow_name
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -23,45 +22,6 @@ from intric.flows.flow_authoring_spec import (
 from intric.flows.step_lineage import existing_step_ref_for_order
 
 AssistantSnapshotProjector = Callable[[AssistantAuthoringSnapshot], AssistantSpec]
-
-
-@dataclass(frozen=True, slots=True)
-class FlowAuthoringUnsupportedFeature:
-    code: str
-    message: str
-    step_ref: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class FlowAuthoringSnapshot:
-    spec: FlowDraftSpecCore
-    draft_revision: int
-    existing_step_refs: tuple[str, ...]
-    unsupported_features: tuple[FlowAuthoringUnsupportedFeature, ...] = ()
-
-
-def flow_to_authoring_snapshot(
-    flow: Flow,
-    *,
-    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-    assistant_snapshot_projector: AssistantSnapshotProjector | None = None,
-    form_fields: list[FormFieldSpec] | None = None,
-) -> FlowAuthoringSnapshot:
-    spec = current_flow_authoring_spec(
-        current_steps=list(flow.steps),
-        flow_name=flow.name,
-        flow_description=flow.description,
-        assistant_snapshots=assistant_snapshots,
-        assistant_snapshot_projector=assistant_snapshot_projector,
-        form_fields=form_fields,
-    )
-    return FlowAuthoringSnapshot(
-        spec=spec,
-        draft_revision=flow.draft_revision,
-        existing_step_refs=tuple(
-            ref for step in spec.steps if (ref := step.existing_step_ref) is not None
-        ),
-    )
 
 
 def current_flow_authoring_spec(
@@ -148,9 +108,6 @@ def _resolve_existing_assistant_spec(
 
 __all__ = [
     "AssistantSnapshotProjector",
-    "FlowAuthoringSnapshot",
-    "FlowAuthoringUnsupportedFeature",
     "current_flow_authoring_spec",
     "flow_step_to_authoring_spec",
-    "flow_to_authoring_snapshot",
 ]

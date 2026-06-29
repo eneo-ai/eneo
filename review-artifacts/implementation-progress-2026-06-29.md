@@ -68,3 +68,44 @@
 - Remaining risk / follow-up:
   - The full Flow-run browser proof remains deferred to PG-9, as requested by the implementation prompt.
   - Beat is not needed to consume `flows.execute`, but is included for Flow runtime parity with scheduled reconciliation/delivery tasks.
+
+## PG-3a.1
+
+- Slice id: PG-3a.1
+- Findings addressed: `A-DEL-1 / missed-deadcode:01`, `A-DEL-3 / missed-deadcode:05`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:174` indexed the dead authoring-snapshot cluster, and `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:24` scoped the deletion to `FlowAuthoringUnsupportedFeature`, `FlowAuthoringSnapshot`, `flow_to_authoring_snapshot`, and their `__all__` entries.
+  - `backend/src/intric/flows/application/flow_authoring_snapshot.py:29`, `:36`, `:43`, and `:151-155` defined/exported the deleted authoring-snapshot symbols before the fix.
+  - `rg -n "flow_to_authoring_snapshot|FlowAuthoringSnapshot|FlowAuthoringUnsupportedFeature" backend/src backend/tests frontend -g '!frontend/bun.lock'` showed only same-file definition/type/export hits before the fix.
+  - CRG `callers_of(flow_to_authoring_snapshot)` and `callers_of(FlowAuthoringUnsupportedFeature)` returned 0 callers; CRG `callers_of(FlowAuthoringSnapshot)` returned only `flow_to_authoring_snapshot`, confirming the class was only used by the deleted wrapper.
+  - CRG `importers_of(flow_authoring_snapshot.py)` returned one live importer, `backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py:52`, which imports only `current_flow_authoring_spec`.
+  - `backend/src/intric/flows/application/flow_authoring_snapshot.py:67-146` kept the live `current_flow_authoring_spec`, `flow_step_to_authoring_spec`, `AssistantSnapshotProjector`, and `_resolve_existing_assistant_spec` path before the fix.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:177` indexed the dead `run_create_fields` row, and `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:26` scoped the deletion to `FlowPrincipal.run_create_fields`.
+  - `backend/src/intric/flows/principal.py:92-98` defined `run_create_fields` before the fix; `rg -n "run_create_fields" backend/src backend/tests -g '*.py'` showed only that definition.
+  - CRG `callers_of(run_create_fields)` returned 0 callers.
+  - `backend/src/intric/flows/application/flow_run_service.py:449-452` and `backend/src/intric/flows/infrastructure/flow_run_repo.py:145-148` already build run principal fields inline, so deleting the dead method does not change run creation behavior.
+  - Live siblings remain referenced: `file_owner_fields` at `backend/src/intric/flows/runtime/executor.py:2122`, `backend/src/intric/flows/runtime/template_fill_runtime.py:170`, and `backend/src/intric/flows/runtime/output_runtime.py:128`; `audit_actor_fields` at `backend/src/intric/flows/api/flow_api_common.py:61`, `backend/src/intric/flows/runtime/flow_run_actor.py:127`, and `backend/src/intric/flows/runtime/flow_run_actor.py:134`.
+- Verification agents used, with verdicts:
+  - `dead_code_deletion_reviewer` for `A-DEL-1` verdict: `confirmed`; exact `rg` showed the authoring-snapshot symbols were only defined/typed/exported in the same module, no wildcard import/package re-export used them, and the smallest fix was to delete only those symbols plus the now-unused imports.
+  - `dead_code_deletion_reviewer` for `A-DEL-3` verdict: `confirmed`; exact `rg` and CRG showed zero source/test callers for `run_create_fields`, live sibling methods remained referenced, and rewiring run creation through the dict helper would be broader and weaker than deletion.
+- Files changed:
+  - `backend/src/intric/flows/application/flow_authoring_snapshot.py`
+  - `backend/src/intric/flows/principal.py`
+- Behavior changed:
+  - Removed dead in-repo public Python symbols only. No runtime path changes are expected because source/test/frontend reference checks and CRG caller checks found no live callers.
+- Complexity deleted or owner clarified:
+  - Deleted the unused "snapshot" wrapper surface and kept `current_flow_authoring_spec` as the live authoring-spec projection owner.
+  - Deleted a dead `FlowPrincipal` run-field projection that implied run creation used it when run creation already writes those fields through the application service and repository.
+- Validation commands and results:
+  - `rg -n "flow_to_authoring_snapshot|FlowAuthoringSnapshot|FlowAuthoringUnsupportedFeature|run_create_fields" backend/src backend/tests frontend -g '!frontend/bun.lock'` -> no matches.
+  - `rg -n "current_flow_authoring_spec|flow_step_to_authoring_spec|AssistantSnapshotProjector|_resolve_existing_assistant_spec" backend/src/intric/flows/application/flow_authoring_snapshot.py backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_projection.py -g '*.py'` -> survivor projection path still referenced.
+  - `rg -n "file_owner_fields|audit_actor_fields" backend/src/intric/flows backend/tests/unittests/flows -g '*.py'` -> live sibling methods still referenced.
+  - `cd backend && uv run ruff check src/intric/flows/application/flow_authoring_snapshot.py src/intric/flows/principal.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/application/flow_authoring_snapshot.py src/intric/flows/principal.py src/intric/flows/ai_builder/ai_builder_edit_compiler.py` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_authoring_projection.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/test_flow_run_actor.py -q` -> pass, 70 passed.
+  - `git diff --check -- backend/src/intric/flows/application/flow_authoring_snapshot.py backend/src/intric/flows/principal.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - CRG `get_review_context` with explicit changed files -> high shared-file impact surface, no concrete blocker surfaced.
+  - CRG `get_affected_flows` for the two source files -> 0 execution flows affected.
+- Remaining risk / follow-up:
+  - Remaining risk is limited to out-of-repo or unmerged branch imports of the deleted exported names; no in-repo evidence supports keeping that compatibility path for pre-production Flow code.
+  - The pre-existing inline duplication of run principal fields in `flow_run_service.py` and `flow_run_repo.py` remains a separate source-of-truth follow-up, not part of this zero-caller deletion slice.
