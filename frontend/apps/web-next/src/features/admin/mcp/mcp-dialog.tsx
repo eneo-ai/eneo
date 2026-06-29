@@ -57,7 +57,7 @@ export function McpServerDialog({
         http_auth_type: authType,
         description: description.trim() || null,
         http_auth_config_schema:
-          authType === "bearer" && bearerToken ? { bearer_token: bearerToken } : null
+          authType === "bearer" && bearerToken ? { token: bearerToken } : null
       };
       if (server) {
         await unwrap(

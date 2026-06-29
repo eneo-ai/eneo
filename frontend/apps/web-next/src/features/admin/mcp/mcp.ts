@@ -38,3 +38,42 @@ export function syncMcpServerTools(api: EneoClient, serverId: string) {
     api.POST("/api/v1/mcp-servers/{id}/tools/sync/", { params: { path: { id: serverId } } })
   );
 }
+
+/** Set tenant-level enablement for a single tool. */
+export function updateTenantToolEnabled(api: EneoClient, toolId: string, isEnabled: boolean) {
+  return unwrap(
+    api.PUT("/api/v1/mcp-servers/settings/tools/{tool_id}/", {
+      params: { path: { tool_id: toolId } },
+      body: { is_enabled: isEnabled }
+    })
+  );
+}
+
+/** Approve pending tool changes (new/changed become active, removed are deleted). */
+export function approveToolChanges(api: EneoClient, serverId: string, toolIds: string[]) {
+  return unwrap(
+    api.POST("/api/v1/mcp-servers/{id}/tools/review/approve/", {
+      params: { path: { id: serverId } },
+      body: { tool_ids: toolIds }
+    })
+  );
+}
+
+/** Reject pending tool changes (new deleted, changed/removed reverted to active). */
+export function rejectToolChanges(api: EneoClient, serverId: string, toolIds: string[]) {
+  return unwrap(
+    api.POST("/api/v1/mcp-servers/{id}/tools/review/reject/", {
+      params: { path: { id: serverId } },
+      body: { tool_ids: toolIds }
+    })
+  );
+}
+
+/** Approve all pending tool changes for a server. */
+export function approveAllToolChanges(api: EneoClient, serverId: string) {
+  return unwrap(
+    api.POST("/api/v1/mcp-servers/{id}/tools/review/approve-all/", {
+      params: { path: { id: serverId } }
+    })
+  );
+}
