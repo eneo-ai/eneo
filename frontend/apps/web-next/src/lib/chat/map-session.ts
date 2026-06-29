@@ -84,6 +84,12 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
               name: message.completion_model.name,
               token_limit: message.completion_model.max_input_tokens
             }
+          : null,
+        answeringAssistant: message.tools?.assistants?.[0]
+          ? {
+              id: String(message.tools.assistants[0].id),
+              handle: message.tools.assistants[0].handle
+            }
           : null
       }
     });

@@ -35,6 +35,8 @@ export type SessionData = {
   completion_model: CompletionModelInfo | null;
   files: Schema<"FilePublic">[];
   web_search_references: { id: string; title: string; url: string }[];
+  /** Group chats: which member assistant answered (null = none / clarification). */
+  answering_assistant?: { id: string; handle: string } | null;
 };
 
 export type TokenUsageData = {
@@ -75,6 +77,8 @@ export type EneoMessageMetadata = {
   webSearchReferences?: { id: string; title: string; url: string }[];
   tokens?: { prompt?: number | null; completion?: number | null };
   completionModel?: CompletionModelInfo | null;
+  /** Group chats: which member assistant answered this message. */
+  answeringAssistant?: { id: string; handle: string } | null;
 };
 
 export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;

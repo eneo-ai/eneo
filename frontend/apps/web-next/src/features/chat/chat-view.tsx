@@ -88,6 +88,7 @@ export function ChatView({
   // consumers (preflight). Both are set together when data-session arrives.
   const sessionIdRef = useRef<string | null>(initialSessionId);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
+  const [liveAnswering, setLiveAnswering] = useState<{ id: string; handle: string } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
   const [lockedTokens, setLockedTokens] = useState(() => {
     const last = initialMessages[initialMessages.length - 1];
@@ -128,6 +129,7 @@ export function ChatView({
           setSessionId(part.data.session_id);
           onSessionCreated?.(part.data.session_id);
         }
+        setLiveAnswering(part.data.answering_assistant ?? null);
       }
       if (part.type === "data-token-usage") {
         setLockedTokens({
@@ -238,9 +240,16 @@ export function ChatView({
               .filter((part) => part.type === "text")
               .map((part) => part.text)
               .join("\n\n");
+            const answering =
+              message.metadata?.answeringAssistant ?? (isStreamingThis ? liveAnswering : null);
             return (
               <Message key={message.id} from={message.role}>
                 <MessageContent>
+                  {isAssistant && partner.showResponseLabel && answering && (
+                    <span className="bg-secondary text-secondary-foreground w-fit rounded-full px-2 py-0.5 text-xs font-medium">
+                      @{answering.handle}
+                    </span>
+                  )}
                   {message.parts.map((part, index) => {
                     if (part.type === "reasoning") {
                       return (
