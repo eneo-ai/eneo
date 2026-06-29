@@ -47,14 +47,14 @@ def downgrade() -> None:
     op.execute(
         """
         UPDATE integrations
-        SET description = 'This integration enables the seamless import of knowledge from Confluence spaces into intric and keeps it up-to-date.'
+        SET description = 'This integration enables the seamless import of knowledge from Confluence spaces into Eneo and keeps it up-to-date.'
         WHERE "name" = 'Confluence';
         """
     )
     op.execute(
         """
         UPDATE integrations
-        SET description = 'This integration enables the seamless import knowledge of different forms from Sharepoint into intric.'
+        SET description = 'This integration enables the seamless import knowledge of different forms from Sharepoint into Eneo.'
         WHERE "name" = 'Sharepoint';
         """
     )

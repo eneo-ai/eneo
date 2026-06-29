@@ -16,7 +16,6 @@
 #   ENEO_BACKEND_SERVER_URL=http://backend:8000
 #   PUBLIC_ENEO_BACKEND_URL=https://eneo.example.com
 #   ORIGIN=https://eneo.example.com
-# NOTE: INTRIC_* versions are still accepted but deprecated (removed in v3.0)
 # ----------------------------------------------------------------------------
 
 # Server-side backend URL (used by frontend SSR for API calls)

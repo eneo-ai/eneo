@@ -15609,16 +15609,6 @@ export interface components {
       super_api_key_configured: boolean;
       /** Super Duper Api Key Configured */
       super_duper_api_key_configured: boolean;
-      /**
-       * Super Api Key Using Legacy
-       * @default false
-       */
-      super_api_key_using_legacy?: boolean;
-      /**
-       * Super Duper Api Key Using Legacy
-       * @default false
-       */
-      super_duper_api_key_using_legacy?: boolean;
     };
     /** SupportedModelKwargs */
     SupportedModelKwargs: {

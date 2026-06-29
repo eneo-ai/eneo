@@ -3,8 +3,8 @@
 
 The project was renamed Intric -> Eneo. This check fails CI if any tracked
 file references "intric" outside a small, documented allow-list of legitimate
-survivors (backward-compat env aliases, real external endpoints, upstream
-attribution, an immutable test fixture, and historical records).
+survivors (real external endpoints, an immutable test fixture, and transitional
+job serialization support).
 
 Run locally:  python3 scripts/check_no_intric.py
 """
@@ -20,10 +20,9 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 # --- Paths that are never scanned -------------------------------------------
-# CHANGELOG history and lockfiles are generated/immutable; this script and its
-# tests necessarily contain the word.
+# Lockfiles are generated/immutable; this script and its tests necessarily
+# contain the word.
 EXCLUDED_PATHSPECS = [
-    ":!**/CHANGELOG.md",
     ":!**/bun.lock",
     ":!**/uv.lock",
     ":!**/*.lock",
@@ -48,32 +47,11 @@ class AllowedOccurrence:
 # (case-insensitive) remains. Keep this list in sync with docs/CONTRIBUTING and
 # the rename keep-list.
 ALLOWED = [
-    # Backward-compat environment variable names (ENEO_* is primary; the
-    # INTRIC_* aliases are still accepted, slated for removal in v3.0).
-    AllowedOccurrence(
-        re.compile(
-            r"\b(?:"
-            r"INTRIC_SUPER_API_KEY|"
-            r"INTRIC_SUPER_DUPER_API_KEY|"
-            r"INTRIC_BACKEND_URL|"
-            r"INTRIC_BACKEND_SERVER_URL|"
-            r"PUBLIC_INTRIC_BACKEND_URL|"
-            r"INTRIC_MARKETPLACE_API_KEY|"
-            r"INTRIC_MARKETPLACE_URL"
-            r")\b"
-        )
-    ),
-    AllowedOccurrence(re.compile(r"\bINTRIC_(?:\*|\b)")),
-    # Deprecated pydantic-settings alias fields bound to the INTRIC_* env vars.
-    AllowedOccurrence(re.compile(r"intric_super_(?:duper_)?api_key")),
     # Hardcoded JWT `aud` claim baked into an OIDC auth test fixture.
     AllowedOccurrence(re.compile(r'client_id="intric"')),
     # Real external endpoints on the intric.ai domain (hostname only, NOT a
     # module path such as `intric.ai_models`).
     AllowedOccurrence(re.compile(r"intric\.ai(?![_A-Za-z0-9])")),
-    # Upstream attribution to the original project / company.
-    AllowedOccurrence(re.compile(r"Intric AB")),
-    AllowedOccurrence(re.compile(r"Intric \(now Eneo\)")),
     # This guard's own identifiers (CI job, pre-commit hook, script name, docs).
     AllowedOccurrence(re.compile(r"check_no_intric")),
     AllowedOccurrence(re.compile(r"no-intric")),
@@ -88,31 +66,6 @@ ALLOWED = [
             "backend/src/eneo/jobs/job_serialization.py",
             "backend/tests/unittests/jobs/test_job_serialization.py",
         ),
-    ),
-    # Immutable historical Alembic text. Migrations are still scanned so a new
-    # `from intric...` import path will fail this guard.
-    AllowedOccurrence(
-        re.compile(r"into intric(?: and keeps it up-to-date|\.)"),
-        paths=(
-            "backend/alembic/versions/202503060954_7c492266359d_shorten_confluence_integration__.py",
-            "backend/alembic/versions/202503141310_b127c46c7ebc_rename_confluence_table_.py",
-            "backend/alembic/versions/202606281200_update_integration_descriptions_for_eneo.py",
-        ),
-    ),
-    AllowedOccurrence(
-        re.compile(r"backend/src/intric/[A-Za-z0-9_./-]*"),
-        paths=(
-            "backend/alembic/versions/202604281200_grant_api_keys_permission_to_owner.py",
-            "backend/alembic/versions/migrate_global_to_tenant_models.py",
-        ),
-    ),
-    AllowedOccurrence(
-        re.compile(r"intric\.model_providers\.domain\.model_defaults_lookup"),
-        paths=("backend/alembic/versions/20260501_backfill_model_costs.py",),
-    ),
-    AllowedOccurrence(
-        re.compile(r"intric hosting"),
-        paths=("backend/alembic/versions/2f8e9a1b3c5d_update_kb_whisper_to_berget.py",),
     ),
 ]
 
@@ -163,8 +116,8 @@ def main() -> int:
             print(f"  {path}:{lineno}: {text}")
         print(
             "\nRename these to 'eneo'. If a reference is a legitimate survivor "
-            "(a documented legacy env alias, an intric.ai endpoint, upstream "
-            "attribution, etc.), add a path-specific allow-list entry in "
+            "(an intric.ai endpoint, pre-rename payload fixture, etc.), add a "
+            "path-specific allow-list entry in "
             "scripts/check_no_intric.py."
         )
         return 1

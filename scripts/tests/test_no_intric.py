@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECK_NO_INTRIC = REPO_ROOT / "scripts" / "check_no_intric.py"
 
@@ -68,7 +67,7 @@ class NoIntricGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("backend/alembic/versions/20260629_bad.py", result.stdout)
 
-    def test_allows_documented_legacy_env_names(self) -> None:
+    def test_rejects_legacy_env_names(self) -> None:
         root = self.make_repo()
         target = root / "backend" / ".env.template"
         target.parent.mkdir(parents=True)
@@ -90,7 +89,8 @@ class NoIntricGuardTests(unittest.TestCase):
 
         result = self.run_check(root)
 
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("backend/.env.template", result.stdout)
 
 
 if __name__ == "__main__":

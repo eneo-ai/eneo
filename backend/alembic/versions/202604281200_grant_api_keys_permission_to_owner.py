@@ -7,7 +7,7 @@ Create Date: 2026-04-28
 Backfills the new ``Permission.API_KEYS`` bit onto every tenant's Owner role
 so existing tenants don't lose API-key creation when the new gate at
 ``POST /api-keys`` lands. The YAML template at
-``backend/src/intric/server/dependencies/predefined_roles.yml`` already
+``backend/src/eneo/server/dependencies/predefined_roles.yml`` already
 includes ``api_keys`` for new tenants — this migration covers the existing
 ones.
 

@@ -142,7 +142,7 @@ INTENTIONALLY_UNGUARDED = {
     "/storage": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/token-usage": "Admin scope + admin key permission guards (not resource guard)",
     "/templates": "Read-only discovery endpoints",
-    "/sysadmin": "Separate intric_super_api_key auth, out of scope",
+    "/sysadmin": "Separate super API key auth, out of scope",
     "/modules": "Separate auth, out of scope",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
