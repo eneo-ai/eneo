@@ -177,6 +177,16 @@ async def _ui_message_chunks(
                 {"id": str(result.id), "title": result.title, "url": result.url}
                 for result in response.web_search_results
             ],
+            # Group chat stamps the answering member assistant onto the response;
+            # the single-assistant / clarification paths leave it empty.
+            "answering_assistant": (
+                {
+                    "id": str(response.tools.assistants[0].id),
+                    "handle": response.tools.assistants[0].handle,
+                }
+                if response.tools and response.tools.assistants
+                else None
+            ),
         },
     }
 

@@ -1230,7 +1230,6 @@ async def transfer_assistant_to_space(
     response_model=PaginatedResponse[PromptSparse],
     description="List the prompt history for an assistant.",
     responses=responses.get_responses([404]),
-    include_in_schema=get_settings().dev,
 )
 async def get_prompts(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]

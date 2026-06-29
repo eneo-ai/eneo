@@ -18,6 +18,8 @@ type AuthRequest = {
   integration: UserIntegration;
   popup: Window | null;
   watcher: ReturnType<typeof setInterval>;
+  /** Backend-issued CSRF state used to correlate the popup callback. */
+  state: string;
 };
 
 function popupAttributes() {
@@ -32,8 +34,9 @@ function popupAttributes() {
  * OAuth connect flow for external integrations, ported from the Svelte
  * IntegrationAuthService: opens a centered popup (about:blank FIRST — Safari
  * blocks popups opened after an await), points it at the backend-issued auth
- * URL with state=tenant_integration_id, and listens for the callback page's
- * postMessage to register the auth code.
+ * URL, and listens for the callback page's postMessage. The backend issues a
+ * single-use CSRF `state` with the URL; the callback is correlated back to its
+ * request by that state.
  */
 export function useIntegrationAuth(onConnected: (result: ConnectResult) => void): {
   connect: (integration: UserIntegration) => Promise<void>;
@@ -65,23 +68,25 @@ export function useIntegrationAuth(onConnected: (result: ConnectResult) => void)
       if (event.origin !== window.location.origin) return;
       if (!isIntegrationCallbackMessage(event.data)) return;
 
-      const { code, state: tenantIntegrationId } = event.data;
-      if (!code || !tenantIntegrationId) {
+      const { code, state } = event.data;
+      if (!code || !state) {
         toast.warning(t("integration_callback_missing_required_fields"));
         return;
       }
 
-      const request = requests.get(tenantIntegrationId);
+      // Correlate the callback to its request by the backend-issued CSRF state.
+      const request = [...requests.values()].find((entry) => entry.state === state);
       if (!request) {
         toast.error(t("integration_callback_unexpected_error"));
         return;
       }
+      const tenantIntegrationId = request.integration.tenant_integration_id;
       finishRequest(tenantIntegrationId);
 
       try {
         const updated = await unwrap(
           browserApi.POST("/api/v1/integrations/auth/callback/token/", {
-            body: { auth_code: code, tenant_integration_id: tenantIntegrationId }
+            body: { auth_code: code, tenant_integration_id: tenantIntegrationId, state }
           })
         );
         onConnectedRef.current({ success: true, integration: updated });
@@ -119,18 +124,17 @@ export function useIntegrationAuth(onConnected: (result: ConnectResult) => void)
       const watcher = setInterval(() => {
         if (popup.closed) finishRequest(tenantIntegrationId);
       }, 1000);
-      requestsRef.current.set(tenantIntegrationId, { integration, popup, watcher });
+      requestsRef.current.set(tenantIntegrationId, { integration, popup, watcher, state: "" });
       setConnectingIds(new Set(requestsRef.current.keys()));
 
       try {
-        const { auth_url } = await unwrap(
+        const { auth_url, state } = await unwrap(
           browserApi.GET("/api/v1/integrations/auth/{tenant_integration_id}/url/", {
-            params: {
-              path: { tenant_integration_id: tenantIntegrationId },
-              query: { state: tenantIntegrationId }
-            }
+            params: { path: { tenant_integration_id: tenantIntegrationId } }
           })
         );
+        const request = requestsRef.current.get(tenantIntegrationId);
+        if (request) request.state = state;
         popup.location.href = auth_url;
       } catch (error) {
         finishRequest(tenantIntegrationId);

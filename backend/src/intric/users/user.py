@@ -437,5 +437,10 @@ else:
         email: EmailStr
 
 
+class UserChangePassword(BaseModel):
+    current_password: str = Field(min_length=7, max_length=100)
+    new_password: str = Field(min_length=7, max_length=100)
+
+
 class UserProvision(BaseModel):
     zitadel_token: str

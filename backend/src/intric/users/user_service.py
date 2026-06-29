@@ -2059,6 +2059,31 @@ class UserService:
 
         return user_in_db
 
+    async def change_own_password(
+        self, user_id: UUID, current_password: str, new_password: str
+    ):
+        """Change the authenticated user's own password (password accounts only)."""
+        user = await self.repo.get_user_by_id(user_id)
+        if user is None:
+            raise NotFoundException("No such user")
+        # Federated (OIDC) accounts have no local password set.
+        if not user.password:
+            raise BadRequestException(
+                "Password change is not available for federated accounts."
+            )
+        if not self.auth_service.verify_password(current_password, user.password):
+            raise AuthenticationException("Current password is incorrect.")
+
+        salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
+            new_password
+        )
+        updated = await self.repo.update(
+            UserUpdate(id=user_id, password=hashed_pass, salt=salt)
+        )
+        if updated is None:
+            raise NotFoundException("No such user")
+        return updated
+
     async def delete_user(self, user_id: UUID):
         from intric.roles.permissions import Permission
 

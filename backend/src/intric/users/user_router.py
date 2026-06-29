@@ -49,6 +49,7 @@ from intric.users.user import (
     PropUserInvite,
     PropUserUpdate,
     UserAdminView,
+    UserChangePassword,
     UserInDB,
     UserLogin,
     UserProvision,
@@ -778,6 +779,27 @@ async def get_currently_authenticated_user(
         **current_user.model_dump(),
         truncated_api_key=truncated_key,
         legacy_api_key_suffix=legacy_suffix,
+    )
+
+
+@router.post(
+    "/me/change-password/",
+    status_code=204,
+    description="Change the authenticated user's password (password accounts only).",
+    responses=responses.get_responses([400, 401, 403]),
+)
+async def change_own_password(
+    change: UserChangePassword,
+    current_user: Annotated[
+        UserInDB, Depends(auth_dependencies.get_current_active_user)
+    ],
+    container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
+):
+    await container.user_service().change_own_password(
+        user_id=current_user.id,
+        current_password=change.current_password,
+        new_password=change.new_password,
     )
 
 

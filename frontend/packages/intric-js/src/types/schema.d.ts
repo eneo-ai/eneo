@@ -591,6 +591,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/me/change-password/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change Own Password
+     * @description Change the authenticated user's password (password accounts only).
+     */
+    post: operations["change_own_password_api_v1_users_me_change_password__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/tenant/": {
     parameters: {
       query?: never;
@@ -1202,6 +1222,26 @@ export interface paths {
      * @description Transfer an assistant to another space.
      */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/assistants/{id}/prompts/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Prompts
+     * @description List the prompt history for an assistant.
+     */
+    get: operations["get_prompts_api_v1_assistants__id__prompts__get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -17046,6 +17086,13 @@ export interface components {
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
+    /** UserChangePassword */
+    UserChangePassword: {
+      /** Current Password */
+      current_password: string;
+      /** New Password */
+      new_password: string;
+    };
     /** UserCreated */
     UserCreated: {
       /**
@@ -20810,6 +20857,64 @@ export interface operations {
       };
     };
   };
+  change_own_password_api_v1_users_me_change_password__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UserChangePassword"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   Get_current_user_tenant_api_v1_users_tenant__get: {
     parameters: {
       query?: never;
@@ -23177,6 +23282,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_prompts_api_v1_assistants__id__prompts__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptSparse_"];
         };
       };
       /** @description Not Found */
