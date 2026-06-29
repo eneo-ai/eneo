@@ -676,6 +676,67 @@
   - Deferred delivery-mechanics cleanup: `_record_success` still calls `save_step_result(payload.step_result, ...)` as an active-run guard, which preserves pre-existing behavior but rewrites the full step-result row and can bump `finished_at` to delivery time. Trigger for the next delivery-mechanics / PG-12+ slice: replace that guard with an explicit active-run check if the repository owner can expose it without reintroducing a duplicate delivery state path.
   - Future HTTP-runtime test cleanup: sweep remaining Flow webhook/HTTP fixtures for pre-authored-config shapes in a dedicated HTTP fixture/contract slice, not as drive-by cleanup in PG-11.
 
+## PG-12
+
+- Slice id: PG-12
+- Findings addressed: `verify-data-model:04`, `missed-sqlalchemy:01`; `verify-data-model:03` metadata tightening is deferred with evidence.
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:31` scopes PG-12 to ordinal `CHECK` constraints, missing assistant FK indexes, and metadata tightening only if retained-bucket semantics are unambiguous.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:45-52` indexes the live metadata `extra="allow"` contract, missing ordinal positivity checks, and missing `assistant_id` indexes.
+  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:212-308` had `FlowSteps.assistant_id` and `step_order` without an assistant FK index or positivity check.
+  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:845-923` had `FlowStepResults.assistant_id`, `step_order`, and nullable `current_attempt_no` without the assistant FK index or ordinal checks.
+  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:1055-1162` had `FlowStepAttempts.step_order` and `attempt_no` without positivity checks.
+  - Fresh source review confirmed `backend/src/intric/flows/runtime/step_definition_parser.py:146-177,534-539` rejects published runtime step orders that are non-positive or non-contiguous.
+  - Fresh source review confirmed `backend/src/intric/flows/application/flow_draft_materialization.py:162-180` materializes authored draft steps as `index + 1`.
+  - Fresh source review confirmed `backend/src/intric/flows/infrastructure/flow_step_attempt_numbering.py:13-26` allocates runtime and rerun attempt numbers as `max(attempt_no, 0) + 1`, and `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py:247-268` uses that owner for rerun root attempts.
+  - Fresh source review confirmed `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py:89-92` intentionally resets invalidated `FlowStepResults.current_attempt_no` to `NULL`, so the DB check must allow `NULL`.
+  - Fresh source review confirmed `backend/src/intric/flows/flow_run_export_json.py:286-317` uses `step_order=0` / `attempt_no=0` only as evidence artifact manifest fallback values, not as a table writer.
+  - Fresh metadata review confirmed `backend/src/intric/flows/flow_metadata.py:75-80,174-200` still allows unknown top-level metadata keys and `backend/tests/unittests/flows/test_flow_metadata.py:267-289` deliberately preserves `ai_builder` / `transcription` buckets for write and persisted-read modes.
+  - Additional metadata review confirmed `backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py:57-96` preserves unknown `ai_builder` subkeys, and `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:447-459` does not define those retained Flow metadata buckets as typed subcontracts.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer for the data-model and metadata owners; it was noisy for file summaries, so all concrete claims were verified with direct source reads and exact `rg`.
+  - Claude peer-loop session `eneo-flows-pg12-schema-hardening-20260630` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; valid feedback applied by adding a compact migration preflight for dirty existing rows, verifying the `attempt_no=0` export sentinel was not a table write path, dropping the redundant SQLAlchemy-metadata-only test layer, and pinning explicit index names.
+  - Claude peer-loop session `eneo-flows-pg12-schema-hardening-20260630` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; its non-blocking recommendation to assert exact constraint names in runtime `IntegrityError` tests was applied and revalidated.
+- Files changed:
+  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py`
+  - `backend/tests/integration/flows/test_flow_runtime_schema_hardening.py`
+  - `backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - PostgreSQL now rejects non-positive `flow_steps.step_order`, `flow_step_results.step_order`, `flow_step_results.current_attempt_no`, `flow_step_attempts.step_order`, and `flow_step_attempts.attempt_no`.
+  - The migration aborts before adding constraints if existing rows violate those invariants, reporting the constraint name, table/column, count, sample IDs, and repair instruction.
+  - Assistant FK maintenance now has deterministic indexes on `flow_steps.assistant_id` and `flow_step_results.assistant_id`.
+  - Flow metadata write/read behavior is unchanged in this slice.
+- Complexity deleted or owner clarified:
+  - The database is now the enforcement boundary for runtime ordinal positivity instead of relying only on writer discipline.
+  - Assistant-delete FK maintenance no longer depends on unindexed runtime child table scans.
+  - No new schema helper/service layer was introduced; the table owner and Alembic revision carry the invariant directly.
+- Architecture delta:
+  - Canonical owner before: ordinal validity was scattered across Flow authoring/runtime validators and writer conventions; assistant FK lookup performance was implicit.
+  - Canonical owner after: `flow_tables.py` and the PG-12 Alembic revision own the persisted ordinal and assistant FK-index invariants.
+  - Duplicate paths remaining: application validators still reject invalid authored/published step order before DB writes, but the DB now owns persisted integrity; metadata retained buckets remain opaque.
+  - 9/10 follow-up candidate: define typed retained Flow metadata buckets for `ai_builder` / `transcription` or delete/decompose those buckets before tightening unknown top-level metadata writes.
+  - Decision or measurement needed: decide the retained-bucket contract and verify existing persisted `flows.metadata_json` rows before any future metadata rejection; measure table size before considering `CONCURRENTLY` / `NOT VALID` migration variants for production-scale tables.
+  - What not to preserve: silent non-positive ordinals in persisted runtime tables, unindexed assistant FK child lookups, and indefinite opaque metadata buckets without a typed owner/deletion trigger.
+- Migration policy:
+  - The PG-12 migration is structural additive DDL only: five named `CHECK` constraints and two named indexes.
+  - Downgrade is real and reversible: it drops exactly the indexes and constraints added by PG-12.
+  - No data is rewritten. Dirty existing rows fail the upgrade loudly through preflight instead of being repaired or hidden.
+  - Metadata tightening is deferred because retained-bucket semantics are not unambiguous from current source/tests; no bucket names or compatibility behavior were invented.
+- Validation commands and results:
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pytest -m migration_isolation tests/integration/migrations/test_flow_runtime_schema_hardening.py -q` -> pass, 2 passed.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pytest tests/integration/flows/test_flow_runtime_schema_hardening.py -q` -> pass, 10 passed.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/ruff check src/intric/database/tables/flow_tables.py alembic/versions/202606291900_flow_runtime_schema_hardening.py tests/integration/flows/test_flow_runtime_schema_hardening.py tests/integration/migrations/test_flow_runtime_schema_hardening.py` -> pass.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pyright src/intric/database/tables/flow_tables.py tests/integration/flows/test_flow_runtime_schema_hardening.py tests/integration/migrations/test_flow_runtime_schema_hardening.py` -> pass, 0 errors.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH uv run pyright` -> pass, 0 errors.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH uv run alembic heads` -> `202606291900_flow_runtime_schema (head)`.
+  - `rg -n "ck_flow_steps_step_order_positive|ck_flow_step_results_step_order_positive|ck_flow_step_results_current_attempt_no_positive|ck_flow_step_attempts_step_order_positive|ck_flow_step_attempts_attempt_no_positive|ix_flow_steps_assistant_id|ix_flow_step_results_assistant_id" backend/src/intric/database/tables/flow_tables.py backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py backend/tests/integration/flows/test_flow_runtime_schema_hardening.py backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py review-artifacts/implementation-progress-2026-06-29.md` -> only intended owner/migration/test/ledger matches.
+  - `git diff --check -- backend/src/intric/database/tables/flow_tables.py backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py backend/tests/integration/flows/test_flow_runtime_schema_hardening.py backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / follow-up:
+  - Migration lock duration is the main runtime risk for large existing tables; this PG slice keeps normal Alembic DDL because the roadmap asks for additive hardening, but production rollout should measure table size before applying.
+  - Metadata tightening remains open and should be its own slice with typed bucket ownership and a preflight query proving existing rows will not be rejected.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

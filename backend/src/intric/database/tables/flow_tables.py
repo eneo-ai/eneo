@@ -277,6 +277,10 @@ class FlowSteps(BasePublic):
         UniqueConstraint("flow_id", "id", name="uq_flow_steps_flow_id_id"),
         UniqueConstraint("id", "tenant_id", name="uq_flow_steps_id_tenant_id"),
         CheckConstraint(
+            "step_order >= 1",
+            name="ck_flow_steps_step_order_positive",
+        ),
+        CheckConstraint(
             "input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')",
             name="ck_flow_steps_input_source",
         ),
@@ -305,6 +309,7 @@ class FlowSteps(BasePublic):
             ondelete="CASCADE",
             name="fk_flow_steps_flow_tenant",
         ),
+        Index("ix_flow_steps_assistant_id", "assistant_id"),
     )
 
 
@@ -899,6 +904,14 @@ class FlowStepResults(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
+            "step_order >= 1",
+            name="ck_flow_step_results_step_order_positive",
+        ),
+        CheckConstraint(
+            "current_attempt_no IS NULL OR current_attempt_no >= 1",
+            name="ck_flow_step_results_current_attempt_no_positive",
+        ),
+        CheckConstraint(
             "status IN ('pending','running','completed','failed','cancelled')",
             name="ck_flow_step_results_status",
         ),
@@ -920,6 +933,7 @@ class FlowStepResults(BasePublic):
         Index(
             "ix_flow_step_results_run_flow_step", "flow_run_id", "flow_id", "step_id"
         ),
+        Index("ix_flow_step_results_assistant_id", "assistant_id"),
     )
 
 
@@ -1124,6 +1138,14 @@ class FlowStepAttempts(BasePublic):
     finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
+        CheckConstraint(
+            "step_order >= 1",
+            name="ck_flow_step_attempts_step_order_positive",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1",
+            name="ck_flow_step_attempts_attempt_no_positive",
+        ),
         CheckConstraint(
             "status IN ('started','retried','failed','completed','cancelled')",
             name="ck_flow_step_attempts_status",
