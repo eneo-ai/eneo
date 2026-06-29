@@ -11,6 +11,7 @@ import { browserApi } from "@/lib/api/browser";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { AddModelWizard } from "./add-model-wizard";
 import { CredentialsPanel } from "./credentials-panel";
+import { MigrationHistoryPanel } from "./migration-history-panel";
 import { ModelTable } from "./model-table";
 import { adminModelsQueryOptions } from "./models";
 import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
@@ -44,6 +45,7 @@ export function ModelsPage() {
           <TabsTrigger value="embedding">{t("embedding_models")}</TabsTrigger>
           <TabsTrigger value="transcription">{t("transcription_models")}</TabsTrigger>
           <TabsTrigger value="credentials">{t("api_credentials")}</TabsTrigger>
+          <TabsTrigger value="migration_history">{t("migration_history_title")}</TabsTrigger>
         </TabsList>
         <TabsContent value="completion" className="flex flex-col gap-6 pt-4">
           <PricingVisibilityToggle />
@@ -72,6 +74,9 @@ export function ModelsPage() {
         </TabsContent>
         <TabsContent value="credentials" className="pt-4">
           <CredentialsPanel />
+        </TabsContent>
+        <TabsContent value="migration_history" className="pt-4">
+          <MigrationHistoryPanel />
         </TabsContent>
       </Tabs>
     </div>

@@ -11,10 +11,33 @@ export type AdminModel = CompletionModelAdmin | EmbeddingModelAdmin | Transcript
 export type TenantCompletionModelUpdate = Schema<"TenantCompletionModelUpdate">;
 export type ModelUsageStatistics = Schema<"ModelUsageStatistics">;
 export type ValidationResult = Schema<"ValidationResult">;
+export type ModelMigrationHistory = Schema<"ModelMigrationHistory"> & {
+  model_type: "completion" | "transcription";
+};
 
 export type ModelKind = "completion" | "embedding" | "transcription";
 
 export const MODELS_KEY = ["admin-models"];
+
+/** Merged completion + transcription migration history, newest first. */
+export function migrationHistoryQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: ["model-migration-history"],
+    queryFn: async (): Promise<ModelMigrationHistory[]> => {
+      const [completion, transcription] = await Promise.all([
+        unwrap(api.GET("/api/v1/completion-models/migration-history")),
+        unwrap(api.GET("/api/v1/transcription-models/migration-history"))
+      ]);
+      const tagged: ModelMigrationHistory[] = [
+        ...completion.map((h) => ({ ...h, model_type: "completion" as const })),
+        ...transcription.map((h) => ({ ...h, model_type: "transcription" as const }))
+      ];
+      return tagged.sort((a, b) =>
+        (b.completed_at ?? b.started_at ?? "").localeCompare(a.completed_at ?? a.started_at ?? "")
+      );
+    }
+  });
+}
 
 /** Usage impact of a completion model (assistants/apps/etc. that reference it). */
 export function modelUsageQueryOptions(api: EneoClient, modelId: string) {
