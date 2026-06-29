@@ -52,6 +52,47 @@ export function modelUsageQueryOptions(api: EneoClient, modelId: string) {
   });
 }
 
+export type ModelUsageEntity = {
+  entity_id: string;
+  entity_name: string;
+  entity_type: string;
+  space_name?: string | null;
+  owner_name?: string | null;
+};
+
+/** Per-model usage details: which assistants/apps/services reference a model. */
+export function modelUsageDetailsQueryOptions(
+  api: EneoClient,
+  modelId: string,
+  kind: "completion" | "transcription"
+) {
+  return queryOptions({
+    queryKey: ["model-usage-details", kind, modelId],
+    queryFn: async (): Promise<{ items: ModelUsageEntity[]; total: number }> => {
+      const res =
+        kind === "transcription"
+          ? await unwrap(
+              api.GET("/api/v1/transcription-models/{model_id}/usage/details", {
+                params: { path: { model_id: modelId } }
+              })
+            )
+          : await unwrap(
+              api.GET("/api/v1/completion-models/{model_id}/usage/details", {
+                params: { path: { model_id: modelId } }
+              })
+            );
+      const items = (res.items ?? []).map((item) => ({
+        entity_id: item.entity_id,
+        entity_name: item.entity_name,
+        entity_type: item.entity_type ?? "app",
+        space_name: item.space_name ?? null,
+        owner_name: item.owner_name ?? null
+      }));
+      return { items, total: res.total ?? items.length };
+    }
+  });
+}
+
 /** Compatibility check for migrating one completion model's usage to another. */
 export function validateMigrationQueryOptions(api: EneoClient, modelId: string, toModelId: string) {
   return queryOptions({

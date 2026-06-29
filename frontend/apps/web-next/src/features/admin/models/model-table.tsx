@@ -38,6 +38,7 @@ import {
 } from "./models";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";
+import { ModelDetailDialog } from "./model-detail-dialog";
 
 type ModelFlags = {
   is_org_enabled?: boolean | null;
@@ -89,6 +90,8 @@ function ModelRow({
   const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
   const [showMigrate, setShowMigrate] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  const canViewDetail = kind === "completion" || kind === "transcription";
 
   const flags = useMutation({
     mutationFn: (next: ModelFlags) => updateModelFlags(kind, model.id, next),
@@ -136,7 +139,17 @@ function ModelRow({
       </TableCell>
       <TableCell className="font-medium">
         <span className="flex items-center gap-2">
-          {modelLabel(model)}
+          {canViewDetail ? (
+            <button
+              type="button"
+              className="text-left hover:underline"
+              onClick={() => setShowDetail(true)}
+            >
+              {modelLabel(model)}
+            </button>
+          ) : (
+            modelLabel(model)
+          )}
           {isDefault && (
             <Badge variant="secondary" className="gap-1">
               <Star className="size-3" /> {t("default_model")}
@@ -239,6 +252,14 @@ function ModelRow({
             model={model as CompletionModelAdmin}
             open={showMigrate}
             onOpenChange={setShowMigrate}
+          />
+        )}
+        {canViewDetail && (
+          <ModelDetailDialog
+            model={model}
+            kind={kind as "completion" | "transcription"}
+            open={showDetail}
+            onOpenChange={setShowDetail}
           />
         )}
       </TableCell>
