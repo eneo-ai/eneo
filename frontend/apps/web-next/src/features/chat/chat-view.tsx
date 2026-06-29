@@ -52,7 +52,8 @@ import {
   MessageFiles,
   MessageSources,
   MessageTool,
-  ToolApprovalCard
+  ToolApprovalCard,
+  WebSources
 } from "./message-parts";
 import { useAttachments } from "./use-attachments";
 
@@ -296,6 +297,7 @@ export function ChatView({
                     ))}
                 </MessageContent>
                 {isAssistant && <MessageSources parts={message.parts} />}
+                {isAssistant && <WebSources references={message.metadata?.webSearchReferences} />}
                 {isAssistant && textContent && !isStreamingThis && (
                   <MessageActions className="-ml-1.5">
                     <MessageAction

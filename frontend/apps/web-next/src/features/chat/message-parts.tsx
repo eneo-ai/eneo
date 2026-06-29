@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
+import { Globe } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import {
@@ -65,6 +66,27 @@ export function MessageSources({ parts }: { parts: Part[] }) {
   );
 }
 
+/** Web-search results cited by the answer, shown as favicon link chips. */
+export function WebSources({
+  references
+}: {
+  references?: { id: string; title: string; url: string }[];
+}) {
+  if (!references || references.length === 0) return null;
+  const chipClass =
+    "bg-card hover:border-ring hover:bg-accent flex max-w-full items-center gap-1.5 rounded-lg border py-1.5 pr-2.5 pl-2 text-xs transition-colors";
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {references.map((ref) => (
+        <a key={ref.id} href={ref.url} target="_blank" rel="noreferrer" className={chipClass}>
+          <Globe className="text-muted-foreground size-3.5 shrink-0" />
+          <span className="truncate">{ref.title || ref.url}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function MessageTool({ part }: { part: Extract<Part, { type: "dynamic-tool" }> }) {
   return (
     <Tool>
@@ -83,8 +105,11 @@ export function MessageTool({ part }: { part: Extract<Part, { type: "dynamic-too
 }
 
 /**
- * MCP tool approval card for the data-tool-approval part. Approving/denying
- * posts the decisions; the still-open stream then continues server-side.
+ * MCP tool approval card for the data-tool-approval part. Each tool can be
+ * approved/denied individually (the backend accepts a partial array of
+ * decisions and tracks the remainder); a batch all-approve/all-deny is offered
+ * when more than one tool is still pending. The still-open stream continues
+ * server-side as decisions arrive.
  */
 export function ToolApprovalCard({
   data,
@@ -94,58 +119,102 @@ export function ToolApprovalCard({
   onResolved?: () => void;
 }) {
   const t = useTranslations();
-  const [resolved, setResolved] = useState<"approved" | "denied" | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, "approved" | "denied">>({});
 
   const submit = useMutation({
-    mutationFn: (approved: boolean) =>
+    mutationFn: (items: { tool_call_id: string; approved: boolean }[]) =>
       unwrap(
         browserApi.POST("/api/v1/conversations/approve-tools/", {
           params: { query: { approval_id: data.approval_id } },
-          body: data.tools.map((tool) => ({
-            tool_call_id: tool.tool_call_id ?? "",
-            approved
-          }))
+          body: items
         })
       ),
-    onSuccess: (_, approved) => {
-      setResolved(approved ? "approved" : "denied");
+    onSuccess: (_, items) => {
+      setDecisions((prev) => {
+        const next = { ...prev };
+        for (const item of items) {
+          next[item.tool_call_id] = item.approved ? "approved" : "denied";
+        }
+        return next;
+      });
       onResolved?.();
     },
     onError: (error) => toastApiError(error, t)
   });
 
   const timedOut = data.status === "timeout_denied";
+  const pending = data.tools.filter((tool) => tool.tool_call_id && !decisions[tool.tool_call_id]);
+  const decideAll = (approved: boolean) =>
+    submit.mutate(pending.map((tool) => ({ tool_call_id: tool.tool_call_id ?? "", approved })));
 
   return (
     <Alert>
       <AlertTitle>{t("chat_tool_awaiting_approval")}</AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-2">
-          <ul className="flex flex-col gap-1">
-            {data.tools.map((tool, index) => (
-              <li key={tool.tool_call_id ?? index} className="font-mono text-xs">
-                {tool.server_name}/{tool.tool_name}
-              </li>
-            ))}
+          <ul className="flex flex-col gap-2">
+            {data.tools.map((tool, index) => {
+              const decision = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
+              return (
+                <li
+                  key={tool.tool_call_id ?? index}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="font-mono text-xs">
+                    {tool.server_name}/{tool.tool_name}
+                  </span>
+                  {timedOut ? (
+                    <Badge variant="outline">{t("tool_rejected_by_user")}</Badge>
+                  ) : decision ? (
+                    <Badge variant={decision === "approved" ? "default" : "destructive"}>
+                      {decision === "approved" ? t("tool_accept") : t("tool_deny")}
+                    </Badge>
+                  ) : (
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        disabled={submit.isPending}
+                        onClick={() =>
+                          submit.mutate([{ tool_call_id: tool.tool_call_id ?? "", approved: true }])
+                        }
+                      >
+                        {t("tool_accept")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={submit.isPending}
+                        onClick={() =>
+                          submit.mutate([
+                            { tool_call_id: tool.tool_call_id ?? "", approved: false }
+                          ])
+                        }
+                      >
+                        {t("tool_deny")}
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-          {timedOut ? (
-            <Badge variant="outline">{t("tool_rejected_by_user")}</Badge>
-          ) : resolved ? (
-            <Badge variant={resolved === "approved" ? "default" : "destructive"}>
-              {resolved === "approved" ? t("approve") : t("tool_deny")}
-            </Badge>
-          ) : (
+          {!timedOut && pending.length > 1 && (
             <div className="flex gap-2">
-              <Button size="sm" disabled={submit.isPending} onClick={() => submit.mutate(true)}>
-                {t("approve")}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={submit.isPending}
+                onClick={() => decideAll(true)}
+              >
+                {t("tool_accept_all")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={submit.isPending}
-                onClick={() => submit.mutate(false)}
+                onClick={() => decideAll(false)}
               >
-                {t("tool_deny")}
+                {t("tool_deny_all")}
               </Button>
             </div>
           )}
