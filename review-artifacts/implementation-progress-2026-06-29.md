@@ -367,6 +367,53 @@
 - Remaining risk / follow-up:
   - PG-6 does not fix the coroutine unwind race. PG-5 must still replace the current timeout/soft-limit `future.cancel()` path with a captured-task cancel-and-join and prove cleanup precedes terminalization.
 
+## PG-8
+
+- Slice id: PG-8
+- Findings addressed: `test-quality-review` Slice 2 / `verify-roadmap:10` sibling
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:27` scopes PG-8 to a DB-backed Celery task-boundary terminalization test, without adding a broker harness.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:21` indexes the task-boundary timeout/cancellation concern that PG-8 must prove against persisted rows.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/open-questions.md:24` requires a real cancellation path plus FAILED run, `flow_task_timeout`, and no post-terminalization COMPLETED step result.
+  - `backend/src/intric/flows/runtime/tasks.py:482-625` is still the task-boundary owner: it schedules `_execute_flow_run_async`, handles timeout / soft-time-limit cancellation, terminalizes with `FlowRunLifecycleSource.TASK_TIMEOUT`, and returns `{"status": "failed", "reason": "timeout"}`.
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py:170-183` pre-seeds pending step-result rows for a created run.
+  - `backend/src/intric/flows/application/flow_run_terminalization.py:189-203` closes active step results and attempts when a run is terminalized as FAILED.
+  - `backend/src/intric/flows/infrastructure/flow_repo.py:688-709` only saves a step result while the parent run is still active; after terminalization, the upsert returns `None`.
+  - `backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py:75-93` inserts the audit-outbox action, source, target status, and error code used by the task-boundary terminalization contract.
+- Verification agents used, with verdicts:
+  - CRG `get_minimal_context` with explicit `test_flow_runtime_worker_contract.py` reported the expected runtime-task entities (`_execute_flow_run_task`, cancellation helpers, and the new PG-8 test); direct source verification was used for all claims.
+  - CRG `get_review_context` with explicit `test_flow_runtime_worker_contract.py` reported high impact because the file exercises central Flow runtime behavior; the slice was kept test-only.
+  - `test_quality_reviewer` verdict: the first private-loop draft was blocked by asyncpg cross-loop session use; the accepted shape is to run `_execute_flow_run_task` in `asyncio.to_thread`, point `_get_flow_task_loop` at pytest's running loop, assert `FlowRepository.save_step_result(...) is None`, and check the real audit outbox row.
+  - Claude peer-loop session `eneo-flows-pg8-task-boundary-db-proof-2026-06-29` iteration 1 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it recommended deleting the redundant terminalizer-source spy and adding one intent comment to the deterministic post-start timeout wrapper, both applied before final validation.
+  - Claude peer-loop session `eneo-flows-pg8-task-boundary-db-proof-2026-06-29` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it confirmed the source-spy deletion strengthened the proof by leaving terminalization unwrapped and relying on the persisted audit-outbox source.
+- Files changed:
+  - `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Test-only. Runtime production code is unchanged in PG-8.
+  - Added a DB-backed task-boundary test that drives `_execute_flow_run_task` through its timeout path, waits for the captured coroutine cancellation, terminalizes via the real task terminalizer, and proves a late completed step-result save is rejected after terminalization.
+- Complexity deleted or owner clarified:
+  - Kept PG-8 as a no-broker worker-contract test using existing runtime, repository, terminalizer, and audit-outbox owners instead of adding a broker/worker harness or a private event-loop DB harness.
+- Architecture delta:
+  - Canonical owner before: `_execute_flow_run_task` owned timeout terminalization, `FlowRunTerminalizer` owned persisted failed state/audit creation, and `FlowRepository.save_step_result` owned late step-result writes, but there was no DB-backed task-boundary proof tying those owners together.
+  - Canonical owner after: the owners are unchanged and now covered together by `test_task_timeout_terminalization_rejects_late_completed_step_write` in `test_flow_runtime_worker_contract.py:486-628`.
+  - Duplicate paths remaining: the executor-boundary late-output test remains separate because it proves provider-return drift inside `FlowRunExecutor`; PG-8 proves the Celery task-boundary timeout contract without broker orchestration.
+  - 9/10 follow-up candidate: keep the existing post-PG runtime crash/load/queue behavior matrix; separately fix or re-baseline the typed-output error-message assertion in `test_typed_step_failure_persists_failed_state_for_fresh_sessions` if that message is the intended product contract.
+  - Decision or measurement needed: no PG-8 product decision; the unrelated typed-output message drift needs a separate owner decision before changing that test.
+  - What not to preserve: tests that only mock `future.cancel()`, private event-loop DB access, broker orchestration for this invariant, and partial assertions that omit the audit-outbox source/error contract.
+- Validation commands and results:
+  - `cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py -q` -> pass, 42 passed.
+  - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_task_timeout_terminalization_rejects_late_completed_step_write -q` -> pass, 1 passed.
+  - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q` -> fail with 1 unrelated pre-existing typed-output assertion drift; the new PG-8 test passed in that run. Expected `"Step 1: typed input/output validation failed (typed_io_output_parse_failed)."` but runtime returned `"Step 1: The model output could not be parsed into the expected JSON shape (typed_io_output_parse_failed)."`.
+  - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_typed_step_failure_persists_failed_state_for_fresh_sessions -q` -> same unrelated failure when isolated.
+  - `git diff --check -- backend/tests/integration/flows/test_flow_runtime_worker_contract.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / follow-up:
+  - PG-8 is non-vacuous without a broker harness because it calls the real `_execute_flow_run_task`, uses a real DB session for terminalization, checks real persisted run/step/audit rows, and asserts the existing repository guard rejects a late completed step write after terminalization.
+  - It still relies on a deterministic wrapper future to force `TimeoutError` after the runtime coroutine starts; the broker/worker crash/load matrix remains a post-PG runtime follow-up, not part of this slice.
+  - The containing integration file remains red because of the unrelated typed-output error-message drift documented above.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

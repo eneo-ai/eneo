@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+import threading
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -9,6 +12,7 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
+import intric.flows.runtime.tasks as flow_runtime_tasks
 from intric.database.database import sessionmanager
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
@@ -26,6 +30,7 @@ from intric.flows.domain.flow import (
     FlowRunStatus,
     FlowStep,
     FlowStepAttemptStatus,
+    FlowStepResult,
     FlowStepResultStatus,
 )
 from intric.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
@@ -474,6 +479,153 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
     assert FlowRunLifecycleSource.EXECUTOR_COMPLETED.value not in {
         row.source for row in outbox_rows
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_task_timeout_terminalization_rejects_late_completed_step_write(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    tasks_module = flow_runtime_tasks
+    completion_service = SimpleNamespace(get_response=AsyncMock())
+    running_loop = asyncio.get_running_loop()
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        await session.commit()
+
+    started = threading.Event()
+    cancelled = threading.Event()
+    real_run_coroutine_threadsafe = asyncio.run_coroutine_threadsafe
+
+    async def _attempt_late_completed_step_write() -> FlowStepResult | None:
+        async with sessionmanager.session() as write_session:
+            enable_autobegin_for_flow_task_session(write_session)
+            result_row = await write_session.scalar(
+                sa.select(FlowStepResults).where(
+                    FlowStepResults.flow_run_id == context.run_id
+                )
+            )
+            assert result_row is not None
+            flow_factory = FlowFactory()
+            late_result = flow_factory.from_flow_step_result_db(result_row).model_copy(
+                update={
+                    "status": FlowStepResultStatus.COMPLETED,
+                    "output_payload_json": {"text": "late completed write"},
+                    "current_attempt_no": 1,
+                    "num_tokens_input": 1,
+                    "num_tokens_output": 1,
+                    "error_code": None,
+                    "error_message": None,
+                }
+            )
+            flow_repo = FlowRepository(session=write_session, factory=flow_factory)
+            saved = await flow_repo.save_step_result(
+                flow_run_id=context.run_id,
+                result=late_result,
+                tenant_id=context.tenant_id,
+                attempt_no=1,
+            )
+            await write_session.commit()
+            return saved
+
+    async def _execute_until_cancelled(**_kwargs) -> dict[str, str]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    class _TimeoutAfterStartedFuture(concurrent.futures.Future[dict[str, str]]):
+        def __init__(
+            self, future: concurrent.futures.Future[dict[str, str]]
+        ) -> None:
+            super().__init__()
+            self._future = future
+
+        def cancel(self) -> bool:
+            return self._future.cancel()
+
+        def result(self, timeout: float | None = None) -> dict[str, str]:
+            # Force timeout after task capture so cancellation drains the coroutine unwind.
+            assert started.wait(timeout=1)
+            raise concurrent.futures.TimeoutError()
+
+    first_execution_call = True
+
+    def _run_coroutine_threadsafe(coroutine, target_loop):
+        nonlocal first_execution_call
+        future = real_run_coroutine_threadsafe(coroutine, target_loop)
+        if first_execution_call:
+            first_execution_call = False
+            return _TimeoutAfterStartedFuture(future)
+        return future
+
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: running_loop)
+    monkeypatch.setattr(
+        tasks_module.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_threadsafe,
+    )
+    monkeypatch.setattr(tasks_module, "_execute_flow_run_async", _execute_until_cancelled)
+
+    task_result = await asyncio.to_thread(
+        lambda: tasks_module._execute_flow_run_task(
+            run_id=str(context.run_id),
+            flow_id=str(context.flow_id),
+            tenant_id=str(context.tenant_id),
+            principal_type="user",
+            principal_user_id=str(admin_user.id),
+            task_id="runtime-timeout-terminalization",
+            retry_count=0,
+        )
+    )
+
+    assert task_result == {"status": "failed", "reason": "timeout"}
+    assert started.wait(timeout=1)
+    assert cancelled.wait(timeout=1)
+    assert await _attempt_late_completed_step_write() is None
+
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    run_error = FlowRunError.model_validate(run_row.error_json)
+    assert run_error.code == FlowApiErrorCode.RUN_TASK_TIMEOUT.value
+    assert run_error.source == FlowRunLifecycleSource.TASK_TIMEOUT
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.output_payload_json is None
+    assert attempt_rows == []
+    assert len(outbox_rows) == 1
+    outbox_row = outbox_rows[0]
+    assert outbox_row.action == "flow_run_failed"
+    assert outbox_row.target_status == FlowRunStatus.FAILED.value
+    assert outbox_row.source == FlowRunLifecycleSource.TASK_TIMEOUT.value
+    assert outbox_row.error_code == FlowApiErrorCode.RUN_TASK_TIMEOUT.value
 
 
 @pytest.mark.asyncio
