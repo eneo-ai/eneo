@@ -414,6 +414,18 @@
   - It still relies on a deterministic wrapper future to force `TimeoutError` after the runtime coroutine starts; the broker/worker crash/load matrix remains a post-PG runtime follow-up, not part of this slice.
   - The containing integration file remains red because of the unrelated typed-output error-message drift documented above.
 
+## Runtime Worker Contract Baseline Repair
+
+- Scope: test-only stale assertion repair before PG-7.
+- Source owner: `backend/src/intric/flows/runtime/step_attempt_runtime.py:135-145` owns `build_typed_failure_run_error_message(...)`; with `contract_validation=None`, it uses the fallback cause from `FLOW_ERROR_TAXONOMY[FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED]`.
+- Stale assertion provenance: `git log -L 1071,1090:backend/tests/integration/flows/test_flow_runtime_worker_contract.py --oneline --decorate` traces the hardcoded full-message literal to `66d45a9e0 refactor(flows-runtime): execute steps through handlers`, so this was pre-existing drift and not introduced by the PG-8 commit.
+- Behavior changed: none. Runtime wording, taxonomy wording, frontend fixtures, generated clients, and docs were not changed.
+- Validation commands and results:
+  - `cd backend && uv run ruff check tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass.
+  - `cd backend && uv run pyright tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_typed_step_failure_persists_failed_state_for_fresh_sessions -q` -> pass, 1 passed.
+  - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q` -> pass, 9 passed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

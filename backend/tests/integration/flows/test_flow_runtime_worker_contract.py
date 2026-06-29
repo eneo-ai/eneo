@@ -42,6 +42,9 @@ from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import build_published_definition_json
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from intric.flows.runtime.flow_run_actor import FlowRunActor
+from intric.flows.runtime.step_attempt_runtime import (
+    build_typed_failure_run_error_message,
+)
 from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
@@ -1068,10 +1071,13 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             retry_count=0,
         )
 
-    assert result["status"] == "failed"
-    assert result["error"] == (
-        "Step 1: typed input/output validation failed (typed_io_output_parse_failed)."
+    expected_message = build_typed_failure_run_error_message(
+        step_order=1,
+        error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        contract_validation=None,
     )
+    assert result["status"] == "failed"
+    assert result["error"] == expected_message
     (
         run_row,
         step_result_row,
@@ -1084,9 +1090,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert FlowRunError.model_validate(run_row.error_json).message == (
-        "Step 1: typed input/output validation failed (typed_io_output_parse_failed)."
-    )
+    assert FlowRunError.model_validate(run_row.error_json).message == expected_message
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
     assert step_result_row.error_message is not None
