@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 // nothing behind. Set E2E_MANAGE_STACK=0 to manage the stack yourself (e.g. when
 // iterating on specs against an already-running stack, including `--ui`).
 const COMPOSE = resolve(process.cwd(), "../../../docker-compose.e2e.yml");
-const SERVICES = ["e2e-db", "e2e-redis", "e2e-mock-model", "e2e-backend"];
+const SERVICES = ["e2e-db", "e2e-redis", "e2e-mock-model", "e2e-backend", "celery-worker-flows"];
 
 // `docker compose up --wait` is silent while healthchecks run (backend can take
 // ~30-60s), so a manual run looks hung. Poll `ps` alongside the wait and print a

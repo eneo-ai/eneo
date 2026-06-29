@@ -473,6 +473,61 @@
   - The default-assistant cache population branch is not directly covered by the new tests; regular assistant indexing and distinct-Space safety are covered. Risk is limited to missed reuse for a default assistant, not a security weakening.
   - Rollback is local: remove `RunExecutionState.space_cache`, `_load_space_for_assistant`, and the two PG-7 tests to return to per-step Space hydration.
 
+## PG-9
+
+- Slice id: PG-9
+- Findings addressed: `verify-roadmap:10` Slice 1 / deterministic Flows browser smoke
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:28` scopes PG-9 to a narrow Playwright Flows smoke in the existing frontend E2E suite.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:38` names browser -> API -> Celery -> status -> result as a remaining test-confidence gap, and `:130` says to run PG-9 after PG-2 makes the E2E stack capable of a real Flow run.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:145` indexes the absence of Flows/AI Builder Playwright coverage; `:162` indexes the prior missing E2E Celery worker that blocked real Flow runs.
+  - Direct source confirmed Flow list requires `flows_view` at `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/+page.ts:12-14`, and the editor requires `flows_manage` at `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.ts:10-12`.
+  - Direct source confirmed the Flow worker consumes `settings.flow_celery_queue` at `backend/src/intric/flows/runtime/cli.py:20-31`, `flows.execute` routes to that queue at `backend/src/intric/flows/runtime/celery_app.py:36-49`, and the default queue name is `flows.execute` at `backend/src/intric/main/config.py:300`.
+  - Direct `rg -n "task_always_eager|always_eager|CELERY_TASK_ALWAYS_EAGER|celery.*eager" backend docker-compose.e2e.yml docker-compose.e2e.ci.yml frontend e2e` returned no matches, so the smoke does not depend on eager Celery mode.
+  - Direct source confirmed the E2E mock model is deterministic text-only: `e2e/mock_model_server.py:16` returns `E2E mock completion: pong`, and `e2e/seed.py:137` seeds `supports_tool_calling=False`.
+- Verification agents used, with verdicts:
+  - CRG `get_minimal_context` with explicit PG-9 files reported low graph risk and was used only as a reducer; all claims above were verified from source lines and direct `rg`.
+  - Claude peer-loop session `pg9-flow-browser-smoke` plan gate verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; valid feedback applied by deriving E2E Owner permissions from the predefined-role source instead of hardcoding Flow permissions, making the worker healthcheck prove queue consumption, and keeping AI Builder create/apply out of scope.
+- Files changed:
+  - `e2e/seed.py`
+  - `docker-compose.e2e.yml`
+  - `docker-compose.e2e.ci.yml`
+  - `frontend/apps/web/e2e/global-setup.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte`
+  - `frontend/apps/web/tests/flows.spec.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - E2E seed now merges the seeded Owner role with the predefined-role permission template before seeding the mock model, so the seeded browser user can reach Flow list/editor without per-test API mutation or an ad hoc Playwright DB patch.
+  - E2E compose now healthchecks `celery-worker-flows` by running Celery `inspect active_queues` and requiring the Flow queue name, proving the worker consumes the Flow execution queue instead of merely proving a process exists.
+  - Browser-visible journey covered: authenticated session -> `/spaces/personal/flows` list -> open a deterministic published Flow -> History tab -> expanded run evidence -> observe `E2E mock completion: pong` from a worker-backed run result.
+  - Production runtime behavior, generated clients, API schemas, runtime wording, and Builder behavior are unchanged.
+- Complexity deleted or owner clarified:
+  - Reused the existing E2E seed owner for E2E-only permissions, the existing compose worker service for readiness, and the existing Playwright helpers/session setup for browser/API fixture work.
+  - Did not add a new E2E harness, fake Flow service, global cache, generated-client change, or per-test permission mutation.
+- Architecture delta:
+  - Canonical owner before: Flow permissions for E2E were implicit in the seeded tenant state and stale relative to the predefined-role template; worker readiness was not an explicit owner in the E2E stack; Flows had no browser smoke owner in `frontend/apps/web/tests`.
+  - Canonical owner after: `e2e/seed.py` owns E2E permission repair from the predefined-role source of truth, `docker-compose.e2e*.yml` own Flow-worker queue readiness, and `frontend/apps/web/tests/flows.spec.ts` owns the narrow browser smoke.
+  - Duplicate paths remaining: production `backend/init_db.py` still has its separate Owner bootstrap behavior and is deliberately not mixed into this UI smoke slice; desktop and mobile evidence panels still share the existing evidence id, so the spec scopes the assertion to the visible desktop table instead of redesigning responsive markup in PG-9.
+  - 9/10 follow-up candidate: decide whether production role bootstrap should reconcile existing predefined Owner permissions from the same `predefined_roles.yml` source, separately from the E2E-only repair.
+  - Decision or measurement needed: no PG-9 product decision; later release confidence work should measure full-suite E2E runtime/flakiness and decide whether the Flow worker healthcheck timeout needs CI tuning.
+  - What not to preserve: Flows browser coverage that stops at auth/smoke pages, worker readiness that only checks process existence, per-test permission mutation, and AI Builder create/apply assertions against a text-only mock model.
+- Validation commands and results:
+  - `cd backend && uv run ruff format ../e2e/seed.py && uv run ruff check ../e2e/seed.py` -> pass.
+  - `cd backend && uv run pyright ../e2e/seed.py` -> pass, 0 errors.
+  - `cd frontend && bun prettier --write apps/web/e2e/global-setup.ts apps/web/src/lib/features/flows/components/FlowRunsTable.svelte apps/web/tests/flows.spec.ts` -> pass.
+  - `cd frontend && bun run --filter @intric/web check` -> pass, 0 errors and 1 unrelated pre-existing warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`.
+  - `docker compose -f docker-compose.e2e.yml config --quiet` -> pass.
+  - `docker compose -f docker-compose.e2e.ci.yml config --quiet` -> pass.
+  - `rg -n "task_always_eager|always_eager|CELERY_TASK_ALWAYS_EAGER|celery.*eager" backend docker-compose.e2e.yml docker-compose.e2e.ci.yml frontend e2e` -> no matches.
+  - `cd frontend/apps/web && bun run test:e2e -- tests/flows.spec.ts` -> failed before browser execution in the local non-CI path because the production Vite build hit the configured 6144 MB Node heap limit.
+  - `cd frontend/apps/web && NODE_ENV=production SVELTE_KIT_OUT_DIR=.svelte-kit-e2e ENEO_BACKEND_URL=http://localhost:8124 PUBLIC_ENEO_BACKEND_URL=http://localhost:8124 JWT_SECRET=1234 NODE_OPTIONS=--max-old-space-size=12288 bun run build` -> pass; used to produce the local E2E preview build after the non-CI heap failure.
+  - `cd frontend/apps/web && CI=1 bun run test:e2e -- tests/flows.spec.ts` -> pass on final diff, 2 passed including auth setup and the new Flow smoke; setup output showed `celery-worker-flows=healthy` before Playwright ran.
+  - `cd frontend/apps/web && CI=1 bun run test:e2e -- tests/authenticated.spec.ts tests/flows.spec.ts` -> pass on final diff, 3 passed including auth setup, the existing authenticated smoke, and the new Flow smoke; setup output showed `celery-worker-flows=healthy` before Playwright ran.
+- Remaining risk / follow-up:
+  - Full `cd frontend && bun run test:e2e` was not run for PG-9 because the non-CI local build path already exhausted the configured heap and the requested narrow validations passed on the final diff.
+  - Local validation required matching the repository's existing devcontainer image/volume names to this machine's prefixed Docker image/volume names; no repo change was made for that local environment mismatch.
+  - PG-9 proves a deterministic one-step text Flow run through browser/API/Celery/result evidence. It does not cover AI Builder create/apply because the seeded mock model is not tool-call capable and emits no tool calls.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

@@ -560,6 +560,7 @@
                     <Button
                       variant="outline"
                       size="sm"
+                      data-testid={`flow-run-evidence-toggle-${run.id}`}
                       aria-expanded={isExpanded}
                       aria-controls={getEvidenceRowId(run.id)}
                       onclick={() => toggleRunDetails(run.id)}
