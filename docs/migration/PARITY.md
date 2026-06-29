@@ -80,32 +80,40 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 
 | Capability | Status | Note |
 |---|---|---|
-| i18n sv/en | PASS | 3609 keys, full parity (en↔sv), Swedish default. |
+| i18n sv/en | PASS | 3684 keys, full parity (en↔sv), Swedish default. |
 | Error / not-found / loading states | PASS | `(app)/error.tsx`, `not-found.tsx`, `loading.tsx`. |
 | WebSocket live updates (app-run, crawl) | REDESIGNED | replaced by adaptive polling. |
 | CSP (nonce-based strict `script-src`) | DEFERRED | safe baseline headers shipped; strict CSP needs nonce middleware + browser verification (CUTOVER.md). |
 | E2E suite on the isolated stack | DEFERRED | ops task; see CUTOVER.md. |
 
-## Accepted deferrals before cutover
+## Parity buildout — 2026-06-29 (branch `feat/web-next-parity-buildout`)
 
-A post-review buildout closed most former deferrals to PASS: rich model selector,
-governance allow-list editing, audit per-action + user filter, insights
-time-series, full template CRUD, full model management (add-wizard / edit /
-credentials / migration), MCP tools panel, assistant-editor MCP picker +
-attachments, and the API-key notification policy.
+A verified parity audit (`REVIEW-web-next-parity-2026-06-29.md`) re-opened the
+deferrals and the listed gaps were built to parity. Now **PASS** (was DEFERRED /
+over-claimed / a gap):
 
-The remaining DEFERRED rows are **backend-gated or ops tasks**, not frontend
-work that can be completed in isolation:
-- **Group-chat answer labels** — the v3 conversation stream doesn't carry the
-  answering assistant (needs a backend change).
-- **Assistant prompt-version history / template-apply on create** — no
-  assistant-prompt-versions endpoint; the create endpoint has no `from_template`.
-- **Per-assistant insights deep-dive** — needs an admin assistant-list entry
-  point (no org-wide assistant listing for analysis).
-- **SharePoint Azure-AD app config** — configured via backend env, not the API;
-  **webhook subscriptions list** is a niche read-only view.
-- **CSP nonce middleware** and the **E2E suite** — ops tasks (CUTOVER.md).
+- MCP: bearer-token bug fixed; per-tool enable/disable + remote tool-change review.
+- Audit: per-row forensic detail (IP/UA/metadata + copy) + JSON/JSONL export.
+- Org API keys: constraint policy + super-key status + scope/key-type filters + per-key usage.
+- Help-assistants: per-kind editor (reuses the assistant editor).
+- SharePoint: Azure-AD app config + webhook subscription health/renew (admin API, not env-only).
+- Models: custom-provider edit/delete, migration-history panel, per-model usage list + detail dialog.
+- Knowledge: Confluence import (vendor-agnostic dialog); **assistant prompt-version history**
+  (backend endpoint un-gated + typed).
+- Templates: editor wizard config + model kwargs; **create assistant from template** (`from_template`).
+- Auth/account: activate/self-provision landing; switch-organisation; **self-service change-password**
+  (new backend endpoint `POST /users/me/change-password/`).
+- Usage/Insights: per-user breakdown + estimated cost; insights custom date-range + compare mode.
+- Chat: **group-chat answer labels** (new `answering_assistant` in the v3 stream); per-tool MCP
+  approval; web-search source rendering.
 
-None block a member or everyday-admin from operating the platform. The
-maintainer should confirm acceptance (or reclassify any as MISSING) before the
-proxy flip.
+### Still open (tracked)
+
+- **Per-assistant insights deep-dive** (admin) — question history + AI chat analysis (SSE).
+- **Per-conversation chat insights page** (`/chat/insights`).
+- **Inline `<inref>` citations** — blob preview popovers / web favicons / MCP snippet modal
+  (web-search references already render as chips).
+- **Account preferred copy-format** (richtext clipboard) — minor.
+- **CSP nonce middleware** and the **Playwright E2E suite** — ops tasks (CUTOVER.md).
+
+None of the open items block a member or everyday-admin from operating the platform.
