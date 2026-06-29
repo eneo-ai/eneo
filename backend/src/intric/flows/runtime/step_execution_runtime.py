@@ -502,7 +502,6 @@ async def call_assistant_with_timeout(
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "text": output.persisted_text,
-        "webhook_delivered": False,
     }
     if output.structured_output is not None:
         payload["structured"] = output.structured_output

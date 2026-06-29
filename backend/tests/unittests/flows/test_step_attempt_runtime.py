@@ -283,7 +283,6 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
         result=StepExecutionResult(output=output),
         output_payload_json={
             "text": "done",
-            "webhook_delivered": False,
         },
         execution_hash="exec-hash",
     )
@@ -293,7 +292,6 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
     assert plan.step_result.error_code is None
     assert plan.step_result.output_payload_json == {
         "text": "done",
-        "webhook_delivered": False,
     }
 
     claimed_without_http_mode = _claimed_result()
@@ -326,7 +324,6 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
         ),
         output_payload_json={
             "text": "done",
-            "webhook_delivered": False,
         },
         execution_hash="exec-hash",
     )

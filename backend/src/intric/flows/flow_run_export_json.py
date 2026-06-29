@@ -1085,6 +1085,7 @@ def _strip_artifact_wrapper_keys(payload: dict[str, Any]) -> dict[str, Any]:
             "artifacts",
             "generated_file_ids",
             "webhook_delivered",
+            "webhook_error",
         }
     }
 

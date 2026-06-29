@@ -265,7 +265,6 @@ async def _create_flow_runtime_fixture(
     await async_session.flush()
     output_payload_json = {
         "text": "kept output",
-        "webhook_delivered": False,
         "template_fill_debug": {"rendered_docx_text_raw": "debug body"},
     }
 

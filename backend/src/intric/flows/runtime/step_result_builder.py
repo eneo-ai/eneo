@@ -116,19 +116,3 @@ def build_transcribe_only_rag_metadata(*, timeout_seconds: float) -> dict[str, A
         "references": [],
         "references_truncated": False,
     }
-
-
-def with_webhook_delivery_status(
-    *,
-    step_result: FlowStepResult,
-    delivered: bool,
-    error: str | None = None,
-) -> FlowStepResult:
-    output_payload = dict(step_result.output_payload_json or {})
-    output_payload["webhook_delivered"] = delivered
-    if error is not None:
-        output_payload["webhook_error"] = error
-    return step_result.model_copy(
-        update={"output_payload_json": output_payload},
-        deep=True,
-    )

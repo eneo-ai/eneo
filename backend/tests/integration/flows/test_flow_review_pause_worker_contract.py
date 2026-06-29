@@ -549,7 +549,6 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
     ]
     assert step_result_rows[0].output_payload_json == {
         "text": "This answer needs review.",
-        "webhook_delivered": False,
     }
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
@@ -661,7 +660,6 @@ async def test_review_checkpoint_open_invariant_terminalizes_failed_run(
     ]
     assert step_result_rows[0].output_payload_json == {
         "text": "This answer needs review.",
-        "webhook_delivered": False,
     }
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
@@ -781,7 +779,6 @@ async def test_executor_pauses_after_review_policy_step_and_duplicate_delivery_s
     assert checkpoint_row.attempt_no == 1
     assert checkpoint_row.original_payload_json == {
         "text": "This answer needs review.",
-        "webhook_delivered": False,
     }
     assert checkpoint_row.current_payload_json == checkpoint_row.original_payload_json
     assert context.second_step_id is not None
@@ -899,7 +896,6 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
     assert public.current_payload_json == {
         "text": '{"summary":"This answer needs review."}',
         "structured": {"summary": "This answer needs review."},
-        "webhook_delivered": False,
     }
 
 
@@ -922,21 +918,17 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
     original_payload: FlowPersistedJsonObject = {
         "text": '{"summary":"This answer needs review."}',
         "structured": {"summary": "This answer needs review."},
-        "webhook_delivered": False,
     }
     invalid_payload: FlowPersistedJsonObject = {
         "text": '{"wrong":"shape"}',
         "structured": {"wrong": "shape"},
-        "webhook_delivered": False,
     }
     missing_structured_payload: FlowPersistedJsonObject = {
         "text": '{"summary":"Missing structured slot."}',
-        "webhook_delivered": False,
     }
     valid_payload: FlowPersistedJsonObject = {
         "text": '{"summary":"Edited answer."}',
         "structured": {"summary": "Edited answer."},
-        "webhook_delivered": False,
     }
     completion_service = SimpleNamespace(
         get_response=AsyncMock(
@@ -1098,7 +1090,6 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
     )
     edited_payload = {
         "text": "Edited answer for resume.",
-        "webhook_delivered": False,
     }
 
     async with sessionmanager.session() as session:
@@ -1196,7 +1187,6 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
     assert run_row.status == FlowRunStatus.COMPLETED.value
     assert run_row.output_payload_json == {
         "text": "Final archive output.",
-        "webhook_delivered": False,
     }
 
     assert checkpoint_row is not None
@@ -1212,7 +1202,6 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
     assert step_result_rows[1].input_payload_json["text"] == edited_payload["text"]
     assert step_result_rows[1].output_payload_json == {
         "text": "Second step used edited answer.",
-        "webhook_delivered": False,
     }
 
     questions = [
@@ -1253,7 +1242,6 @@ async def test_resume_last_step_review_terminalizes_completed_run(
     )
     edited_payload = {
         "text": "Approved final answer.",
-        "webhook_delivered": False,
     }
 
     async with sessionmanager.session() as session:

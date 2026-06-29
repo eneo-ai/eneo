@@ -1846,6 +1846,44 @@ def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> N
         assert typed_step[field] == legacy_step[field]
 
 
+@pytest.mark.parametrize(
+    ("mirror_key", "mirror_value"),
+    [
+        ("webhook_delivered", False),
+        ("webhook_error", "HTTP 503 Service Unavailable"),
+    ],
+)
+def test_evidence_export_ignores_legacy_webhook_delivery_payload_mirror(
+    mirror_key: str,
+    mirror_value: bool | str,
+) -> None:
+    run, _ = _evidence_run_and_version()
+    step_id = uuid4()
+    version = _evidence_version_with_steps(run, step_ids=[step_id])
+    output_payload = {"text": "done", mirror_key: mirror_value}
+    export = _render_raw_export(
+        run.model_copy(update={"output_payload_json": output_payload}),
+        version,
+        step_results=[
+            _step_result_for_run(
+                run,
+                step_id=step_id,
+                output_payload_json=output_payload,
+            )
+        ],
+        step_attempts=[
+            _attempt_with_provenance(run, None).model_copy(
+                update={"step_id": step_id, "step_order": 1, "attempt_no": 1}
+            )
+        ],
+    )
+
+    assert export["summary"]["final_output"]["kind"] == "text"
+    assert export["summary_typed"]["final_output"]["kind"] == "text"
+    assert export["summary"]["step_overview"][0]["result_output_kind"] == "text"
+    assert export["summary_typed"]["step_overview"][0]["result_output_kind"] == "text"
+
+
 def test_evidence_export_summary_shared_fields_use_typed_normalization() -> None:
     run, _ = _evidence_run_and_version()
     step_id = uuid4()

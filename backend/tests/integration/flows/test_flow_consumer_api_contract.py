@@ -1471,7 +1471,6 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
         current_payload_json={
             "text": '{"summary":"Original."}',
             "structured": {"summary": "Original."},
-            "webhook_delivered": False,
         },
     )
 
@@ -1482,7 +1481,6 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
             "current_payload_json": {
                 "text": '{"wrong":"shape"}',
                 "structured": {"wrong": "shape"},
-                "webhook_delivered": False,
             },
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -1572,7 +1570,6 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
         current_payload_json={
             "text": '{"summary":"Original."}',
             "structured": {"summary": "Original."},
-            "webhook_delivered": False,
         },
     )
     active_path = _runtime_path(review_paths["active_template"], run_id=run["id"])
@@ -1597,7 +1594,6 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
             "current_payload_json": {
                 "text": '{"wrong":"shape"}',
                 "structured": {"wrong": "shape"},
-                "webhook_delivered": False,
             },
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -1612,7 +1608,6 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
             "current_payload_json": {
                 "text": '{"summary":"Approved."}',
                 "structured": {"summary": "Approved."},
-                "webhook_delivered": False,
             },
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -1760,7 +1755,6 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
         current_payload_json={
             "text": '{"summary":"Original service-key result."}',
             "structured": {"summary": "Original service-key result."},
-            "webhook_delivered": False,
         },
     )
     active_response = await client.get(active_path, headers=service_headers)
@@ -1788,7 +1782,6 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
             "current_payload_json": {
                 "text": '{"summary":"Reviewed by service integration."}',
                 "structured": {"summary": "Reviewed by service integration."},
-                "webhook_delivered": False,
             },
         },
         headers=service_headers,

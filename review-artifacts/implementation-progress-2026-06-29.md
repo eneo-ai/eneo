@@ -578,6 +578,104 @@
   - PG-10a deliberately does not change FastAPI's app-global request-validation behavior. PG-10b must handle that as a separate generated-client-visible API contract slice, not as a Flow evidence cleanup.
   - The new `AuditLoggingUnavailableException` is mapped to 503 with `ErrorCodes.INTERNAL_SERVER_ERROR`, preserving the prior wire type and code while letting the existing handler attach request identity.
 
+## PG-10b
+
+- Slice id: PG-10b
+- Status: blocked / no code change
+- Findings addressed: app-global validation-error part of `verify-api-dx:01`
+- Verified evidence before decision:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:29` includes FastAPI validation errors in PG-10 but flags generated-client-visible risk.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:136-143` states PG-10b must remain separate from PG-10a and must not touch global validation behavior without an explicit decision.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:374-381` records the app-global `RequestValidationError` / `GeneralError` contract as an undecided API/generated-client owner decision.
+  - Direct `rg -n "RequestValidationError" backend/src/intric/server backend/src/intric/main backend/src/intric/flows/api backend/tests` during PG-10a found no main-app handler; that gap is still app-global, not Flow-local.
+- Decision / blocker:
+  - PG-10b is not implemented in this slice because changing FastAPI request-validation 422 shape affects all endpoints and generated clients, including non-Flow consumers.
+  - The smallest clean follow-up is a dedicated app-global API contract slice that names the 422 code/context policy, updates generated-client-visible contracts, and covers representative non-Flow plus Flow endpoints.
+- Architecture delta:
+  - Canonical owner before: FastAPI's default request-validation handler owns malformed request bodies for the whole app.
+  - Canonical owner after: unchanged until the API/generated-client decision is made.
+  - Duplicate paths remaining: mapped application errors use `server/exception_handlers.py`, while FastAPI validation errors can still return raw `{detail: [...]}`.
+  - 9/10 follow-up candidate: implement PG-10b as a dedicated app-global API envelope contract slice after the generated-client/non-Flow impact decision.
+  - Decision or measurement needed: decide global 422 `GeneralError` code, `intric_error_code`, `context`, `request_id`, and compatibility posture for generated clients.
+  - What not to preserve: indefinite raw FastAPI validation envelopes if the explicit API decision approves the standard `GeneralError` shape.
+- Validation commands and results:
+  - No code was changed for PG-10b.
+
+## PG-11
+
+- Slice id: PG-11
+- Findings addressed: `verify-data-model:01`, `verify-data-model:07`, `A-DEL-STAGED-1`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:30` scopes PG-11 to deleting `webhook_delivered` / `webhook_error` from `output_payload_json` while leaving delivery state observable in `flow_run_webhook_deliveries`.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:33-34` indexes the duplicate JSON writers and the `webhook_error` export leak.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:104` names `flow_run_webhook_deliveries` as the intended owner and instructs deleting the JSON mirror after confirming no frontend/manual consumer reads the flags.
+  - Direct `rg -n "webhook_delivered|webhook_error|with_webhook_delivery_status" backend/src backend/tests frontend/packages frontend/apps docs -g "!frontend/bun.lock" -g "!**/.venv/**"` before editing found production writers only in `step_execution_runtime.py`, `step_result_builder.py`, and `flow_webhook_delivery.py`; a legacy export scrub in `flow_run_export_json.py`; a hand-maintained TypeScript type in `frontend/packages/intric-js/src/types/resources.d.ts`; and tests.
+  - Fresh source review confirmed `backend/src/intric/flows/runtime/step_execution_runtime.py:502-511` seeded `webhook_delivered`, `backend/src/intric/flows/runtime/step_result_builder.py:121-134` only mutated the mirror, and `backend/src/intric/flows/runtime/flow_webhook_delivery.py:319-421` used that helper for success/dead-letter writes.
+  - Fresh source review confirmed `backend/src/intric/flows/flow_run_export_json.py:1077-1089` already strips `webhook_delivered` before structured-output detection, so legacy export normalization must keep that scrub and add `webhook_error`.
+- Verification agents used, with verdicts:
+  - CRG `get_minimal_context` and `query_graph` were used as first-pass reducers for the runtime/export files; all concrete claims were verified with direct source reads and exact `rg`.
+  - Claude peer-loop session `pg11-webhook-delivery-mirror-20260629` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by keeping legacy `webhook_delivered` export scrubbing, adding `webhook_error` scrubbing plus an export regression, and preserving the success-path `save_step_result` active-run guard without JSON mutation.
+  - Claude peer-loop session `pg11-webhook-delivery-mirror-20260629` iteration 2 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; it agreed the production diff was correct but required explicit proof that the authored-HTTP fixture repair was stale setup rather than a masked delivery regression.
+  - Claude peer-loop session `pg11-webhook-delivery-mirror-20260629` iteration 3 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it independently verified the fixture repair chain against the existing auth/timeout validators and cleared the commit gate.
+- Files changed:
+  - `backend/src/intric/flows/runtime/step_execution_runtime.py`
+  - `backend/src/intric/flows/runtime/step_result_builder.py`
+  - `backend/src/intric/flows/runtime/flow_webhook_delivery.py`
+  - `backend/src/intric/flows/flow_run_export_json.py`
+  - `backend/tests/unittests/flows/test_step_execution_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - `backend/tests/unittests/flows/test_flow_runtime_builders.py`
+  - `backend/tests/unittests/flows/test_step_attempt_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
+  - `backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py`
+  - `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`
+  - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
+  - `backend/tests/integration/flows/test_flow_review_pause_worker_contract.py`
+  - `backend/tests/integration/test_flow_runtime_retention_cleanup.py`
+  - `frontend/packages/intric-js/src/types/resources.d.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - New step/run output payloads no longer include `webhook_delivered` or `webhook_error`.
+  - Webhook success, retry, and dead-letter state remain persisted in `flow_run_webhook_deliveries`; success still uses `save_step_result` as the active-run guard before marking delivery succeeded.
+  - Raw evidence export continues to normalize legacy `webhook_delivered` rows and now also normalizes legacy `webhook_error` rows, preventing delivery error strings from turning a text-only output into `mixed` / structured-like output.
+  - The hand-maintained `FlowRunOutputPayload` TypeScript type no longer exposes webhook delivery state fields.
+- Complexity deleted or owner clarified:
+  - Deleted `with_webhook_delivery_status`, the only helper dedicated to writing duplicate delivery state into `output_payload_json`.
+  - Removed the runtime success/dead-letter JSON mirror writes and kept delivery status/error ownership in `flow_run_webhook_deliveries`.
+  - Removed stale delivery-state expectations from API/runtime/review/retention tests and left relational outbox assertions as the behavior proof.
+- Architecture delta:
+  - Canonical owner before: delivery state was split between `flow_run_webhook_deliveries` and duplicated `output_payload_json` keys.
+  - Canonical owner after: `flow_run_webhook_deliveries` is the delivery state/error owner; output payload JSON owns model/user output only.
+  - Duplicate paths remaining: legacy persisted rows may still contain old JSON keys, but export normalization strips them; no new production writer or public TypeScript type remains.
+  - 9/10 follow-up candidate: PG-12 should harden the relational survivor with the planned constraints/indexes now that the JSON mirror is gone.
+  - Decision or measurement needed: decide whether any migration/backfill is worth running to remove legacy keys from already persisted pre-production rows; current slice handles read/export compatibility without preserving writers.
+  - What not to preserve: delivery flags/errors inside output payloads, tests that assert internal delivery mirrors, and frontend payload types that imply webhook state belongs to model output.
+- Validation commands and results:
+  - Red proof before source change: `cd backend && .venv/bin/pytest tests/unittests/flows/test_step_execution_runtime.py::test_build_output_payload_excludes_artifact_display_keys -q` -> failed because `build_output_payload` still emitted `webhook_delivered`.
+  - Red proof before source change: `cd backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_evidence.py::test_evidence_export_ignores_legacy_webhook_delivery_payload_mirror -q` -> failed for `webhook_error` because export classified text plus `webhook_error` as `mixed`.
+  - Pre-source-change integration attempt: `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_webhook_outbox_delivery.py::test_flow_webhook_delivery_sends_outside_transaction_and_completes_run -q` failed before the PG-11 assertion because the test fixture still used legacy flat HTTP output config without the now-required `auth` field.
+  - After adding `auth`, `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_webhook_outbox_delivery.py -q` still failed before delivery assertions because `HttpAuthoredConfig` defaulted `timeout_seconds` to 30 while this test's `FlowHttpRuntimeHelper` caps max timeout at 5. The fixture repair to authored config plus explicit `timeout_seconds: 5` was required to reach the delivery path and is called out in the PG-11 commit body.
+  - `cd backend && .venv/bin/pytest tests/unittests/flows/test_step_execution_runtime.py::test_build_output_payload_excludes_artifact_display_keys -q` -> pass, 1 passed.
+  - `cd backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_evidence.py::test_evidence_export_ignores_legacy_webhook_delivery_payload_mirror -q` -> pass, 2 passed.
+  - `cd backend && .venv/bin/pytest tests/unittests/flows/test_flow_runtime_builders.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_flow_executor_runtime.py -q` -> pass, 95 passed.
+  - `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_webhook_outbox_delivery.py -q` -> pass, 9 passed.
+  - `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q` -> pass, 9 passed.
+  - `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_consumer_api_contract.py -q` -> pass, 18 passed.
+  - `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -q` -> pass, 10 passed.
+  - `cd backend && .venv/bin/pytest tests/integration/test_flow_runtime_retention_cleanup.py -q` -> pass, 23 passed.
+  - `cd backend && .venv/bin/ruff check <touched backend files/tests>` -> pass.
+  - Direct `.venv/bin/pyright <touched files>` was not authoritative in this devcontainer because it did not use the repo dependency environment and reported existing missing-import/unknown-type noise; `cd backend && uv run pyright` -> pass, 0 errors.
+  - `cd frontend && bun run --filter @intric/intric-js check` -> pass.
+  - `cd frontend/packages/intric-js && bun x prettier --check src/types/resources.d.ts` -> pass.
+  - `rg -n "FlowRunOutputPayload|schema.d.ts|openapi-typescript|update.js" frontend/packages/intric-js -g "!node_modules/**"` confirmed `FlowRunOutputPayload` lives in hand-maintained `resources.d.ts`; OpenAPI regeneration writes `src/types/schema.d.ts` and client version metadata.
+  - `rg -n "webhook_delivered|webhook_error|with_webhook_delivery_status" backend/src backend/tests frontend/packages frontend/apps docs -g "!frontend/bun.lock" -g "!**/.venv/**"` -> remaining matches only in `flow_run_export_json.py` legacy scrub and the export regression test.
+  - Full Flow suite check: `cd backend && .venv/bin/pytest tests/unittests/flows tests/integration/flows -q` -> failed with 1 unrelated integration fixture failure after 4839 passed / 8 deselected. The failure is `tests/integration/flows/test_flow_audit_outbox_delivery.py::test_flow_audit_outbox_delivery_dead_letters_bad_row_and_delivers_neighbors`, where `test_flow_audit_outbox_delivery.py:282-286` calls `_create_flow_and_run` three times and `_create_flow_and_run` calls `completion_model_factory(session, "gpt-4o-mini")` at `:84`; `completion_models.py:157-158` inserts/flushes a duplicate active nickname in the same tenant/provider, violating `uq_completion_models_active_nickname`. The same test fails when run alone, so it is unrelated to PG-11 output payload/delete behavior.
+- Remaining risk / follow-up:
+  - No data migration was added; legacy rows are handled at export/read-summary time by the existing scrub boundary.
+  - `backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py` also needed a narrow authored-HTTP fixture repair (`auth` plus explicit `timeout_seconds`) because the current runtime rejects legacy flat configs and defaults above the test helper's max timeout before reaching delivery assertions.
+  - Deferred delivery-mechanics cleanup: `_record_success` still calls `save_step_result(payload.step_result, ...)` as an active-run guard, which preserves pre-existing behavior but rewrites the full step-result row and can bump `finished_at` to delivery time. Trigger for the next delivery-mechanics / PG-12+ slice: replace that guard with an explicit active-run check if the repository owner can expose it without reintroducing a duplicate delivery state path.
+  - Future HTTP-runtime test cleanup: sweep remaining Flow webhook/HTTP fixtures for pre-authored-config shapes in a dedicated HTTP fixture/contract slice, not as drive-by cleanup in PG-11.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

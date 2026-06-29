@@ -12,7 +12,6 @@ from intric.flows.runtime.step_result_builder import (
     build_default_failed_input_payload,
     build_failed_step_result,
     build_transcribe_only_rag_metadata,
-    with_webhook_delivery_status,
 )
 
 
@@ -198,25 +197,6 @@ def test_step_public_defaults_runtime_input_file_ids_to_empty_list():
     public_step = FlowAssembler().to_step_public(built)
 
     assert public_step.runtime_input_file_ids == []
-
-
-def test_with_webhook_delivery_status_updates_payload_without_losing_existing_fields():
-    result = _step_result(1, status=FlowStepResultStatus.COMPLETED, text="answer")
-
-    failed = with_webhook_delivery_status(
-        step_result=result, delivered=False, error="timeout"
-    )
-    assert failed.output_payload_json == {
-        "text": "answer",
-        "webhook_delivered": False,
-        "webhook_error": "timeout",
-    }
-
-    delivered = with_webhook_delivery_status(step_result=result, delivered=True)
-    assert delivered.output_payload_json == {
-        "text": "answer",
-        "webhook_delivered": True,
-    }
 
 
 def test_build_transcribe_only_rag_metadata_rounds_timeout_to_int():

@@ -555,9 +555,7 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             raise
 
     class _TimeoutAfterStartedFuture(concurrent.futures.Future[dict[str, str]]):
-        def __init__(
-            self, future: concurrent.futures.Future[dict[str, str]]
-        ) -> None:
+        def __init__(self, future: concurrent.futures.Future[dict[str, str]]) -> None:
             super().__init__()
             self._future = future
 
@@ -585,7 +583,9 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
         "run_coroutine_threadsafe",
         _run_coroutine_threadsafe,
     )
-    monkeypatch.setattr(tasks_module, "_execute_flow_run_async", _execute_until_cancelled)
+    monkeypatch.setattr(
+        tasks_module, "_execute_flow_run_async", _execute_until_cancelled
+    )
 
     task_result = await asyncio.to_thread(
         lambda: tasks_module._execute_flow_run_task(
@@ -781,7 +781,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert run_row.status == FlowRunStatus.COMPLETED.value
         assert run_row.output_payload_json == {
             "text": "The run completed.",
-            "webhook_delivered": False,
         }
 
         step_result_rows = (
@@ -799,7 +798,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert step_result_rows[0].status == FlowStepResultStatus.COMPLETED.value
         assert step_result_rows[0].output_payload_json == {
             "text": "The run completed.",
-            "webhook_delivered": False,
         }
 
         attempt_rows = (
@@ -825,7 +823,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert evidence["run"]["status"] == FlowRunStatus.COMPLETED.value
         assert evidence["step_results"][0]["output_payload_json"] == {
             "text": "The run completed.",
-            "webhook_delivered": False,
         }
 
         audit_service.log_async.assert_not_awaited()
@@ -869,7 +866,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert rerun_run_row.revision == 2
         assert rerun_run_row.output_payload_json == {
             "text": "The rerun completed.",
-            "webhook_delivered": False,
         }
 
         rerun_step_result = await session.scalar(
@@ -880,7 +876,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert rerun_step_result.current_attempt_no == 2
         assert rerun_step_result.output_payload_json == {
             "text": "The rerun completed.",
-            "webhook_delivered": False,
         }
 
         rerun_attempt_rows = (
@@ -957,7 +952,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert rerun_evidence["step_results"][0]["current_attempt_no"] == 2
         assert rerun_evidence["step_results"][0]["output_payload_json"] == {
             "text": "The rerun completed.",
-            "webhook_delivered": False,
         }
 
 
@@ -1244,7 +1238,6 @@ async def test_webhook_output_enqueues_delivery_for_fresh_sessions(
     assert step_result_row.status == FlowStepResultStatus.COMPLETED.value
     assert step_result_row.output_payload_json == {
         "text": "Webhook payload text.",
-        "webhook_delivered": False,
     }
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value

@@ -993,7 +993,7 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
     assert flow_repo.save_step_result.await_count == 1
     saved = flow_repo.save_step_result.await_args_list[0].args[1]
     assert saved.status == FlowStepResultStatus.COMPLETED
-    assert saved.output_payload_json["webhook_delivered"] is False
+    assert saved.output_payload_json == {"text": "result"}
     call_kwargs = (
         executor.webhook_delivery_repo.insert_pending_delivery.await_args.kwargs
     )

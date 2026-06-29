@@ -1874,7 +1874,6 @@ def test_build_output_payload_excludes_artifact_display_keys():
 
     assert payload == {
         "text": "done",
-        "webhook_delivered": False,
         "structured": {"ok": True},
     }
 

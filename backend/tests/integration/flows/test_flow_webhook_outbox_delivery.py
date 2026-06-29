@@ -93,7 +93,11 @@ def _build_flow(
                 output_contract=None,
                 input_bindings={"question": "{{flow.input.question}}"},
                 output_config=output_config
-                or {"url": "https://example.org/hook/{{flow_input.case_id}}"},
+                or {
+                    "url": "https://example.org/hook/{{flow_input.case_id}}",
+                    "auth": {"mode": "none"},
+                    "timeout_seconds": 5,
+                },
                 output_classification_override=None,
                 mcp_policy="inherit",
                 input_config=None,
@@ -206,7 +210,7 @@ async def _create_running_webhook_run(
             "status": FlowStepResultStatus.COMPLETED,
             "current_attempt_no": 1,
             "input_payload_json": {"text": "hello"},
-            "output_payload_json": {"text": "done", "webhook_delivered": False},
+            "output_payload_json": {"text": "done"},
             "effective_prompt": "prompt",
             "model_parameters_json": {},
             "num_tokens_input": 1,
@@ -543,7 +547,7 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
     assert delivery_state.delivery_attempts == 1
     assert delivery_state.delivered_at is not None
     assert run_state == FlowRunStatus.COMPLETED.value
-    assert result_payload["webhook_delivered"] is True
+    assert result_payload == {"text": "done"}
     audit_service.log_async.assert_awaited_once()
     assert audit_service.log_async.await_args.kwargs["outcome"] == Outcome.SUCCESS
 
@@ -638,10 +642,16 @@ async def test_flow_webhook_delivery_decrypts_encrypted_headers(
             assistant_factory=assistant_factory,
             output_config={
                 "url": "https://example.org/hook/{{flow_input.case_id}}",
-                "headers": {
-                    "Authorization": "enc:fernet:v1:Bearer top-secret",
-                    "X-Plain": "visible",
-                },
+                "auth": {"mode": "none"},
+                "timeout_seconds": 5,
+                "custom_headers": [
+                    {
+                        "name": "Authorization",
+                        "value": "enc:fernet:v1:Bearer top-secret",
+                        "secret": True,
+                    },
+                    {"name": "X-Plain", "value": "visible", "secret": False},
+                ],
             },
         )
         webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
@@ -733,7 +743,7 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_success_claim_l
     assert result.dead_lettered_count == 0
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.claim_token is not None
-    assert result_payload["webhook_delivered"] is False
+    assert result_payload == {"text": "done"}
 
 
 @pytest.mark.asyncio
@@ -883,5 +893,4 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_l
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.claim_token is not None
     assert run_state == FlowRunStatus.RUNNING.value
-    assert result_payload["webhook_delivered"] is False
-    assert "webhook_error" not in result_payload
+    assert result_payload == {"text": "done"}

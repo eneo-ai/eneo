@@ -45,7 +45,6 @@ from intric.flows.runtime.http_orchestration import (
 from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime.run_outcome import finalize_run_from_current_results
-from intric.flows.runtime.step_result_builder import with_webhook_delivery_status
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.settings.encryption_service import EncryptionService
 from intric.tenants.tenant_repo import TenantRepository
@@ -145,7 +144,6 @@ class FlowRunWebhookDeliveryService:
 
             row = rows[0]
             attempted += 1
-            payload: WebhookDeliveryPayload | None = None
             try:
                 async with self.webhook_delivery_repo.session.begin():
                     payload = await self._prepare_delivery_payload(row=row)
@@ -158,7 +156,6 @@ class FlowRunWebhookDeliveryService:
                             now=now,
                             error=exc,
                             force_dead_letter=True,
-                            payload=None,
                         )
                 except WebhookDeliveryClaimLostError:
                     continue
@@ -172,7 +169,6 @@ class FlowRunWebhookDeliveryService:
                             now=now,
                             error=exc,
                             force_dead_letter=False,
-                            payload=payload,
                         )
                 except WebhookDeliveryClaimLostError:
                     continue
@@ -323,13 +319,10 @@ class FlowRunWebhookDeliveryService:
         now: datetime,
         payload: WebhookDeliveryPayload,
     ) -> bool:
-        delivered_result = with_webhook_delivery_status(
-            step_result=payload.step_result,
-            delivered=True,
-        )
+        # Retain save_step_result as the active-run guard before marking delivery succeeded.
         saved_result = await self.flow_repo.save_step_result(
             row.flow_run_id,
-            delivered_result,
+            payload.step_result,
             tenant_id=row.tenant_id,
             attempt_no=row.attempt_no,
         )
@@ -366,7 +359,6 @@ class FlowRunWebhookDeliveryService:
         now: datetime,
         error: Exception,
         force_dead_letter: bool,
-        payload: WebhookDeliveryPayload | None,
     ) -> bool:
         attempt_no = row.delivery_attempts + 1
         retry_delay = (
@@ -379,19 +371,6 @@ class FlowRunWebhookDeliveryService:
             None if retry_delay is None else now + timedelta(seconds=retry_delay)
         )
         error_message = sanitize_webhook_delivery_error(error)
-
-        if payload is not None and dead_lettered_at is not None:
-            failed_result = with_webhook_delivery_status(
-                step_result=payload.step_result,
-                delivered=False,
-                error=error_message,
-            )
-            await self.flow_repo.save_step_result(
-                row.flow_run_id,
-                failed_result,
-                tenant_id=row.tenant_id,
-                attempt_no=row.attempt_no,
-            )
 
         did_record = await self.webhook_delivery_repo.record_delivery_failure(
             delivery_id=row.id,

@@ -208,8 +208,6 @@ export type FlowRunError = components["schemas"]["FlowRunError"];
 export type FlowRunOutputPayload = {
   text?: string;
   structured?: Record<string, unknown> | unknown[];
-  webhook_delivered?: boolean;
-  webhook_error?: string;
   template_fill_debug?: Record<string, unknown>;
   template_provenance?: Record<string, unknown>;
 };
