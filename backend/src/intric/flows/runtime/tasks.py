@@ -62,6 +62,7 @@ from intric.users.user_repo import UsersRepository
 
 logger = get_logger(__name__)
 
+_SECONDARY_TERMINALIZATION_TIMEOUT_SECONDS = 10
 _FLOW_TASK_LOOP: asyncio.AbstractEventLoop | None = None
 _FLOW_TASK_LOOP_THREAD: threading.Thread | None = None
 _FLOW_TASK_LOOP_LOCK = threading.Lock()
@@ -359,6 +360,47 @@ async def terminalize_flow_run_failure(
             )
 
 
+def _terminalize_flow_run_failure_from_task(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    run_id: UUID,
+    tenant_id: UUID,
+    task_id: str | None,
+    source: FlowRunLifecycleSource,
+    error: FlowRunError,
+) -> None:
+    try:
+        asyncio.run_coroutine_threadsafe(
+            terminalize_flow_run_failure(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                source=source,
+                error=error,
+            ),
+            loop,
+        ).result(timeout=_SECONDARY_TERMINALIZATION_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        logger.exception(
+            "Flow run task terminalization timed out",
+            extra={
+                "run_id": str(run_id),
+                "tenant_id": str(tenant_id),
+                "task_id": task_id,
+                "source": source.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Flow run task terminalization failed",
+            extra={
+                "run_id": str(run_id),
+                "tenant_id": str(tenant_id),
+                "task_id": task_id,
+                "source": source.value,
+            },
+        )
+
+
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="flows.execute",
     bind=True,
@@ -437,22 +479,21 @@ def _execute_flow_run_task(
             run_id_uuid = missing_principal.run_id
             tenant_id_uuid = missing_principal.tenant_id
             loop = _get_flow_task_loop()
-            asyncio.run_coroutine_threadsafe(
-                terminalize_flow_run_failure(
-                    run_id=run_id_uuid,
-                    tenant_id=tenant_id_uuid,
-                    source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                    error=FlowRunError.from_source(
-                        FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                        code=FlowApiErrorCode.RUN_MISSING_PRINCIPAL,
-                        message=(
-                            "flow_missing_principal: "
-                            "Flow run execution skipped because run has no execution principal."
-                        ),
+            _terminalize_flow_run_failure_from_task(
+                loop=loop,
+                run_id=run_id_uuid,
+                tenant_id=tenant_id_uuid,
+                task_id=task_id,
+                source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.MISSING_PRINCIPAL,
+                    code=FlowApiErrorCode.RUN_MISSING_PRINCIPAL,
+                    message=(
+                        "flow_missing_principal: "
+                        "Flow run execution skipped because run has no execution principal."
                     ),
                 ),
-                loop,
-            ).result(timeout=10)
+            )
             logger.error(
                 "Flow run execution skipped because run has no execution principal",
                 extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
@@ -504,19 +545,18 @@ def _execute_flow_run_task(
             "Flow execution task timed out",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        asyncio.run_coroutine_threadsafe(
-            terminalize_flow_run_failure(
-                run_id=run_id_uuid,
-                tenant_id=tenant_id_uuid,
-                source=FlowRunLifecycleSource.TASK_TIMEOUT,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.TASK_TIMEOUT,
-                    code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
-                    message=error_message,
-                ),
+        _terminalize_flow_run_failure_from_task(
+            loop=loop,
+            run_id=run_id_uuid,
+            tenant_id=tenant_id_uuid,
+            task_id=task_id,
+            source=FlowRunLifecycleSource.TASK_TIMEOUT,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.TASK_TIMEOUT,
+                code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
+                message=error_message,
             ),
-            loop,
-        ).result(timeout=10)
+        )
         return {"status": "failed", "reason": "timeout"}
     except Exception:
         error_message = (
@@ -526,19 +566,18 @@ def _execute_flow_run_task(
             "Flow execution task failed",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        asyncio.run_coroutine_threadsafe(
-            terminalize_flow_run_failure(
-                run_id=run_id_uuid,
-                tenant_id=tenant_id_uuid,
-                source=FlowRunLifecycleSource.TASK_FAILURE,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.TASK_FAILURE,
-                    code=FlowApiErrorCode.RUN_TASK_FAILURE,
-                    message=error_message,
-                ),
+        _terminalize_flow_run_failure_from_task(
+            loop=loop,
+            run_id=run_id_uuid,
+            tenant_id=tenant_id_uuid,
+            task_id=task_id,
+            source=FlowRunLifecycleSource.TASK_FAILURE,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.TASK_FAILURE,
+                code=FlowApiErrorCode.RUN_TASK_FAILURE,
+                message=error_message,
             ),
-            loop,
-        ).result(timeout=10)
+        )
         return {"status": "failed", "reason": "task_failure"}
 
 

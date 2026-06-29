@@ -283,6 +283,43 @@
   - Residual risk is limited to out-of-repo imports of the deleted Python names; no in-repo production or docs reference remains.
   - The broader output-mode vocabulary map remains deliberately out of scope because it is not the decorative registry finding and may affect API/runtime contract ownership.
 
+## PG-6
+
+- Slice id: PG-6
+- Findings addressed: `missed-runtime-celery:03`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:25` scopes PG-6 to guarding the three secondary terminalization `.result(timeout=10)` call sites in `flows/runtime/tasks.py`.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:23` indexes the unguarded secondary terminalization path.
+  - Before the edit, `backend/src/intric/flows/runtime/tasks.py:440-455`, `:507-519`, and `:529-541` scheduled `terminalize_flow_run_failure(...)` and called `.result(timeout=10)` without a guard.
+  - Before the edit, `backend/tests/unittests/flows/test_celery_runtime.py:615-799` covered timeout and generic task failure only when secondary terminalization succeeded.
+  - A red unit test proved the current bug: `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_returns_failed_when_task_terminalization_fails -q` failed on all three parametrized paths because terminalization `RuntimeError` / `TimeoutError` escaped `_execute_flow_run_task`.
+- Verification agents used, with verdicts:
+  - Claude peer-loop prompt verification artifacts for `pg5-pg6-pg8-next-prompt-2026-06-29` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` for the runtime cluster direction after requiring the captured-task PG-5 drain and PG-6 guarded terminalization helper.
+  - CRG `get_review_context` with explicit `tasks.py` and `test_celery_runtime.py` reported high impact for the runtime task owner; direct source and targeted tests were used as proof.
+- Files changed:
+  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/tests/unittests/flows/test_celery_runtime.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Task-boundary terminalization failures/timeouts no longer escape `_execute_flow_run_task`; the task returns the same failed result shape and logs the secondary terminalization failure.
+  - The existing failure reasons remain unchanged: `missing_principal`, `timeout`, and `task_failure`.
+- Complexity deleted or owner clarified:
+  - Replaced three duplicate unguarded `run_coroutine_threadsafe(...).result(timeout=10)` call sites with one local task-boundary helper.
+- Architecture delta:
+  - Canonical owner before: `_execute_flow_run_task` owned task-boundary execution, but secondary terminalization wait/error handling was copied inline in three branches.
+  - Canonical owner after: `_execute_flow_run_task` remains the owner, with `_terminalize_flow_run_failure_from_task` as the local private helper for task-boundary terminalization scheduling and failure logging.
+  - Duplicate paths remaining: PG-5 still needs the timeout/soft-limit cancellation unwind join in the same owner; PG-8 still needs the DB-backed task-boundary proof.
+  - 9/10 follow-up candidate: no new candidate; executor failure-tail dedup remains the existing post-PG runtime follow-up after PG-5/PG-6/PG-8 protect terminalization ordering.
+  - Decision or measurement needed: none for PG-6; terminalization helper failures deliberately leave stale-running reconciliation as the existing backstop.
+  - What not to preserve: unguarded secondary `.result(timeout=10)` calls that can re-raise and hide the task's deterministic failed result.
+- Validation commands and results:
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_returns_failed_when_task_terminalization_fails -q` -> red before the fix, then pass, 3 passed.
+  - `cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/intric/flows/runtime/tasks.py backend/tests/unittests/flows/test_celery_runtime.py` -> pass.
+- Remaining risk / follow-up:
+  - PG-6 does not fix the coroutine unwind race. PG-5 must still replace the current timeout/soft-limit `future.cancel()` path with a captured-task cancel-and-join and prove cleanup precedes terminalization.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

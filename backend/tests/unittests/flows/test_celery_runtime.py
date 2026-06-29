@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import importlib
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -737,6 +738,97 @@ def test_execute_flow_run_handles_soft_time_limit_as_timeout(monkeypatch):
         FlowRunLifecycleSource.TASK_TIMEOUT
     )
     assert terminalize_failure.await_args.kwargs["error"].code == "flow_task_timeout"
+
+
+@pytest.mark.parametrize(
+    ("payload", "scheduled_exceptions", "expected_result", "expected_source"),
+    [
+        (
+            {},
+            [RuntimeError("terminalizer unavailable")],
+            {"status": "failed", "reason": "missing_principal"},
+            FlowRunLifecycleSource.MISSING_PRINCIPAL,
+        ),
+        (
+            {"principal_type": "user", "principal_user_id": str(uuid4())},
+            [
+                concurrent.futures.TimeoutError(),
+                RuntimeError("terminalizer unavailable"),
+            ],
+            {"status": "failed", "reason": "timeout"},
+            FlowRunLifecycleSource.TASK_TIMEOUT,
+        ),
+        (
+            {"principal_type": "user", "principal_user_id": str(uuid4())},
+            [RuntimeError("execution failed"), concurrent.futures.TimeoutError()],
+            {"status": "failed", "reason": "task_failure"},
+            FlowRunLifecycleSource.TASK_FAILURE,
+        ),
+    ],
+)
+def test_execute_flow_run_returns_failed_when_task_terminalization_fails(
+    monkeypatch,
+    payload,
+    scheduled_exceptions,
+    expected_result,
+    expected_source,
+):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    terminalize_failure = AsyncMock()
+    execute_async = AsyncMock()
+    logger = MagicMock()
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
+    monkeypatch.setattr(tasks_module, "_execute_flow_run_async", execute_async)
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(tasks_module, "logger", logger)
+    monkeypatch.setattr(
+        tasks_module,
+        "get_settings",
+        lambda: type(
+            "_Settings",
+            (),
+            {"flow_task_timeout_seconds": 1, "flow_max_inline_text_bytes": 1024},
+        )(),
+    )
+    exceptions = deque(scheduled_exceptions)
+
+    class _Future:
+        def __init__(self, exception):
+            self._exception = exception
+
+        def cancel(self):
+            return None
+
+        def result(self, timeout=None):
+            raise self._exception
+
+    def _run_coroutine_threadsafe(coroutine, _loop):
+        coroutine.close()
+        return _Future(exceptions.popleft())
+
+    monkeypatch.setattr(
+        tasks_module.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_threadsafe,
+    )
+    base_payload = {
+        "run_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "tenant_id": str(uuid4()),
+        "task_id": "task-1",
+        "retry_count": 0,
+    }
+    base_payload.update(payload)
+
+    result = tasks_module._execute_flow_run_task(**base_payload)
+
+    assert result == expected_result
+    assert terminalize_failure.call_args.kwargs["source"] == expected_source
+    logger.exception.assert_called()
 
 
 def test_execute_flow_run_handles_generic_exception(monkeypatch):
