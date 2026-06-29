@@ -156,6 +156,42 @@
   - Remaining risk is limited to out-of-repo imports of the deleted Builder helper names; direct in-repo source/test/frontend checks found no live callers.
   - `build_structured_reference_payload` is kept by the explicit `B-DEL-4` carve-out even though deleting `render_structured_reference_block` leaves it currently referenced only by tests; see `PG3-FU-1`.
 
+## PG-3b
+
+- Slice id: PG-3b
+- Findings addressed: `A-DEL-4 / missed-module-depth:01`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:27` scopes the deletion to `backend/src/intric/flows/runtime/document_renderer.py` and repointing its test call sites.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:173` indexes the pass-through facade, production direct service use, and test-only importer.
+  - Before deletion, `backend/src/intric/flows/runtime/document_renderer.py:14-41` only wrapped `default_document_render_service().render_document` and `default_document_render_service().render_structured_document`.
+  - `backend/src/intric/flows/runtime/executor.py:546-550` constructs `default_document_render_service(...)` directly, and `backend/src/intric/flows/runtime/executor.py:2098-2102` passes `self.document_render_service.render_document` / `render_structured_document` into typed-output runtime.
+  - Direct `rg "document_renderer|render_document\\(|render_structured_document\\(" backend/src backend/tests --glob '*.py'` showed the only `document_renderer` import was `backend/tests/unittests/flows/test_document_renderer.py:13` before the fix.
+  - CRG `importers_of(backend/src/intric/flows/runtime/document_renderer.py)` returned 0 importers; direct `rg` was used as truth for the test importer that CRG did not report.
+- Verification agents used, with verdicts:
+  - `PG-3b` read-only verifier verdict: `confirmed`; delete the runtime `document_renderer.py` facade, repoint `test_document_renderer.py` to `default_document_render_service()`, and do not create test aliases for the deleted facade functions.
+- Files changed:
+  - `backend/src/intric/flows/runtime/document_renderer.py` (deleted)
+  - `backend/tests/unittests/flows/test_document_renderer.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Removed the test-only pass-through facade and its hidden process-global cached service.
+  - Tests now exercise the real `DocumentRenderService` owner through `default_document_render_service()`; production already used `DocumentRenderService` directly, so no production runtime behavior changes are expected.
+- Complexity deleted or owner clarified:
+  - Deleted a shallow "stable facade" module and made `intric.flows.runtime.document_rendering.service.DocumentRenderService` the only renderer service owner.
+- Validation commands and results:
+  - `rg -n "intric\\.flows\\.runtime\\.document_renderer|from intric\\.flows\\.runtime\\.document_renderer|document_renderer import" backend/src backend/tests --glob '*.py'` -> no matches.
+  - `rg -n -P "(?<!\\.)\\brender_document\\(|(?<!\\.)\\brender_structured_document\\(" backend/tests/unittests/flows/test_document_renderer.py` -> no unqualified render calls.
+  - `cd backend && uv run ruff check src/intric/flows/runtime/document_rendering tests/unittests/flows/test_document_renderer.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/runtime tests/unittests/flows/test_document_renderer.py` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/unittests/flows/test_document_renderer.py -q` on the host -> failed only on PDF cases because host WeasyPrint cannot load native `libgobject-2.0-0`; non-PDF subset passed, 33 passed / 13 deselected.
+  - `docker start cf394ee1b6e8` then `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_document_renderer.py -q'` -> pass, 46 passed.
+  - `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/runtime/document_rendering tests/unittests/flows/test_document_renderer.py'` -> pass.
+  - `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/pyright src/intric/flows/runtime tests/unittests/flows/test_document_renderer.py'` -> failed with broad pre-existing container import-resolution errors for packages such as `celery`, `docx`, and `markdown_it`; host pyright above is the type gate for this slice.
+  - `git diff --check -- backend/src/intric/flows/runtime/document_renderer.py backend/tests/unittests/flows/test_document_renderer.py` -> pass.
+- Remaining risk / follow-up:
+  - No in-repo runtime caller remains. Residual risk is limited to out-of-repo imports of the deleted facade, which is not a compatibility requirement for this pre-production cleanup.
+  - Host PDF tests need native WeasyPrint libraries; the devcontainer is the reliable validation environment for PDF rendering.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

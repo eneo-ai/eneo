@@ -1,4 +1,4 @@
-"""Tests for intric.flows.runtime.document_renderer — PDF/DOCX generation."""
+"""Tests for DocumentRenderService PDF/DOCX generation."""
 
 from __future__ import annotations
 
@@ -10,10 +10,6 @@ import pdfplumber
 import pytest
 from docx import Document
 
-from intric.flows.runtime.document_renderer import (
-    render_document,
-    render_structured_document,
-)
 from intric.flows.runtime.document_rendering.blocks import DocumentBlock, InlineTextRun
 from intric.flows.runtime.document_rendering.html_blocks import (
     blocks_to_html_document,
@@ -23,7 +19,10 @@ from intric.flows.runtime.document_rendering.markdown_blocks import (
     parse_markdown_blocks,
 )
 from intric.flows.runtime.document_rendering.renderers import RenderedDocument
-from intric.flows.runtime.document_rendering.service import DocumentRenderService
+from intric.flows.runtime.document_rendering.service import (
+    DocumentRenderService,
+    default_document_render_service,
+)
 from intric.flows.runtime.document_rendering.weasyprint_renderer import (
     WeasyPrintDocumentRenderer,
     _deny_external_fetch,
@@ -31,30 +30,32 @@ from intric.flows.runtime.document_rendering.weasyprint_renderer import (
 )
 from intric.main.exceptions import TypedIOValidationException
 
+_render_service = default_document_render_service()
+
 # --- PDF rendering ---
 
 
 def test_render_pdf_valid_blob():
-    blob, mimetype, filename = render_document("Hello world", "pdf", step_order=1)
+    blob, mimetype, filename = _render_service.render_document("Hello world", "pdf", step_order=1)
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     assert blob[:5] == b"%PDF-"
 
 
 def test_render_pdf_correct_mime():
-    _, mimetype, _ = render_document("Test", "pdf", step_order=1)
+    _, mimetype, _ = _render_service.render_document("Test", "pdf", step_order=1)
     assert mimetype == "application/pdf"
 
 
 def test_render_pdf_filename_pattern():
-    _, _, filename = render_document("Test", "pdf", step_order=3)
+    _, _, filename = _render_service.render_document("Test", "pdf", step_order=3)
     assert filename == "step_3_output.pdf"
 
 
 def test_render_pdf_markdown_headings_and_lists_as_readable_document():
     text = "# Titel\n\n## Sammanfattning\n\n- punkt ett\n- punkt två\n\n1. nästa steg"
 
-    blob, _, _ = render_document(text, "pdf", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "pdf", step_order=1)
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -68,7 +69,7 @@ def test_render_pdf_markdown_headings_and_lists_as_readable_document():
 def test_render_pdf_markdown_table_outputs_cells_without_separator_row():
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
 
-    blob, _, _ = render_document(text, "pdf", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "pdf", step_order=1)
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -108,7 +109,7 @@ def test_render_pdf_markdown_inline_syntax_as_readable_text():
         "Leona visar tydliga framsteg inom **svenska** och `matematik`."
     )
 
-    blob, _, _ = render_document(text, "pdf", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "pdf", step_order=1)
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -180,7 +181,7 @@ def test_markdown_blocks_preserve_inline_run_semantics():
 
 
 def test_render_docx_valid_blob():
-    blob, mimetype, filename = render_document("Hello world", "docx", step_order=1)
+    blob, mimetype, filename = _render_service.render_document("Hello world", "docx", step_order=1)
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     # DOCX is a ZIP file — starts with PK magic bytes
@@ -188,7 +189,7 @@ def test_render_docx_valid_blob():
 
 
 def test_render_docx_correct_mime():
-    _, mimetype, _ = render_document("Test", "docx", step_order=1)
+    _, mimetype, _ = _render_service.render_document("Test", "docx", step_order=1)
     assert (
         mimetype
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -196,13 +197,13 @@ def test_render_docx_correct_mime():
 
 
 def test_render_docx_filename_pattern():
-    _, _, filename = render_document("Test", "docx", step_order=5)
+    _, _, filename = _render_service.render_document("Test", "docx", step_order=5)
     assert filename == "step_5_output.docx"
 
 
 def test_render_docx_empty_output_still_valid():
     """Empty markdown should still produce a readable DOCX file."""
-    blob, _, _ = render_document("", "docx", step_order=1)
+    blob, _, _ = _render_service.render_document("", "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert isinstance(blob, bytes)
     assert len(doc.paragraphs) >= 1
@@ -211,7 +212,7 @@ def test_render_docx_empty_output_still_valid():
 def test_render_docx_preserves_swedish_characters():
     """Swedish characters should survive DOCX rendering."""
     text = "Svenska tecken: å ä ö"
-    blob, _, _ = render_document(text, "docx", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
     assert "å" in all_text
@@ -222,7 +223,7 @@ def test_render_docx_preserves_swedish_characters():
 def test_render_docx_markdown_table_creates_table():
     """Markdown table syntax should become a DOCX table."""
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
-    blob, _, _ = render_document(text, "docx", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert len(doc.tables) == 1
     assert doc.tables[0].cell(0, 0).text == "Namn"
@@ -237,7 +238,7 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
         "Träna `skrivande` och ~~gamla mål~~."
     )
 
-    blob, _, _ = render_document(text, "docx", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
 
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
@@ -251,7 +252,7 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
 
 
 def test_render_docx_preserves_inline_bold_runs():
-    blob, _, _ = render_document("**Medarbetare:** Leona", "docx", step_order=1)
+    blob, _, _ = _render_service.render_document("**Medarbetare:** Leona", "docx", step_order=1)
 
     doc = Document(io.BytesIO(blob))
     paragraph = doc.paragraphs[0]
@@ -262,7 +263,7 @@ def test_render_docx_preserves_inline_bold_runs():
 
 def test_render_structured_docx_uses_schema_titles_and_tables():
     """Validated JSON contracts should render as semantic DOCX content."""
-    blob, _, _ = render_structured_document(
+    blob, _, _ = _render_service.render_structured_document(
         {
             "summary": "Kort sammanfattning",
             "actions": [
@@ -305,7 +306,7 @@ def test_render_structured_docx_uses_schema_titles_and_tables():
 
 def test_render_structured_docx_pins_null_and_empty_array_values():
     """Missing structured values should stay visible instead of disappearing."""
-    blob, _, _ = render_structured_document(
+    blob, _, _ = _render_service.render_structured_document(
         {"summary": None, "notes": []},
         "docx",
         step_order=1,
@@ -327,7 +328,7 @@ def test_render_structured_docx_pins_null_and_empty_array_values():
 
 def test_render_structured_docx_escapes_scalar_markdown_control_text():
     """JSON strings are data and must not become document structure."""
-    blob, _, _ = render_structured_document(
+    blob, _, _ = _render_service.render_structured_document(
         {"summary": "Rad ett\n# Inte en rubrik\n```inte kod```"},
         "docx",
         step_order=1,
@@ -349,7 +350,7 @@ def test_render_structured_docx_escapes_scalar_markdown_control_text():
 
 def test_render_structured_docx_table_cells_preserve_pipe_characters():
     """Escaped Markdown table pipes should round-trip into DOCX table cells."""
-    blob, _, _ = render_structured_document(
+    blob, _, _ = _render_service.render_structured_document(
         {"rows": [{"name": "A | B", "value": "C"}]},
         "docx",
         step_order=1,
@@ -368,7 +369,7 @@ def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
         "radbrytas i PDF-tabellen och ändå behålla unique-tail-token."
     )
 
-    blob, _, _ = render_structured_document(
+    blob, _, _ = _render_service.render_structured_document(
         {"actions": [{"owner": "Leona", "task": long_value}]},
         "pdf",
         step_order=1,
@@ -395,7 +396,7 @@ def test_render_structured_pdf_table_repeats_headers_after_page_break():
         for index in range(45)
     ]
 
-    blob, _, _ = render_structured_document(
+    blob, _, _ = _render_service.render_structured_document(
         {"actions": rows},
         "pdf",
         step_order=1,
@@ -638,7 +639,7 @@ def test_document_render_service_rejects_too_many_structured_list_items():
     data: list[object] = [None] * 5_001
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        render_structured_document(data, "pdf", step_order=1)
+        _render_service.render_structured_document(data, "pdf", step_order=1)
 
     assert exc_info.value.code == "typed_io_render_failed"
     assert exc_info.value.context == {
@@ -657,7 +658,7 @@ def test_document_render_service_rejects_deep_structured_values_before_conversio
         current = child
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        render_structured_document(data, "docx", step_order=1)
+        _render_service.render_structured_document(data, "docx", step_order=1)
 
     assert exc_info.value.code == "typed_io_render_failed"
     assert exc_info.value.context is not None
@@ -667,7 +668,7 @@ def test_document_render_service_rejects_deep_structured_values_before_conversio
 def test_render_docx_markdown_lists_and_code_blocks():
     """Lists and fenced code blocks should be represented in DOCX text."""
     text = "# Titel\n\n- punkt ett\n- punkt två\n\n```python\nprint('hej')\n```"
-    blob, _, _ = render_document(text, "docx", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
     assert "Titel" in all_text
@@ -678,7 +679,7 @@ def test_render_docx_markdown_lists_and_code_blocks():
 def test_render_docx_very_long_output():
     """Very long markdown output should produce a valid DOCX without exceptions."""
     text = ("Rad med innehåll och åäö.\n" * 5000).strip()
-    blob, _, _ = render_document(text, "docx", step_order=1)
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert len(blob) > 0
     assert any("åäö" in paragraph.text for paragraph in doc.paragraphs)
@@ -687,7 +688,7 @@ def test_render_docx_very_long_output():
 def test_render_docx_still_works_when_package_default_template_is_missing():
     """Renderer should not depend on python-docx package template layout."""
     with patch("docx.api._default_docx_path", return_value="/tmp/missing-default.docx"):
-        blob, _, _ = render_document("Fallback template test", "docx", step_order=1)
+        blob, _, _ = _render_service.render_document("Fallback template test", "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
     assert "Fallback template test" in all_text
@@ -698,12 +699,12 @@ def test_render_docx_still_works_when_package_default_template_is_missing():
 
 def test_render_unsupported_type_raises():
     with pytest.raises(TypedIOValidationException, match="Unsupported document type"):
-        render_document("Test", "html", step_order=1)
+        _render_service.render_document("Test", "html", step_order=1)
 
 
 def test_render_unsupported_error_code():
     with pytest.raises(TypedIOValidationException) as exc_info:
-        render_document("Test", "html", step_order=1)
+        _render_service.render_document("Test", "html", step_order=1)
     assert exc_info.value.code == "typed_io_render_failed"
 
 
@@ -713,7 +714,7 @@ def test_render_unsupported_error_code():
 def test_render_pdf_unicode_characters():
     """Em-dash, Swedish chars, curly quotes must render without error."""
     text = "Em-dash \u2014 and Swedish: \u00e5\u00e4\u00f6 and curly \u201cquotes\u201d"
-    blob, mimetype, filename = render_document(text, "pdf", step_order=1)
+    blob, mimetype, filename = _render_service.render_document(text, "pdf", step_order=1)
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     assert blob[:5] == b"%PDF-"
@@ -721,7 +722,7 @@ def test_render_pdf_unicode_characters():
 
 def test_render_pdf_font_fallback():
     """System font fallback should keep Unicode PDF rendering available."""
-    blob, _, _ = render_document(
+    blob, _, _ = _render_service.render_document(
         "Em-dash \u2014 and curly \u201cquotes\u201d",
         "pdf",
         step_order=1,
