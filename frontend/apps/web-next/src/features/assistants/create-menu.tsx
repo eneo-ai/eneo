@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, Users } from "lucide-react";
+import { Bot, ChevronDown, LayoutTemplate, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -25,7 +25,9 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
+import { TemplateGalleryDialog } from "./template-gallery-dialog";
 
 function CreateDialog({
   open,
@@ -92,25 +94,29 @@ function CreateDialog({
 }
 
 /**
- * Split button: primary action creates an assistant, the chevron menu also
- * offers group chats. Template-based creation is deferred (tracked in the
- * migration ledger); creation here is always blank.
+ * Split button: primary action creates a blank assistant; the chevron menu also
+ * offers a group chat and — when the tenant has templates enabled — creation
+ * from a template gallery (passes from_template).
  */
 export function CreateChatAppMenu() {
   const t = useTranslations();
   const router = useRouter();
   const { space, routeId } = useSpace();
+  const { settings } = useAppContext();
   const queryClient = useQueryClient();
-  const [dialog, setDialog] = useState<"assistant" | "group-chat" | null>(null);
+  const [dialog, setDialog] = useState<"assistant" | "group-chat" | "template" | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
 
   const createAssistant = useMutation({
-    mutationFn: (name: string) =>
+    mutationFn: ({ name, templateId }: { name: string; templateId?: string }) =>
       unwrap(
         browserApi.POST("/api/v1/spaces/{id}/applications/assistants/", {
           params: { path: { id: space.id } },
-          body: { name }
+          body: {
+            name,
+            ...(templateId ? { from_template: { id: templateId, additional_fields: null } } : {})
+          }
         })
       ),
     onSuccess: (assistant) => {
@@ -153,6 +159,11 @@ export function CreateChatAppMenu() {
             <DropdownMenuItem onSelect={() => setDialog("assistant")}>
               <Bot className="size-4" /> {t("create_new_assistant")}
             </DropdownMenuItem>
+            {settings.using_templates && (
+              <DropdownMenuItem onSelect={() => setDialog("template")}>
+                <LayoutTemplate className="size-4" /> {t("start_with_template")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onSelect={() => setDialog("group-chat")}>
               <Users className="size-4" /> {t("create_new_group_chat")}
             </DropdownMenuItem>
@@ -166,7 +177,13 @@ export function CreateChatAppMenu() {
         nameLabel={t("name")}
         confirmLabel={t("create_assistant")}
         pending={createAssistant.isPending}
-        onCreate={(name) => createAssistant.mutate(name)}
+        onCreate={(name) => createAssistant.mutate({ name })}
+      />
+      <TemplateGalleryDialog
+        open={dialog === "template"}
+        onOpenChange={(open) => setDialog(open ? "template" : null)}
+        pending={createAssistant.isPending}
+        onCreate={(templateId, name) => createAssistant.mutate({ name, templateId })}
       />
       <CreateDialog
         open={dialog === "group-chat"}
