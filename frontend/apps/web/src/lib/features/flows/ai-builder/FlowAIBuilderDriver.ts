@@ -541,9 +541,6 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#state.applyError = null;
     this.#state.isConflict = false;
-    if (this.#state.session) {
-      this.#state.session = { ...this.#state.session, status: "applying" };
-    }
     this.#notify();
 
     try {

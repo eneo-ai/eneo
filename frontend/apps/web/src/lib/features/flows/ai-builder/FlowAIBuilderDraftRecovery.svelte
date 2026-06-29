@@ -71,8 +71,6 @@
     switch (status) {
       case "awaiting_approval":
         return { label: m.ai_builder_draft_step_reviewing(), variant: "reviewing" };
-      case "applying":
-        return { label: m.ai_builder_draft_step_building(), variant: "building" };
       default:
         return { label: m.ai_builder_draft_step_discovering(), variant: "discovering" };
     }
