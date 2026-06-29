@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import importlib
+import threading
 from collections import deque
+from collections.abc import Coroutine
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -613,108 +615,64 @@ def test_execute_flow_run_rejects_malformed_dispatch_payload_without_runtime(
     assert log_extra["task_id"] == "task-1"
 
 
-def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
+@pytest.mark.parametrize("trigger", ["timeout", "soft_time_limit"])
+def test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization(
+    monkeypatch, trigger
+):
     tasks_module = importlib.import_module("intric.flows.runtime.tasks")
-    terminalize_failure = AsyncMock()
-    monkeypatch.setattr(
-        tasks_module,
-        "terminalize_flow_run_failure",
-        terminalize_failure,
-    )
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    started = threading.Event()
+    cleanup_done = threading.Event()
+    terminalize_started = threading.Event()
+    terminal_sources: list[FlowRunLifecycleSource] = []
+    ordering: list[str] = []
+    real_run_coroutine_threadsafe = asyncio.run_coroutine_threadsafe
+
+    async def _execute_async(**_kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.05)
+            ordering.append("cleanup_done")
+            cleanup_done.set()
+            raise
+
+    async def _terminalize_failure(*, source, **_kwargs):
+        ordering.append("terminalize_start")
+        terminalize_started.set()
+        terminal_sources.append(source)
+
+    monkeypatch.setattr(tasks_module, "_execute_flow_run_async", _execute_async)
+    monkeypatch.setattr(tasks_module, "terminalize_flow_run_failure", _terminalize_failure)
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: loop)
     monkeypatch.setattr(
         tasks_module,
         "get_settings",
-        lambda: type(
-            "_Settings",
-            (),
-            {"flow_task_timeout_seconds": 1, "flow_max_inline_text_bytes": 1024},
-        )(),
+        lambda: SimpleNamespace(flow_task_timeout_seconds=0.01),
     )
-
-    class _RunFuture:
-        def cancel(self):
-            return None
-
-        def result(self, timeout=None):
-            raise concurrent.futures.TimeoutError()
-
-    class _DoneFuture:
-        def result(self, timeout=None):
-            return None
-
     calls = {"count": 0}
 
-    def _run_coroutine_threadsafe(coroutine, _loop):
-        if calls["count"] == 0:
-            calls["count"] += 1
-            coroutine.close()
-            return _RunFuture()
-        asyncio.run(coroutine)
-        return _DoneFuture()
+    class _SoftLimitFuture:
+        def __init__(self, future):
+            self._future = future
 
-    monkeypatch.setattr(
-        tasks_module.asyncio,
-        "run_coroutine_threadsafe",
-        _run_coroutine_threadsafe,
-    )
-    result = tasks_module._execute_flow_run_task(
-        run_id=str(uuid4()),
-        flow_id=str(uuid4()),
-        tenant_id=str(uuid4()),
-        principal_type="user",
-        principal_user_id=str(uuid4()),
-        task_id="task-1",
-        retry_count=0,
-    )
-
-    assert result == {"status": "failed", "reason": "timeout"}
-    assert terminalize_failure.await_count == 1
-    assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunLifecycleSource.TASK_TIMEOUT
-    )
-    error = terminalize_failure.await_args.kwargs["error"]
-    assert error.code == "flow_task_timeout"
-    assert error.message == (
-        "flow_task_timeout: Flow execution timed out before task completion."
-    )
-
-
-def test_execute_flow_run_handles_soft_time_limit_as_timeout(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
-    terminalize_failure = AsyncMock()
-    monkeypatch.setattr(
-        tasks_module,
-        "terminalize_flow_run_failure",
-        terminalize_failure,
-    )
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
-    monkeypatch.setattr(
-        tasks_module,
-        "get_settings",
-        lambda: type("_Settings", (), {"flow_task_timeout_seconds": 10})(),
-    )
-
-    class _RunFuture:
         def cancel(self):
-            return None
+            return self._future.cancel()
 
         def result(self, timeout=None):
             raise tasks_module.SoftTimeLimitExceeded()
 
-    class _DoneFuture:
-        def result(self, timeout=None):
-            return None
-
-    calls = {"count": 0}
-
-    def _run_coroutine_threadsafe(coroutine, _loop):
-        if calls["count"] == 0:
-            calls["count"] += 1
-            coroutine.close()
-            return _RunFuture()
-        asyncio.run(coroutine)
-        return _DoneFuture()
+    def _run_coroutine_threadsafe(coroutine, target_loop):
+        future = real_run_coroutine_threadsafe(coroutine, target_loop)
+        call_count = calls["count"]
+        calls["count"] += 1
+        if trigger == "soft_time_limit" and call_count == 0:
+            assert started.wait(timeout=1)
+            return _SoftLimitFuture(future)
+        return future
 
     monkeypatch.setattr(
         tasks_module.asyncio,
@@ -722,22 +680,102 @@ def test_execute_flow_run_handles_soft_time_limit_as_timeout(monkeypatch):
         _run_coroutine_threadsafe,
     )
 
-    result = tasks_module._execute_flow_run_task(
-        run_id=str(uuid4()),
-        flow_id=str(uuid4()),
-        tenant_id=str(uuid4()),
-        principal_type="user",
-        principal_user_id=str(uuid4()),
-        task_id="task-1",
-        retry_count=0,
+    try:
+        result = tasks_module._execute_flow_run_task(
+            run_id=str(uuid4()),
+            flow_id=str(uuid4()),
+            tenant_id=str(uuid4()),
+            principal_type="user",
+            principal_user_id=str(uuid4()),
+            task_id="task-1",
+            retry_count=0,
+        )
+
+        assert result == {"status": "failed", "reason": "timeout"}
+        assert terminalize_started.wait(timeout=1)
+        assert cleanup_done.wait(timeout=1)
+        assert ordering == ["cleanup_done", "terminalize_start"]
+        assert terminal_sources == [FlowRunLifecycleSource.TASK_TIMEOUT]
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=1)
+        loop.close()
+
+
+def test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalization(
+    monkeypatch,
+):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    pending_future: concurrent.futures.Future[dict[str, str]] | None = None
+    terminalize_saw_cancelled: list[bool] = []
+    terminal_sources: list[FlowRunLifecycleSource] = []
+
+    class _PendingExecutionFuture(concurrent.futures.Future[dict[str, str]]):
+        def __init__(
+            self, coroutine: Coroutine[object, object, dict[str, str]]
+        ) -> None:
+            super().__init__()
+            self._coroutine = coroutine
+            self._closed = False
+
+        def cancel(self) -> bool:
+            self.close_coroutine()
+            return super().cancel()
+
+        def close_coroutine(self) -> None:
+            if self._closed:
+                return
+            # Test hygiene only; production closes through asyncio cancellation.
+            self._coroutine.close()
+            self._closed = True
+
+    def _run_coroutine_threadsafe(
+        coroutine: Coroutine[object, object, dict[str, str]], _loop: object
+    ) -> _PendingExecutionFuture:
+        nonlocal pending_future
+        future = _PendingExecutionFuture(coroutine)
+        pending_future = future
+        return future
+
+    def _terminalize_from_task(*, source: FlowRunLifecycleSource, **_kwargs) -> None:
+        assert pending_future is not None
+        terminalize_saw_cancelled.append(pending_future.cancelled())
+        terminal_sources.append(source)
+
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(
+        tasks_module.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_threadsafe,
+    )
+    monkeypatch.setattr(
+        tasks_module,
+        "_terminalize_flow_run_failure_from_task",
+        _terminalize_from_task,
+    )
+    monkeypatch.setattr(
+        tasks_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_task_timeout_seconds=0.01),
     )
 
+    try:
+        result = tasks_module._execute_flow_run_task(
+            run_id=str(uuid4()),
+            flow_id=str(uuid4()),
+            tenant_id=str(uuid4()),
+            principal_type="user",
+            principal_user_id=str(uuid4()),
+            task_id="task-1",
+            retry_count=0,
+        )
+    finally:
+        if isinstance(pending_future, _PendingExecutionFuture):
+            pending_future.close_coroutine()
+
     assert result == {"status": "failed", "reason": "timeout"}
-    assert terminalize_failure.await_count == 1
-    assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunLifecycleSource.TASK_TIMEOUT
-    )
-    assert terminalize_failure.await_args.kwargs["error"].code == "flow_task_timeout"
+    assert terminalize_saw_cancelled == [True]
+    assert terminal_sources == [FlowRunLifecycleSource.TASK_TIMEOUT]
 
 
 @pytest.mark.parametrize(

@@ -63,6 +63,7 @@ from intric.users.user_repo import UsersRepository
 logger = get_logger(__name__)
 
 _SECONDARY_TERMINALIZATION_TIMEOUT_SECONDS = 10
+_FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS = 10
 _FLOW_TASK_LOOP: asyncio.AbstractEventLoop | None = None
 _FLOW_TASK_LOOP_THREAD: threading.Thread | None = None
 _FLOW_TASK_LOOP_LOCK = threading.Lock()
@@ -360,6 +361,57 @@ async def terminalize_flow_run_failure(
             )
 
 
+async def _cancel_and_join_flow_execution_task(task: asyncio.Task[object]) -> None:
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        return
+
+
+def _cancel_flow_execution_task_from_worker(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    execution_future: concurrent.futures.Future[dict[str, str]] | None,
+    execution_task: asyncio.Task[object] | None,
+    run_id: UUID,
+    tenant_id: UUID,
+    task_id: str | None,
+) -> None:
+    if execution_task is None:
+        # The loop task has not started; cancel the submission so it cannot
+        # become orphaned work after timeout terminalization.
+        if execution_future is not None:
+            execution_future.cancel()
+        return
+
+    try:
+        asyncio.run_coroutine_threadsafe(
+            _cancel_and_join_flow_execution_task(execution_task),
+            loop,
+        ).result(timeout=_FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        logger.exception(
+            "Flow execution task cancellation timed out",
+            extra={
+                "run_id": str(run_id),
+                "tenant_id": str(tenant_id),
+                "task_id": task_id,
+                "source": FlowRunLifecycleSource.TASK_TIMEOUT.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Flow execution task cancellation failed",
+            extra={
+                "run_id": str(run_id),
+                "tenant_id": str(tenant_id),
+                "task_id": task_id,
+                "source": FlowRunLifecycleSource.TASK_TIMEOUT.value,
+            },
+        )
+
+
 def _terminalize_flow_run_failure_from_task(
     *,
     loop: asyncio.AbstractEventLoop,
@@ -520,24 +572,37 @@ def _execute_flow_run_task(
 
     loop = _get_flow_task_loop()
     future: concurrent.futures.Future[dict[str, str]] | None = None
+    flow_execution_task: asyncio.Task[object] | None = None
+
+    async def _execute_flow_run_async_with_task_capture() -> dict[str, str]:
+        nonlocal flow_execution_task
+        flow_execution_task = asyncio.current_task()
+        return await _execute_flow_run_async(
+            run_id=run_id_uuid,
+            flow_id=flow_id_uuid,
+            tenant_id=tenant_id_uuid,
+            principal_type=resolved_principal_type,
+            principal_user_id=resolved_principal_user_id,
+            principal_service_id=resolved_principal_service_id,
+            celery_task_id=task_id,
+            retry_count=retry_count,
+        )
+
     try:
         future = asyncio.run_coroutine_threadsafe(
-            _execute_flow_run_async(
-                run_id=run_id_uuid,
-                flow_id=flow_id_uuid,
-                tenant_id=tenant_id_uuid,
-                principal_type=resolved_principal_type,
-                principal_user_id=resolved_principal_user_id,
-                principal_service_id=resolved_principal_service_id,
-                celery_task_id=task_id,
-                retry_count=retry_count,
-            ),
+            _execute_flow_run_async_with_task_capture(),
             loop,
         )
         return future.result(timeout=get_settings().flow_task_timeout_seconds)
     except (concurrent.futures.TimeoutError, SoftTimeLimitExceeded):
-        if future is not None:
-            future.cancel()
+        _cancel_flow_execution_task_from_worker(
+            loop=loop,
+            execution_future=future,
+            execution_task=flow_execution_task,
+            run_id=run_id_uuid,
+            tenant_id=tenant_id_uuid,
+            task_id=task_id,
+        )
         error_message = (
             "flow_task_timeout: Flow execution timed out before task completion."
         )

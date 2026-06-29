@@ -283,6 +283,53 @@
   - Residual risk is limited to out-of-repo imports of the deleted Python names; no in-repo production or docs reference remains.
   - The broader output-mode vocabulary map remains deliberately out of scope because it is not the decorative registry finding and may affect API/runtime contract ownership.
 
+## PG-5
+
+- Slice id: PG-5
+- Findings addressed: `missed-runtime-celery:01`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:24` scopes PG-5 to awaiting executor coroutine cancellation before task-boundary timeout terminalization, with no completed step result after terminalization.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:21` indexes the `future.cancel()` race and the prior no-op cancellation test.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/open-questions.md:24` requires a real non-mocked cancel path before treating the severity as proven.
+  - Before the edit, `backend/src/intric/flows/runtime/tasks.py:521-560` scheduled `_execute_flow_run_async(...)`, called `future.result(timeout=...)`, then ran `future.cancel()` and immediately scheduled timeout terminalization on `TimeoutError` / `SoftTimeLimitExceeded`.
+  - Before the edit, `backend/tests/unittests/flows/test_celery_runtime.py:616-740` used fake futures that closed the coroutine and asserted exception mapping, so they never exercised event-loop task cancellation or cleanup ordering.
+  - A scratch proof confirmed `concurrent.futures.Future.cancel(); future.result(timeout=...)` returns before coroutine cleanup finishes, so it cannot be used as a drain.
+  - During implementation review, a read-only runtime verifier found the first PG-5 draft did not cancel the submitted future when timeout fired before the wrapper captured `asyncio.current_task()`.
+- Verification agents used, with verdicts:
+  - Claude peer-loop prompt verification artifacts for `pg5-pg6-pg8-next-prompt-2026-06-29` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after rejecting the original superficial `future.cancel(); future.result(...)` drain and requiring captured-task cancel-and-join.
+  - `runtime_reliability_reviewer` verdict: `blocker`; the first draft handled started loop tasks but left pre-capture submitted futures uncancelled before timeout terminalization.
+  - Claude peer-loop session `eneo-flows-pg5-precapture-cancel-2026-06-29` plan gate verdict: `changes_required`; the source direction was acceptable, but the pre-capture test name overclaimed, the code needed a clearer orphan-work framing, and the ledger needed an explicit small-patch-vs-synchronous-capture decision.
+  - Claude peer-loop session `eneo-flows-pg5-precapture-cancel-2026-06-29` verification verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after the test name, source comment, and design-decision ledger entry were corrected.
+  - CRG `get_minimal_context` with explicit PG-5/PG-8 files reported low graph risk; CRG `callees_of(_execute_flow_run_task)` confirmed the task-boundary owner routes through local runtime task helpers.
+- Files changed:
+  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/tests/unittests/flows/test_celery_runtime.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Timeout and Celery soft-time-limit paths now cancel and await the actual captured asyncio task on the flow task loop before starting timeout terminalization.
+  - If timeout fires before the wrapper captures the loop task, the submitted `concurrent.futures.Future` is cancelled before timeout terminalization starts; there is no started loop task to unwind in that branch.
+  - If cancellation joining times out or fails, `_execute_flow_run_task` logs the cancellation-drain failure and still returns the existing `{"status": "failed", "reason": "timeout"}` result after task-boundary terminalization.
+- Complexity deleted or owner clarified:
+  - Replaced the fire-and-forget `future.cancel()` branch and two mocked cancellation tests with one local cancellation helper, one real loop/thread ordering test covering both timeout triggers, and one pre-capture submission-cancellation test.
+- Architecture delta:
+  - Canonical owner before: `_execute_flow_run_task` owned task-boundary execution, but timeout cancellation relied on the outer `concurrent.futures.Future` instead of the inner asyncio task that actually holds executor cleanup/session unwind.
+  - Canonical owner after: `_execute_flow_run_task` remains the task-boundary owner; `_cancel_flow_execution_task_from_worker` and `_cancel_and_join_flow_execution_task` are local private helpers for the same owner.
+  - Duplicate paths remaining: no duplicate timeout/soft-limit cancellation owner remains; the helper has two explicit states, started loop task and not-yet-captured submitted future. PG-8 still needs the DB-backed no-broker proof for task-boundary terminalization.
+  - 9/10 follow-up candidate: keep the existing post-PG C1 runtime work on crash/load/queue behavior and executor failure-tail dedup after PG-5/PG-6/PG-8 protect terminalization ordering.
+  - Decision or measurement needed: no product decision; deliberately kept the stdlib `run_coroutine_threadsafe` result bridge plus explicit started/not-yet-captured states instead of custom synchronous task submission, because reimplementing task creation/result bridging would add a larger runtime primitive for marginal benefit. Later load/crash work should measure whether the 10-second cancellation-drain budget is operationally sufficient.
+  - What not to preserve: mocked no-op cancellation tests, fire-and-forget `future.cancel()` as a drain, and any fallback that claims unwind without a captured asyncio task.
+- Validation commands and results:
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization -q` -> red before the fix, 2 failures; both parametrizations recorded `terminalize_start` before `cleanup_done`.
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_cancels_uncaptured_submission_before_timeout_terminalization -q` -> red on the first PG-5 draft, 1 failure; terminalization saw the submitted future still uncancelled. The test was then renamed to `test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalization` to describe the exact property it proves.
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization -q` -> pass after the fix, 2 passed.
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalization -q` -> pass after the pre-capture fix, 3 passed.
+  - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py -q` -> pass, 42 passed.
+  - `cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/intric/flows/runtime/tasks.py backend/tests/unittests/flows/test_celery_runtime.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / follow-up:
+  - PG-5 proves loop-task cancellation cleanup precedes timeout terminalization at the task boundary. PG-8 must still add the requested DB-backed no-broker proof that the failed run/audit state and no-completed-step invariant hold with persisted rows.
+
 ## PG-6
 
 - Slice id: PG-6
