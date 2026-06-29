@@ -24,6 +24,7 @@ from intric.transcription_models.presentation import TranscriptionModelPublic
 
 if TYPE_CHECKING:
     from intric.main.models import ResourcePermission
+    from intric.users.user import UserInDB
 
 # Max files per input type
 _TEXT_MAX_FILES = 3
@@ -34,9 +35,11 @@ _IMAGE_MAX_FILES = 2
 class AppAssembler:
     def __init__(
         self,
+        user: "UserInDB",
         prompt_assembler: PromptAssembler,
     ):
         super().__init__()
+        self.user = user
         self.prompt_assembler = prompt_assembler
 
     def _get_accepted_file_types(
@@ -139,7 +142,8 @@ class AppAssembler:
         )
         completion_model = (
             CompletionModelAssembler.from_completion_model_to_sparse(
-                completion_model=app.completion_model
+                completion_model=app.completion_model,
+                show_pricing=self.user.can_view_model_pricing,
             )
             if app.completion_model is not None
             else None

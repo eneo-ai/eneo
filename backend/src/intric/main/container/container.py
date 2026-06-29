@@ -259,9 +259,18 @@ from intric.mcp_servers.application.mcp_server_service import MCPServerService
 from intric.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
+from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+    McpSessionLifecycleService,
+)
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
+)
+from intric.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+    MCPProxySessionFactory,
+)
+from intric.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
+    ChatSessionMcpStateRepo,
 )
 from intric.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -564,6 +573,7 @@ class Container(containers.DeclarativeContainer):
     storage_assembler = providers.Factory(StorageInfoAssembler)
     app_assembler = providers.Factory(
         AppAssembler,
+        user=user,
         prompt_assembler=prompt_assembler,
     )
     app_run_assembler = providers.Factory(AppRunAssembler)
@@ -596,7 +606,9 @@ class Container(containers.DeclarativeContainer):
     tenant_integration_mapper = providers.Factory(TenantIntegrationMapper)
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
-    confluence_token_mapper = providers.Factory(OauthTokenMapper)
+    confluence_token_mapper = providers.Factory(
+        OauthTokenMapper, encryption_service=encryption_service
+    )
     sync_log_mapper = providers.Factory(SyncLogMapper)
     sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
 
@@ -1121,11 +1133,26 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
+    chat_session_mcp_state_repo = providers.Factory(
+        ChatSessionMcpStateRepo,
+        session=session,
+    )
+    mcp_proxy_session_factory = providers.Factory(
+        MCPProxySessionFactory,
+        encryption_service=encryption_service,
+    )
+    mcp_session_lifecycle_service = providers.Factory(
+        McpSessionLifecycleService,
+        state_repo=chat_session_mcp_state_repo,
+        mcp_server_repo=mcp_server_repo,
+        proxy_factory=mcp_proxy_session_factory,
+    )
     session_service = providers.Factory(
         SessionService,
         user=user,
         question_repo=question_repo,
         session_repo=session_repo,
+        mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
@@ -1328,6 +1355,7 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         oauth_token_repo=oauth_token_repo,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
     )
 
     oauth_token_service = providers.Factory(
@@ -1418,6 +1446,7 @@ class Container(containers.DeclarativeContainer):
         job_repo=job_repo,
         user_repo=user_repo,
         change_key_service=office_change_key_service,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,

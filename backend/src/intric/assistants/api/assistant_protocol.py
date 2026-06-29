@@ -7,6 +7,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from intric.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
+    McpToolReference,
     ResponseType,
 )
 from intric.completion_models.domain.completion_model import CompletionModel
@@ -16,7 +17,11 @@ from intric.info_blobs.info_blob import (
     InfoBlobMetadata,
 )
 from intric.main.logging import get_logger
-from intric.questions.question import UseTools, WebSearchResultPublic
+from intric.questions.question import (
+    McpToolReferencePublic,
+    UseTools,
+    WebSearchResultPublic,
+)
 from intric.sessions.session import (
     AskChatResponse,
     AskResponse,
@@ -57,10 +62,13 @@ class _SupportsWebSearchResult(Protocol):
 class _SupportsToolCallMetadata(Protocol):
     server_name: str
     tool_name: str
+    title: str | None
     arguments: dict[str, object] | None
     tool_call_id: str | None
     approved: bool | None
     result_status: str | None
+    result: str | None
+    mcp_tool_name: str | None
 
 
 def _require_approval_id(chunk: Completion) -> str:
@@ -77,16 +85,23 @@ def to_ask_response(
     info_blobs: Sequence[_SupportsModelDump],
     tools: "UseTools",
     completion_model: CompletionModel | CompletionModelPublic | None = None,
+    show_pricing: bool = True,
+    mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskResponse:
-    public_model = (
-        completion_model
-        if isinstance(completion_model, CompletionModelPublic)
-        else (
-            CompletionModelPublic.from_domain(completion_model)
-            if completion_model is not None
-            else None
+    if completion_model is None:
+        public_model = None
+    elif isinstance(completion_model, CompletionModelPublic):
+        public_model = (
+            completion_model
+            if show_pricing
+            else completion_model.model_copy(
+                update={"input_cost_per_token": None, "output_cost_per_token": None}
+            )
         )
-    )
+    else:
+        public_model = CompletionModelPublic.from_domain(
+            completion_model, show_pricing=show_pricing
+        )
     return AskResponse(
         question=question,
         files=[FilePublic(**file.model_dump()) for file in files],
@@ -103,6 +118,18 @@ def to_ask_response(
         model=public_model,
         tools=tools,
         web_search_references=[],
+        mcp_tool_references=[
+            McpToolReferencePublic(
+                id=ref.id,
+                uri=ref.uri,
+                mime_type=ref.mime_type,
+                content=ref.content,
+                meta=ref.meta,
+                tool_call_id=ref.tool_call_id,
+                mcp_tool_name=ref.mcp_tool_name,
+            )
+            for ref in mcp_tool_references
+        ],
     )
 
 
@@ -114,20 +141,27 @@ def to_ask_conversation_response(
     info_blobs: Sequence[_SupportsModelDump],
     tools: "UseTools",
     completion_model: CompletionModel | CompletionModelPublic | None = None,
+    show_pricing: bool = True,
     question_id: Optional["UUID"] = None,
     created_at: Optional[datetime] = None,
     updated_at: Optional[datetime] = None,
     web_search_results: Sequence[_SupportsWebSearchResult] | None = None,
+    mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskChatResponse:
-    public_model = (
-        completion_model
-        if isinstance(completion_model, CompletionModelPublic)
-        else (
-            CompletionModelPublic.from_domain(completion_model)
-            if completion_model is not None
-            else None
+    if completion_model is None:
+        public_model = None
+    elif isinstance(completion_model, CompletionModelPublic):
+        public_model = (
+            completion_model
+            if show_pricing
+            else completion_model.model_copy(
+                update={"input_cost_per_token": None, "output_cost_per_token": None}
+            )
         )
-    )
+    else:
+        public_model = CompletionModelPublic.from_domain(
+            completion_model, show_pricing=show_pricing
+        )
     return AskChatResponse(  # type: ignore[call-arg]
         created_at=created_at,  # type: ignore[call-arg]
         updated_at=updated_at,  # type: ignore[call-arg]
@@ -153,6 +187,18 @@ def to_ask_conversation_response(
                 url=web_search_result.url,
             )
             for web_search_result in (web_search_results or [])
+        ],
+        mcp_tool_references=[
+            McpToolReferencePublic(
+                id=ref.id,
+                uri=ref.uri,
+                mime_type=ref.mime_type,
+                content=ref.content,
+                meta=ref.meta,
+                tool_call_id=ref.tool_call_id,
+                mcp_tool_name=ref.mcp_tool_name,
+            )
+            for ref in mcp_tool_references
         ],
     )
 
@@ -194,18 +240,36 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         tool_calls = cast(
             Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
         )
+        # `result` is intentionally omitted from the SSE payload because tool
+        # outputs can be large. Conversation history likewise omits the raw
+        # upstream result; API callers that need it can use the dedicated
+        # tool-call-result endpoint.
         data = SSEToolCall(
             session_id=session_id,
             tools=[
                 ToolCallInfo(
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
+                    title=tc.title,
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
                     result_status=tc.result_status,
+                    mcp_tool_name=tc.mcp_tool_name,
                 )
                 for tc in tool_calls
+            ],
+            mcp_tool_references=[
+                McpToolReferencePublic(
+                    id=ref.id,
+                    uri=ref.uri,
+                    mime_type=ref.mime_type,
+                    content=ref.content,
+                    meta=ref.meta,
+                    tool_call_id=ref.tool_call_id,
+                    mcp_tool_name=ref.mcp_tool_name,
+                )
+                for ref in (chunk.mcp_tool_references or [])
             ],
         )
 
@@ -220,6 +284,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                 ToolCallInfo(
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
+                    title=tc.title,
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
@@ -240,6 +305,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                 ToolCallInfo(
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
+                    title=tc.title,
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
@@ -294,6 +360,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
 async def to_response(
     response: "AssistantResponse",
     stream: bool,
+    *,
+    show_pricing: bool = True,
 ) -> EventSourceResponse | AskResponse:
     if stream:
 
@@ -308,6 +376,7 @@ async def to_response(
                         answer=chunk.text or "",
                         info_blobs=chunk.reference_chunks or [],
                         completion_model=response.completion_model,
+                        show_pricing=show_pricing,
                         tools=response.tools,
                     ).model_dump_json()
 
@@ -321,13 +390,17 @@ async def to_response(
         answer=response.answer,
         info_blobs=response.info_blobs,
         completion_model=response.completion_model,
+        show_pricing=show_pricing,
         tools=response.tools,
+        mcp_tool_references=response.mcp_tool_references,
     )
 
 
 async def to_conversation_response(
     response: "AssistantResponse",
     stream: bool,
+    *,
+    show_pricing: bool = True,
 ) -> EventSourceResponse | AskChatResponse:
     if stream:
 
@@ -341,6 +414,7 @@ async def to_conversation_response(
                     info_blobs=response.info_blobs,
                     tools=response.tools,
                     completion_model=response.completion_model,
+                    show_pricing=show_pricing,
                     question_id=response.question_id,
                     created_at=response.created_at,
                     updated_at=response.updated_at,
@@ -366,7 +440,10 @@ async def to_conversation_response(
         info_blobs=response.info_blobs,
         tools=response.tools,
         completion_model=response.completion_model,
+        show_pricing=show_pricing,
         question_id=response.question_id,
         created_at=response.created_at,
         updated_at=response.updated_at,
+        web_search_results=response.web_search_results,
+        mcp_tool_references=response.mcp_tool_references,
     )

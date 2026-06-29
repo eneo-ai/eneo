@@ -5,10 +5,43 @@ import pytest
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ResponseType,
     ToolCallMetadata,
 )
-from intric.assistants.api.assistant_protocol import to_sse_response
+from intric.assistants.api.assistant_protocol import (
+    to_ask_conversation_response,
+    to_sse_response,
+)
+from intric.questions.question import UseTools
+from intric.sessions.session import SessionInDB
+
+
+def test_non_streaming_conversation_response_includes_mcp_references():
+    reference = McpToolReference(
+        id=uuid4(),
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        uri="https://example.test/resource",
+        mime_type="text/plain",
+        content="resource content",
+        meta={"title": "Resource"},
+        order=0,
+    )
+
+    response = to_ask_conversation_response(
+        question="Question",
+        files=[],
+        session=SessionInDB(id=uuid4(), user_id=uuid4(), name="Conversation"),
+        answer="Answer",
+        info_blobs=[],
+        tools=UseTools(assistants=[]),
+        mcp_tool_references=[reference],
+    )
+
+    assert len(response.mcp_tool_references) == 1
+    assert response.mcp_tool_references[0].id == reference.id
+    assert response.mcp_tool_references[0].content == "resource content"
 
 
 def test_tool_call_sse_preserves_null_tool_call_id():

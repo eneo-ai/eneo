@@ -246,6 +246,7 @@ class SharePointSubscriptionService:
         )
         subscription.subscription_id = new_subscription_id
         subscription.expires_at = new_expiration
+        subscription.mark_renewal_success()
         await self.subscription_repo.update(subscription)
 
         logger.info(
@@ -302,6 +303,7 @@ class SharePointSubscriptionService:
                     if response.status == 200:
                         # Update database
                         subscription.expires_at = new_expiration
+                        subscription.mark_renewal_success()
                         await self.subscription_repo.update(subscription)
 
                         logger.info(

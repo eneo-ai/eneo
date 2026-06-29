@@ -98,6 +98,7 @@ class MCPServerToolRepoImpl(
             .on_conflict_do_update(
                 index_elements=["mcp_server_id", "name"],
                 set_={
+                    "title": db_dict["title"],
                     "description": db_dict["description"],
                     "input_schema": db_dict["input_schema"],
                     "is_enabled_by_default": db_dict["is_enabled_by_default"],

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -53,6 +53,23 @@ class WebSearchResultPublic(BaseModel):
     url: str
 
 
+class McpToolReferencePublic(InDB):
+    """One MCP resource block captured from a tool call.
+
+    Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+    raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+    (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+    gracefully when meta is empty.
+    """
+
+    uri: str
+    mime_type: Optional[str] = None
+    content: Optional[str] = None
+    meta: dict[str, Any] = {}
+    tool_call_id: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
+
+
 # Models
 class QuestionBase(BaseModel):
     question: str
@@ -64,6 +81,7 @@ class ToolCallInfo(BaseModel):
 
     server_name: str
     tool_name: str
+    title: Optional[str] = None
     arguments: Optional[dict[str, object]] = None
     tool_call_id: Optional[str] = None  # For tool approval flow
     approved: Optional[bool] = (
@@ -117,6 +135,7 @@ class Question(QuestionAdd, InDB):
     )
     questions_files: list[QuestionsFiles] = []
     web_search_results: list[WebSearchResult] = []
+    mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
     @model_validator(mode="after")
@@ -142,6 +161,7 @@ class Message(QuestionBase, InDB):
     tools: UseTools
     generated_files: list[FilePublic]
     web_search_references: list[WebSearchResultPublic]
+    mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
     reasoning: Optional[str] = None
     # Default 0 keeps deserialization safe for rows persisted before token

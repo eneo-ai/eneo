@@ -1,165 +1,133 @@
+<!--
+  Model picker for the config surfaces (assistant/app/service editors, admin
+  templates and help assistants). Uses the same model selector as the personal
+  chat — provider logos, a searchable vendor-grouped command palette and the
+  model details preview — behind a bordered trigger that fits the settings
+  forms. Works for both completion and transcription models.
+-->
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
   import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
-  import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
+  import { uid } from "uid";
+  import { Ban, ChevronsUpDown } from "lucide-svelte";
+  import * as Popover from "$lib/components/ui/popover/index.js";
+  import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
   import { sortModels } from "../sortModels";
-  import { groupModelsByProvider } from "../groupModels";
-  import { createSelect } from "@melt-ui/svelte";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { groupModelsByVendor } from "../groupModels";
   import { m } from "$lib/paraglide/messages";
-  import ProviderGlyph from "../../../../routes/(app)/admin/models/components/ProviderGlyph.svelte";
-  import ModelCostBadge from "./ModelCostBadge.svelte";
+  import ChatModelDetails from "$lib/features/chat/components/switcher/ChatModelDetails.svelte";
 
-  /** An array of models the user can choose from, this component will sort in-place the models by vendor */
-  export let availableModels: T[];
-  sortModels(availableModels);
-  /** Bindable id of the selected model*/
-  export let selectedModel: T | undefined | null;
+  type Props = {
+    /** Models the user can choose from. Sorted by vendor for display. */
+    availableModels: T[];
+    /** Bindable id-bearing model that is currently selected. */
+    selectedModel: T | undefined | null;
+    /** Forwarded to the trigger; surfaces (e.g. Settings.Row) pass labelling ids. */
+    aria?: Record<string, string>;
+  };
 
-  export let aria: AriaProps = { "aria-label": m.select_ai_model() };
-  /** Hide the inline cost chip on dropdown rows. Useful for surfaces where
-   *  cost is irrelevant or the row is too narrow. */
-  export let showCost: boolean = true;
+  let { availableModels, selectedModel = $bindable(), aria = {} }: Props = $props();
 
-  // Check if models have provider info (provider_name field exists and at least one model has a provider)
-  function hasProviderInfo(models: T[]): boolean {
-    if (models.length === 0) return false;
-    // Check if provider_name field exists in the model type
-    return "provider_name" in models[0];
-  }
+  // Sort a copy so we never mutate the caller's array.
+  const sortedModels = $derived(sortModels([...availableModels]));
+  const modelGroups = $derived(groupModelsByVendor(sortedModels, m.model_group_other()));
 
-  // Group models by provider if they have provider info
-  $: modelGroups = hasProviderInfo(availableModels)
-    ? groupModelsByProvider(
-        availableModels as unknown as Parameters<typeof groupModelsByProvider>[0],
-        m.model_group_system()
-      )
-    : null;
+  const selectedId = $derived(selectedModel?.id ?? "");
+  const unsupportedModelSelected = $derived(
+    selectedModel != null && !availableModels.some((model) => model.id === selectedModel?.id)
+  );
 
-  const {
-    elements: { trigger, menu, option },
-    states: { selected },
-    helpers: { isSelected }
-  } = createSelect<T>({
-    positioning: {
-      placement: "bottom",
-      fitViewport: true,
-      sameWidth: true
-    },
-    defaultSelected: selectedModel ? { value: selectedModel } : undefined,
-    portal: null,
-    onSelectedChange: ({ next }) => {
-      selectedModel = next?.value ?? availableModels[0];
-      return next;
-    }
+  let open = $state(false);
+  const valueId = uid(8);
+  // Compose the accessible name so screen readers announce the *selected* model,
+  // not only the field label a surface supplies via aria-labelledby.
+  const labelledBy = $derived([aria["aria-labelledby"], valueId].filter(Boolean).join(" "));
+
+  // Drive the details preview from the highlighted row, falling back to the
+  // selected model so the panel is populated the moment the dropdown opens.
+  let previewedModelId = $state<string | null>(null);
+  const previewedModel = $derived(
+    sortedModels.find((model) => model.id === previewedModelId) ??
+      sortedModels.find((model) => model.id === selectedId) ??
+      sortedModels[0] ??
+      null
+  );
+  // The details card renders completion-model metadata; transcription models have none.
+  const detailModel = $derived(
+    previewedModel && "max_input_tokens" in previewedModel
+      ? (previewedModel as CompletionModel)
+      : null
+  );
+
+  $effect(() => {
+    if (!open) previewedModelId = null;
   });
 
-  $: unsupportedModelSelected = !availableModels.some((model) => model.id === selectedModel?.id);
-
-  function watchChanges(incomingModel: T | null | undefined) {
-    // Use ID comparison instead of object reference comparison
-    // to avoid Svelte 5 proxy equality issues
-    const currentId = $selected?.value?.id;
-    const incomingId = incomingModel?.id;
-
-    if (currentId !== incomingId) {
-      $selected = incomingModel ? { value: incomingModel } : undefined;
-    }
+  function pick(model: T) {
+    selectedModel = model;
   }
-  // Watch outside changes
-  $: watchChanges(selectedModel);
 </script>
 
-<button
-  {...$trigger}
-  {...aria}
-  use:trigger
-  class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
->
-  {#if unsupportedModelSelected}
-    <div class="text-negative-default flex gap-3 truncate pl-1">
-      <IconCancel />{m.unsupported_model_selected()} ({selectedModel?.name ?? m.no_model_found()})
-    </div>
-  {:else if $selected}
-    <ModelNameAndVendor model={$selected.value} descriptionMode="hidden"></ModelNameAndVendor>
-  {:else}
-    <div class="text-negative-default flex gap-3 truncate pl-1">
-      <IconCancel />{m.no_model_selected()}
-    </div>
-  {/if}
-  <IconChevronDown />
-</button>
-
-<div
-  class="border-default bg-primary z-20 flex flex-col overflow-y-auto rounded-lg border shadow-xl"
-  {...$menu}
-  use:menu
->
-  <div
-    class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 font-mono text-sm"
-  >
-    {m.select_completion_model()}
-  </div>
-  {#if modelGroups}
-    {#each modelGroups as group (group.id ?? "system")}
-      <div
-        class="bg-surface-dimmer border-default sticky top-10 flex items-center gap-2 border-b px-4 py-2 font-mono text-xs tracking-wide uppercase"
+<ModelSelector.Root bind:open>
+  <Popover.Trigger>
+    {#snippet child({ props })}
+      <button
+        {...props}
+        {...aria}
+        aria-labelledby={labelledBy || undefined}
+        type="button"
+        class="border-default text-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-stronger flex h-12 items-center justify-between gap-2 rounded-xl border px-3 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
       >
-        {#if group.providerType}
-          <ProviderGlyph providerType={group.providerType} size="sm" />
+        {#if unsupportedModelSelected}
+          <span id={valueId} class="text-negative-default flex min-w-0 items-center gap-2 truncate">
+            <Ban class="size-4 shrink-0" aria-hidden="true" />
+            {m.unsupported_model_selected()}
+          </span>
+        {:else if selectedModel}
+          <span id={valueId} class="flex min-w-0 items-center gap-2 truncate">
+            <ModelSelector.Logo provider={selectedModel.org ?? selectedModel.provider_type} />
+            <span class="truncate font-medium">{selectedModel.nickname ?? selectedModel.name}</span>
+          </span>
+        {:else}
+          <span id={valueId} class="text-secondary truncate">{m.select_a_model()}</span>
         {/if}
-        <span class="text-secondary">{group.label}</span>
-      </div>
-      {#each group.models as model (model.id)}
-        <div
-          class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between gap-3 border-b px-4 hover:cursor-pointer"
-          {...$option({ value: model, label: model.nickname ?? undefined })}
-          use:option
-        >
-          <ModelNameAndVendor model={model as T} descriptionMode="non-tabbable"
-          ></ModelNameAndVendor>
-          <div class="flex items-center gap-3">
-            {#if showCost}
-              <ModelCostBadge model={model as T} dense />
-            {/if}
-            <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
-              <IconCheck class="text-positive-default" />
-            </div>
-          </div>
-        </div>
-      {/each}
-    {/each}
-  {:else}
-    {#each availableModels as model (model.id)}
+        <ChevronsUpDown class="text-muted size-4 shrink-0" aria-hidden="true" />
+      </button>
+    {/snippet}
+  </Popover.Trigger>
+
+  <ModelSelector.Content
+    align="start"
+    class="w-auto max-w-[calc(100vw-1rem)] border-0 bg-transparent p-0 shadow-none ring-0"
+    commandClass="size-auto overflow-visible rounded-none! bg-transparent p-0"
+  >
+    <div class="flex items-start gap-2">
       <div
-        class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between gap-3 border-b px-4 hover:cursor-pointer"
-        {...$option({ value: model, label: model.nickname ?? undefined })}
-        use:option
+        class="bg-popover/95 ring-foreground/10 w-72 shrink-0 overflow-hidden rounded-xl shadow-lg ring-1 backdrop-blur-xl"
       >
-        <ModelNameAndVendor {model} descriptionMode="non-tabbable"></ModelNameAndVendor>
-        <div class="flex items-center gap-3">
-          {#if showCost}
-            <ModelCostBadge {model} dense />
-          {/if}
-          <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
-            <IconCheck class="text-positive-default" />
-          </div>
-        </div>
+        <ModelSelector.Input placeholder={m.search_models()} />
+        <ModelSelector.List class="max-h-[20rem] p-1 pt-0">
+          <ModelSelector.Empty>{m.no_models_found()}</ModelSelector.Empty>
+          {#each modelGroups as group (group.label)}
+            <ModelSelector.Group heading={group.label}>
+              {#each group.models as model (model.id)}
+                <ModelSelector.Item
+                  value={`${model.nickname ?? model.name} ${group.label}`}
+                  selected={model.id === selectedId}
+                  onSelect={() => pick(model)}
+                  onHighlight={() => (previewedModelId = model.id)}
+                  class="min-h-10"
+                >
+                  <ModelSelector.Logo provider={model.org ?? model.provider_type} />
+                  <ModelSelector.Name>{model.nickname ?? model.name}</ModelSelector.Name>
+                </ModelSelector.Item>
+              {/each}
+            </ModelSelector.Group>
+          {/each}
+        </ModelSelector.List>
       </div>
-    {/each}
-  {/if}
-</div>
-
-<style lang="postcss">
-  @reference "@intric/ui/styles";
-  div[data-highlighted] {
-    @apply bg-hover-default;
-  }
-
-  /* div[data-selected] { } */
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-</style>
+      {#if detailModel}
+        <ChatModelDetails model={detailModel} />
+      {/if}
+    </div>
+  </ModelSelector.Content>
+</ModelSelector.Root>

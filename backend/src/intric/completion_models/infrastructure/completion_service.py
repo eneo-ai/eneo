@@ -238,6 +238,16 @@ class CompletionService:
             web_search_results = []
         if mcp_servers is None:
             mcp_servers = []
+        # Org-level disable must be honored at runtime. Disabling a server only
+        # flips MCPServers.is_enabled (mcp_server_settings_service); the existing
+        # assistant->server associations are never pruned, so a disabled server
+        # can still reach this point attached to an assistant (or help assistant).
+        # This is the single boundary where MCP servers are connected and their
+        # tools exposed to the model, so filter here: a disabled server is never
+        # connected, and if every server is disabled no proxy is created at all.
+        # The governed personal-default path already filters is_enabled upstream
+        # (effective_config_service), so re-filtering here is idempotent.
+        mcp_servers = [server for server in mcp_servers if server.is_enabled]
         model_adapter = await self._get_adapter(model)
 
         # Make sure everything fits in the context of the model
@@ -251,9 +261,17 @@ class CompletionService:
 
         # Create MCP proxy session before building the context, so the tool
         # definitions it will register can be counted toward the token budget.
+        # Pass the chat session id + active DB session so each MCP server's
+        # protocol-assigned ``mcp-session-id`` resumes across user turns
+        # (persisted in ``chat_session_mcp_state``). Behavior is identical for
+        # every MCP server, with no per-server-kind branching.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
-            mcp_proxy = self._mcp_proxy_factory.create(mcp_servers)
+            mcp_proxy = self._mcp_proxy_factory.create(
+                mcp_servers,
+                chat_session_id=session.id if session is not None else None,
+                db_session=self.session,
+            )
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )

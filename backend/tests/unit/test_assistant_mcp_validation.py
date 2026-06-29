@@ -11,14 +11,15 @@ from intric.assistants.assistant_service import AssistantService
 from intric.main.exceptions import BadRequestException
 
 
-def _build_assistant_service_with_mocks():
+def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=False):
     service = object.__new__(AssistantService)
     assistant_id = uuid4()
     assistant = SimpleNamespace(id=assistant_id, is_default=True, mcp_servers=[])
     space = SimpleNamespace(
         id=uuid4(),
         get_assistant=lambda **_: assistant,
-        is_personal=lambda: True,
+        is_personal=lambda: is_personal,
+        is_mcp_server_in_space=lambda _server_id: server_in_space,
     )
     actor = SimpleNamespace(
         can_edit_assistants=lambda: True,
@@ -58,12 +59,15 @@ async def test_add_mcp_to_assistant_rejects_server_not_enabled_for_tenant():
 
 
 @pytest.mark.asyncio
-async def test_add_mcp_to_assistant_rejects_server_not_assigned_to_space():
-    service, assistant_id, session = _build_assistant_service_with_mocks()
-    session.scalar.side_effect = [
-        SimpleNamespace(id=uuid4()),  # server exists and is enabled
-        None,  # missing space mapping
-    ]
+async def test_add_mcp_to_assistant_rejects_server_not_in_shared_space():
+    # Shared (non-personal) space: a tenant-enabled server that is not a member
+    # of the space is still rejected. Membership now comes from the space read
+    # model (space.is_mcp_server_in_space), so no spaces_mcp_servers round-trip
+    # is issued — only the tenant-enablement query hits the DB.
+    service, assistant_id, session = _build_assistant_service_with_mocks(
+        is_personal=False, server_in_space=False
+    )
+    session.scalar.return_value = SimpleNamespace(id=uuid4())  # server is enabled
 
     with pytest.raises(
         BadRequestException, match="not assigned to this assistant's space"
@@ -72,7 +76,38 @@ async def test_add_mcp_to_assistant_rejects_server_not_assigned_to_space():
             assistant_id=assistant_id, mcp_server_id=uuid4()
         )
 
+    assert session.scalar.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_creation():
+    # Regression for #500: a personal space exposes every tenant-enabled server
+    # via the read model (space.is_mcp_server_in_space -> True), even though the
+    # stale spaces_mcp_servers table holds no row for a server enabled after the
+    # space was created. The assignment must succeed, without a spaces_mcp_servers
+    # round-trip (server lookup + assistant row only).
+    service, assistant_id, session = _build_assistant_service_with_mocks(
+        is_personal=True, server_in_space=True
+    )
+    mcp_server_id = uuid4()
+    assistant_in_db = SimpleNamespace(id=assistant_id)
+    session.scalar.side_effect = [
+        SimpleNamespace(id=mcp_server_id),  # server exists and is enabled
+        assistant_in_db,  # assistant row for set_mcp_servers
+    ]
+    result = MagicMock()
+    result.scalars.return_value = []
+    session.execute.return_value = result
+
+    await service.add_mcp_to_assistant(
+        assistant_id=assistant_id,
+        mcp_server_id=mcp_server_id,
+    )
+
     assert session.scalar.await_count == 2
+    service.repo.set_mcp_servers.assert_awaited_once_with(
+        assistant_in_db, [mcp_server_id]
+    )
 
 
 @pytest.mark.asyncio

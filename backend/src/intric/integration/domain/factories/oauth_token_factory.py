@@ -8,8 +8,7 @@ from intric.integration.domain.entities.oauth_token import (
 from intric.integration.domain.factories.user_integration_factory import (
     UserIntegrationFactory,
 )
-from intric.integration.infrastructure.content_service.types import OAuthResource
-from intric.integration.presentation.models import IntegrationType
+from intric.integration.domain.value_objects import IntegrationType, OAuthResource
 
 if TYPE_CHECKING:
     from intric.database.tables.integration_table import (
@@ -19,7 +18,20 @@ if TYPE_CHECKING:
 
 class OauthTokenFactory:
     @staticmethod
-    def create_entity(record: "OauthTokenDBModel") -> OauthToken:
+    def create_entity(
+        record: "OauthTokenDBModel",
+        *,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+    ) -> OauthToken:
+        # The mapper decrypts the stored credentials and passes them in; fall back to
+        # the raw columns when called without overrides.
+        resolved_access_token = (
+            access_token if access_token is not None else record.access_token
+        )
+        resolved_refresh_token = (
+            refresh_token if refresh_token is not None else record.refresh_token
+        )
         user_integration = UserIntegrationFactory.create_entity(record.user_integration)
         # resources comes from a JSON column; build typed list of OAuthResource
         raw_resources = record.resources
@@ -31,8 +43,8 @@ class OauthTokenFactory:
 
         if token_type.is_confluence:
             return ConfluenceToken(
-                access_token=record.access_token,
-                refresh_token=record.refresh_token,
+                access_token=resolved_access_token,
+                refresh_token=resolved_refresh_token,
                 token_type=token_type,
                 user_integration=user_integration,
                 id=record.id,
@@ -42,8 +54,8 @@ class OauthTokenFactory:
             )
         elif token_type.is_sharepoint:
             return SharePointToken(
-                access_token=record.access_token,
-                refresh_token=record.refresh_token,
+                access_token=resolved_access_token,
+                refresh_token=resolved_refresh_token,
                 token_type=token_type,
                 user_integration=user_integration,
                 id=record.id,

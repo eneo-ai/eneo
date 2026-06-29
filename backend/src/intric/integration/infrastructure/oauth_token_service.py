@@ -83,7 +83,11 @@ class OauthTokenService:
 
             assert token_result is not None
             token.access_token = token_result["access_token"]
-            token.refresh_token = token_result["refresh_token"]
+            # Some providers/flows omit refresh_token on refresh (no rotation);
+            # keep the existing one instead of overwriting it with None.
+            new_refresh_token = token_result.get("refresh_token")
+            if new_refresh_token:
+                token.refresh_token = new_refresh_token
 
             token = await self.oauth_token_repo.update(obj=token)
             return token

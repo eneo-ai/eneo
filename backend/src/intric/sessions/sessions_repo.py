@@ -55,6 +55,9 @@ class SessionRepository:
             .selectinload(QuestionsFiles.file),
             selectinload(Sessions.questions).selectinload(Questions.questions_files),
             selectinload(Sessions.questions).selectinload(Questions.web_search_results),
+            selectinload(Sessions.questions).selectinload(
+                Questions.mcp_tool_references
+            ),
             selectinload(Sessions.assistant).selectinload(Assistants.user),
         ]
 

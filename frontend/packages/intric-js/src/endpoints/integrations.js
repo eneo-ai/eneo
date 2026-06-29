@@ -363,35 +363,37 @@ export function initIntegrations(client) {
       },
 
       /**
-       * OAuth flow: Get an url where the user can authenticate for this specific integration
+       * OAuth flow: Get an url where the user can authenticate for this specific integration.
+       * The backend generates a single-use CSRF `state` bound to the user + integration;
+       * the caller must echo it back via {@link registerAuthCode}.
        *
-       * @param {{integration: {tenant_integration_id: string}, state?: string}} args
+       * @param {{integration: {tenant_integration_id: string}}} args
+       * @returns {Promise<{url: string, state: string}>}
        * @throws {IntricError}
        * */
-      getAuthUrl: async ({ integration, state }) => {
+      getAuthUrl: async ({ integration }) => {
         const res = await client.fetch("/api/v1/integrations/auth/{tenant_integration_id}/url/", {
           method: "get",
           params: {
-            path: integration,
-            query: { state }
+            path: integration
           }
         });
 
-        return res.auth_url;
+        return { url: res.auth_url, state: res.state };
       },
 
       /**
        * OAuth flow: Pass the callback code / auth token to the backend
        *
-       * @param {{integration: {tenant_integration_id: string}, code: string}} args
+       * @param {{integration: {tenant_integration_id: string}, code: string, state: string}} args
        * @throws {IntricError}
        * */
-      registerAuthCode: async ({ integration, code }) => {
+      registerAuthCode: async ({ integration, code, state }) => {
         const { tenant_integration_id } = integration;
         const res = await client.fetch("/api/v1/integrations/auth/callback/token/", {
           method: "post",
           requestBody: {
-            "application/json": { auth_code: code, tenant_integration_id }
+            "application/json": { auth_code: code, tenant_integration_id, state }
           }
         });
 

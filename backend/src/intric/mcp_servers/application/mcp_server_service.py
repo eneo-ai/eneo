@@ -227,6 +227,7 @@ class MCPServerService:
             tool = MCPServerTool(
                 mcp_server_id=mcp_server.id,
                 name=tool_def["name"],
+                title=tool_def.get("title"),
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
                 is_enabled_by_default=True,
@@ -415,6 +416,7 @@ class MCPServerService:
 
             for tool_def in tool_defs:
                 name = tool_def["name"]
+                remote_title = tool_def.get("title")
                 remote_desc = tool_def.get("description")
                 remote_schema = tool_def.get("input_schema")
 
@@ -423,6 +425,7 @@ class MCPServerService:
                     tool = MCPServerTool(
                         mcp_server_id=mcp_server.id,
                         name=name,
+                        title=remote_title,
                         description=None,  # No active description yet
                         input_schema=None,  # No active schema yet
                         is_enabled_by_default=True,
@@ -441,8 +444,12 @@ class MCPServerService:
                     )
                 else:
                     existing = existing_by_name[name]
+                    title_changed = existing.title != remote_title
                     desc_changed = existing.description != remote_desc
                     schema_changed = existing.input_schema != remote_schema
+
+                    if title_changed:
+                        existing.title = remote_title
 
                     if desc_changed or schema_changed:
                         # Changed tool — store pending values, keep active values
@@ -463,7 +470,7 @@ class MCPServerService:
                         )
                     else:
                         # Unchanged — clear any stale removed flag
-                        if existing.removed_from_remote:
+                        if title_changed or existing.removed_from_remote:
                             existing.removed_from_remote = False
                             await self.tool_repo.update(existing)
                         result.unchanged_count += 1

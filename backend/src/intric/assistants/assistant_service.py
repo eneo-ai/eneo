@@ -7,6 +7,7 @@ from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ModelKwargs,
     ResponseType,
     TokenUsage,
@@ -622,9 +623,6 @@ class AssistantService:
             from intric.database.tables.mcp_server_table import (
                 MCPServers as MCPServersTable,
             )
-            from intric.database.tables.mcp_server_table import (
-                SpacesMCPServers as SpacesMCPServersTable,
-            )
 
             mcp_servers_query = (
                 sa.select(MCPServersTable.id)
@@ -648,9 +646,6 @@ class AssistantService:
 
             # For a personal default assistant under an active MCP policy, the
             # governance whitelist (enforced just below) is the source of truth.
-            # Personal spaces are seeded with tenant MCP servers only at creation
-            # time and are not back-filled when a server is enabled later, so the
-            # space-assignment check would wrongly reject a policy-allowed server.
             if isinstance(mcp_effective_config, NotProvided):
                 mcp_effective_config = await self._resolve_effective_config(
                     space=space, assistant=assistant
@@ -659,20 +654,18 @@ class AssistantService:
                 mcp_effective_config is not None and mcp_effective_config.mcp_enforced
             )
             if not mcp_governed:
-                space_servers_query = sa.select(
-                    SpacesMCPServersTable.mcp_server_id
-                ).where(
-                    SpacesMCPServersTable.space_id == space.id,
-                    SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
-                )
-                space_servers_result = await self.repo.session.execute(
-                    space_servers_query
-                )
-                space_server_ids = {row[0] for row in space_servers_result.fetchall()}
+                # Validate space membership against the space read model — the
+                # same source the editor/UI uses to offer servers. For a personal
+                # space that is every tenant-enabled server (space_factory exposes
+                # them all); for a shared space it is the spaces_mcp_servers
+                # mapping. Do NOT query spaces_mcp_servers directly: that table is
+                # seeded once at space creation and never back-filled, so for a
+                # personal space it goes stale and wrongly rejects servers enabled
+                # after the space was created (#500).
                 missing_space_ids = [
                     str(server_id)
                     for server_id in mcp_server_ids
-                    if server_id not in space_server_ids
+                    if not space.is_mcp_server_in_space(server_id)
                 ]
                 if missing_space_ids:
                     raise BadRequestException(
@@ -1029,6 +1022,11 @@ class AssistantService:
                 reasoning_string = ""
                 generated_files: list[File] = []
                 tool_calls: list[ToolCallInfo] = []
+                mcp_tool_references: list[McpToolReference] = []
+                # TOOL_CALL chunks can fire twice in the approval flow. IDs
+                # identify exact events without collapsing distinct resources
+                # that legitimately share a URI.
+                mcp_ref_seen: set[UUID] = set()
                 stream_usage: TokenUsage | None = None
                 completed = False
 
@@ -1073,6 +1071,12 @@ class AssistantService:
                             yield chunk
 
                         if chunk.response_type == ResponseType.TOOL_CALL:
+                            if chunk.mcp_tool_references:
+                                for ref in chunk.mcp_tool_references:
+                                    if ref.id in mcp_ref_seen:
+                                        continue
+                                    mcp_ref_seen.add(ref.id)
+                                    mcp_tool_references.append(ref)
                             if chunk.tool_calls_metadata:
                                 for tc in chunk.tool_calls_metadata:
                                     # Check if this tool_call already exists (from TOOL_APPROVAL_REQUIRED)
@@ -1107,6 +1111,7 @@ class AssistantService:
                                             ToolCallInfo(
                                                 server_name=tc.server_name,
                                                 tool_name=tc.tool_name,
+                                                title=tc.title,
                                                 arguments=cast(
                                                     dict[str, object] | None,
                                                     tc.arguments,
@@ -1149,6 +1154,7 @@ class AssistantService:
                                             ToolCallInfo(
                                                 server_name=tc.server_name,
                                                 tool_name=tc.tool_name,
+                                                title=tc.title,
                                                 arguments=cast(
                                                     dict[str, object] | None,
                                                     tc.arguments,
@@ -1183,6 +1189,7 @@ class AssistantService:
                                             ToolCallInfo(
                                                 server_name=tc.server_name,
                                                 tool_name=tc.tool_name,
+                                                title=tc.title,
                                                 arguments=cast(
                                                     dict[str, object] | None,
                                                     tc.arguments,
@@ -1250,6 +1257,7 @@ class AssistantService:
                         or LoggingDetails(model_kwargs={}),
                         web_search_results=list(web_search_results or []),
                         tool_calls=tool_calls if tool_calls else None,
+                        mcp_tool_references=mcp_tool_references or None,
                         reasoning=reasoning_string or None,
                     )
                     completed = True
@@ -1310,6 +1318,7 @@ class AssistantService:
             final_reasoning: str | None = None
             generated_files: list[File] = []
 
+            non_streaming_mcp_refs: list[McpToolReference] = []
             if response.completion is not None:
                 answer = response.completion
                 if isinstance(answer, str):
@@ -1317,6 +1326,9 @@ class AssistantService:
                 else:
                     reasoning_token_count = getattr(answer, "reasoning_token_count", 0)
                     final_answer = getattr(answer, "text", "")
+                    non_streaming_mcp_refs = (
+                        getattr(answer, "mcp_tool_references", None) or []
+                    )
                     final_reasoning = getattr(answer, "reasoning_content", None)
 
             reference_chunks = get_references(
@@ -1365,6 +1377,7 @@ class AssistantService:
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
                 web_search_results=list(web_search_results or []),
+                mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
             )
 
@@ -1683,9 +1696,12 @@ class AssistantService:
             assistant_selector_tokens=assistant_selector_tokens,
         )
 
+        mcp_tool_references: list[McpToolReference] = []
         if not stream:
             assert isinstance(answer, str)
             info_blob_references = datastore_result.info_blobs
+            if isinstance(response.completion, Completion):
+                mcp_tool_references = response.completion.mcp_tool_references or []
         else:
             info_blob_references = datastore_result.info_blobs
 
@@ -1704,6 +1720,7 @@ class AssistantService:
             description=assistant_to_ask.description,
             web_search_results=web_search_results,
             question_id=question_id,
+            mcp_tool_references=mcp_tool_references,
         )
 
         return final_response
@@ -1786,9 +1803,6 @@ class AssistantService:
         from intric.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
-        from intric.database.tables.mcp_server_table import (
-            SpacesMCPServers as SpacesMCPServersTable,
-        )
 
         # Validate tenant ownership + enablement
         mcp_server_query = sa.select(MCPServersTable).where(
@@ -1804,16 +1818,14 @@ class AssistantService:
             space=space, assistant=assistant
         )
         mcp_governed = effective_config is not None and effective_config.mcp_enforced
-        if not mcp_governed:
-            space_mapping_query = sa.select(SpacesMCPServersTable).where(
-                SpacesMCPServersTable.space_id == space.id,
-                SpacesMCPServersTable.mcp_server_id == mcp_server_id,
+        if not mcp_governed and not space.is_mcp_server_in_space(mcp_server_id):
+            # Validate against the space read model, not the stale
+            # spaces_mcp_servers table (seeded once at space creation, never
+            # back-filled), so a server enabled after a personal space was
+            # created is assignable. See update_assistant (#500).
+            raise BadRequestException(
+                "MCP server is not assigned to this assistant's space"
             )
-            space_mapping = await self.repo.session.scalar(space_mapping_query)
-            if space_mapping is None:
-                raise BadRequestException(
-                    "MCP server is not assigned to this assistant's space"
-                )
 
         await self._ensure_governance_policy_allows_update(
             space=space,

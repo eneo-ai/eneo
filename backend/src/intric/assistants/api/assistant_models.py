@@ -21,6 +21,7 @@ from intric.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
     CompletionModelSparse,
+    McpToolReference,
     ModelKwargs,
 )
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
@@ -100,6 +101,10 @@ def _empty_mcp_server_public_dict_list() -> list[MCPServerPublicDict]:
 
 
 def _empty_mcp_tool_setting_list() -> list[MCPToolSetting]:
+    return []
+
+
+def _empty_mcp_tool_reference_list() -> list[McpToolReference]:
     return []
 
 
@@ -281,6 +286,9 @@ class AssistantResponse(BaseModel):
     completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools
     web_search_results: list[WebSearchResult]
+    mcp_tool_references: list[McpToolReference] = Field(
+        default_factory=_empty_mcp_tool_reference_list
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     description: Optional[str] = None

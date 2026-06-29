@@ -10,6 +10,9 @@ from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.logging_table import logging_table
+from intric.database.tables.mcp_tool_references_table import (
+    McpToolReference as McpToolReferencesTable,
+)
 from intric.database.tables.questions_table import (
     InfoBlobReferences,
     Questions,
@@ -25,6 +28,7 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.questions.question import Question, QuestionAdd
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.logging.logging import LoggingDetails
     from intric.questions.question import ToolCallInfo
@@ -55,6 +59,7 @@ class QuestionRepository:
             .selectinload(InfoBlobReferences.info_blob)
             .selectinload(InfoBlobs.website),
             selectinload(Questions.web_search_results),
+            selectinload(Questions.mcp_tool_references),
         ]
 
     def _add_options(
@@ -129,6 +134,28 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
+    async def _add_mcp_tool_references(
+        self, mcp_tool_references: list["McpToolReference"], question_id: UUID
+    ):
+        stmt = sa.insert(McpToolReferencesTable).values(
+            [
+                dict(
+                    id=ref.id,
+                    question_id=question_id,
+                    tool_call_id=ref.tool_call_id,
+                    mcp_tool_name=ref.mcp_tool_name,
+                    uri=ref.uri,
+                    mime_type=ref.mime_type,
+                    content=ref.content,
+                    meta=ref.meta,
+                    order=ref.order,
+                )
+                for ref in mcp_tool_references
+            ]
+        )
+
+        await self.session.execute(stmt)
+
     async def get(self, id: UUID):
         return await self.delegate.get(id)
 
@@ -147,6 +174,7 @@ class QuestionRepository:
         generated_files: list[File] | None = None,
         web_search_results: list["WebSearchResult"] | None = None,
         logging_details: "LoggingDetails | None" = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
     ) -> None:
         """Update an existing placeholder Question row with the final or partial answer.
 
@@ -205,6 +233,11 @@ class QuestionRepository:
                 web_search_results=list(web_search_results),
                 question_id=question_id,
             )
+        if mcp_tool_references:
+            await self._add_mcp_tool_references(
+                mcp_tool_references=mcp_tool_references,
+                question_id=question_id,
+            )
 
     async def add(
         self,
@@ -213,6 +246,7 @@ class QuestionRepository:
         files: list[File] | None = None,
         generated_files: list[File] | None = None,
         web_search_results: list["WebSearchResult"] | None = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
     ):
         stmt = (
             sa.insert(Questions)
@@ -243,6 +277,12 @@ class QuestionRepository:
         if web_search_results:
             await self._add_web_search_results(
                 web_search_results=web_search_results, question_id=question_record.id
+            )
+
+        if mcp_tool_references:
+            await self._add_mcp_tool_references(
+                mcp_tool_references=mcp_tool_references,
+                question_id=question_record.id,
             )
 
         if question.logging_details is not None:

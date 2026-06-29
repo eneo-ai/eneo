@@ -253,7 +253,7 @@ class Settings(BaseSettings):
     mcp_client_connect_timeout_seconds: int = 30
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60
-    mcp_tool_output_max_chars: int = 10000
+    mcp_tool_output_max_chars: int = 32768
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 

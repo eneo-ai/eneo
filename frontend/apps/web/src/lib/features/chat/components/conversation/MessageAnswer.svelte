@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Markdown } from "@intric/ui";
   import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
+  import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
@@ -35,6 +36,7 @@
       | Array<{
           server_name: string;
           tool_name: string;
+          title?: string | null;
           arguments?: Record<string, unknown>;
           tool_call_id?: string;
           approved?: boolean;
@@ -97,9 +99,12 @@
                 ? "running"
                 : "complete";
       return {
-        toolName: tc.tool_name,
+        // Prefer the server-provided title annotation, falling back to the
+        // raw tool name when the MCP server omits one.
+        toolName: tc.title || tc.tool_name,
         serverName: tc.server_name,
         args: tc.arguments,
+        toolCallId: tc.tool_call_id,
         status
       };
     })
@@ -190,7 +195,12 @@
 
   {#if tracedSteps.length > 0 || reasoningText.trim().length > 0}
     <div class="mb-4">
-      <ReasoningTrace steps={tracedSteps} reasoning={reasoningText} working={toolsStillExecuting} />
+      <ReasoningTrace
+        steps={tracedSteps}
+        reasoning={reasoningText}
+        working={toolsStillExecuting}
+        loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
+      />
     </div>
   {/if}
 
@@ -350,6 +360,8 @@
     }}
   />
 </div>
+
+<McpImageAttachments />
 
 {#each message.generated_files as file (file.id)}
   {@const url = attachmentUrls.getUrl(file) ?? null}

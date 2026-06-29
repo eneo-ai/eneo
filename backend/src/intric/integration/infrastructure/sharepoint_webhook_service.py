@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from typing import Optional, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -13,6 +14,9 @@ from intric.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
 )
 from intric.integration.domain.repositories.oauth_token_repo import OauthTokenRepository
+from intric.integration.domain.repositories.sharepoint_subscription_repo import (
+    SharePointSubscriptionRepository,
+)
 from intric.integration.infrastructure.content_service.types import (
     SharePointWebhookNotification,
     SharePointWebhookPayload,
@@ -47,6 +51,7 @@ class SharepointWebhookService:
         job_repo: JobRepository,
         user_repo: UsersRepository,
         change_key_service: OfficeChangeKeyService,
+        sharepoint_subscription_repo: SharePointSubscriptionRepository,
     ) -> None:
         super().__init__()
         self.session = session
@@ -54,6 +59,7 @@ class SharepointWebhookService:
         self.job_repo = job_repo
         self.user_repo = user_repo
         self.change_key_service = change_key_service
+        self.sharepoint_subscription_repo = sharepoint_subscription_repo
         settings = get_settings()
         self.expected_client_state = settings.sharepoint_webhook_client_state
 
@@ -70,25 +76,43 @@ class SharepointWebhookService:
             logger.debug("SharePoint webhook called without notifications")
             return
 
+        # clientState is the only authentication for this endpoint (it is
+        # unauthenticated at the HTTP layer). Fail closed: without a configured
+        # secret we cannot tell genuine Graph notifications from forged ones, so
+        # reject everything rather than silently accepting unverified payloads.
+        if not self.expected_client_state:
+            logger.error(
+                "Rejecting SharePoint webhook: SHAREPOINT_WEBHOOK_CLIENT_STATE is "
+                "not configured, so notifications cannot be authenticated."
+            )
+            return
+
         # Group notifications by resource (SharePoint site or OneDrive drive)
         notifications_by_resource: dict[
             tuple[str, str], list[SharePointWebhookNotification]
         ] = {}
+        received_subscription_ids: set[str] = set()
         for notification in values:
             resource_info = self._extract_resource_from_notification(notification)
             if not resource_info:
                 continue
             resource_type, resource_id = resource_info
 
-            if (
-                self.expected_client_state
-                and notification.get("clientState") != self.expected_client_state
+            client_state = notification.get("clientState")
+            # Constant-time compare to avoid leaking the secret via timing.
+            if not isinstance(client_state, str) or not hmac.compare_digest(
+                client_state, self.expected_client_state
             ):
                 logger.warning(
                     "Ignoring webhook notification with unexpected clientState. "
                     "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
                 )
                 continue
+
+            subscription_id = notification.get("subscriptionId")
+            if subscription_id and subscription_id not in received_subscription_ids:
+                await self._mark_subscription_webhook_received(subscription_id)
+                received_subscription_ids.add(subscription_id)
 
             key = (resource_type, resource_id)
             if key not in notifications_by_resource:
@@ -104,6 +128,29 @@ class SharepointWebhookService:
                 resource_type=resource_type,
                 resource_id=resource_id,
                 notifications=resource_notifications,
+            )
+
+    async def _mark_subscription_webhook_received(self, subscription_id: str) -> None:
+        try:
+            subscription = (
+                await self.sharepoint_subscription_repo.get_by_subscription_id(
+                    subscription_id
+                )
+            )
+            if not subscription:
+                logger.debug(
+                    "Received SharePoint webhook for unknown subscription %s",
+                    subscription_id,
+                )
+                return
+
+            subscription.mark_webhook_received()
+            await self.sharepoint_subscription_repo.update(subscription)
+        except Exception as exc:
+            logger.warning(
+                "Could not update SharePoint subscription webhook health for %s: %s",
+                subscription_id,
+                exc,
             )
 
     async def _queue_refresh_for_resource(

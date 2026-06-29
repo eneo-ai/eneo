@@ -25,6 +25,7 @@ import pytest
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ResponseType,
 )
 from intric.sessions import session_service as session_service_module
@@ -440,6 +441,73 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
 
     # Crucially: no partial-save task was scheduled on a clean finish.
     assert persist_calls == []
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
+    first_ref = McpToolReference(
+        id=uuid4(),
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        uri="https://example.test/shared",
+        mime_type="text/plain",
+        content="first",
+        meta={},
+        order=0,
+    )
+    second_ref = McpToolReference(
+        id=uuid4(),
+        tool_call_id="call_2",
+        mcp_tool_name="server__tool",
+        uri="https://example.test/shared",
+        mime_type="text/plain",
+        content="second",
+        meta={},
+        order=1,
+    )
+
+    async def fake_completion_stream():
+        for ref in (first_ref, second_ref):
+            yield Completion(
+                reasoning_token_count=0,
+                response_type=ResponseType.TOOL_CALL,
+                mcp_tool_references=[ref],
+            )
+        yield Completion(
+            reasoning_token_count=0,
+            response_type=ResponseType.TEXT,
+            text="ok",
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from intric.assistants.assistant_service import AssistantService
+
+    gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+    )
+    async for _ in gen:
+        pass
+
+    update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
+    assert update_kwargs["mcp_tool_references"] == [first_ref, second_ref]
 
 
 @pytest.mark.asyncio

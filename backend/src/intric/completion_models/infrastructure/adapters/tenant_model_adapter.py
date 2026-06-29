@@ -3,7 +3,7 @@
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -15,6 +15,7 @@ from typing import (
     TypedDict,
     cast,
 )
+from urllib.parse import urlsplit, urlunsplit
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -22,6 +23,7 @@ from typing_extensions import override
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ModelKwargs,
     ResponseType,
     TokenUsage,
@@ -33,6 +35,9 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 from intric.completion_models.infrastructure.message_payload import (
     build_content,
     build_turn_messages,
+)
+from intric.completion_models.infrastructure.static_prompts import (
+    MCP_TOOL_REFERENCES_INSTRUCTION,
 )
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
@@ -54,6 +59,171 @@ PROVIDER_UNAVAILABLE_CODE = litellm_transport.PROVIDER_UNAVAILABLE_CODE
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+# Markdown image token: ![alt](url "optional title"). Captures the url only.
+_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)")
+
+
+def _canonical_resource_key(uri: str) -> str:
+    """Signature-independent identity for an MCP resource URL.
+
+    Signed URLs for the same object differ only in the query (HMAC/expiry) and
+    sometimes the fragment, so dedup must ignore those; identity lives in
+    scheme+host+path. The path extension is deliberately preserved: crawl-origin
+    images distinguish themselves by extension (``a.png`` vs ``a.jpg`` are
+    different assets), and for uploaded-doc images the inline and resource_link
+    surfaces carry the same path verbatim, so query-stripping alone collapses
+    them. For opaque uris (custom scheme, no host) the whole string is the key.
+    """
+    if not uri:
+        return ""
+    parts = urlsplit(uri)
+    if not parts.scheme or not parts.netloc:
+        return uri.strip()
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
+
+
+def _inline_image_keys(text: str) -> set[str]:
+    """Canonical keys of every Markdown image already embedded in ``text``."""
+    if not text:
+        return set()
+    return {
+        _canonical_resource_key(m.group(1))
+        for m in _MARKDOWN_IMAGE_PATTERN.finditer(text)
+    }
+
+
+def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
+    """Mint a UUID whose 8-char hex prefix is unique within this Message.
+
+    ``existing_prefixes`` is mutated in place so frontend prefix lookup stays
+    unambiguous across multi-tool-call turns.
+    """
+    ref_id = uuid.uuid4()
+    attempt = 0
+    while str(ref_id)[:8] in existing_prefixes and attempt < 8:
+        ref_id = uuid.uuid4()
+        attempt += 1
+    existing_prefixes.add(str(ref_id)[:8])
+    return ref_id
+
+
+def _build_tool_result_with_references(
+    content_list: list[dict[str, Any]],
+    tool_call_id: Optional[str],
+    mcp_tool_name: Optional[str],
+    existing_prefixes: set[str],
+) -> tuple[str, str, list[McpToolReference]]:
+    """Build LLM-facing and user-facing tool result texts; capture resource refs.
+
+    Two texts are produced because they serve different audiences:
+
+    - ``llm_text`` (forwarded to the LLM): upstream text blocks, then each
+      resource rendered as a self-describing, triple-quoted block whose
+      attribution rides in the server-provided ``resource.text``. Eneo prepends
+      only an 8-char ``source_id`` line so the model can cite, mirroring the
+      knowledge-base source format in ``context_builder``. ``_meta`` is not
+      forwarded: per MCP it is implementation metadata, not model-facing.
+    - ``display_text`` (persisted on ``ToolCallInfo.result`` for raw-result
+      API consumers): upstream text blocks plus each resource's own text,
+      exactly what a vanilla MCP client would render. No source_id markers.
+
+    Resource blocks are captured as ``McpToolReference`` rows for separate
+    persistence (the structured channel the frontend renders, where ``uri`` and
+    ``meta`` live). ``existing_prefixes`` is mutated in place so multi-tool-call
+    turns don't mint colliding 8-char prefixes.
+
+    Image ``resource_link`` blocks (MCP spec, 2025-11-25) are also captured as
+    rows, but display-only: no text, no source_id, absent from ``llm_text``.
+    They are audience-gated (``user`` or unstated) and de-duplicated against
+    inline Markdown images by signature-independent URL identity, so a server
+    that emits both an inline ``![](url)`` and a ``resource_link`` for the same
+    object renders it once (inline wins).
+    """
+    text_parts: list[str] = []
+    resource_texts: list[str] = []
+    llm_blocks: list[str] = []
+    refs: list[McpToolReference] = []
+
+    # Inline Markdown wins. Collect every image url already embedded in any
+    # text/resource block so a resource_link for the same object is suppressed
+    # (a host that renders both surfaces would otherwise show it twice).
+    inline_image_keys: set[str] = set()
+    for ci in content_list:
+        if ci.get("type") in ("text", "resource"):
+            inline_image_keys |= _inline_image_keys(ci.get("text") or "")
+    seen_link_keys: set[str] = set()
+
+    for ci in content_list:
+        block_type = ci.get("type")
+        if block_type == "text":
+            text_parts.append(ci.get("text") or "")
+        elif block_type == "resource":
+            uri = ci.get("uri") or ""
+            if not uri:
+                # Resource without a URI has nothing to cite. Skip.
+                continue
+            ref_id = _mint_ref_id(existing_prefixes)
+            prefix = str(ref_id)[:8]
+            resource_text = ci.get("text") or ""
+            refs.append(
+                McpToolReference(
+                    id=ref_id,
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    uri=uri,
+                    mime_type=ci.get("mime_type"),
+                    content=ci.get("text"),
+                    meta=ci.get("meta") or {},
+                    order=len(refs),
+                )
+            )
+            resource_texts.append(resource_text)
+            llm_blocks.append(f'"""source_id: {prefix}\n{resource_text}"""')
+        elif block_type == "resource_link":
+            # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
+            # no citable text, so it rides the structured channel (the
+            # McpToolReference row the frontend renders as a thumbnail) and is
+            # not added to the LLM-facing text.
+            uri = ci.get("uri") or ""
+            mime = ci.get("mime_type") or ""
+            if not uri or not mime.startswith("image/"):
+                # Scope: only image resource_links get a display surface today.
+                continue
+            audience = ci.get("audience")
+            if audience is not None and "user" not in audience:
+                # Marked for the model only; not a user-facing figure.
+                # Absent audience == default == render.
+                continue
+            key = _canonical_resource_key(uri)
+            if key in inline_image_keys or key in seen_link_keys:
+                # Inline Markdown already renders this image (inline wins), or a
+                # prior resource_link covered it. Suppress to avoid double-render.
+                continue
+            seen_link_keys.add(key)
+            refs.append(
+                McpToolReference(
+                    id=_mint_ref_id(existing_prefixes),
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    uri=uri,
+                    mime_type=ci.get("mime_type"),
+                    content=None,
+                    meta=ci.get("meta") or {},
+                    order=len(refs),
+                )
+            )
+
+    upstream_text = "".join(text_parts)
+    if not refs:
+        return upstream_text, upstream_text, refs
+
+    display_text = "\n\n".join(
+        seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
+    )
+    llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
+    llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
+    return llm_text, display_text, refs
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -141,6 +311,12 @@ class PreparedModelStream:
     kwargs: dict[str, Any]
     mcp_proxy: "MCPProxySession | None"
     has_tools: bool
+    # Intric built-in tools (web search, etc.) kept so iterate_stream can
+    # re-merge with refreshed MCP tools after a tools/list_changed without
+    # recomputing the built-ins.
+    intric_tools: list[dict[str, Any]] = field(
+        default_factory=lambda: cast("list[dict[str, Any]]", [])
+    )
 
 
 def _get_supported_openai_params(model: str) -> list[str] | None:
@@ -341,32 +517,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return cast(dict[str, Any], parsed)
 
-    @staticmethod
-    def _tool_result_text(result: dict[str, Any]) -> tuple[str, str]:
-        text = "".join(
-            str(item.get("text", ""))
-            for item in result.get("content", [])
-            if item.get("type") == "text"
-        )
-        if result.get("is_error"):
-            return (
-                json.dumps({"error": text or "Tool execution failed"}),
-                "failed",
-            )
-        return text, "succeeded"
-
-    @staticmethod
-    def _tool_identity(
-        mcp_proxy: "MCPProxySession",
-        prefixed_name: str,
-    ) -> tuple[str, str]:
-        info = mcp_proxy.get_tool_info(prefixed_name)
-        if info:
-            return info
-        if "__" in prefixed_name:
-            return cast(tuple[str, str], tuple(prefixed_name.split("__", 1)))
-        return "", prefixed_name
-
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -456,6 +606,38 @@ class TenantModelAdapter(CompletionModelAdapter):
             return []
         mcp_tools = mcp_proxy.get_tools_for_llm() if mcp_proxy else []
         return intric_tools + mcp_tools
+
+    async def _refresh_mcp_tools_after_round(
+        self,
+        mcp_proxy: "MCPProxySession",
+        intric_tools: list[dict[str, Any]],
+        tool_names: list[str],
+        litellm_kwargs: dict[str, Any],
+        allowed_tools: set[str],
+    ) -> set[str]:
+        """Re-list MCP tools after a tool round; update the advertised set if changed.
+
+        Progressive-discovery MCP servers reveal tools lazily: a tool such as
+        ``load_tools`` activates new tools and the server emits
+        ``notifications/tools/list_changed``. Without re-listing, the model never
+        sees the activated tools and loops calling the activator. When the tool
+        set changed, rewrite ``litellm_kwargs["tools"]`` (consumed by the
+        follow-up request) and return a refreshed allow-list; otherwise return
+        the current allow-list unchanged.
+        """
+        try:
+            tools_changed = await mcp_proxy.refresh_tools(touched_tool_names=tool_names)
+        except Exception as exc:
+            logger.warning(f"[MCP] Tool refresh failed: {exc}")
+            return allowed_tools
+
+        if not tools_changed:
+            return allowed_tools
+
+        refreshed_tools = self._merge_mcp_tools(intric_tools, mcp_proxy)
+        if refreshed_tools:
+            litellm_kwargs["tools"] = refreshed_tools
+        return mcp_proxy.get_allowed_tool_names()
 
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -630,6 +812,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
                 tool_round = 0
+                seen_prefixes: set[str] = set()
+                captured_refs: list[McpToolReference] = []
                 while msg.tool_calls and mcp_proxy:
                     if tool_round >= self.MAX_TOOL_ROUNDS:
                         raise OpenAIException(
@@ -670,16 +854,37 @@ class TenantModelAdapter(CompletionModelAdapter):
                         proxy_calls.append((tc.function.name, arguments))
                     results = await mcp_proxy.call_tools_parallel(proxy_calls)
 
+                    # Add tool results to messages. Resource content blocks are
+                    # captured as McpToolReferences (buffered on completion for
+                    # later persistence) and woven into the LLM-facing text via
+                    # a structured MCP source context so the model can emit
+                    # <inref/> markers without relying on server-specific shapes.
                     for tc, result in zip(msg.tool_calls, results):
-                        result_text, _ = self._tool_result_text(result)
+                        content_list = cast(
+                            list[dict[str, Any]], result.get("content") or []
+                        )
+                        (
+                            llm_text,
+                            _display_text,
+                            refs_for_call,
+                        ) = _build_tool_result_with_references(
+                            content_list=content_list,
+                            tool_call_id=tc.id,
+                            mcp_tool_name=tc.function.name,
+                            existing_prefixes=seen_prefixes,
+                        )
+                        captured_refs.extend(refs_for_call)
+                        if result.get("is_error"):
+                            llm_text = json.dumps(
+                                {"error": llm_text or "Tool execution failed"}
+                            )
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": result_text,
+                                "content": llm_text,
                             }
                         )
-
                     response = cast(
                         _LiteLLMResponse,
                         await _acompletion_call(
@@ -696,6 +901,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     choice = response.choices[0]
                     msg = choice.message
 
+                if captured_refs:
+                    completion.mcp_tool_references = captured_refs
                 if msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"
@@ -794,6 +1001,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 kwargs=litellm_kwargs,
                 mcp_proxy=mcp_proxy,
                 has_tools=bool(all_tools),
+                intric_tools=intric_tools,
             )
 
         except Exception as exc:
@@ -863,14 +1071,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                 else set()
             )
 
-            def _resolve_tool_names(name: str) -> tuple[str, str]:
+            def _resolve_tool_names(name: str) -> tuple[str, str, str | None]:
                 info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
                 if info:
                     return info
                 if "__" in name:
                     server_name, tool_name = name.split("__", 1)
-                    return server_name, tool_name
-                return "", name
+                    return server_name, tool_name, None
+                return "", name, None
 
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
@@ -965,7 +1173,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     or name not in pending_allowed_tools
                                 ):
                                     continue
-                                server_name, tool_name = _resolve_tool_names(name)
+                                server_name, tool_name, title = _resolve_tool_names(
+                                    name
+                                )
                                 pending_emitted.add(idx)
                                 yield Completion(
                                     response_type=ResponseType.TOOL_CALL,
@@ -973,6 +1183,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         ToolCallMetadata(
                                             server_name=server_name,
                                             tool_name=tool_name,
+                                            title=title,
                                             arguments=None,
                                             tool_call_id=call_id,
                                             result_status="pending",
@@ -1026,6 +1237,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             if result.has_tool_calls and mcp_proxy and prepared and prepared.has_tools:
                 messages = prepared.messages
                 litellm_kwargs = prepared.kwargs
+                intric_tools: list[dict[str, Any]] = prepared.intric_tools
                 allowed_tools = mcp_proxy.get_allowed_tool_names()
 
                 max_rounds = self.MAX_TOOL_ROUNDS
@@ -1060,11 +1272,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                         except OpenAIException:
                             args = None
-                        sname, tname = self._tool_identity(mcp_proxy, name)
+                        info = mcp_proxy.get_tool_info(name)
+                        if info:
+                            sname, tname, title = info
+                        elif "__" in name:
+                            sname, tname = name.split("__", 1)
+                            title = None
+                        else:
+                            sname, tname, title = "", name, None
                         tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=sname,
                                 tool_name=tname,
+                                title=title,
                                 arguments=args,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=name,
@@ -1125,6 +1345,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     ToolCallMetadata(
                                         server_name=tm.server_name,
                                         tool_name=tm.tool_name,
+                                        title=tm.title,
                                         arguments=_tool_metadata_arguments(tm),
                                         tool_call_id=tm.tool_call_id,
                                         approved=False,
@@ -1141,6 +1362,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ToolCallMetadata(
                                     server_name=tm.server_name,
                                     tool_name=tm.tool_name,
+                                    title=tm.title,
                                     arguments=_tool_metadata_arguments(tm),
                                     tool_call_id=tm.tool_call_id,
                                     approved=decision_map.get(
@@ -1178,6 +1400,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ToolCallMetadata(
                                     server_name=tm.server_name,
                                     tool_name=tm.tool_name,
+                                    title=tm.title,
                                     arguments=_tool_metadata_arguments(tm),
                                     tool_call_id=tm.tool_call_id,
                                     approved=tm.approved,
@@ -1220,28 +1443,63 @@ class TenantModelAdapter(CompletionModelAdapter):
                         ]
                         results = await mcp_proxy.call_tools_parallel(proxy_calls)
                         execution_metadata: list[ToolCallMetadata] = []
+                        captured_refs: list[McpToolReference] = []
+                        seen_prefixes: set[str] = set()
                         for tc, res in zip(approved_tcs, results):
-                            text, result_status = self._tool_result_text(res)
+                            result_data = res
+                            content_list = cast(
+                                list[dict[str, Any]], result_data.get("content") or []
+                            )
+                            (
+                                llm_text,
+                                display_text,
+                                refs_for_call,
+                            ) = _build_tool_result_with_references(
+                                content_list=content_list,
+                                tool_call_id=tc["id"],
+                                mcp_tool_name=tc["function"]["name"],
+                                existing_prefixes=seen_prefixes,
+                            )
+                            captured_refs.extend(refs_for_call)
+                            result_status = "succeeded"
+                            if result_data.get("is_error"):
+                                error_payload = json.dumps(
+                                    {"error": llm_text or "Tool execution failed"}
+                                )
+                                llm_text = error_payload
+                                display_text = error_payload
+                                result_status = "failed"
                             messages.append(
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
-                                    "content": text,
+                                    "content": llm_text,
                                 }
                             )
-                            server_name, tool_name = self._tool_identity(
-                                mcp_proxy,
-                                tc["function"]["name"],
-                            )
+                            tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
+                            if tool_info:
+                                server_name, tool_name, title = tool_info
+                            elif "__" in tc["function"]["name"]:
+                                server_name, tool_name = tc["function"]["name"].split(
+                                    "__", 1
+                                )
+                                title = None
+                            else:
+                                server_name, tool_name, title = (
+                                    "",
+                                    tc["function"]["name"],
+                                    None,
+                                )
                             execution_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
                                     tool_name=tool_name,
+                                    title=title,
                                     arguments=tool_args_by_call_id.get(tc["id"] or ""),
                                     tool_call_id=tc["id"],
                                     approved=True,
                                     result_status=result_status,
-                                    result=text,
+                                    result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
                                 )
                             )
@@ -1250,6 +1508,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             yield Completion(
                                 response_type=ResponseType.TOOL_CALL,
                                 tool_calls_metadata=execution_metadata,
+                                mcp_tool_references=(
+                                    captured_refs if captured_refs else None
+                                ),
                             )
 
                     # Add denied tool results
@@ -1268,14 +1529,25 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": json.dumps(denial_payload),
                             }
                         )
-                        server_name, tool_name = self._tool_identity(
-                            mcp_proxy,
-                            tc["function"]["name"],
-                        )
+                        tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
+                        if tool_info:
+                            server_name, tool_name, title = tool_info
+                        elif "__" in tc["function"]["name"]:
+                            server_name, tool_name = tc["function"]["name"].split(
+                                "__", 1
+                            )
+                            title = None
+                        else:
+                            server_name, tool_name, title = (
+                                "",
+                                tc["function"]["name"],
+                                None,
+                            )
                         denied_metadata.append(
                             ToolCallMetadata(
                                 server_name=server_name,
                                 tool_name=tool_name,
+                                title=title,
                                 arguments=tool_args_by_call_id.get(tc["id"] or ""),
                                 tool_call_id=tc["id"],
                                 approved=False,
@@ -1292,6 +1564,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=denied_metadata,
                         )
+
+                    # Re-fetch tools in case a tool we just ran (e.g. load_tools
+                    # on a progressive-discovery server) activated new tools via
+                    # notifications/tools/list_changed. Updates the advertised
+                    # tools on litellm_kwargs (consumed by the follow-up below)
+                    # and returns a fresh allow-list for next round's validation.
+                    allowed_tools = await self._refresh_mcp_tools_after_round(
+                        mcp_proxy=mcp_proxy,
+                        intric_tools=intric_tools,
+                        tool_names=[tc["function"]["name"] for tc in tool_calls],
+                        litellm_kwargs=litellm_kwargs,
+                        allowed_tools=allowed_tools,
+                    )
 
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = cast(

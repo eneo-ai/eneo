@@ -493,11 +493,7 @@
               <p class="text-muted text-xs">{m.governance_assistant_locked_by_policy()}</p>
             </div>
           {:else}
-            <SelectAIModelV2
-              bind:selectedModel={$update.completion_model}
-              {availableModels}
-              showCost={false}
-              {aria}
+            <SelectAIModelV2 bind:selectedModel={$update.completion_model} {availableModels} {aria}
             ></SelectAIModelV2>
             {#if modelsEnforced}
               <p class="text-muted mt-2 text-xs">

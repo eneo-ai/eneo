@@ -12,7 +12,7 @@
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
-  const { tenant } = getAppContext();
+  const { tenant, updateTenant } = getAppContext();
   const intric = getIntric();
   let { data } = $props();
 
@@ -25,6 +25,9 @@
     auditLoggingEnabled = data.settings.audit_logging_enabled;
     provisioningEnabled = data.settings.provisioning ?? false;
   });
+
+  // Org-wide model pricing visibility lives on the tenant (not settings).
+  let showModelPricing = $state(tenant.show_model_pricing ?? true);
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -100,6 +103,22 @@
       provisioningEnabled = previousValue; // Revert on error
     }
   }
+
+  // Toggle whether model input/output prices are shown to regular users.
+  async function handleToggleModelPricing({ next }: { current: boolean; next: boolean }) {
+    const previousValue = showModelPricing;
+    showModelPricing = next; // Optimistic UI update
+
+    try {
+      const updated = await intric.settings.updateModelPricingVisibility(next);
+      showModelPricing = updated.show_model_pricing;
+      updateTenant({ show_model_pricing: updated.show_model_pricing });
+      await invalidateAll();
+    } catch (error) {
+      console.error("[Admin] Error updating model pricing visibility:", error);
+      showModelPricing = previousValue; // Revert on error
+    }
+  }
 </script>
 
 <svelte:head>
@@ -127,6 +146,14 @@
           description={m.enable_provisioning_description()}
         >
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
+        </Settings.Row>
+      </Settings.Group>
+      <Settings.Group title={m.model_pricing()}>
+        <Settings.Row
+          title={m.show_model_pricing()}
+          description={m.show_model_pricing_description()}
+        >
+          <Input.Switch bind:value={showModelPricing} sideEffect={handleToggleModelPricing} />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

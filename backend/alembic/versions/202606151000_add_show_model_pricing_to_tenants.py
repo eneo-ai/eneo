@@ -1,6 +1,6 @@
 """add show_model_pricing to tenants
 Revision ID: 202606151000
-Revises: b4f2a9c1e7d3
+Revises: 202605251000
 Create Date: 2026-06-15 10:00:00.000000
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202606151000"
-down_revision = "b4f2a9c1e7d3"
+down_revision = "202605251000"
 branch_labels = None
 depends_on = None
 

@@ -18,6 +18,7 @@ import {
   type ConversationTools,
   type SSE
 } from "@intric/intric-js";
+import { SvelteMap } from "svelte/reactivity";
 
 export type PendingToolApproval = {
   approvalId: string;
@@ -37,6 +38,7 @@ export class ChatService {
     return "tools" in partner && partner.tools?.assistants?.length > 0;
   });
   #intric: Intric;
+  #toolCallResultCache = new SvelteMap<string, Promise<string | null>>();
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
   loadedConversations = $state<ConversationSparse[]>([]);
@@ -209,6 +211,27 @@ export class ChatService {
     this.currentConversation = emptyConversation();
     this.#resetLocked();
     this.#clearPreflight();
+  }
+
+  async getToolCallResult(toolCallId: string): Promise<string | null> {
+    const sessionId = this.currentConversation.id;
+    if (!sessionId) {
+      throw new Error("Cannot load a tool result without an active conversation");
+    }
+
+    const cacheKey = `${sessionId}:${toolCallId}`;
+    const cached = this.#toolCallResultCache.get(cacheKey);
+    if (cached) return cached;
+
+    const request = this.#intric.conversations
+      .getToolCallResult({ sessionId, toolCallId })
+      .then((response) => response.result ?? null)
+      .catch((error) => {
+        this.#toolCallResultCache.delete(cacheKey);
+        throw error;
+      });
+    this.#toolCallResultCache.set(cacheKey, request);
+    return request;
   }
 
   #seedLockedFromHistory() {
@@ -637,6 +660,22 @@ export class ChatService {
                 } else {
                   // @ts-expect-error - mcp_tool_calls is a runtime property
                   ref.mcp_tool_calls.push(tool);
+                }
+              }
+              const newRefs = (event as unknown as { mcp_tool_references?: Array<{ id: string }> })
+                .mcp_tool_references;
+              if (newRefs && newRefs.length) {
+                if (!ref.mcp_tool_references) {
+                  ref.mcp_tool_references = [];
+                }
+                // eslint-disable-next-line svelte/prefer-svelte-reactivity
+                const seen = new Set(ref.mcp_tool_references.map((r) => r.id));
+                for (const newRef of newRefs) {
+                  if (!seen.has(newRef.id)) {
+                    seen.add(newRef.id);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    ref.mcp_tool_references.push(newRef as any);
+                  }
                 }
               }
             },

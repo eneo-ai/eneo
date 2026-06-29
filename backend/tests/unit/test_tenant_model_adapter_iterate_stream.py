@@ -14,6 +14,7 @@ from intric.completion_models.infrastructure.adapters.tenant_model_adapter impor
     PROVIDER_UNAVAILABLE_MESSAGE,
     PreparedModelStream,
     TenantModelAdapter,
+    _build_tool_result_with_references,
 )
 from intric.main.exceptions import OpenAIException
 from intric.mcp_servers.infrastructure.tool_approval import (
@@ -112,12 +113,33 @@ class _FakeMCPProxy:
         return {"server__tool"}
 
     def get_tool_info(self, prefixed_tool_name: str):
-        return ("Server", "tool")
+        return ("Server", "tool", "Tool title")
 
     async def call_tools_parallel(self, proxy_calls):
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
+            for _ in proxy_calls
+        ]
+
+
+class _ResourceMCPProxy(_FakeMCPProxy):
+    async def call_tools_parallel(self, proxy_calls):
+        self.calls.append(proxy_calls)
+        call_number = len(self.calls)
+        return [
+            {
+                "content": [
+                    {
+                        "type": "resource",
+                        "uri": "https://example.test/shared",
+                        "mime_type": "text/plain",
+                        "text": f"resource round {call_number}",
+                        "meta": {},
+                    }
+                ],
+                "is_error": False,
+            }
             for _ in proxy_calls
         ]
 
@@ -128,6 +150,78 @@ def _make_adapter() -> TenantModelAdapter:
     adapter.provider_type = "openai"
     adapter.model = SimpleNamespace(name="test-model")
     return adapter
+
+
+def test_build_tool_result_with_references_uses_self_describing_resource_blocks():
+    llm_text, display_text, refs = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Tool summary.\n"},
+            {
+                "type": "resource",
+                "uri": "https://example.test/docs/alpha",
+                "mime_type": "text/markdown",
+                "text": "**Alpha document** — Intro\n\nResource body",
+                "meta": {
+                    "title": "Alpha document",
+                    "pageRange": "3-4",
+                    "customKey": {"nested": True},
+                },
+            },
+        ],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    # Resource fields (uri/mime/content/meta) are persisted for the UI channel.
+    assert len(refs) == 1
+    source_id = str(refs[0].id)[:8]
+    assert refs[0].uri == "https://example.test/docs/alpha"
+    assert refs[0].mime_type == "text/markdown"
+    assert refs[0].content == "**Alpha document** — Intro\n\nResource body"
+    assert refs[0].meta["customKey"] == {"nested": True}
+
+    # display_text mirrors a vanilla client: upstream text + the resource's own
+    # text, no source_id markers.
+    assert (
+        display_text == "Tool summary.\n\n**Alpha document** — Intro\n\nResource body"
+    )
+
+    # Model channel: each resource is a self-describing, triple-quoted block whose
+    # attribution rides in the server text; Eneo prepends only the source_id.
+    assert (
+        f'"""source_id: {source_id}\n**Alpha document** — Intro\n\nResource body"""'
+        in llm_text
+    )
+    assert "Tool summary." in llm_text
+    assert '<inref id="<source_id>"/>' in llm_text
+
+    # No standalone JSON index, and _meta is not forwarded to the model.
+    assert "MCP referenced resources:" not in llm_text
+    assert '"metadata"' not in llm_text
+    assert '"uri"' not in llm_text
+    assert "pageRange" not in llm_text
+    assert "customKey" not in llm_text
+
+
+def test_build_tool_result_with_references_skips_unciteable_resources():
+    llm_text, display_text, refs = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Tool summary."},
+            {
+                "type": "resource",
+                "text": "No URI",
+                "meta": {"title": "Cannot cite"},
+            },
+        ],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    assert display_text == "Tool summary."
+    assert llm_text == "Tool summary."
+    assert refs == []
 
 
 def _make_completion_adapter() -> TenantModelAdapter:
@@ -309,7 +403,7 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
 @pytest.mark.asyncio
 async def test_non_streaming_supports_multiple_tool_rounds():
     adapter = _make_completion_adapter()
-    mcp_proxy = _FakeMCPProxy()
+    mcp_proxy = _ResourceMCPProxy()
     responses = [
         _response(
             tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
@@ -339,6 +433,15 @@ async def test_non_streaming_supports_multiple_tool_rounds():
         [("server__tool", {"q": "first"})],
         [("server__tool", {"q": "second"})],
     ]
+    assert completion.mcp_tool_references is not None
+    assert len(completion.mcp_tool_references) == 2
+    assert {ref.tool_call_id for ref in completion.mcp_tool_references} == {
+        "call_1",
+        "call_2",
+    }
+    assert {ref.uri for ref in completion.mcp_tool_references} == {
+        "https://example.test/shared"
+    }
 
 
 def test_models_without_tool_capability_receive_no_tools():

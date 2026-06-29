@@ -67,6 +67,7 @@ class ToolCallMetadata:
 
     server_name: str
     tool_name: str
+    title: Optional[str] = None
     arguments: Optional[dict[str, object]] = (
         None  # The input values provided to the tool
     )
@@ -85,6 +86,25 @@ class ToolCallMetadata:
 
 
 @dataclass
+class McpToolReference:
+    """An MCP resource content block captured from a tool call.
+
+    Generic across MCP servers. The 8-char `<inref>` prefix used in the
+    LLM-facing tool message is `str(id)[:8]`; minting is collision-checked
+    against the other reference pools in a given message.
+    """
+
+    id: UUID
+    tool_call_id: Optional[str]
+    mcp_tool_name: Optional[str]
+    uri: str
+    mime_type: Optional[str]
+    content: Optional[str]
+    meta: dict[str, Any]
+    order: int
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
@@ -92,6 +112,7 @@ class Completion:
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None
@@ -215,7 +236,9 @@ class CompletionModelPublic(CompletionModel):
     migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
-    def from_domain(cls, completion_model: CompletionModelDomain):
+    def from_domain(
+        cls, completion_model: CompletionModelDomain, *, show_pricing: bool = True
+    ):
         return cls(
             id=completion_model.id,
             created_at=completion_model.created_at,
@@ -240,11 +263,15 @@ class CompletionModelPublic(CompletionModel):
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
-            input_cost_per_token=getattr(
-                completion_model, "input_cost_per_token", None
+            input_cost_per_token=(
+                getattr(completion_model, "input_cost_per_token", None)
+                if show_pricing
+                else None
             ),
-            output_cost_per_token=getattr(
-                completion_model, "output_cost_per_token", None
+            output_cost_per_token=(
+                getattr(completion_model, "output_cost_per_token", None)
+                if show_pricing
+                else None
             ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,

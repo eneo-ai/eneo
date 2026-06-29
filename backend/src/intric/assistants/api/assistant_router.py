@@ -876,7 +876,11 @@ async def ask_assistant(
         ),
     )
 
-    return await assistant_protocol.to_response(response=response, stream=ask.stream)
+    return await assistant_protocol.to_response(
+        response=response,
+        stream=ask.stream,
+        show_pricing=user.can_view_model_pricing,
+    )
 
 
 @router.get(
@@ -1024,7 +1028,11 @@ async def ask_followup(
         version=version,
     )
 
-    return await assistant_protocol.to_response(response=response, stream=ask.stream)
+    return await assistant_protocol.to_response(
+        response=response,
+        stream=ask.stream,
+        show_pricing=container.user().can_view_model_pricing,
+    )
 
 
 @router.post(

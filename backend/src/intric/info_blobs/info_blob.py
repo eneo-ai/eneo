@@ -71,6 +71,7 @@ class InfoBlobInDBNoText(InDB):
     website_id: Optional[UUID] = None
     integration_knowledge_id: Optional[UUID] = None
     sharepoint_item_id: Optional[str] = None
+    content_hash: Optional[bytes] = None
 
     group: Optional[GroupInDBBase] = None
     website: Optional[WebsiteInDBBase] = None

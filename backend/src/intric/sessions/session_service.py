@@ -32,7 +32,11 @@ from intric.sessions.sessions_repo import SessionRepository
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
+    from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+        McpSessionLifecycleService,
+    )
 
 logger = get_logger(__name__)
 
@@ -124,6 +128,7 @@ class SessionService:
         user: UserInDB,
         assistant_service: AssistantService | None = None,
         group_chat_service: GroupChatService | None = None,
+        mcp_session_lifecycle_service: "McpSessionLifecycleService | None" = None,
     ):
         super().__init__()
         self.session_repo = session_repo
@@ -131,6 +136,7 @@ class SessionService:
         self.user = user
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
+        self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncIterator[None]:
@@ -216,6 +222,18 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def get_tool_call_result(
+        self,
+        session: SessionInDB,
+        tool_call_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Return (result, mcp_tool_name) for one visible tool call."""
+        for question in session.questions or []:
+            for tc in question.tool_calls or []:
+                if tc.tool_call_id and tc.tool_call_id == tool_call_id:
+                    return tc.result, tc.mcp_tool_name
+        return None, None
+
     async def get_sessions_by_assistant(
         self,
         assistant_id: UUID,
@@ -249,6 +267,10 @@ class SessionService:
         owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+        if self.mcp_session_lifecycle_service is not None:
+            await self.mcp_session_lifecycle_service.terminate_for_chat_session(
+                owned_session.id
+            )
         return await self.session_repo.delete(owned_session.id)
 
     async def create_session(
@@ -336,6 +358,7 @@ class SessionService:
         logging_details: LoggingDetails | None = None,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
@@ -356,6 +379,7 @@ class SessionService:
                 if web_search_results
                 else None,
                 logging_details=logging_details,
+                mcp_tool_references=mcp_tool_references,
             )
 
     async def leave_feedback(

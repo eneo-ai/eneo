@@ -69,6 +69,40 @@ def _require_timestamp(value: datetime | None, field_name: str) -> datetime:
     return value
 
 
+def _to_subscription_public(
+    subscription: "SharePointSubscription",
+    *,
+    owner_email: str | None,
+    owner_type: str,
+) -> SharePointSubscriptionPublic:
+    """Build the public model for a subscription (owner is resolved by the caller)."""
+    from datetime import timezone
+
+    now = datetime.now(timezone.utc)
+    expires_in_hours = max(
+        0, int((subscription.expires_at - now).total_seconds() / 3600)
+    )
+    return SharePointSubscriptionPublic(
+        id=subscription.id,
+        user_integration_id=subscription.user_integration_id,
+        site_id=subscription.site_id,
+        subscription_id=subscription.subscription_id,
+        drive_id=subscription.drive_id,
+        expires_at=subscription.expires_at,
+        created_at=_require_timestamp(
+            subscription.created_at, "subscription.created_at"
+        ),
+        is_expired=subscription.is_expired(),
+        expires_in_hours=expires_in_hours,
+        consecutive_renewal_failures=subscription.consecutive_renewal_failures,
+        last_renewal_failed_at=subscription.last_renewal_failed_at,
+        last_renewal_error=subscription.last_renewal_error,
+        last_webhook_received_at=subscription.last_webhook_received_at,
+        owner_email=owner_email,
+        owner_type=owner_type,
+    )
+
+
 class _SimpleGraphToken:
     """Lightweight token wrapper compatible with subscription service."""
 
@@ -610,8 +644,6 @@ async def list_sharepoint_subscriptions(
         # Tenant-scoped lookup to avoid cross-tenant disclosure
         all_subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
 
-        from datetime import datetime, timezone
-
         # Build a cache of user_integrations and users for efficiency
         user_integration_ids: list[UUID] = [
             sub.user_integration_id for sub in all_subscriptions
@@ -636,40 +668,19 @@ async def list_sharepoint_subscriptions(
         # Convert to public models with computed fields
         result: list[SharePointSubscriptionPublic] = []
         for sub in all_subscriptions:
-            now = datetime.now(timezone.utc)
-            expires_in_hours = max(
-                0, int((sub.expires_at - now).total_seconds() / 3600)
-            )
-
-            # Determine owner info
+            # Determine owner info from the prefetched maps
             owner_email: str | None = None
             owner_type = "organization"
-
             ui = user_integrations_map.get(sub.user_integration_id)
-            if ui:
-                if ui.user_id:
-                    owner_type = "user"
-                    user_obj = users_map.get(ui.user_id)
-                    if user_obj:
-                        owner_email = user_obj.email
-                else:
-                    owner_type = "organization"
+            if ui and ui.user_id:
+                owner_type = "user"
+                user_obj = users_map.get(ui.user_id)
+                if user_obj:
+                    owner_email = user_obj.email
 
             result.append(
-                SharePointSubscriptionPublic(
-                    id=sub.id,
-                    user_integration_id=sub.user_integration_id,
-                    site_id=sub.site_id,
-                    subscription_id=sub.subscription_id,
-                    drive_id=sub.drive_id,
-                    expires_at=sub.expires_at,
-                    created_at=_require_timestamp(
-                        sub.created_at, "subscription.created_at"
-                    ),
-                    is_expired=sub.is_expired(),
-                    expires_in_hours=expires_in_hours,
-                    owner_email=owner_email,
-                    owner_type=owner_type,
+                _to_subscription_public(
+                    sub, owner_email=owner_email, owner_type=owner_type
                 )
             )
 
@@ -898,14 +909,6 @@ async def recreate_subscription(
             f"Admin {user.id} manually recreated subscription {subscription_id}"
         )
 
-        # Return updated subscription
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc)
-        expires_in_hours = max(
-            0, int((subscription.expires_at - now).total_seconds() / 3600)
-        )
-
         # Determine owner info (user_integration already fetched above)
         owner_email = None
         owner_type = "organization"
@@ -916,20 +919,8 @@ async def recreate_subscription(
             if owner_user:
                 owner_email = owner_user.email
 
-        return SharePointSubscriptionPublic(
-            id=subscription.id,
-            user_integration_id=subscription.user_integration_id,
-            site_id=subscription.site_id,
-            subscription_id=subscription.subscription_id,
-            drive_id=subscription.drive_id,
-            expires_at=subscription.expires_at,
-            created_at=_require_timestamp(
-                subscription.created_at, "subscription.created_at"
-            ),
-            is_expired=subscription.is_expired(),
-            expires_in_hours=expires_in_hours,
-            owner_email=owner_email,
-            owner_type=owner_type,
+        return _to_subscription_public(
+            subscription, owner_email=owner_email, owner_type=owner_type
         )
 
     except HTTPException:
