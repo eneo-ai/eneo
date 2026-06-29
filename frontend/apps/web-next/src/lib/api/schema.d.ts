@@ -15083,6 +15083,14 @@ export interface components {
        * @description Hours until expiration (0 if already expired)
        */
       expires_in_hours: number;
+      /** Consecutive Renewal Failures */
+      consecutive_renewal_failures: number;
+      /** Last Renewal Failed At */
+      last_renewal_failed_at?: string | null;
+      /** Last Renewal Error */
+      last_renewal_error?: string | null;
+      /** Last Webhook Received At */
+      last_webhook_received_at?: string | null;
       /**
        * Owner Email
        * @description Email of subscription owner (None for organization integrations)

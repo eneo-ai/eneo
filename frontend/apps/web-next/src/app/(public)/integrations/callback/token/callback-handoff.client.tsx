@@ -2,12 +2,16 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
 import { INTEGRATION_CALLBACK_MESSAGE_TYPE } from "@/features/integrations/callback-message";
 
 type View = { status: "processing" | "done" | "error"; errorMessage?: string };
 
-/** Posts the OAuth params to the opener and closes; returns what to render. */
-function runHandoff(): View {
+const OAUTH_STATE_KEY = "sharepoint_service_account_oauth";
+
+/** Popup OAuth: posts the params to the opener and closes; returns what to render. */
+function runPopupHandoff(): View {
   const url = new URL(window.location.href);
   const error = url.searchParams.get("error");
   if (error) {
@@ -30,15 +34,55 @@ function runHandoff(): View {
   return { status: "done" };
 }
 
+/**
+ * Full-page SharePoint service-account OAuth return: the admin dialog stored a
+ * state token and did a top-level redirect (no opener). Complete the auth
+ * server-side via the proxy, then return to admin integrations.
+ */
+async function completeServiceAccount(stored: string): Promise<View | null> {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  let expectedState: string | undefined;
+  try {
+    expectedState = (JSON.parse(stored) as { state?: string }).state;
+  } catch {
+    expectedState = undefined;
+  }
+  if (!code || !state || state !== expectedState) return null;
+
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
+  try {
+    await unwrap(
+      browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/callback", {
+        body: { auth_code: code, state }
+      })
+    );
+    window.location.href = "/admin/integrations";
+    return { status: "done" };
+  } catch (error) {
+    return { status: "error", errorMessage: error instanceof Error ? error.message : undefined };
+  }
+}
+
 export function CallbackHandoff() {
   const t = useTranslations();
   const [view, setView] = useState<View>({ status: "processing" });
 
   useEffect(() => {
-    const result = runHandoff();
-    // Deferred: the params only exist in the browser, so the first render is
-    // always "processing" and the real view lands a microtask later.
     let cancelled = false;
+    const stored = sessionStorage.getItem(OAUTH_STATE_KEY);
+
+    if (stored) {
+      void completeServiceAccount(stored).then((result) => {
+        if (!cancelled) setView(result ?? runPopupHandoff());
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const result = runPopupHandoff();
     queueMicrotask(() => {
       if (!cancelled) setView(result);
     });
