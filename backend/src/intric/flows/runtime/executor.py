@@ -188,6 +188,7 @@ if TYPE_CHECKING:
     from intric.assistants.references import ReferencesService
     from intric.audit.application.audit_service import AuditService
     from intric.files.transcriber import Transcriber
+    from intric.spaces.space import Space
 
 
 _RERUN_MULTIPLE_ACTIVE_OPERATIONS_RUN_ERROR_MESSAGE = (
@@ -1957,11 +1958,29 @@ class FlowRunExecutor:
     ) -> RuntimeAssistantProtocol:
         if state and assistant_id in state.assistant_cache:
             return state.assistant_cache[assistant_id]
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        space = await self._load_space_for_assistant(
+            assistant_id=assistant_id, state=state
+        )
         assistant = space.get_assistant(assistant_id=assistant_id)
         if state:
             state.assistant_cache[assistant_id] = assistant
         return assistant
+
+    async def _load_space_for_assistant(
+        self, *, assistant_id: UUID, state: RunExecutionState | None = None
+    ) -> Space:
+        if state and assistant_id in state.space_cache:
+            return state.space_cache[assistant_id]
+
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        if state:
+            # Pin Space for this run pass; assistant snapshots are already pass-scoped.
+            state.space_cache[assistant_id] = space
+            if space.default_assistant is not None:
+                state.space_cache[space.default_assistant.id] = space
+            for assistant in space.assistants:
+                state.space_cache[assistant.id] = space
+        return space
 
     async def _validate_assistant_snapshots(
         self,
@@ -2020,8 +2039,8 @@ class FlowRunExecutor:
         state: RunExecutionState,
         prior_output_levels_by_order: dict[int, int | None],
     ) -> int | None:
-        space = await self.space_repo.get_space_by_assistant(
-            assistant_id=step.assistant_id
+        space = await self._load_space_for_assistant(
+            assistant_id=step.assistant_id, state=state
         )
         assistant = await self._load_assistant(step.assistant_id, state)
         evaluation = evaluate_step_security_classification(

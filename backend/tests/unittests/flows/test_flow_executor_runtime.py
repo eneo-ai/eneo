@@ -380,7 +380,12 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
 
     async def _get_space_by_assistant(*, assistant_id):
         assistant = _default_snapshot_assistant(assistant_id)
-        return SimpleNamespace(get_assistant=lambda assistant_id: assistant)
+        return SimpleNamespace(
+            id=uuid4(),
+            default_assistant=None,
+            assistants=[assistant],
+            get_assistant=lambda assistant_id: assistant,
+        )
 
     flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=1)
     flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(return_value=None)
@@ -3514,7 +3519,12 @@ async def test_assistant_cache_hit(user):
     executor, _, _, _ = _build_executor(user)
     assistant_id = uuid4()
     mock_assistant = SimpleNamespace(id=assistant_id)
-    mock_space = SimpleNamespace(get_assistant=lambda assistant_id: mock_assistant)
+    mock_space = SimpleNamespace(
+        id=uuid4(),
+        default_assistant=None,
+        assistants=[mock_assistant],
+        get_assistant=lambda assistant_id: mock_assistant,
+    )
     executor.space_repo.get_space_by_assistant = AsyncMock(return_value=mock_space)
 
     state = RunExecutionState(
@@ -3530,6 +3540,143 @@ async def test_assistant_cache_hit(user):
 
     assert result1 is result2
     assert executor.space_repo.get_space_by_assistant.call_count == 1
+
+
+def _security_assistant(assistant_id: UUID, *, model_level: int = 3) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=assistant_id,
+        completion_model=SimpleNamespace(
+            security_classification=SimpleNamespace(security_level=model_level)
+        ),
+        collections=[],
+        websites=[],
+        integration_knowledge_list=[],
+        mcp_servers=[],
+    )
+
+
+def _security_space(
+    *,
+    space_id: UUID,
+    assistants: list[SimpleNamespace],
+    security_level: int,
+) -> SimpleNamespace:
+    assistants_by_id = {assistant.id: assistant for assistant in assistants}
+    return SimpleNamespace(
+        id=space_id,
+        default_assistant=None,
+        assistants=assistants,
+        security_classification=SimpleNamespace(security_level=security_level),
+        get_assistant=lambda assistant_id: assistants_by_id[assistant_id],
+    )
+
+
+def _security_step(
+    *,
+    step_order: int,
+    assistant_id: UUID,
+    input_source: str = "flow_input",
+) -> RuntimeStep:
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=assistant_id,
+        user_description=f"Step {step_order}",
+        input_source=input_source,
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+
+
+async def _validate_security_steps(
+    executor: FlowRunExecutor,
+    state: RunExecutionState,
+    steps: list[RuntimeStep],
+) -> dict[int, int | None]:
+    levels: dict[int, int | None] = {}
+    for step in steps:
+        levels[step.step_order] = await executor._validate_runtime_step_security(
+            step=step,
+            state=state,
+            prior_output_levels_by_order=levels,
+        )
+    return levels
+
+
+@pytest.mark.asyncio
+async def test_runtime_step_security_reuses_space_for_same_space_assistants(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant_one = _security_assistant(uuid4())
+    assistant_two = _security_assistant(uuid4())
+    space = _security_space(
+        space_id=uuid4(),
+        assistants=[assistant_one, assistant_two],
+        security_level=1,
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    state = _empty_execution_state()
+
+    levels = await _validate_security_steps(
+        executor=executor,
+        state=state,
+        steps=[
+            _security_step(step_order=1, assistant_id=assistant_one.id),
+            _security_step(step_order=2, assistant_id=assistant_two.id),
+            _security_step(
+                step_order=3,
+                assistant_id=assistant_one.id,
+                input_source="previous_step",
+            ),
+        ],
+    )
+
+    assert levels == {1: 1, 2: 1, 3: 1}
+    assert state.assistant_cache[assistant_one.id] is assistant_one
+    assert state.assistant_cache[assistant_two.id] is assistant_two
+    assert executor.space_repo.get_space_by_assistant.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_step_security_keeps_distinct_space_hydration(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant_one = _security_assistant(uuid4())
+    assistant_two = _security_assistant(uuid4())
+    space_by_assistant_id = {
+        assistant_one.id: _security_space(
+            space_id=uuid4(),
+            assistants=[assistant_one],
+            security_level=1,
+        ),
+        assistant_two.id: _security_space(
+            space_id=uuid4(),
+            assistants=[assistant_two],
+            security_level=2,
+        ),
+    }
+
+    async def _get_space_by_assistant(*, assistant_id: UUID):
+        return space_by_assistant_id[assistant_id]
+
+    executor.space_repo.get_space_by_assistant = AsyncMock(
+        side_effect=_get_space_by_assistant
+    )
+    state = _empty_execution_state()
+
+    levels = await _validate_security_steps(
+        executor=executor,
+        state=state,
+        steps=[
+            _security_step(step_order=1, assistant_id=assistant_one.id),
+            _security_step(step_order=2, assistant_id=assistant_two.id),
+        ],
+    )
+
+    assert levels == {1: 1, 2: 2}
+    assert state.assistant_cache[assistant_one.id] is assistant_one
+    assert state.assistant_cache[assistant_two.id] is assistant_two
+    assert executor.space_repo.get_space_by_assistant.await_count == 2
 
 
 def _step_for_execute_step(*, step_order: int = 1) -> RuntimeStep:
@@ -4542,7 +4689,12 @@ async def test_execute_audits_failed_run_terminal_state(user):
 async def test_validate_runtime_step_security_rejects_write_down(user):
     executor, _, _, _ = _build_executor(user)
     assistant_id = uuid4()
-    space = SimpleNamespace(security_classification=SimpleNamespace(security_level=1))
+    space = SimpleNamespace(
+        id=uuid4(),
+        default_assistant=None,
+        assistants=[],
+        security_classification=SimpleNamespace(security_level=1),
+    )
     assistant = SimpleNamespace(
         completion_model=SimpleNamespace(
             security_classification=SimpleNamespace(security_level=3)

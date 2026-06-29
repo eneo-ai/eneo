@@ -412,7 +412,7 @@
 - Remaining risk / follow-up:
   - PG-8 is non-vacuous without a broker harness because it calls the real `_execute_flow_run_task`, uses a real DB session for terminalization, checks real persisted run/step/audit rows, and asserts the existing repository guard rejects a late completed step write after terminalization.
   - It still relies on a deterministic wrapper future to force `TimeoutError` after the runtime coroutine starts; the broker/worker crash/load matrix remains a post-PG runtime follow-up, not part of this slice.
-  - The containing integration file remains red because of the unrelated typed-output error-message drift documented above.
+  - At the PG-8 commit boundary, the containing integration file remained red because of the unrelated typed-output error-message drift documented above. The baseline repair below fixed that stale assertion before PG-7 started.
 
 ## Runtime Worker Contract Baseline Repair
 
@@ -425,6 +425,53 @@
   - `cd backend && uv run pyright tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_typed_step_failure_persists_failed_state_for_fresh_sessions -q` -> pass, 1 passed.
   - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q` -> pass, 9 passed.
+
+## PG-7
+
+- Slice id: PG-7
+- Findings addressed: `missed-performance:01`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:26` scopes PG-7 to caching Space on the per-step security hot path.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:25` indexes the hot-path full-Space hydration finding.
+  - `backend/src/intric/flows/runtime/models.py:107-122` had per-run `assistant_cache`, `json_mode_supported`, and `file_cache`, but no Space cache.
+  - `backend/src/intric/flows/runtime/execution_state_builder.py:19-30` builds one `RunExecutionState` per executor pass.
+  - `backend/src/intric/flows/runtime/executor.py:752-760` validates runtime step security once per step.
+  - Before the edit, `backend/src/intric/flows/runtime/executor.py:1955-1964` loaded a Space to get an assistant and cached only the assistant, while `backend/src/intric/flows/runtime/executor.py:2016-2035` loaded a Space again for security validation.
+  - `backend/src/intric/flows/flow_security_classification.py:83-95` reads Space only for the baseline security-classification level; assistant-derived model/knowledge/MCP levels still come from the assistant.
+  - `backend/src/intric/spaces/space_repo.py:1578-1591` resolves Space through a tenant-scoped assistant join; `backend/src/intric/database/tables/assistant_table.py:53-55` shows an assistant has a single scalar `space_id` FK, nullable only for non-Space assistants that already fail this runtime lookup.
+- Verification agents used, with verdicts:
+  - CRG `get_minimal_context` with explicit `executor.py` reported low graph risk but noisy key entities; direct source review was used for all PG-7 claims.
+  - Claude peer-loop session `eneo-flows-pg7-space-cache-2026-06-29` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; it rejected the first two-dict plan as overbuilt, required the assistant to be derived from the cached Space, and required honest per-execution freshness semantics.
+  - Claude peer-loop session `eneo-flows-pg7-space-cache-2026-06-29` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it confirmed the one-dict implementation, tests, and freshness framing address the iteration-1 concerns.
+- Files changed:
+  - `backend/src/intric/flows/runtime/models.py`
+  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - The executor now pins Space hydration to a single `RunExecutionState` pass. Later steps in the same pass reuse the cached Space object for security classification and assistant lookup.
+  - Production security-classification rules and assistant snapshot drift checks are unchanged; the freshness boundary is now per-execution pass for Space classification, matching the already pass-scoped assistant snapshot/cache behavior.
+- Complexity deleted or owner clarified:
+  - Replaced duplicate per-step `space_repo.get_space_by_assistant(...)` calls with one private executor loader and one `RunExecutionState.space_cache`.
+  - Did not add a global cache, cache service, repository wrapper, generic memoizer, or new abstraction layer.
+- Architecture delta:
+  - Canonical owner before: `RunExecutionState` owned assistant and file/value caches, while `_load_assistant` and `_validate_runtime_step_security` each independently hydrated Space through `space_repo`.
+  - Canonical owner after: `RunExecutionState.space_cache` owns per-execution Space reuse, and `FlowRunExecutor._load_space_for_assistant` is the single private loader for the executor pass.
+  - Duplicate paths remaining: no duplicate Space hydration path remains inside `_load_assistant` / `_validate_runtime_step_security`; other runtime paths such as transcription keep their independent Space loads because they are outside this per-step security hot path.
+  - 9/10 follow-up candidate: no new candidate; broader runtime load/crash/queue measurement remains the existing post-PG runtime follow-up.
+  - Decision or measurement needed: later load testing can quantify the DB round-trip reduction on large flows; no product/security decision is needed for per-execution Space pinning.
+  - What not to preserve: per-step full-Space hydration in the security loop, global caches, repo wrappers, and a separate Space-id cache that duplicates the assistant-keyed runtime lookup.
+- Validation commands and results:
+  - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_reuses_space_for_same_space_assistants tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_keeps_distinct_space_hydration -q` -> red before the fix, 2 failed; same-Space observed 5 hydrations instead of 1 and distinct-Space observed 4 instead of 2.
+  - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_reuses_space_for_same_space_assistants tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_keeps_distinct_space_hydration -q` -> pass after the fix, 2 passed.
+  - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_assistant_cache_hit tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_reuses_space_for_same_space_assistants tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_keeps_distinct_space_hydration tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_accepts_matching_execution_surface tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_rejects_prompt_drift tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_skips_legacy_steps_without_snapshot tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_requires_schema_versioned_snapshots tests/unittests/flows/test_flow_executor_runtime.py::test_execute_fails_before_claim_when_assistant_snapshot_drifted tests/unittests/flows/test_flow_executor_runtime.py::test_validate_runtime_step_security_rejects_write_down -q` -> pass, 9 passed.
+  - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -q` -> pass, 75 passed.
+  - `cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/execution_state_builder.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_executor_runtime.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/execution_state_builder.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_executor_runtime.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/intric/flows/runtime/models.py backend/src/intric/flows/runtime/executor.py backend/tests/unittests/flows/test_flow_executor_runtime.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / follow-up:
+  - The default-assistant cache population branch is not directly covered by the new tests; regular assistant indexing and distinct-Space safety are covered. Risk is limited to missed reuse for a default assistant, not a security weakening.
+  - Rollback is local: remove `RunExecutionState.space_cache`, `_load_space_for_assistant`, and the two PG-7 tests to return to per-step Space hydration.
 
 ## 9/10 Follow-Up Candidates
 

@@ -11,6 +11,7 @@ from intric.flows.flow_run_provenance import AttemptStartProvenance
 
 if TYPE_CHECKING:
     from intric.files.file_models import File
+    from intric.spaces.space import Space
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:
@@ -26,6 +27,10 @@ def _empty_step_ref_mapping() -> dict[str, int]:
 
 
 def _empty_attempt_start_by_step() -> dict[UUID, AttemptStartProvenance]:
+    return {}
+
+
+def _empty_space_cache() -> dict[UUID, Space]:
     return {}
 
 
@@ -111,6 +116,7 @@ class RunExecutionState:
     assistant_cache: dict[UUID, Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
+    space_cache: dict[UUID, Space] = field(default_factory=_empty_space_cache)
     attempt_start_by_step: dict[UUID, AttemptStartProvenance] = field(
         default_factory=_empty_attempt_start_by_step
     )
