@@ -158,10 +158,7 @@ from intric.flows.runtime.step_execution_runtime import (
     json_mode_cache_key,
     prepare_step_execution,
 )
-from intric.flows.runtime.step_handlers import (
-    STEP_HANDLER_REGISTRY,
-    resolve_handler_mode,
-)
+from intric.flows.runtime.step_handlers import resolve_handler_mode
 from intric.flows.runtime.step_handlers.base import PreparedAssistantStep, StepHandler
 from intric.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from intric.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
@@ -1214,32 +1211,24 @@ class FlowRunExecutor:
             return result
 
     def _build_step_handler(self, mode: FlowOutputMode) -> StepHandler:
-        handler_class = STEP_HANDLER_REGISTRY[mode]
         match mode:
             case FlowOutputMode.PASS_THROUGH:
-                assert handler_class is PassThroughStepHandler
                 return PassThroughStepHandler(
                     prepare_assistant_step=self._prepare_assistant_step
                 )
             case FlowOutputMode.HTTP_POST:
-                assert handler_class is HttpPostStepHandler
                 return HttpPostStepHandler(
                     completion_handler=PassThroughStepHandler(
                         prepare_assistant_step=self._prepare_assistant_step
                     )
                 )
             case FlowOutputMode.TRANSCRIBE_ONLY:
-                assert handler_class is TranscribeOnlyStepHandler
                 return TranscribeOnlyStepHandler(
                     prepare_assistant_step=self._prepare_assistant_step
                 )
             case FlowOutputMode.TEMPLATE_FILL:
-                assert handler_class is TemplateFillStepHandler
                 return TemplateFillStepHandler(deps=self._template_fill_runtime_deps())
-        raise TypedIOValidationException(
-            f"Unsupported output mode '{mode.value}'.",
-            code=FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE,
-        )
+        assert_never(mode)
 
     def _template_fill_runtime_deps(self) -> TemplateFillRuntimeDeps:
         return TemplateFillRuntimeDeps(

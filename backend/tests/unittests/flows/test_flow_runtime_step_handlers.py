@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import ast
 from datetime import datetime, timezone
-from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -11,6 +11,8 @@ import pytest
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.domain.flow import FlowRun, FlowRunStatus
 from intric.flows.enums import FlowOutputMode
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.runtime.executor import FlowRunExecutor
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
@@ -25,17 +27,14 @@ from intric.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
 )
-from intric.flows.runtime.step_handlers import STEP_HANDLER_REGISTRY
+from intric.flows.runtime.step_handlers import resolve_handler_mode
 from intric.flows.runtime.step_handlers.base import PreparedAssistantStep
 from intric.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from intric.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
 from intric.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from intric.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from intric.flows.variable_resolver import FlowVariableResolver
-
-FLOW_RUNTIME_ROOT = (
-    Path(__file__).resolve().parents[3] / "src" / "intric" / "flows" / "runtime"
-)
+from intric.main.exceptions import TypedIOValidationException
 
 
 def _run() -> FlowRun:
@@ -157,45 +156,37 @@ class _OutputOnlyHandler:
         return StepExecutionResult(output=_step_output())
 
 
-def test_registry_covers_all_flow_output_modes() -> None:
-    assert set(STEP_HANDLER_REGISTRY) == set(FlowOutputMode), (
-        "runtime/step_handlers.STEP_HANDLER_REGISTRY is the canonical output_mode "
-        "owner. Add one handler entry for every FlowOutputMode instead of branching "
-        "in generic runtime code."
+@pytest.mark.parametrize(
+    ("mode", "expected_type"),
+    [
+        (FlowOutputMode.PASS_THROUGH, PassThroughStepHandler),
+        (FlowOutputMode.HTTP_POST, HttpPostStepHandler),
+        (FlowOutputMode.TRANSCRIBE_ONLY, TranscribeOnlyStepHandler),
+        (FlowOutputMode.TEMPLATE_FILL, TemplateFillStepHandler),
+    ],
+)
+def test_executor_builds_expected_step_handler(
+    mode: FlowOutputMode,
+    expected_type: type[object],
+) -> None:
+    executor = cast(
+        FlowRunExecutor,
+        SimpleNamespace(
+            _prepare_assistant_step=AsyncMock(),
+            _template_fill_runtime_deps=MagicMock(),
+        ),
     )
 
+    handler = FlowRunExecutor._build_step_handler(executor, mode)
 
-def _build_step_handler_match_modes() -> frozenset[FlowOutputMode]:
-    tree = ast.parse((FLOW_RUNTIME_ROOT / "executor.py").read_text())
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name != "_build_step_handler":
-            continue
-        modes: set[FlowOutputMode] = set()
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Match):
-                continue
-            for case in child.cases:
-                pattern = case.pattern
-                if not (
-                    isinstance(pattern, ast.MatchValue)
-                    and isinstance(pattern.value, ast.Attribute)
-                    and isinstance(pattern.value.value, ast.Name)
-                    and pattern.value.value.id == "FlowOutputMode"
-                ):
-                    continue
-                modes.add(FlowOutputMode[pattern.value.attr])
-        return frozenset(modes)
-    raise AssertionError("FlowRunExecutor._build_step_handler was not found")
+    assert isinstance(handler, expected_type)
 
 
-def test_executor_handler_match_cases_cover_registry_modes() -> None:
-    match_modes = _build_step_handler_match_modes()
+def test_resolve_handler_mode_rejects_unsupported_output_mode() -> None:
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        resolve_handler_mode("unsupported")
 
-    assert match_modes == set(STEP_HANDLER_REGISTRY), (
-        "FlowRunExecutor._build_step_handler is the temporary construction guard "
-        "for runtime/step_handlers. Keep its FlowOutputMode match cases in sync "
-        "with STEP_HANDLER_REGISTRY until executor.py can use assert_never."
-    )
+    assert exc_info.value.code == FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE.value
 
 
 @pytest.mark.asyncio

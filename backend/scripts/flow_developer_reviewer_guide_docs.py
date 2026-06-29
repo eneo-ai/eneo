@@ -456,19 +456,22 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
     _route(
         slug="step-handler",
         change_type="Step handler or output mode",
-        start_here="For handlers start at `STEP_HANDLER_REGISTRY`; for output modes start at the output modes and output processing modules.",
+        start_here="Start runtime handler construction at `FlowRunExecutor._build_step_handler` and keep concrete behavior in `runtime/step_handlers/`",
         proof="Prove parser validation, handler or output-processing behavior, and typed errors.",
         source_refs=(
             _source(
-                "Step handler registry",
-                "backend/src/intric/flows/runtime/step_handlers/__init__.py",
+                "Handler construction",
+                "backend/src/intric/flows/runtime/executor.py",
+            ),
+            _source(
+                "Handler contract",
+                "backend/src/intric/flows/runtime/step_handlers/base.py",
             ),
             _source("Output modes", "backend/src/intric/flows/output_modes.py"),
             _source(
                 "Output processing",
                 "backend/src/intric/flows/output_processing.py",
             ),
-            _source("Executor", "backend/src/intric/flows/runtime/executor.py"),
             _source(
                 "Step definition parser",
                 "backend/src/intric/flows/runtime/step_definition_parser.py",
@@ -482,7 +485,7 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
             ),
             ProcedureStep(
                 "Add runtime support",
-                "Update the runtime handler registry in `backend/src/intric/flows/runtime/step_handlers/__init__.py` only when the capability needs execution support.",
+                "Update executor handler construction when the capability needs a runtime handler; keep behavior in `runtime/step_handlers/`.",
             ),
             ProcedureStep(
                 "Update parsing and output",

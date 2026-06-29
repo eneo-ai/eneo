@@ -231,6 +231,58 @@
 - Remaining risk / follow-up:
   - Shared `CompletionService.resolve_structured_output_capability` may now be a zero-production-caller capability outside Builder; it is deliberately kept in PG-3c because the backlog protects the shared type/owner. See `PG3-FU-2`.
 
+## PG-4
+
+- Slice id: PG-4
+- Findings addressed: `A-DEL-5 / verify-roadmap:02 + backlog#1`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:28` scoped the deletion to `STEP_HANDLER_REGISTRY`, `StepHandlerClass`, the registry coverage test, the AST match-case guard, and the docs-contract registry pin.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:20` indexed the decorative registry lookup/assert/hand-construction path.
+  - Before the edit, `backend/src/intric/flows/runtime/step_handlers/__init__.py:15-31` defined `StepHandlerClass` and `STEP_HANDLER_REGISTRY`.
+  - Before the edit, `backend/src/intric/flows/runtime/executor.py:1217-1238` read the registry only to assert concrete classes, then constructed the same concrete handlers in a `match`.
+  - Before the edit, direct `rg` for `STEP_HANDLER_REGISTRY|StepHandlerClass|runtime handler registry|Step handler registry` under `backend/src`, `backend/tests`, `backend/scripts`, and the docs site showed only the executor lookup, the registry definition/export, registry-coupled tests, and generated docs/docs-contract pins.
+  - CRG `get_minimal_context` for the explicit PG-4 file set reported low risk. CRG `importers_of` for `runtime/step_handlers/__init__.py` was not useful, so direct `rg` remained the proof source.
+- Verification agents used, with verdicts:
+  - `dead_code_deletion_reviewer` verdict: `confirmed`; delete `STEP_HANDLER_REGISTRY` / `StepHandlerClass`, keep `resolve_handler_mode` or equivalent typed invalid-string validation, add static exhaustiveness with `assert_never`, replace registry/AST tests with a small construction behavior test, and repoint generated docs to the real owner.
+  - Claude peer-loop session `eneo-flows-pg4-step-handler-registry-2026-06-29` plan gate verdict: `changes_required`; the core deletion was safe, but the plan needed generated-docs source updates, a behavior wiring test for `_build_step_handler`, and a docs-contract owner pin instead of editing rendered MDX directly.
+  - Claude peer-loop implementation gate iteration 2 verdict: `changes_required`; code and ownership were clean, but the generated procedure text used a backtick-wrapped `backend/.../step_handlers/` directory token that failed the docs source-reference contract. The generator was corrected to use unprefixed `runtime/step_handlers/`, the docs were regenerated, and the full docs contract file was run.
+  - Claude peer-loop implementation gate iteration 3 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9`; no code blockers remained, with the commit-scope guardrail to stage only the PG-4 paths.
+- Files changed:
+  - `backend/src/intric/flows/runtime/step_handlers/__init__.py`
+  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/tests/unittests/flows/test_flow_runtime_step_handlers.py`
+  - `backend/tests/unittests/flows/test_flow_docs_site_contract.py`
+  - `backend/scripts/flow_developer_reviewer_guide_docs.py`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx`
+- Behavior changed:
+  - Removed the decorative registry and class alias from the runtime handler package.
+  - `resolve_handler_mode` still converts persisted string output modes into `FlowOutputMode` and still raises `TypedIOValidationException` with `FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE` for unsupported strings.
+  - `FlowRunExecutor._build_step_handler` is now the only runtime construction owner for concrete step handlers, with `assert_never(mode)` as the static exhaustiveness guard.
+  - Developer docs now point reviewers to `FlowRunExecutor._build_step_handler` and the concrete handler contract instead of the removed registry.
+- Complexity deleted or owner clarified:
+  - Deleted the false registry owner, four redundant executor identity asserts, and the registry-coupled AST test.
+  - Replaced implementation-shape coverage with a behavior test that verifies each current `FlowOutputMode` builds the expected concrete handler.
+- Architecture delta:
+  - Canonical owner before: mode-to-handler construction was split between `STEP_HANDLER_REGISTRY` in `runtime/step_handlers/__init__.py` and the executor's direct `match` construction.
+  - Canonical owner after: `FlowRunExecutor._build_step_handler` owns runtime handler construction; `runtime/step_handlers/__init__.py::resolve_handler_mode` owns the defensive persisted string-to-enum validation.
+  - Duplicate paths remaining: no duplicate handler-construction path remains; output-mode vocabulary still has distinct owners in `FlowOutputMode`, parser validation, `output_modes.py`, and `output_processing.py`, which serve separate API/runtime concerns.
+  - 9/10 follow-up candidate: no new PG-4 candidate; any future output-mode vocabulary consolidation should be evaluated in the post-PG API/runtime ownership map, not inside this deletion slice.
+  - Decision or measurement needed: keep strict pyright coverage on the executor so `assert_never(mode)` remains an actual exhaustiveness check; no product decision is needed for this slice.
+  - What not to preserve: the registry, `StepHandlerClass`, docs references to the registry, and AST tests that compare implementation shape to a decorative map.
+- Validation commands and results:
+  - `make docs:regen` -> pass after tightening the generated-docs catalog text to satisfy its short-sentence and file-path validators.
+  - `rg -n "STEP_HANDLER_REGISTRY|StepHandlerClass|runtime handler registry|Step handler registry" backend/src backend/scripts frontend/apps/docs-site --glob '!**/.venv/**'` -> no matches.
+  - `rg -n "STEP_HANDLER_REGISTRY|StepHandlerClass|runtime handler registry|Step handler registry" backend/tests/unittests/flows/test_flow_runtime_step_handlers.py backend/tests/unittests/flows/test_flow_docs_site_contract.py --glob '!**/.venv/**'` -> only the negative docs-contract assertion remains.
+  - `cd backend && uv run ruff check src/intric/flows/runtime/step_handlers/__init__.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_docs_site_contract.py scripts/flow_developer_reviewer_guide_docs.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/runtime/step_handlers/__init__.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_docs_site_contract.py scripts/flow_developer_reviewer_guide_docs.py` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_rejects_invalid_output_mode tests/unittests/flows/test_flow_executor_runtime.py::test_execute_fails_run_when_definition_snapshot_is_invalid tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_reviewer_guide_is_generated_from_review_catalog tests/unittests/flows/test_flow_architecture_guards.py::test_output_mode_literal_branches_only_appear_in_allowlisted_call_sites -q` -> pass, 13 passed.
+  - `cd backend && uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py -q` -> pass, 69 passed.
+  - `cd frontend && bun prettier --check apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx` -> pass.
+  - `git diff --check -- backend/scripts/flow_developer_reviewer_guide_docs.py backend/src/intric/flows/runtime/executor.py backend/src/intric/flows/runtime/step_handlers/__init__.py backend/tests/unittests/flows/test_flow_runtime_step_handlers.py backend/tests/unittests/flows/test_flow_docs_site_contract.py frontend/apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx` -> pass.
+- Remaining risk / follow-up:
+  - Residual risk is limited to out-of-repo imports of the deleted Python names; no in-repo production or docs reference remains.
+  - The broader output-mode vocabulary map remains deliberately out of scope because it is not the decorative registry finding and may affect API/runtime contract ownership.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

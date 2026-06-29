@@ -2088,7 +2088,9 @@ def test_flow_developer_docs_reviewer_guide_is_generated_from_review_catalog() -
     assert "<Cards num={2}>" in related_section
     assert related_section.count("<Cards.Card") == len(related_cards)
     assert "\n- [" not in related_section
-    assert "STEP_HANDLER_REGISTRY" in page
+    assert "STEP_HANDLER_REGISTRY" not in page
+    assert "FlowRunExecutor._build_step_handler" in page
+    assert "runtime/step_handlers/" in page
     assert "output_modes.py" in page
     assert "output_processing.py" in page
     assert "runtime/step_definition_parser.py" in page
