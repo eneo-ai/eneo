@@ -154,10 +154,6 @@ class NamedMCPReferenceIssue:
     resolved_server_ref: str | None
     selected_server_refs: frozenset[str]
 
-    @property
-    def selected_any_mcp(self) -> bool:
-        return bool(self.selected_server_refs)
-
 
 def find_named_mcp_reference_issue(
     *,
@@ -246,28 +242,6 @@ def find_named_mcp_request_issue(
                     resolved_server_ref=resolved_ref,
                     selected_server_refs=frozenset(),
                 )
-        return NamedMCPReferenceIssue(
-            requested_name=name_group[-1],
-            name_candidates=name_group,
-            step_name="conversation",
-            step_ref="conversation",
-            reason="unavailable_requested_server",
-            resolved_server_ref=None,
-            selected_server_refs=frozenset(),
-        )
-    return None
-
-
-def find_unavailable_named_mcp_request(
-    *,
-    catalog: AIBuilderResourceCatalog,
-    signal_text: str,
-) -> NamedMCPReferenceIssue | None:
-    """Detect a user-named MCP that is not among enabled space MCP metadata."""
-
-    for name_group in explicit_mcp_name_groups(signal_text):
-        if any(_resolve_named_mcp_server(catalog, name) for name in name_group):
-            continue
         return NamedMCPReferenceIssue(
             requested_name=name_group[-1],
             name_candidates=name_group,

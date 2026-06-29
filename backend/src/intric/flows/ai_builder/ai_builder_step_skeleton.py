@@ -581,12 +581,6 @@ def materialize_step_skeleton(
     )
 
 
-def compiled_chain_step_template(
-    chain_token: ChainStepToken,
-) -> CompiledChainStepTemplate:
-    return _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
-
-
 def _compiled_chain_step_template(
     chain_token: ChainStepToken,
     *,

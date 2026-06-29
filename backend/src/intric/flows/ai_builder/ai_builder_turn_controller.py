@@ -75,23 +75,6 @@ class BuilderTurnControl:
     unresolved_architectural_choices: frozenset[str]
 
 
-def determine_turn_decision(
-    *,
-    session_state: PlanningState,
-    selected_discovery_question_ids: tuple[str, ...],
-    requirements_confirmed: bool,
-    is_edit_mode: bool,
-    ui_language: str | None,
-) -> BuilderTurnDecision:
-    return resolve_turn_control(
-        session_state=session_state,
-        selected_discovery_question_ids=selected_discovery_question_ids,
-        requirements_confirmed=requirements_confirmed,
-        is_edit_mode=is_edit_mode,
-        ui_language=ui_language,
-    ).decision
-
-
 def resolve_turn_control(
     *,
     session_state: PlanningState,
@@ -429,6 +412,5 @@ __all__ = [
     "CommitArchitecture",
     "ConfirmRequirements",
     "GenerateProposal",
-    "determine_turn_decision",
     "resolve_turn_control",
 ]

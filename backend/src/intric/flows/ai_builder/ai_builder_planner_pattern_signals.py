@@ -259,10 +259,6 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
     )
 
 
-def extract_planner_pattern_recipe_signals(text: str) -> set[str]:
-    return detect_planner_pattern_signals(text).recipe_signals()
-
-
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
 

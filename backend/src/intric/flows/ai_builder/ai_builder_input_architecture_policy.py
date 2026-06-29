@@ -254,30 +254,6 @@ _RUNTIME_TEXT_ACTION_PHRASES: tuple[str, ...] = (
     "input field",
 )
 
-_OUTPUT_ONLY_EDIT_INPUT_CHANGE_MARKERS: tuple[str, ...] = (
-    (
-        "ändra indata",
-        "change input",
-        "ny indata",
-        "new input",
-        "input architecture",
-        "indataarkitektur",
-        "flow_input",
-        "upload",
-        "ladda upp",
-        "runtime input",
-        "filtyp",
-        "file type",
-        "document package",
-        "dokumentpaket",
-    )
-    + _AUDIO_PREFIX_MARKERS
-    + _DOCUMENT_INPUT_MARKERS
-    + _DOCUMENT_UPLOAD_MARKERS
-    + _TEXT_INPUT_MARKERS
-)
-
-
 @dataclass(frozen=True, slots=True)
 class InputIntentResolution:
     primary_runtime_input: PrimaryRuntimeInput
@@ -338,50 +314,6 @@ def resolve_input_intent(
     )
 
 
-def infer_mixed_input_architecture_choice(text: str) -> str | None:
-    normalized = _normalize_signal_text(text)
-    if not normalized:
-        return None
-    if _contains_any(
-        normalized,
-        (
-            "behåll dokument",
-            "keep documents",
-            "documents as primary",
-            "dokument som primär",
-            "keep the document flow",
-            "documents as usual",
-            "dokument som vanligt",
-        ),
-    ):
-        return "document_primary_input"
-    if _contains_any(
-        normalized,
-        (
-            "byt till ljud",
-            "switch to audio",
-            "audio as primary",
-            "ljud som primär",
-            "transcribe first",
-            "transkribera först",
-        ),
-    ):
-        return "audio_primary_input"
-    if _contains_any(
-        normalized,
-        (
-            "blandade filer",
-            "mixed files",
-            "all file types",
-            "alla typer",
-            "generic file",
-            "fil alla typer",
-        ),
-    ):
-        return "generic_file_input"
-    return None
-
-
 def has_real_audio_transcription_step(spec: FlowDraftSpecCore) -> bool:
     return any(
         step.input_source == InputSource.FLOW_INPUT
@@ -429,37 +361,6 @@ def uses_pseudo_transcription_without_audio_step(spec: FlowDraftSpecCore) -> boo
     return False
 
 
-def is_narrow_output_edit_request(
-    text: str,
-    *,
-    flow: "Flow | None" = None,
-    flow_defaults: dict[str, set[str]] | None = None,
-) -> bool:
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
-        mentions_output_change,
-        mentions_runtime_metadata,
-    )
-
-    if flow is None:
-        return False
-
-    normalized = _normalize_signal_text(text)
-    if not normalized or not mentions_output_change(normalized):
-        return False
-    if mentions_runtime_metadata(normalized):
-        return False
-
-    defaults = (
-        flow_defaults
-        if flow_defaults is not None
-        else build_flow_discovery_defaults(flow)
-    )
-    if not _flow_has_defined_input_architecture(defaults):
-        return False
-
-    return not _contains_any(normalized, _OUTPUT_ONLY_EDIT_INPUT_CHANGE_MARKERS)
-
-
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return contains_any_phrase(text, markers)
 
@@ -489,12 +390,6 @@ def _resolve_primary_from_answers(
     if "text" in input_modes:
         return "text"
     return "unknown"
-
-
-def _flow_has_defined_input_architecture(flow_defaults: dict[str, set[str]]) -> bool:
-    return bool(flow_defaults.get("input_material_mode")) or bool(
-        flow_defaults.get("document_material_scope")
-    )
 
 
 def _resolve_primary_from_defaults(

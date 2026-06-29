@@ -68,7 +68,6 @@ from intric.flows.flow_authoring_spec import (
 
 __all__ = [
     "aggregate_freeform_user_text",
-    "aggregate_user_text",
     "canonical_option_id",
     "canonical_question_id",
     "extract_freeform_user_messages",
@@ -297,12 +296,6 @@ def infer_question_answer_from_freeform(
             "answer": selected,
         }
     )
-
-
-def aggregate_user_text(
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-) -> str:
-    return _aggregate_user_text(conversation, include_structured_answers=True)
 
 
 def aggregate_freeform_user_text(

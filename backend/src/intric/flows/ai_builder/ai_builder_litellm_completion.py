@@ -30,12 +30,6 @@ class CompletionMetadata:
 
 
 @dataclass(frozen=True, slots=True)
-class PlannerCompletionResult:
-    raw_content: str
-    metadata: CompletionMetadata
-
-
-@dataclass(frozen=True, slots=True)
 class LLMCompletionToolCallFunction:
     name: str
     arguments: str
@@ -63,32 +57,6 @@ class LLMCompletionChoice:
 class LLMCompletionResponse:
     choices: tuple[LLMCompletionChoice, ...]
     usage: CompletionTokenUsage | None
-
-
-async def call_planner_completion(
-    *,
-    litellm_client: Any,
-    litellm_model: str,
-    litellm_kwargs: Mapping[str, Any],
-    messages: list[dict[str, Any]],
-) -> PlannerCompletionResult:
-    response = await litellm_client.acompletion(
-        model=litellm_model,
-        messages=messages,
-        **litellm_kwargs,
-    )
-    normalized = normalize_litellm_completion_response(response)
-    raw_content, finish_reason = _first_text_and_finish_reason(normalized)
-    return PlannerCompletionResult(
-        raw_content=raw_content,
-        metadata=_completion_metadata_from_response(
-            normalized,
-            litellm_model=litellm_model,
-            messages=messages,
-            completion_text=raw_content,
-            finish_reason=finish_reason,
-        ),
-    )
 
 
 async def call_proposal_completion(
@@ -271,8 +239,6 @@ __all__ = [
     "LLMCompletionResponse",
     "LLMCompletionToolCall",
     "LLMCompletionToolCallFunction",
-    "PlannerCompletionResult",
-    "call_planner_completion",
     "call_proposal_completion",
     "make_usage_tracked_proposal_completion",
     "normalize_litellm_completion_response",

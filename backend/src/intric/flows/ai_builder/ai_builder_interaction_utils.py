@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
@@ -43,37 +43,6 @@ def _count_structured_answers(conversation: list["ConversationMessage"]) -> int:
         if question_id is not None:
             answered_ids.add(question_id)
     return len(answered_ids)
-
-
-def build_question_fallback_text(arguments: dict[str, Any]) -> str | None:
-    question = arguments.get("question")
-    question_id = arguments.get("question_id")
-    if not isinstance(question, str) or not question.strip():
-        if isinstance(question_id, str) and question_id:
-            question = "Jag behöver förtydliga nästa designval innan jag bygger vidare."
-        else:
-            return None
-
-    lines = [question.strip()]
-    options = arguments.get("options")
-    if isinstance(options, list):
-        labels = [
-            str(option_dict.get("label")).strip()
-            for option in cast(list[object], options)
-            if isinstance(option, dict)
-            and isinstance(
-                (option_dict := cast(dict[str, Any], option)).get("label"), str
-            )
-        ]
-        if labels:
-            if len(labels) == 1:
-                lines.append(f"Föreslaget alternativ: {labels[0]}")
-            else:
-                lines.append("Alternativ:")
-                lines.extend(f"- {label}" for label in labels)
-
-    lines.append("Svara gärna i fri text så bygger jag vidare.")
-    return "\n".join(lines)
 
 
 def looks_like_information_request(text: str) -> bool:

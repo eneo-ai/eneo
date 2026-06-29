@@ -802,7 +802,7 @@ def test_litellm_completion_has_single_typed_completion_boundary() -> None:
     stale_paths = [str(path) for path in old_completion_paths if path.exists()]
     if stale_paths:
         violations.append(f"stale completion modules exist: {stale_paths}")
-    if len(acompletion_refs) != 2:
+    if len(acompletion_refs) != 1:
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{completion_path}: acompletion refs {lines}")
     if "_ProposalCompletion" in completion_text:
@@ -1195,7 +1195,7 @@ def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
         for node in ast.walk(completion_tree)
         if isinstance(node, ast.Attribute) and node.attr == "acompletion"
     ]
-    if len(acompletion_refs) != 2:
+    if len(acompletion_refs) != 1:
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{completion_path}: acompletion refs {lines}")
 

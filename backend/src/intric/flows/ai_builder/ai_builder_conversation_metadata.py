@@ -578,11 +578,6 @@ def metadata_has_question_answer(metadata: object) -> bool:
     return question_answer_from_metadata(metadata) is not None
 
 
-def metadata_has_real_question_answer(metadata: object) -> bool:
-    answer = question_answer_from_metadata(metadata)
-    return answer is not None and question_answer_has_real_payload(answer)
-
-
 def question_answer_has_real_payload(
     answer: StructuredQuestionAnswerMetadata | Mapping[str, Any],
 ) -> bool:
@@ -837,14 +832,3 @@ def _text_from_scalar(value: object) -> str | None:
 
 def tool_call_ids(tool_calls: Sequence[PersistedAssistantToolCall]) -> set[str]:
     return {tool_call.id for tool_call in tool_calls if tool_call.id}
-
-
-def latest_tool_call_arguments(
-    message: object,
-    *,
-    tool_name: str,
-) -> FlowPersistedJsonObject | None:
-    for tool_call in reversed(tool_calls_from_message(message)):
-        if tool_call.name == tool_name:
-            return tool_call.arguments
-    return None

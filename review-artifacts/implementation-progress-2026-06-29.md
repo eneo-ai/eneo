@@ -109,3 +109,59 @@
 - Remaining risk / follow-up:
   - Remaining risk is limited to out-of-repo or unmerged branch imports of the deleted exported names; no in-repo evidence supports keeping that compatibility path for pre-production Flow code.
   - The pre-existing inline duplication of run principal fields in `flow_run_service.py` and `flow_run_repo.py` remains a separate source-of-truth follow-up, not part of this zero-caller deletion slice.
+
+## PG-3a.2
+
+- Slice id: PG-3a.2
+- Findings addressed: `B-DEL-3 / missed-builder-controlplane:04`, `B-DEL-4 / missed-deadcode:02`, `B-DEL-5 / missed-deadcode:03`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:50-52` scopes this slice to the Builder planner-completion boundary, facade wrappers, and dead policy/util helpers only.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:62-70` lists the keep-carve-outs; this slice kept `CompletionMetadata`, kept the real implementations behind `B-DEL-4`, and did not touch `StructuredOutputCapabilityDecision`, `FlowExecutionBackend`, the JSON-text proposal repair fallback, or the active private-fields migration/test.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:73` indexes the dead planner-completion boundary.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:175-176` indexes the dead facade wrappers and dead policy/util helpers.
+  - Before the edit, direct `rg` for `PlannerCompletionResult|call_planner_completion|aggregate_user_text|render_structured_reference_block|determine_turn_decision|compiled_chain_step_template|metadata_has_real_question_answer|latest_tool_call_arguments|infer_mixed_input_architecture_choice|is_narrow_output_edit_request|build_question_fallback_text|find_unavailable_named_mcp_request|extract_planner_pattern_recipe_signals|selected_any_mcp` under `backend/src backend/tests frontend` returned only definition/export hits.
+  - CRG `callers_of(determine_turn_decision)`, `callers_of(find_unavailable_named_mcp_request)`, and `callers_of(infer_mixed_input_architecture_choice)` returned 0 callers in this session.
+  - `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:27-29` still owns the protected `CompletionMetadata` type after deleting the dead `PlannerCompletionResult` path.
+  - `backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py:339`, `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:21`, `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py:78`, and `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:584` remain as the real retained implementations behind the deleted wrappers.
+- Verification agents used, with verdicts:
+  - `PG-3a.2` read-only verifier verdict: `confirmed`; delete only the named symbols, keep `CompletionMetadata`, `_aggregate_user_text`, `build_structured_reference_payload`, `resolve_turn_control`, `_compiled_chain_step_template`, and `NamedMCPReferenceIssue`.
+  - Claude peer-loop session `eneo-flows-pg3-remaining-2026-06-29`: initial passes required proof that `B-DEL-1` structured-output resolution is side-effect-free and that `B-DEL-4` does not delete retained implementations; final pass returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after those proofs and the keep decision were documented.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_interaction_utils.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py`
+- Behavior changed:
+  - Removed dead in-repo Builder Python symbols and their stale exports only.
+  - Updated the Builder import-ownership test to assert the new single live LiteLLM provider-call boundary after deleting the dead planner completion path.
+- Complexity deleted or owner clarified:
+  - Deleted 14 dead wrappers/helpers and one stale public completion result type, reducing Builder helper surface by 258 net lines.
+  - Kept the live owners explicit: proposal completion remains the only LiteLLM proposal provider-call boundary, turn control remains `resolve_turn_control`, structured reference data remains `build_structured_reference_payload`, and compiled skeleton lookup remains `_compiled_chain_step_template`.
+- Validation commands and results:
+  - `rg -n --no-heading -S "\\b(PlannerCompletionResult|call_planner_completion|aggregate_user_text|render_structured_reference_block|determine_turn_decision|compiled_chain_step_template|metadata_has_real_question_answer|latest_tool_call_arguments|infer_mixed_input_architecture_choice|is_narrow_output_edit_request|build_question_fallback_text|find_unavailable_named_mcp_request|extract_planner_pattern_recipe_signals|selected_any_mcp)\\b" backend/src backend/tests frontend --glob '!**/.venv/**' --glob '!frontend/bun.lock'` -> no matches.
+  - `rg -n "_aggregate_user_text|build_structured_reference_payload|resolve_turn_control|_compiled_chain_step_template|CompletionMetadata" backend/src backend/tests --glob '*.py'` -> retained owners still present and referenced.
+  - `rg -n "from intric\\.flows\\.ai_builder\\.(ai_builder_litellm_completion|ai_builder_framework_policy|ai_builder_flow_capability_reference|ai_builder_turn_controller|ai_builder_step_skeleton|ai_builder_conversation_metadata|ai_builder_input_architecture_policy|ai_builder_interaction_utils|ai_builder_mcp_intent|ai_builder_planner_pattern_signals) import \\*" backend/src backend/tests --glob '*.py'` -> no wildcard imports.
+  - `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_litellm_completion.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py src/intric/flows/ai_builder/ai_builder_turn_controller.py src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py src/intric/flows/ai_builder/ai_builder_interaction_utils.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/ai_builder` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py tests/unittests/flows/ai_builder/test_ai_builder_turn_controller.py tests/unittests/flows/ai_builder/test_ai_builder_turn_decision_proof.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q` -> pass, 211 passed.
+  - `git diff --check -- backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py` -> pass.
+- Remaining risk / follow-up:
+  - Remaining risk is limited to out-of-repo imports of the deleted Builder helper names; direct in-repo source/test/frontend checks found no live callers.
+  - `build_structured_reference_payload` is kept by the explicit `B-DEL-4` carve-out even though deleting `render_structured_reference_block` leaves it currently referenced only by tests; see `PG3-FU-1`.
+
+## 9/10 Follow-Up Candidates
+
+- Candidate id: PG3-FU-1
+- Area: Builder / maintainability
+- Source evidence: `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:21` defines `build_structured_reference_payload`; `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py:4-37` currently exercises it; deleting `render_structured_reference_block` in PG-3a.2 removes the only production-facing renderer wrapper.
+- Why it is not part of the current PG slice: the PG-3 instructions explicitly require keeping the real implementations behind the `B-DEL-4` wrappers, and Claude's final green-light pass agreed that deletion or rewiring of this retained owner belongs outside PG-3a.2.
+- Likely canonical owner: whichever Builder prompt/request-preparation owner should expose the Flow capability reference to the planner, if the reference is still product-relevant.
+- Deletion/reuse/merge path if known: either wire `build_structured_reference_payload` into the canonical planner prompt/request preparation path with behavior tests, or delete it and its tests in a later Builder cleanup once product need is disproven.
+- Decision or measurement needed: decide whether the planner still needs an explicit structured Flow capability reference after the current server-owned Builder control-plane changes.

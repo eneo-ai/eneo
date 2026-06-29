@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
@@ -74,13 +73,6 @@ def build_structured_reference_payload(*, is_edit_mode: bool) -> dict[str, Any]:
     return payload
 
 
-def render_structured_reference_block(*, is_edit_mode: bool) -> str:
-    payload = build_structured_reference_payload(is_edit_mode=is_edit_mode)
-    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
-    return f"# Strukturerad referens\n\n```json\n{rendered}\n```"
-
-
 __all__ = [
     "build_structured_reference_payload",
-    "render_structured_reference_block",
 ]
