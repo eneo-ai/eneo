@@ -178,10 +178,11 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     ]
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
     apply_output_cap = AsyncMock()
+    template_asset_repo = AsyncMock()
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
-        template_asset_repo=AsyncMock(),
+        template_asset_repo=template_asset_repo,
         apply_output_cap=apply_output_cap,
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
@@ -229,6 +230,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     assert output.num_tokens_output == 0
     assert '"title": "Social medias påverkan"' in output.input_text
     file_repo.add.assert_awaited_once()
+    template_asset_repo.get.assert_not_awaited()
     apply_output_cap.assert_not_awaited()
 
 
@@ -286,6 +288,66 @@ async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> No
         "template_checksum": "checksum",
         "published_flow_version": run.flow_version,
     }
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_resolves_asset_id_only_config() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    asset_file_id = uuid4()
+    step = _asset_step(
+        template_asset_id=template_asset_id,
+        template_file_id=uuid4(),
+    )
+    del step.output_config["template_file_id"]
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_tenant.return_value = [
+        SimpleNamespace(
+            id=asset_file_id,
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        )
+    ]
+    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=asset_file_id)
+    deps = TemplateFillRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        apply_output_cap=AsyncMock(),
+        principal=FlowPrincipal.from_run(run),
+        logger=_logger(),
+    )
+
+    output = await execute_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    template_asset_repo.get.assert_awaited_once_with(
+        asset_id=template_asset_id,
+        tenant_id=run.tenant_id,
+    )
+    file_repo.get_list_by_id_and_tenant.assert_awaited_once_with(
+        ids=[asset_file_id],
+        tenant_id=run.tenant_id,
+        include_transcription=False,
+    )
+    assert output.output_payload_extensions["template_provenance"] == {
+        "template_name": "template.docx",
+        "template_asset_id": str(template_asset_id),
+        "template_file_id": str(asset_file_id),
+        "template_checksum": "checksum",
+        "published_flow_version": run.flow_version,
+    }
+    assert output.model_parameters_json["template_asset_id"] == str(template_asset_id)
+    assert output.model_parameters_json["template_file_id"] == str(asset_file_id)
 
 
 @pytest.mark.asyncio

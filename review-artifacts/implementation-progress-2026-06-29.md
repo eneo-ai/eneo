@@ -951,6 +951,57 @@
   - The API schema remains intentionally unchanged because `FlowTemplateAssetPublic` still declares the four public fields; generated-client cleanup is deferred until a dedicated API contract slice decides whether `can_select`/`can_inspect` are real consumer contract or removable pre-production noise.
   - The runtime readiness missing-asset `can_download=True` behavior is preserved to avoid a hidden product/API behavior change in PG-15; a future runtime contract cleanup can decide whether download should require accessible asset state.
 
+## PG-D4.1
+
+- Slice id: PG-D4 template identity step 1
+- Findings addressed: staged template asset/file dual identity cleanup, runtime asset-first resolution only.
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:47` scopes PG-D4 to staged template/evidence migrations; template work must migrate runtime to `template_asset_id`, backfill published definitions, then remove the `template_file_id` fallback later.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:89` requires the template work to stay staged and not delete `template_file_id` before runtime asset-first migration plus backfill.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:105` identifies the dual `template_asset_id` / `template_file_id` runtime identity path and calls for asset-first runtime resolution with a later fallback deletion.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:55-65` and `:374-395` keep Builder work behind the ship/no-ship decision gate, so this slice stayed in Flows runtime only.
+  - Fresh source review before the change confirmed `backend/src/intric/flows/runtime/template_fill_runtime.py:293-300` always required `template_file_id`, even when `template_asset_id` was present, and `backend/src/intric/flows/runtime/template_fill_runtime.py:341-399` loaded the file by `template_file_id` after only cross-checking the optional asset.
+  - Fresh source review confirmed publishing still writes both identifiers at `backend/src/intric/flows/application/flow_service.py:911-916`, and the authoring validator accepts either identifier at `backend/src/intric/flows/flow_validators_template.py:14-68`.
+  - Fresh source review after the change confirms `backend/src/intric/flows/runtime/template_fill_runtime.py:274-308` accepts asset-id-only template configs, `backend/src/intric/flows/runtime/template_fill_runtime.py:349-386` resolves through the asset's file id first, and `backend/src/intric/flows/runtime/template_fill_runtime.py:89,220-248` records the resolved file id in logs/provenance/model parameters.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but its output was stale/noisy for this small runtime file; all concrete claims were verified with direct source reads and exact `rg`.
+  - Read-only verifier agents checked runtime identity/fallback behavior, API/generated-client/frontend surface area, and sunset/no-permanent-dual-owner drift. Valid findings applied: keep the legacy file-id-only fallback, preserve existing mismatch rejection when both ids conflict, avoid API/frontend/generated-client edits, and record a concrete deletion trigger.
+  - Claude peer-loop session `pgd4-template-asset-first-runtime-20260630` iteration 1 plan-gate verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; valid guidance applied by keeping a Ponytail-small runtime-owner edit, asserting resolved provenance/model parameters in the red test, and avoiding a new resolver abstraction.
+  - Claude peer-loop session `pgd4-template-asset-first-runtime-20260630` iteration 2 commit-gate verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; valid non-blocking feedback applied by adding one intent comment for the loaded-file-id reassignment.
+- Red proof:
+  - Before the implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_template_fill_runtime.py::test_execute_template_fill_step_resolves_asset_id_only_config -q` failed as expected with `TypedIOValidationException: Template fill requires a valid template_file_id.`
+- Files changed:
+  - `backend/src/intric/flows/runtime/template_fill_runtime.py`
+  - `backend/tests/unittests/flows/test_template_fill_runtime.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Runtime template fill now resolves a published template by `template_asset_id` first when the asset id is present, using `FlowTemplateAssetRepository.get()` and the asset's `file_id`.
+  - Legacy published definitions that only carry `template_file_id` continue to resolve through the existing file-id fallback.
+  - Published definitions that carry both identifiers and point them at different files keep the verified existing `TEMPLATE_NOT_ACCESSIBLE` mismatch failure.
+  - No OpenAPI, generated-client, frontend, route, schema, FlowService publish, Builder, backfill, evidence-summary, or `template_file_id` deletion work is included.
+- Complexity deleted or owner clarified:
+  - `template_fill_runtime.py` remains the runtime template-fill resolution owner; no new resolver service, framework, or pass-through helper was added.
+  - Template asset identity is now the canonical runtime target when present; `template_file_id` is retained only as a named legacy fallback for already-published definitions.
+- Architecture delta:
+  - Canonical owner before: runtime fill required `template_file_id` and treated `template_asset_id` as a cross-check only.
+  - Canonical owner after: runtime fill resolves from `template_asset_id` first and uses the resolved file id for downstream provenance; file-id-only fallback remains in the same runtime owner.
+  - Duplicate paths remaining: published definitions and runtime config still support both `template_asset_id` and `template_file_id` until the later backfill/deletion slice.
+  - 9/10 follow-up candidate: run a backfill/migration check proving every runtime-relevant published template-fill definition carries a valid `template_asset_id`, then delete the `template_file_id` runtime fallback and its legacy tests.
+  - Decision or measurement needed: inventory published FlowVersions after the backfill to prove no runtime-relevant template-fill config depends on file-id-only identity.
+  - What not to preserve: permanent dual identity, file-id-first runtime resolution, broad resolver abstractions, Builder coupling, or frontend/API/client-visible churn for this internal runtime slice.
+- Fallback sunset trigger:
+  - Keep the `template_file_id` fallback only until a backfill/migration check proves every runtime-relevant published template-fill definition carries a valid `template_asset_id` and preserves the existing `template_checksum`; then delete the fallback branch and the legacy file-id-only tests in a dedicated later slice.
+  - The asset-id-only branch is intentionally ahead of the publish path because current FlowService still writes both identifiers; this slice prepares runtime for the later backfill without widening the public contract.
+- Validation commands and results:
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_template_fill_runtime.py::test_execute_template_fill_step_resolves_asset_id_only_config -q` -> pass, 1 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py && /home/vscode/.local/bin/uv run ruff format --check src/intric/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_template_fill_runtime.py -q` -> pass, 23 passed.
+- Remaining risk / follow-up:
+  - Existing published definitions are still expected to carry both identifiers until the later backfill, so the asset-id-only path is mostly a forward-compatible runtime guard until PG-D4 continues.
+  - The legacy fallback deliberately keeps file-id-only published snapshots runnable; deleting it before a data proof would risk breaking old FlowVersions.
+  - The later fallback-deletion slice must prove asset-backed published definitions retain checksum pinning, because once `template_file_id` is removed the checksum becomes the runtime reproducibility guard.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

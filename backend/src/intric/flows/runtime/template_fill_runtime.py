@@ -86,6 +86,8 @@ async def execute_template_fill_step(
             template_file_id=template_file_id,
             template_checksum=template_checksum,
         )
+        # Asset-only configs carry no pinned file id; use the loaded file id downstream.
+        template_file_id = template_file.id
         template_blob = template_file.blob
         if (
             template_blob is None
@@ -272,7 +274,7 @@ async def execute_template_fill_step(
 
 def _parse_template_output_config(
     step: RuntimeStep,
-) -> tuple[UUID | None, UUID, str | None, str | None, list[str], dict[str, str]]:
+) -> tuple[UUID | None, UUID | None, str | None, str | None, list[str], dict[str, str]]:
     if not isinstance(step.output_config, dict):
         raise TypedIOValidationException(
             "Template fill requires output_config.",
@@ -291,13 +293,20 @@ def _parse_template_output_config(
             ) from exc
 
     template_file_id_raw = step.output_config.get("template_file_id")
-    try:
-        template_file_id = UUID(str(template_file_id_raw))
-    except Exception as exc:
+    template_file_id: UUID | None = None
+    if template_file_id_raw not in (None, ""):
+        try:
+            template_file_id = UUID(str(template_file_id_raw))
+        except Exception as exc:
+            raise TypedIOValidationException(
+                "Template fill requires a valid template_file_id.",
+                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            ) from exc
+    elif template_asset_id is None:
         raise TypedIOValidationException(
             "Template fill requires a valid template_file_id.",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
-        ) from exc
+        )
 
     bindings_raw = cast(dict[Any, Any] | None, step.output_config.get("bindings"))
     placeholders_raw = cast(list[Any] | None, step.output_config.get("placeholders"))
@@ -344,7 +353,7 @@ async def _load_template_file(
     file_repo: FileRepository,
     tenant_id: UUID,
     template_asset_id: UUID | None,
-    template_file_id: UUID,
+    template_file_id: UUID | None,
     template_checksum: str | None,
 ) -> File:
     if template_asset_id is not None:
@@ -359,14 +368,22 @@ async def _load_template_file(
                 code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
             ) from exc
 
-        if asset.file_id != template_file_id:
+        if template_file_id is not None and asset.file_id != template_file_id:
             raise TypedIOValidationException(
                 "The published DOCX template asset no longer matches the pinned template file. Re-publish the flow.",
                 code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
             )
+        effective_file_id = asset.file_id
+    elif template_file_id is not None:
+        effective_file_id = template_file_id
+    else:
+        raise TypedIOValidationException(
+            "Template fill requires a valid template_file_id.",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+        )
 
     files = await file_repo.get_list_by_id_and_tenant(
-        ids=[template_file_id],
+        ids=[effective_file_id],
         tenant_id=tenant_id,
         include_transcription=False,
     )
