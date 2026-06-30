@@ -22,8 +22,17 @@ export function InstructionsSection({ app }: { app: App }) {
 
   return (
     <SettingsGroup title={t("instructions")}>
-      <SettingsRow title={t("prompt")} description={t("app_prompt_description")}>
-        <Textarea value={prompt} rows={6} onChange={(event) => setPrompt(event.target.value)} />
+      <SettingsRow
+        title={t("prompt")}
+        description={t("app_prompt_description")}
+        htmlFor="app-prompt"
+      >
+        <Textarea
+          id="app-prompt"
+          value={prompt}
+          rows={6}
+          onChange={(event) => setPrompt(event.target.value)}
+        />
         <SaveRow
           dirty={dirty}
           pending={update.isPending}

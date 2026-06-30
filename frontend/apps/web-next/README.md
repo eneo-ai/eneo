@@ -67,9 +67,11 @@ shadcn/ui (new-york style, zinc base, CSS variables) installed into
 bunx shadcn@latest add <component>
 ```
 
-The theme carries over ONLY the Eneo accent color from the legacy design
-system; every other token is stock shadcn. Deviations are documented at the
-top of `src/app/globals.css`.
+The theme uses shadcn's semantic token contract (`background`, `primary`,
+`muted`, `sidebar`, chart tokens, etc.) but the token values are an intentional
+Eneo palette, not stock shadcn. The implemented palette and its rationale are
+documented at the top of `src/app/globals.css`; keep all feature styling on
+semantic tokens instead of hard-coded colors.
 
 ## i18n
 
@@ -83,3 +85,7 @@ node scripts/convert-paraglide-messages.mjs
 
 The script flags messages that need manual ICU review; do not edit the
 generated catalogs by hand.
+
+`bun run lint` runs `scripts/check-i18n.mjs`, which fails when `sv`/`en` drift
+apart or when a literal `t("key")` call is missing from the generated catalogs.
+Add web-next-only strings to `src/lib/i18n/extra/{sv,en}.json`, then regenerate.

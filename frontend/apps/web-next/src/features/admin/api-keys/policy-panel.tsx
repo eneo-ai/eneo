@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -37,7 +37,6 @@ export function ApiKeyPolicyDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
-  const queryClient = useQueryClient();
 
   const { data: policy, isPending } = useQuery({
     queryKey: POLICY_KEY,
@@ -51,34 +50,61 @@ export function ApiKeyPolicyDialog({
     queryFn: () => unwrap(browserApi.GET("/api/v1/admin/super-api-key-status"))
   });
 
-  const [draft, setDraft] = useState<Policy | null>(null);
-  useEffect(() => {
-    if (policy) setDraft(policy);
-  }, [policy]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("api_keys_admin_tenant_policy")}</DialogTitle>
+          <DialogDescription>{t("api_keys_admin_policy_description")}</DialogDescription>
+        </DialogHeader>
+
+        {isPending || !policy ? (
+          <Skeleton className="h-72 w-full" />
+        ) : (
+          <PolicyForm
+            policy={policy}
+            superStatus={superStatus}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PolicyForm({
+  policy,
+  superStatus,
+  onClose
+}: {
+  policy: Policy;
+  superStatus: SuperKeyStatus | undefined;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<Policy>(policy);
 
   const save = useMutation({
     mutationFn: () => {
       // ApiKeyPolicyUpdate is extra="forbid" — send only changed fields.
       const body: Record<string, unknown> = {};
-      if (draft && policy) {
-        for (const key of Object.keys(draft) as (keyof Policy)[]) {
-          if (draft[key] !== policy[key]) body[key] = draft[key];
-        }
+      for (const key of Object.keys(draft) as (keyof Policy)[]) {
+        if (draft[key] !== policy[key]) body[key] = draft[key];
       }
       return unwrap(browserApi.PATCH("/api/v1/admin/api-key-policy", { body }));
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: POLICY_KEY });
-      onOpenChange(false);
+      onClose();
     },
     onError: (error) => toastApiError(error, t)
   });
 
-  const dirty =
-    draft && policy && (Object.keys(draft) as (keyof Policy)[]).some((k) => draft[k] !== policy[k]);
+  const dirty = (Object.keys(draft) as (keyof Policy)[]).some((key) => draft[key] !== policy[key]);
 
   const setField = (key: keyof Policy, value: number | boolean | null) =>
-    setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setDraft((prev) => ({ ...prev, [key]: value }));
 
   const numberValue = (value: number | null | undefined) =>
     value === null || value === undefined ? "" : String(value);
@@ -88,92 +114,81 @@ export function ApiKeyPolicyDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{t("api_keys_admin_tenant_policy")}</DialogTitle>
-          <DialogDescription>{t("api_keys_admin_policy_description")}</DialogDescription>
-        </DialogHeader>
+    <>
+      <div className="flex flex-col gap-4">
+        <ToggleRow
+          label={t("api_keys_admin_policy_require_expiration")}
+          description={t("api_keys_admin_policy_require_expiration_desc")}
+          checked={draft.require_expiration ?? false}
+          onCheckedChange={(value) => setField("require_expiration", value)}
+        />
+        <NumberRow
+          label={t("api_keys_admin_policy_max_expiration")}
+          description={t("api_keys_admin_policy_max_expiration_desc")}
+          placeholder={t("api_keys_admin_policy_placeholder_no_limit")}
+          suffix={t("api_keys_admin_policy_suffix_days")}
+          min={1}
+          value={numberValue(draft.max_expiration_days)}
+          onChange={onNumber("max_expiration_days")}
+        />
+        <NumberRow
+          label={t("api_keys_admin_policy_auto_expire")}
+          description={t("api_keys_admin_policy_auto_expire_desc")}
+          placeholder={t("api_keys_admin_policy_placeholder_disabled")}
+          suffix={t("api_keys_admin_policy_suffix_days")}
+          min={1}
+          value={numberValue(draft.auto_expire_unused_days)}
+          onChange={onNumber("auto_expire_unused_days")}
+        />
+        <NumberRow
+          label={t("api_keys_admin_policy_max_rate_limit")}
+          description={t("api_keys_admin_policy_max_rate_limit_desc")}
+          placeholder={t("api_keys_admin_policy_placeholder_no_limit")}
+          suffix={t("api_keys_admin_policy_suffix_req_hr")}
+          min={1}
+          value={numberValue(draft.max_rate_limit_override)}
+          onChange={onNumber("max_rate_limit_override")}
+        />
+        <NumberRow
+          label={t("api_keys_admin_policy_rotation_grace")}
+          description={t("api_keys_admin_policy_rotation_grace_desc")}
+          placeholder="24"
+          suffix={t("api_keys_admin_policy_suffix_hours")}
+          min={0}
+          value={numberValue(draft.rotation_grace_hours)}
+          onChange={onNumber("rotation_grace_hours")}
+        />
+        <NumberRow
+          label={t("api_keys_admin_policy_max_delegation")}
+          description={t("api_keys_admin_policy_max_delegation_desc")}
+          placeholder={t("api_keys_admin_policy_placeholder_no_limit")}
+          suffix={t("api_keys_admin_policy_suffix_levels")}
+          min={1}
+          value={numberValue(draft.max_delegation_depth)}
+          onChange={onNumber("max_delegation_depth")}
+        />
+        <ToggleRow
+          label={t("api_keys_admin_policy_revocation_cascade")}
+          description={t("api_keys_admin_policy_revocation_cascade_desc")}
+          checked={draft.revocation_cascade_enabled ?? false}
+          onCheckedChange={(value) => setField("revocation_cascade_enabled", value)}
+        />
 
-        {isPending || !draft ? (
-          <Skeleton className="h-72 w-full" />
-        ) : (
-          <div className="flex flex-col gap-4">
-            <ToggleRow
-              label={t("api_keys_admin_policy_require_expiration")}
-              description={t("api_keys_admin_policy_require_expiration_desc")}
-              checked={draft.require_expiration ?? false}
-              onCheckedChange={(v) => setField("require_expiration", v)}
-            />
-            <NumberRow
-              label={t("api_keys_admin_policy_max_expiration")}
-              description={t("api_keys_admin_policy_max_expiration_desc")}
-              placeholder={t("api_keys_admin_policy_placeholder_no_limit")}
-              suffix={t("api_keys_admin_policy_suffix_days")}
-              min={1}
-              value={numberValue(draft.max_expiration_days)}
-              onChange={onNumber("max_expiration_days")}
-            />
-            <NumberRow
-              label={t("api_keys_admin_policy_auto_expire")}
-              description={t("api_keys_admin_policy_auto_expire_desc")}
-              placeholder={t("api_keys_admin_policy_placeholder_disabled")}
-              suffix={t("api_keys_admin_policy_suffix_days")}
-              min={1}
-              value={numberValue(draft.auto_expire_unused_days)}
-              onChange={onNumber("auto_expire_unused_days")}
-            />
-            <NumberRow
-              label={t("api_keys_admin_policy_max_rate_limit")}
-              description={t("api_keys_admin_policy_max_rate_limit_desc")}
-              placeholder={t("api_keys_admin_policy_placeholder_no_limit")}
-              suffix={t("api_keys_admin_policy_suffix_req_hr")}
-              min={1}
-              value={numberValue(draft.max_rate_limit_override)}
-              onChange={onNumber("max_rate_limit_override")}
-            />
-            <NumberRow
-              label={t("api_keys_admin_policy_rotation_grace")}
-              description={t("api_keys_admin_policy_rotation_grace_desc")}
-              placeholder="24"
-              suffix={t("api_keys_admin_policy_suffix_hours")}
-              min={0}
-              value={numberValue(draft.rotation_grace_hours)}
-              onChange={onNumber("rotation_grace_hours")}
-            />
-            <NumberRow
-              label={t("api_keys_admin_policy_max_delegation")}
-              description={t("api_keys_admin_policy_max_delegation_desc")}
-              placeholder={t("api_keys_admin_policy_placeholder_no_limit")}
-              suffix={t("api_keys_admin_policy_suffix_levels")}
-              min={1}
-              value={numberValue(draft.max_delegation_depth)}
-              onChange={onNumber("max_delegation_depth")}
-            />
-            <ToggleRow
-              label={t("api_keys_admin_policy_revocation_cascade")}
-              description={t("api_keys_admin_policy_revocation_cascade_desc")}
-              checked={draft.revocation_cascade_enabled ?? false}
-              onCheckedChange={(v) => setField("revocation_cascade_enabled", v)}
-            />
+        <SuperKeySection status={superStatus} t={t} />
+      </div>
 
-            <SuperKeySection status={superStatus} t={t} />
-          </div>
-        )}
-
-        <DialogFooter>
-          <span className="text-muted-foreground mr-auto text-xs">
-            {dirty ? t("api_keys_admin_changes_apply") : ""}
-          </span>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t("cancel")}
-          </Button>
-          <Button disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
-            {t("api_keys_admin_save_changes")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <DialogFooter>
+        <span className="text-muted-foreground mr-auto text-xs">
+          {dirty ? t("api_keys_admin_changes_apply") : ""}
+        </span>
+        <Button variant="outline" onClick={onClose}>
+          {t("cancel")}
+        </Button>
+        <Button disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+          {t("api_keys_admin_save_changes")}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 

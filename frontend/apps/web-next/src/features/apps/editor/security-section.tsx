@@ -5,7 +5,6 @@ import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useSpace } from "@/features/spaces/use-space";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
@@ -27,11 +26,9 @@ export function SecuritySection({ app }: { app: App }) {
       <SettingsRow
         title={t("conversation_retention_title")}
         description={t("conversation_retention_app_description")}
+        htmlFor="app-retention-days"
       >
         <div className="flex items-center gap-2">
-          <Label htmlFor="app-retention-days" className="sr-only">
-            {t("conversation_retention_title")}
-          </Label>
           <Input
             id="app-retention-days"
             type="number"

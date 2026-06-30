@@ -35,8 +35,16 @@ function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
 
   return (
     <SettingsGroup title={t("general")}>
-      <SettingsRow title={t("name")} description={t("give_group_chat_name_displayed_to_users")}>
-        <Input value={name} onChange={(event) => setName(event.target.value)} />
+      <SettingsRow
+        title={t("name")}
+        description={t("give_group_chat_name_displayed_to_users")}
+        htmlFor="group-chat-name"
+      >
+        <Input
+          id="group-chat-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
         <SaveRow
           dirty={name !== groupChat.name}
           pending={update.isPending}

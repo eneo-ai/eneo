@@ -153,6 +153,7 @@ export function ModelDetails({
 }
 
 type ModelSelectorProps = {
+  id?: string;
   models: CompletionModel[];
   selectedId: string | null | undefined;
   onSelect: (id: string) => void;
@@ -172,6 +173,7 @@ type ModelSelectorProps = {
  * `ai-elements/model-selector` + `ChatModelSelect`/`ChatModelDetails`.
  */
 export function ModelSelector({
+  id,
   models,
   selectedId,
   onSelect,
@@ -229,6 +231,7 @@ export function ModelSelector({
       }}
     >
       <PopoverTrigger
+        id={id}
         disabled={disabled}
         className={triggerClasses}
         aria-label={t("completion_model")}

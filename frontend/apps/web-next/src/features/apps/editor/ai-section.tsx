@@ -117,9 +117,10 @@ export function AiSection({ app }: { app: App }) {
         <SettingsRow
           title={t("transcription_model")}
           description={t("transcription_model_description")}
+          htmlFor="app-transcription-model"
         >
           <Select value={transcriptionId} onValueChange={setTranscriptionId}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger id="app-transcription-model" className="w-full">
               <SelectValue placeholder={t("select_a_model")} />
             </SelectTrigger>
             <SelectContent>
@@ -133,8 +134,13 @@ export function AiSection({ app }: { app: App }) {
         </SettingsRow>
       )}
 
-      <SettingsRow title={t("completion_model")} description={t("this_model_will_be_used")}>
+      <SettingsRow
+        title={t("completion_model")}
+        description={t("this_model_will_be_used")}
+        htmlFor="app-completion-model"
+      >
         <ModelSelector
+          id="app-completion-model"
           models={space.completion_models}
           selectedId={modelId}
           onSelect={setModelId}
@@ -144,14 +150,18 @@ export function AiSection({ app }: { app: App }) {
       </SettingsRow>
 
       {presetsSupported && (
-        <SettingsRow title={t("model_behaviour")} description={t("select_preset_behavior")}>
+        <SettingsRow
+          title={t("model_behaviour")}
+          description={t("select_preset_behavior")}
+          htmlFor="app-model-behaviour"
+        >
           <div className="flex flex-col gap-3">
             <Select
               value={behaviour}
               disabled={!model}
               onValueChange={(value) => selectBehaviour(value as ModelBehaviour)}
             >
-              <SelectTrigger className="w-full" aria-label={t("select_model_behaviour")}>
+              <SelectTrigger id="app-model-behaviour" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -201,7 +211,12 @@ export function AiSection({ app }: { app: App }) {
               const capability = kwargCapability(model, name);
               return (
                 <div key={name} className="flex items-center justify-between gap-4">
-                  <Label className="text-muted-foreground font-normal">{kwargLabel(name, t)}</Label>
+                  <Label
+                    htmlFor={`app-kwarg-${name}`}
+                    className="text-muted-foreground font-normal"
+                  >
+                    {kwargLabel(name, t)}
+                  </Label>
                   {isSelectKwarg(name) ? (
                     <Select
                       value={(kwargs[name] as string | null | undefined) ?? "__default"}
@@ -212,7 +227,7 @@ export function AiSection({ app }: { app: App }) {
                         }))
                       }
                     >
-                      <SelectTrigger className="w-44">
+                      <SelectTrigger id={`app-kwarg-${name}`} className="w-44">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -226,6 +241,7 @@ export function AiSection({ app }: { app: App }) {
                     </Select>
                   ) : (
                     <Input
+                      id={`app-kwarg-${name}`}
                       type="number"
                       className="w-28"
                       min={capability?.minimum ?? 0}

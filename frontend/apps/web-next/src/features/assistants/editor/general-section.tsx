@@ -44,11 +44,20 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
 
   return (
     <SettingsGroup title={t("general")}>
-      <SettingsRow title={t("name")} description={t("assistant_name_description")}>
-        <Input value={name} onChange={(event) => setName(event.target.value)} />
+      <SettingsRow
+        title={t("name")}
+        description={t("assistant_name_description")}
+        htmlFor="assistant-name"
+      >
+        <Input id="assistant-name" value={name} onChange={(event) => setName(event.target.value)} />
       </SettingsRow>
-      <SettingsRow title={t("description")} description={t("assistant_description_description")}>
+      <SettingsRow
+        title={t("description")}
+        description={t("assistant_description_description")}
+        htmlFor="assistant-description"
+      >
         <Textarea
+          id="assistant-description"
           value={description}
           rows={4}
           placeholder={t("assistant_placeholder", { name })}

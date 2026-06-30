@@ -56,8 +56,13 @@ export function FeatureToggles() {
 
   return (
     <SettingsGroup title={t("features")}>
-      <SettingsRow title={t("enable_templates")} description={t("enable_templates_description")}>
+      <SettingsRow
+        title={t("enable_templates")}
+        description={t("enable_templates_description")}
+        htmlFor="feature-toggle-templates"
+      >
         <Switch
+          id="feature-toggle-templates"
           checked={templates}
           disabled={pending}
           onCheckedChange={(next) => toggle("templates", next, setTemplates, templates)}
@@ -66,8 +71,10 @@ export function FeatureToggles() {
       <SettingsRow
         title={t("enable_audit_logging")}
         description={t("enable_audit_logging_description")}
+        htmlFor="feature-toggle-audit-logging"
       >
         <Switch
+          id="feature-toggle-audit-logging"
           checked={auditLogging}
           disabled={pending}
           onCheckedChange={(next) => toggle("audit-logging", next, setAuditLogging, auditLogging)}
@@ -76,8 +83,10 @@ export function FeatureToggles() {
       <SettingsRow
         title={t("enable_provisioning")}
         description={t("enable_provisioning_description")}
+        htmlFor="feature-toggle-provisioning"
       >
         <Switch
+          id="feature-toggle-provisioning"
           checked={provisioning}
           disabled={pending}
           onCheckedChange={(next) => toggle("provisioning", next, setProvisioning, provisioning)}

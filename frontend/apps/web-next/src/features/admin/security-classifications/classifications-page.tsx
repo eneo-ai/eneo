@@ -136,10 +136,12 @@ function EnableToggle({ enabled }: { enabled: boolean }) {
     <SettingsRow
       title={t("security_classification")}
       description={t("enable_security_description")}
+      htmlFor="security-classification-enabled"
     >
       <Label className="flex items-center justify-between gap-2 py-1 font-normal">
         {enabled ? t("enabled") : t("disabled")}
         <Switch
+          id="security-classification-enabled"
           checked={enabled}
           disabled={toggle.isPending}
           onCheckedChange={(next) => setConfirm(next ? "enable" : "disable")}

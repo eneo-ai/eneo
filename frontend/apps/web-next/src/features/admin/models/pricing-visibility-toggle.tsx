@@ -49,8 +49,10 @@ export function PricingVisibilityToggle() {
       <SettingsRow
         title={t("show_model_pricing")}
         description={t("show_model_pricing_description")}
+        htmlFor="show-model-pricing"
       >
         <Switch
+          id="show-model-pricing"
           checked={enabled}
           disabled={pending}
           onCheckedChange={toggle}

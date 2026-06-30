@@ -35,9 +35,11 @@ const TYPE_GROUPS: { group: string; types: InputFieldType[] }[] = [
 ];
 
 function InputTypeSelect({
+  id,
   value,
   onChange
 }: {
+  id: string;
   value: InputFieldType;
   onChange: (value: InputFieldType) => void;
 }) {
@@ -45,7 +47,7 @@ function InputTypeSelect({
   const Icon = TYPE_META[value].icon;
   return (
     <Select value={value} onValueChange={(next) => onChange(next as InputFieldType)}>
-      <SelectTrigger className="w-full">
+      <SelectTrigger id={id} className="w-full">
         <SelectValue>
           <span className="flex items-center gap-2">
             <Icon className="size-4" />
@@ -103,14 +105,24 @@ export function InputSection({ app }: { app: App }) {
           <SettingsRow
             title={t("input_description")}
             description={t("input_description_description")}
+            htmlFor={`app-input-${index}-description`}
           >
             <Input
+              id={`app-input-${index}-description`}
               value={field.description}
               onChange={(event) => patchField(index, { description: event.target.value })}
             />
           </SettingsRow>
-          <SettingsRow title={t("input_type")} description={t("input_type_description")}>
-            <InputTypeSelect value={field.type} onChange={(type) => patchField(index, { type })} />
+          <SettingsRow
+            title={t("input_type")}
+            description={t("input_type_description")}
+            htmlFor={`app-input-${index}-type`}
+          >
+            <InputTypeSelect
+              id={`app-input-${index}-type`}
+              value={field.type}
+              onChange={(type) => patchField(index, { type })}
+            />
           </SettingsRow>
         </div>
       ))}

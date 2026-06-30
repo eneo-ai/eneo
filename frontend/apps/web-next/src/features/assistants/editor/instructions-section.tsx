@@ -26,13 +26,18 @@ export function InstructionsSection({ assistant }: { assistant: Assistant }) {
 
   return (
     <SettingsGroup title={t("instructions")}>
-      <SettingsRow title={t("prompt")} description={t("describe_assistant_behavior")}>
+      <SettingsRow
+        title={t("prompt")}
+        description={t("describe_assistant_behavior")}
+        htmlFor="assistant-prompt"
+      >
         <div className="flex justify-end">
           <Button type="button" variant="ghost" size="sm" onClick={() => setShowHistory(true)}>
             <History className="size-4" /> {t("show_prompt_history")}
           </Button>
         </div>
         <Textarea
+          id="assistant-prompt"
           value={prompt}
           rows={8}
           className="min-h-32 text-base"

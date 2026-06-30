@@ -5,7 +5,6 @@ import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useSpace } from "@/features/spaces/use-space";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
@@ -26,11 +25,9 @@ export function SecuritySection({ assistant }: { assistant: Assistant }) {
       <SettingsRow
         title={t("conversation_retention_title")}
         description={t("conversation_retention_assistant_description")}
+        htmlFor="assistant-retention-days"
       >
         <div className="flex items-center gap-2">
-          <Label htmlFor="assistant-retention-days" className="sr-only">
-            {t("conversation_retention_title")}
-          </Label>
           <Input
             id="assistant-retention-days"
             type="number"

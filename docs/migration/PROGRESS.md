@@ -61,11 +61,16 @@ actually happened. Update this file when a phase lands.
   in `src/components/composites/` (page-header, settings-rows, confirm-dialog,
   empty-state, secret-reveal); AI Elements vendored editable in
   `src/components/ai-elements/`; feature compositions in `src/features/`.
+  Theme values live only in `src/app/globals.css` as shadcn semantic tokens
+  with an Eneo palette. Feature code uses tokens/utilities, not hard-coded
+  colors or copied Svelte design-system variables.
 - **i18n**: keys come from the converted Svelte catalogs; web-next-only keys
   go in `src/lib/i18n/extra/{en,sv}.json`, then run
   `node scripts/convert-paraglide-messages.mjs`. `t()` is untyped (plain
-  string keys). Swedish is default; locale is the `NEXT_LOCALE` cookie set via
-  server action (`src/lib/i18n/actions.ts`).
+  string keys), but `bun run lint` runs `scripts/check-i18n.mjs` to enforce
+  `sv`/`en` key parity and literal `t("key")` coverage. Swedish is default;
+  locale is the `NEXT_LOCALE` cookie set via server action
+  (`src/lib/i18n/actions.ts`).
 - **Layout shell**: `(app)/layout.tsx` is viewport-locked (`h-svh`, scroll
   inside `main`) so chat can pin its input; don't reintroduce page-level
   growth. In chat, URL updates use `window.history.replaceState`

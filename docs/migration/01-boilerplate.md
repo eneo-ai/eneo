@@ -3,6 +3,11 @@
 ## Goal
 A bootable, CI-green Next.js 16 App Router app at `frontend/apps/web-next` (`@eneo/web-next`) with all shadcn/ui primitives CLI-installed app-locally under `src/components/ui`, themed with a fresh shadcn palette that carries over ONLY the Eneo accent color. TypeScript strict, next-intl scaffolding (sv + en), base layout, env handling, lint/format/test wiring, and a health endpoint.
 
+> Historical note: the implemented app later moved from "stock shadcn plus
+> accent" to an intentional Eneo palette expressed through shadcn semantic
+> tokens. Treat `frontend/apps/web-next/src/app/globals.css` and
+> `frontend/apps/web-next/README.md` as canonical for current theme ownership.
+
 Standing rule established here for all later phases: every piece of UI is composed from shadcn/ui (and, from Phase 5, AI Elements) primitives living in `src/components/ui` / `src/components/ai-elements`. Missing primitives are installed via the shadcn CLI; generic composites (data-table, form field, page header, confirm dialog, empty state, …) are added under `src/components/composites` as they emerge; feature code never defines its own primitives. There is no shared UI workspace package: the web app is the only consumer, and new code uses the `eneo` name, never the legacy `@intric/*` prefix. No auth, no backend calls yet (except an optional unauthenticated `/version` smoke call).
 
 ## Prerequisites
