@@ -134,5 +134,7 @@
   "personal_assistant_suggestion_draft": "Write a draft",
   "personal_assistant_prompt_draft": "Help me write a clear draft for: ",
   "personal_assistant_suggestion_plan": "Make a plan",
-  "personal_assistant_prompt_plan": "Make a concrete plan for: "
+  "personal_assistant_prompt_plan": "Make a concrete plan for: ",
+  "search_attachments": "Search files...",
+  "total_size": "Total size: {size}"
 }

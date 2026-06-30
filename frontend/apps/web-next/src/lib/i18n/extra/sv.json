@@ -134,5 +134,7 @@
   "personal_assistant_suggestion_draft": "Skriv ett utkast",
   "personal_assistant_prompt_draft": "Hjälp mig skriva ett tydligt utkast till: ",
   "personal_assistant_suggestion_plan": "Gör en plan",
-  "personal_assistant_prompt_plan": "Gör en konkret plan för: "
+  "personal_assistant_prompt_plan": "Gör en konkret plan för: ",
+  "search_attachments": "Sök bland filer...",
+  "total_size": "Total storlek: {size}"
 }

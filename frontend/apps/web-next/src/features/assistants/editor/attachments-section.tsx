@@ -1,34 +1,44 @@
 "use client";
 
-import { File, FileImage, FileText, Paperclip, UploadCloud, X } from "lucide-react";
+import {
+  ArrowUpDown,
+  Braces,
+  Download,
+  Eye,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileJson,
+  FilePenLine,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  FileVideo,
+  Paperclip,
+  Search,
+  Trash2,
+  UploadCloud,
+  type LucideIcon
+} from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useReportDirty } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 type Attachment = NonNullable<Assistant["attachments"]>[number];
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
-  return `${(kb / 1024).toFixed(1)} MB`;
-}
 
 const TYPE_LABELS: Record<string, string> = {
   "application/pdf": "PDF",
@@ -36,12 +46,24 @@ const TYPE_LABELS: Record<string, string> = {
   "text/markdown": "MD",
   "text/csv": "CSV",
   "application/json": "JSON",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX"
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPTX",
+  "application/vnd.ms-excel": "XLS",
+  "application/vnd.ms-powerpoint": "PPT",
+  "application/zip": "ZIP"
 };
 
-function fileTypeLabel(mimetype: string): string {
-  if (TYPE_LABELS[mimetype]) return TYPE_LABELS[mimetype];
-  const subtype = mimetype.split("/").pop() ?? mimetype;
+function fileExtension(name: string): string {
+  return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function attachmentTypeLabel(file: Attachment): string {
+  const knownLabel = TYPE_LABELS[file.mimetype];
+  if (knownLabel) return knownLabel;
+  const extension = fileExtension(file.name);
+  if (extension) return extension.toUpperCase().slice(0, 5);
+  const subtype = file.mimetype.split("/").pop() ?? file.mimetype;
   return (subtype.split(/[.+]/).pop() ?? subtype).toUpperCase().slice(0, 5);
 }
 
@@ -51,12 +73,150 @@ function compactTokens(value: number): string {
   );
 }
 
-function FileIcon({ mimetype }: { mimetype: string }) {
-  const className = "text-muted-foreground size-5 shrink-0";
-  if (mimetype.startsWith("image/")) return <FileImage aria-hidden="true" className={className} />;
-  if (mimetype === "application/pdf" || mimetype.startsWith("text/"))
-    return <FileText aria-hidden="true" className={className} />;
-  return <File aria-hidden="true" className={className} />;
+function fileIconConfig(file: Attachment): {
+  Icon: LucideIcon;
+  className: string;
+  label: string;
+} {
+  const extension = fileExtension(file.name);
+  const type = file.mimetype;
+
+  if (type === "application/pdf" || extension === "pdf") {
+    return {
+      Icon: FileText,
+      className: "bg-red-50 text-red-600 dark:bg-red-950/50",
+      label: "PDF"
+    };
+  }
+  if (type.startsWith("image/")) {
+    return {
+      Icon: FileImage,
+      className: "bg-sky-50 text-sky-600 dark:bg-sky-950/50",
+      label: "IMG"
+    };
+  }
+  if (type.startsWith("audio/")) {
+    return {
+      Icon: FileAudio,
+      className: "bg-violet-50 text-violet-600 dark:bg-violet-950/50",
+      label: "AUD"
+    };
+  }
+  if (type.startsWith("video/")) {
+    return {
+      Icon: FileVideo,
+      className: "bg-pink-50 text-pink-600 dark:bg-pink-950/50",
+      label: "VID"
+    };
+  }
+  if (
+    type.includes("spreadsheet") ||
+    type.includes("excel") ||
+    ["csv", "xls", "xlsx"].includes(extension)
+  ) {
+    return {
+      Icon: FileSpreadsheet,
+      className: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50",
+      label: extension === "csv" ? "CSV" : "XLS"
+    };
+  }
+  if (type.includes("presentation") || ["ppt", "pptx"].includes(extension)) {
+    return {
+      Icon: FileType,
+      className: "bg-orange-50 text-orange-600 dark:bg-orange-950/50",
+      label: "PPT"
+    };
+  }
+  if (type.includes("wordprocessing") || ["doc", "docx"].includes(extension)) {
+    return {
+      Icon: FilePenLine,
+      className: "bg-blue-50 text-blue-600 dark:bg-blue-950/50",
+      label: "DOC"
+    };
+  }
+  if (
+    type.includes("zip") ||
+    type.includes("compressed") ||
+    ["zip", "7z", "rar", "tar", "gz"].includes(extension)
+  ) {
+    return {
+      Icon: FileArchive,
+      className: "bg-amber-50 text-amber-600 dark:bg-amber-950/50",
+      label: "ZIP"
+    };
+  }
+  if (type === "application/json" || extension === "json") {
+    return {
+      Icon: FileJson,
+      className: "bg-lime-50 text-lime-700 dark:bg-lime-950/50",
+      label: "JSON"
+    };
+  }
+  if (
+    [
+      "js",
+      "jsx",
+      "ts",
+      "tsx",
+      "py",
+      "java",
+      "go",
+      "rs",
+      "html",
+      "css",
+      "xml",
+      "sql",
+      "yaml",
+      "yml"
+    ].includes(extension)
+  ) {
+    return {
+      Icon: FileCode,
+      className: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50",
+      label: "CODE"
+    };
+  }
+  if (type.startsWith("text/")) {
+    return {
+      Icon: Braces,
+      className: "bg-slate-100 text-slate-600 dark:bg-slate-800",
+      label: "TXT"
+    };
+  }
+  return {
+    Icon: File,
+    className: "bg-muted text-muted-foreground",
+    label: attachmentTypeLabel(file)
+  };
+}
+
+function AssistantAttachmentIcon({ file }: { file: Attachment }) {
+  const { Icon, className, label } = fileIconConfig(file);
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("relative grid size-10 shrink-0 place-items-center rounded-md", className)}
+    >
+      <Icon className="size-5" />
+      <span className="bg-background/95 absolute right-0.5 bottom-0.5 rounded px-1 py-0.5 text-[8px] leading-none font-semibold shadow-sm">
+        {label}
+      </span>
+    </span>
+  );
+}
+
+function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () => void }) {
+  const url = useSignedUrl(file.id);
+  return (
+    <AttachmentPreviewDialog
+      open
+      onOpenChange={(next) => !next && onClose()}
+      name={file.name}
+      mimetype={file.mimetype}
+      url={url}
+    />
+  );
 }
 
 /**
@@ -75,6 +235,9 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [preview, setPreview] = useState<Attachment | null>(null);
+  const [query, setQuery] = useState("");
+  const [sortAscending, setSortAscending] = useState(true);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const dirty =
     JSON.stringify(files.map((file) => file.id).sort()) !==
@@ -83,9 +246,26 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
 
   const totalSize = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
 
+  const filteredFiles = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return files
+      .filter((file) => {
+        if (!needle) return true;
+        return (
+          file.name.toLowerCase().includes(needle) ||
+          attachmentTypeLabel(file).toLowerCase().includes(needle)
+        );
+      })
+      .sort((first, second) =>
+        sortAscending
+          ? first.name.localeCompare(second.name)
+          : second.name.localeCompare(first.name)
+      );
+  }, [files, query, sortAscending]);
+
   function metaLine(file: Attachment): string {
     return [
-      fileTypeLabel(file.mimetype),
+      attachmentTypeLabel(file),
       formatBytes(file.size),
       file.token_count != null ? `${compactTokens(file.token_count)} ${t("tokens")}` : null,
       file.created_at
@@ -94,6 +274,29 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
     ]
       .filter(Boolean)
       .join(" · ");
+  }
+
+  async function downloadFile(file: Attachment) {
+    setDownloadingId(file.id);
+    try {
+      const { url } = await unwrap(
+        browserApi.POST("/api/v1/files/{id}/signed-url/", {
+          params: { path: { id: file.id } },
+          body: { expires_in: 3600, content_disposition: "attachment" }
+        })
+      );
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.name;
+      anchor.rel = "noreferrer";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (error) {
+      toastApiError(error, t);
+    } finally {
+      setDownloadingId(null);
+    }
   }
 
   async function uploadFiles(selected: File[]) {
@@ -130,37 +333,85 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   }
 
   return (
-    <SettingsGroup title={t("attachments")} description={t("attachments_description")}>
+    <SettingsGroup
+      title={t("attachments")}
+      description={t("attachments_description")}
+      headerEnd={
+        <>
+          <span className="bg-secondary text-secondary-foreground rounded-full px-2.5 py-1 text-xs font-medium">
+            {t("attachment_count", { count: files.length })}
+          </span>
+          <span className="bg-secondary text-secondary-foreground rounded-full px-2.5 py-1 text-xs font-medium">
+            {t("total_size", { size: formatBytes(totalSize) })}
+          </span>
+        </>
+      }
+    >
       <SettingsRow>
-        <div className="flex flex-col gap-3">
-          {files.length > 0 && (
-            <div className="rounded-lg border">
-              <div className="text-muted-foreground border-b px-3 py-2 text-xs">
-                {[t("attachment_count", { count: files.length }), formatBytes(totalSize)].join(
-                  " · "
-                )}
-              </div>
-              <div className="max-h-72 overflow-y-auto">
-                <ul>
-                  {files.map((file) => (
-                    <li
-                      key={file.id}
-                      className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0"
-                    >
-                      <button
+        <div className="bg-card flex flex-col gap-4 rounded-lg border p-4">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <Search
+                aria-hidden="true"
+                className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+              />
+              <Input
+                value={query}
+                placeholder={t("search_attachments")}
+                className="pl-9"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => setSortAscending((value) => !value)}
+              >
+                <ArrowUpDown className="size-4" />
+                {t("name")}
+              </Button>
+            </div>
+          </div>
+
+          <div className="-mx-4">
+            {filteredFiles.length > 0 ? (
+              <ul className="max-h-80 overflow-y-auto">
+                {filteredFiles.map((file) => (
+                  <li
+                    key={file.id}
+                    className="hover:bg-muted/40 flex items-center gap-3 border-t px-4 py-3"
+                  >
+                    <AssistantAttachmentIcon file={file} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{file.name}</p>
+                      <p className="text-muted-foreground truncate text-xs">{metaLine(file)}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
                         type="button"
-                        onClick={() => setPreview(file)}
+                        variant="ghost"
+                        size="icon"
                         aria-label={`${t("preview")} ${file.name}`}
-                        className="hover:bg-muted/50 -mx-1 flex min-w-0 flex-1 items-center gap-3 rounded px-1 py-0.5 text-left"
+                        onClick={() => setPreview(file)}
                       >
-                        <FileIcon mimetype={file.mimetype} />
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm">{file.name}</span>
-                          <span className="text-muted-foreground block truncate text-xs">
-                            {metaLine(file)}
-                          </span>
-                        </span>
-                      </button>
+                        <Eye className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`${t("download")} ${file.name}`}
+                        disabled={downloadingId === file.id}
+                        onClick={() => void downloadFile(file)}
+                      >
+                        {downloadingId === file.id ? (
+                          <Spinner className="size-4" />
+                        ) : (
+                          <Download className="size-4" />
+                        )}
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -170,14 +421,18 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
                           setFiles((current) => current.filter((other) => other.id !== file.id))
                         }
                       >
-                        <X className="size-4" />
+                        <Trash2 className="size-4" />
                       </Button>
-                    </li>
-                  ))}
-                </ul>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-muted-foreground flex min-h-24 items-center justify-center px-3 py-6 text-sm">
+                {query ? t("no_results") : t("no_attachments")}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div
             onDragOver={(event) => {
@@ -191,36 +446,40 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
               void uploadFiles(Array.from(event.dataTransfer.files));
             }}
             className={cn(
-              "flex flex-col items-center gap-2 rounded-lg border border-dashed p-4 text-center",
-              dragActive && "border-primary bg-muted/50"
+              "flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-5 text-center",
+              dragActive && "border-primary bg-primary/5"
             )}
           >
-            <UploadCloud aria-hidden="true" className="text-muted-foreground size-5" />
-            <p className="text-muted-foreground text-xs">
-              {files.length > 0 ? t("drop_files_here") : t("no_attachments")}
+            <span className="bg-muted grid size-10 place-items-center rounded-full">
+              <UploadCloud aria-hidden="true" className="text-muted-foreground size-5" />
+            </span>
+            <p className="text-sm font-medium">
+              {uploading ? t("uploading") : t("drop_files_here")}
             </p>
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="shrink-0"
               disabled={uploading}
               onClick={() => fileInput.current?.click()}
             >
               {uploading ? <Spinner className="size-4" /> : <Paperclip className="size-4" />}
               {t("attach_files")}
             </Button>
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              hidden
-              aria-label={t("attach_files")}
-              onChange={(event) => {
-                void uploadFiles(Array.from(event.target.files ?? []));
-                event.target.value = "";
-              }}
-            />
           </div>
+
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            aria-label={t("attach_files")}
+            onChange={(event) => {
+              void uploadFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
         </div>
       </SettingsRow>
 
@@ -231,22 +490,7 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
         onRevert={() => setFiles(saved)}
       />
 
-      <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="truncate">{preview?.name}</DialogTitle>
-            <DialogDescription>{preview ? metaLine(preview) : null}</DialogDescription>
-          </DialogHeader>
-          <p className="text-muted-foreground text-xs">{t("extracted_text")}</p>
-          <div className="max-h-80 overflow-y-auto rounded-md border p-3">
-            {preview?.transcription ? (
-              <p className="text-sm whitespace-pre-wrap">{preview.transcription}</p>
-            ) : (
-              <p className="text-muted-foreground text-sm">{t("no_extracted_text")}</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {preview && <AttachmentPreview file={preview} onClose={() => setPreview(null)} />}
     </SettingsGroup>
   );
 }
