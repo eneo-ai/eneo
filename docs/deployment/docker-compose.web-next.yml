@@ -129,6 +129,7 @@ services:
 
   db-init:
     image: *backend-image
+    pull_policy: always
     container_name: eneonext_db_init
     command: ["python", "init_db.py"]
     environment:
@@ -144,6 +145,7 @@ services:
 
   backend:
     image: *backend-image
+    pull_policy: always
     container_name: eneonext_backend
     restart: unless-stopped
     # Run migrations, then gunicorn. --timeout 900 so long LLM / AI Builder
@@ -187,6 +189,7 @@ services:
     # ARQ background worker (uploads, crawls, integrations). Drop this service
     # if you don't need background processing for the test.
     image: *backend-image
+    pull_policy: always
     container_name: eneonext_worker
     restart: unless-stopped
     environment:
@@ -203,6 +206,7 @@ services:
 
   frontend:
     image: ghcr.io/eneo-ai/eneo-frontend:refactor-web-next
+    pull_policy: always
     container_name: eneonext_frontend
     restart: unless-stopped
     environment:
