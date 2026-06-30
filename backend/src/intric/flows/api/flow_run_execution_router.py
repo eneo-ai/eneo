@@ -18,7 +18,9 @@ from fastapi import (
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
 from intric.database.database import AsyncSession
 from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
@@ -64,6 +66,9 @@ from intric.flows.api.flow_service_principal_actor_read_model import (
 from intric.flows.application.flow_dispatch import (
     dispatch_flow_run_after_commit,
     dispatch_flow_run_recoverably_after_commit,
+)
+from intric.flows.application.stale_queued_redispatch import (
+    StaleQueuedRedispatchDispatchError,
 )
 from intric.flows.domain.flow import FlowRunReviewCheckpoint
 from intric.flows.flow_access_policy import FlowApiAction
@@ -1510,11 +1515,28 @@ async def redispatch_flow_run(
     user = container.user()
     actor_kwargs = audit_actor_kwargs(user)
     run_service = container.flow_run_service()
-    result = await run_service.redispatch_run(
-        flow_id=id,
-        run_id=run_id,
-        execution_backend=container.flow_execution_backend(),
-    )
+    try:
+        result = await run_service.redispatch_run(
+            flow_id=id,
+            run_id=run_id,
+            execution_backend=container.flow_execution_backend(),
+        )
+    except StaleQueuedRedispatchDispatchError as exc:
+        failed_run = exc.run
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            actor_id=actor_kwargs["actor_id"],
+            actor_type=actor_kwargs["actor_type"],
+            actor_api_key_id=actor_kwargs["actor_api_key_id"],
+            action=ActionType.FLOW_RUN_REDISPATCHED,
+            entity_type=EntityType.FLOW_RUN,
+            entity_id=failed_run.id,
+            description=f"Redispatch failed for flow run {failed_run.id}",
+            metadata=AuditMetadata.standard(actor=user, target=failed_run),
+            outcome=Outcome.FAILURE,
+            error_message=str(exc)[:MAX_ERROR_MESSAGE_LENGTH],
+        )
+        raise
 
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,

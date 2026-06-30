@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Sequence
+from typing import Sequence, assert_never
 from uuid import UUID
 
 from intric.authentication.api_key_resolver import resolve_effective_resource_permission
@@ -18,6 +18,14 @@ from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from intric.flows.application.stale_queued_redispatch import (
+    StaleQueuedRedispatchDispatched,
+    StaleQueuedRedispatchDispatchError,
+    StaleQueuedRedispatchDispatchFailed,
+    StaleQueuedRedispatchInvalidRequest,
+    StaleQueuedRedispatchNotClaimed,
+    redispatch_stale_queued_run,
+)
 from intric.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
@@ -75,11 +83,8 @@ from intric.flows.published_definition import (
 )
 from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
-from intric.main.logging import get_logger
 from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
-
-logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +224,62 @@ class FlowRunService:
 
     def build_dispatch_request(self, run: FlowRun) -> FlowRunDispatchRequest:
         return build_flow_run_dispatch_request(run)
+
+    async def claim_stale_queued_run_for_redispatch(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+    ) -> FlowRun | None:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        stale_before = datetime.now(timezone.utc) - timedelta(
+            seconds=max(1, self.queued_redispatch_after_seconds)
+        )
+        return await self.flow_run_repo.claim_stale_queued_run_for_redispatch(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            stale_before=stale_before,
+            flow_id=flow_id,
+        )
+
+    async def redispatch_run(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        execution_backend: FlowExecutionBackend,
+    ) -> FlowRunRedispatchResult:
+        async def claim_run() -> FlowRun | None:
+            return await self.claim_stale_queued_run_for_redispatch(
+                flow_id=flow_id,
+                run_id=run_id,
+            )
+
+        redispatched_count = 0
+        result = await redispatch_stale_queued_run(
+            claim_run=claim_run,
+            backend=execution_backend,
+        )
+        match result:
+            case StaleQueuedRedispatchDispatched():
+                redispatched_count = 1
+            case StaleQueuedRedispatchNotClaimed():
+                pass
+            case StaleQueuedRedispatchInvalidRequest():
+                pass
+            case StaleQueuedRedispatchDispatchFailed(run=failed_run, error=error):
+                raise StaleQueuedRedispatchDispatchError(
+                    run=failed_run,
+                    cause=error,
+                ) from error
+            case _:
+                assert_never(result)
+
+        refreshed = await self.get_run(run_id=run_id, flow_id=flow_id)
+        return FlowRunRedispatchResult(
+            run=refreshed,
+            redispatched_count=redispatched_count,
+        )
 
     def _validate_idempotency_key(self, idempotency_key: str | None) -> str | None:
         if idempotency_key is None:
@@ -700,55 +761,6 @@ class FlowRunService:
                 )
             )
         return tuple(views)
-
-    async def redispatch_run(
-        self,
-        *,
-        flow_id: UUID,
-        run_id: UUID,
-        execution_backend: FlowExecutionBackend | None = None,
-    ) -> FlowRunRedispatchResult:
-        run = await self.get_run(run_id=run_id, flow_id=flow_id)
-        backend = execution_backend or self.execution_backend
-        redispatched = 0
-
-        if backend is not None:
-            stale_before = datetime.now(timezone.utc) - timedelta(
-                seconds=max(1, self.queued_redispatch_after_seconds)
-            )
-            claimed_run = (
-                await self.flow_run_repo.claim_stale_queued_run_for_redispatch(
-                    run_id=run.id,
-                    tenant_id=self.user.tenant_id,
-                    stale_before=stale_before,
-                    flow_id=flow_id,
-                )
-            )
-            if claimed_run is not None:
-                try:
-                    dispatch_request = self.build_dispatch_request(claimed_run)
-                except ValueError:
-                    pass
-                else:
-                    try:
-                        await backend.dispatch(request=dispatch_request)
-                        redispatched = 1
-                    except Exception:
-                        logger.exception(
-                            "Failed to redispatch stale queued flow run",
-                            extra={
-                                "run_id": str(claimed_run.id),
-                                "flow_id": str(claimed_run.flow_id),
-                                "tenant_id": str(claimed_run.tenant_id),
-                            },
-                        )
-                        raise
-
-        refreshed = await self.get_run(run_id=run_id, flow_id=flow_id)
-        return FlowRunRedispatchResult(
-            run=refreshed,
-            redispatched_count=redispatched,
-        )
 
     async def cancel_run(self, *, run_id: UUID, flow_id: UUID) -> FlowRun:
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="cancel")

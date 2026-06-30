@@ -646,7 +646,9 @@ def test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminaliza
         terminal_sources.append(source)
 
     monkeypatch.setattr(tasks_module, "_execute_flow_run_async", _execute_async)
-    monkeypatch.setattr(tasks_module, "terminalize_flow_run_failure", _terminalize_failure)
+    monkeypatch.setattr(
+        tasks_module, "terminalize_flow_run_failure", _terminalize_failure
+    )
     monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: loop)
     monkeypatch.setattr(
         tasks_module,
@@ -1242,6 +1244,68 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
 
     assert result["redispatched"] == 0
     assert backend.dispatch.await_count == 0
+
+
+def test_redispatch_stale_queued_continues_after_dispatch_failure(monkeypatch):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tenant = SimpleNamespace(id=uuid4())
+    failed_run = SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=tenant.id,
+        principal_type="user",
+        principal_user_id=uuid4(),
+    )
+    successful_run = SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=tenant.id,
+        principal_type="user",
+        principal_user_id=uuid4(),
+    )
+    repo = MagicMock()
+    repo.list_stale_queued_runs = AsyncMock(return_value=[failed_run, successful_run])
+    repo.claim_stale_queued_run_for_redispatch = AsyncMock(
+        side_effect=[failed_run, successful_run]
+    )
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant])
+    backend = MagicMock()
+    backend.dispatch = AsyncMock(side_effect=[RuntimeError("broker down"), None])
+
+    class _Container:
+        def __init__(self, session=None):
+            self._repo = repo
+            self._tenant_repo = tenant_repo
+            self._backend = backend
+
+        def flow_run_repo(self):
+            return self._repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_execution_backend(self):
+            return self._backend
+
+    fake_session = _fake_flow_task_session()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
+
+    assert result == {"status": "ok", "redispatched": 1}
+    assert backend.dispatch.await_count == 2
 
 
 def test_flow_worker_process_init_initializes_observability_db_and_http_client(

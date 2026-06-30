@@ -25,6 +25,9 @@ from intric.flows.application.flow_run_service import (
     FlowRunVersionedView,
     FlowRunWithResultFilesAndTokenUsage,
 )
+from intric.flows.application.stale_queued_redispatch import (
+    StaleQueuedRedispatchDispatchError,
+)
 from intric.flows.domain.flow import (
     Flow,
     FlowRun,
@@ -3045,6 +3048,103 @@ def test_build_dispatch_request_uses_service_key_identity(user):
 
 
 @pytest.mark.asyncio
+async def test_claim_stale_queued_run_for_redispatch_propagates_lookup_error(
+    user, monkeypatch
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow_id = uuid4()
+    run_id = uuid4()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    get_run = AsyncMock(side_effect=NotFoundException("Flow run not found."))
+    monkeypatch.setattr(service, "get_run", get_run)
+
+    with pytest.raises(NotFoundException):
+        await service.claim_stale_queued_run_for_redispatch(
+            flow_id=flow_id,
+            run_id=run_id,
+        )
+
+    get_run.assert_awaited_once_with(run_id=run_id, flow_id=flow_id)
+    flow_run_repo.claim_stale_queued_run_for_redispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_claim_stale_queued_run_for_redispatch_claims_run(user, monkeypatch):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = run
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    get_run = AsyncMock(return_value=run)
+    monkeypatch.setattr(service, "get_run", get_run)
+
+    result = await service.claim_stale_queued_run_for_redispatch(
+        flow_id=flow_id,
+        run_id=run.id,
+    )
+
+    assert result is run
+    get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
+    claim_kwargs = flow_run_repo.claim_stale_queued_run_for_redispatch.await_args.kwargs
+    assert claim_kwargs["run_id"] == run.id
+    assert claim_kwargs["tenant_id"] == user.tenant_id
+    assert claim_kwargs["flow_id"] == flow_id
+    assert isinstance(claim_kwargs["stale_before"], datetime)
+
+
+@pytest.mark.asyncio
+async def test_claim_stale_queued_run_for_redispatch_returns_none_when_claim_returns_none(
+    user, monkeypatch
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = None
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    get_run = AsyncMock(return_value=run)
+    monkeypatch.setattr(service, "get_run", get_run)
+
+    result = await service.claim_stale_queued_run_for_redispatch(
+        flow_id=flow_id,
+        run_id=run.id,
+    )
+
+    assert result is None
+    get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
+    flow_run_repo.claim_stale_queued_run_for_redispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_redispatch_run_propagates_initial_lookup_error(user, monkeypatch):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -3109,14 +3209,6 @@ async def test_redispatch_run_claims_dispatches_and_returns_reloaded_run(
     assert result.run is reloaded_run
     assert result.redispatched_count == 1
     assert get_run.await_count == 2
-    assert get_run.await_args_list[0].kwargs == {
-        "run_id": run.id,
-        "flow_id": flow_id,
-    }
-    assert get_run.await_args_list[1].kwargs == {
-        "run_id": run.id,
-        "flow_id": flow_id,
-    }
     claim_kwargs = flow_run_repo.claim_stale_queued_run_for_redispatch.await_args.kwargs
     assert claim_kwargs["run_id"] == run.id
     assert claim_kwargs["tenant_id"] == user.tenant_id
@@ -3164,34 +3256,6 @@ async def test_redispatch_run_reloads_when_claim_returns_none(user, monkeypatch)
     assert result.redispatched_count == 0
     assert get_run.await_count == 2
     execution_backend.dispatch.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_redispatch_run_reloads_without_backend(user, monkeypatch):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow_id = uuid4()
-    run = _run(user=user, flow_id=flow_id)
-    reloaded_run = run.model_copy(update={"status": FlowRunStatus.RUNNING})
-    service = _flow_run_service(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_review_checkpoint_repo=AsyncMock(),
-        flow_version_repo=flow_version_repo,
-        runtime_upload_repo=_runtime_upload_repo(),
-        max_concurrent_runs=5,
-    )
-    get_run = AsyncMock(side_effect=[run, reloaded_run])
-    monkeypatch.setattr(service, "get_run", get_run)
-
-    result = await service.redispatch_run(flow_id=flow_id, run_id=run.id)
-
-    assert result.run is reloaded_run
-    assert result.redispatched_count == 0
-    assert get_run.await_count == 2
-    flow_run_repo.claim_stale_queued_run_for_redispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3256,7 +3320,7 @@ async def test_redispatch_run_propagates_dispatch_failure(user, monkeypatch):
     get_run = AsyncMock(return_value=run)
     monkeypatch.setattr(service, "get_run", get_run)
 
-    with pytest.raises(RuntimeError, match="broker down"):
+    with pytest.raises(StaleQueuedRedispatchDispatchError, match="broker down"):
         await service.redispatch_run(
             flow_id=flow_id,
             run_id=run.id,

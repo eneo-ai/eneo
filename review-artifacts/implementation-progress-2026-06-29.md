@@ -832,6 +832,69 @@
   - Retention intentionally fails closed on unknown published schema versions or unreadable template-reference values. This avoids data loss but can leave safe blobs retained until a schema-aware cleanup is added; the unsafe-skip counter/log makes that stall visible.
   - Published-then-superseded template assets remain pinned by immutable `FlowVersions` history until the owning flow/version history is removed. PG-13 mainly reclaims never-published draft template assets.
 
+## PG-14
+
+- Slice id: PG-14
+- Findings addressed: `verify-runtime:02 / A-MERGE-2`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:33` scopes PG-14 to merging beat/manual queued redispatch while preserving caller-specific swallow-vs-propagate policy.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:100` identifies the stale queued redispatch duplication map and explicitly rejects a generic queue manager.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:17` indexes the beat/manual divergence and missing manual dispatch-failure audit.
+  - Fresh source review confirmed the live beat path owned claim/build/dispatch inside `backend/src/intric/flows/runtime/tasks.py`, the manual path duplicated those mechanics in `FlowRunService.redispatch_run`, and `backend/src/intric/flows/api/flow_run_execution_router.py` audited only manual success.
+  - Fresh source review after the change confirms `backend/src/intric/flows/application/stale_queued_redispatch.py:17-97` owns the typed queued-redispatch result contract and shared build/dispatch classification; `backend/src/intric/flows/application/flow_run_service.py:230-282` owns manual scoped claim plus application orchestration; `backend/src/intric/flows/runtime/tasks.py:752-777` preserves beat continue/swallow policy; `backend/src/intric/flows/api/flow_run_execution_router.py:1508-1539` keeps authorization visible and manual dispatch-failure audit-visible.
+  - Direct `rg -n "build_flow_run_dispatch_request|Failed to redispatch stale queued flow run|Skipping redispatch for run with invalid principal" backend/src/intric/flows` confirmed the stale queued build/dispatch classification lives in the leaf helper rather than duplicated in the beat and manual service paths.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer for the runtime/API owners; the output was noisy for this small runtime slice, so all concrete claims were verified with direct source reads and exact `rg`.
+  - Read-only verifier agents checked runtime ownership, manual API/audit behavior, and test coverage. Valid feedback applied: manual dispatch failure must be audit-visible with bounded non-empty error text, authorization must remain visible at the router boundary, and beat failure must continue to later stale runs.
+  - Claude peer-loop session `pg14-queued-redispatch-20260630` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; valid feedback applied by using a typed total-result contract, keeping caller policy outside the shared helper, bounding manual failure audit text, and adding a beat dispatch-failure continuation test.
+  - Claude peer-loop session `pg14-queued-redispatch-20260630` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; implementation proceeded from that owner split.
+  - Claude peer-loop session `pg14-queued-redispatch-20260630` iteration 3 commit-gate verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by moving manual orchestration back into `FlowRunService.redispatch_run`, moving the helper/result contract to a leaf module, restoring visible router authorization, removing manual commit-before-dispatch, and moving helper tests out of the router test file.
+  - Claude peer-loop session `pg14-queued-redispatch-20260630` iteration 4 verification verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; optional P3 nits were noted for `StaleQueuedRedispatchDispatchError.cause` / `__cause__` assertion but were non-blocking and left out to keep the now-reviewed slice stable.
+- Files changed:
+  - `backend/src/intric/flows/application/stale_queued_redispatch.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - `backend/tests/unittests/flows/test_flow_run_execution_router.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `backend/tests/unittests/flows/test_celery_runtime.py`
+  - `backend/tests/unittests/flows/test_stale_queued_redispatch.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Beat and manual stale queued redispatch now use one shared claim/build/dispatch classifier for not-claimed, invalid-request, dispatched, and dispatch-failed outcomes.
+  - Beat/recovery still logs dispatch failure and continues scanning later stale queued runs.
+  - Manual API redispatch keeps authorization visible at handler entry, delegates claim/build/dispatch orchestration to `FlowRunService.redispatch_run`, and returns the refreshed run on success/zero-dispatch.
+  - Manual API dispatch failure is now audit-visible via `ActionType.FLOW_RUN_REDISPATCHED`, `Outcome.FAILURE`, the claimed run id carried by `StaleQueuedRedispatchDispatchError`, and a bounded error message before the exception is re-raised to the caller.
+  - Invalid persisted principal behavior remains explicit and non-terminalizing: the shared helper classifies it as `invalid_dispatch_request`, logs it, skips dispatch, and lets the caller keep its existing policy.
+- Complexity deleted or owner clarified:
+  - Deleted the duplicate beat/manual build-dispatch branches and centralized them in `stale_queued_redispatch.py`.
+  - `FlowRunService.redispatch_run` remains as the manual application boundary, but now delegates classification to the shared helper and only maps outcomes into manual caller behavior.
+  - `flow_dispatch.py` is back to post-commit create/rerun/resume dispatch ownership; it no longer carries stale queued redispatch logic or lazy import workarounds.
+  - The router remains the HTTP/audit policy boundary; the beat task remains the scheduler continue/swallow policy boundary.
+- Architecture delta:
+  - Canonical owner before: queued redispatch mechanics were split between `tasks.py` and `FlowRunService.redispatch_run`, with manual success audit in the router.
+  - Canonical owner after: `stale_queued_redispatch.redispatch_stale_queued_run` owns shared claim-result build/dispatch classification; `FlowRunService.redispatch_run` owns manual application orchestration; the router owns HTTP authorization/audit; the beat owns scheduler policy.
+  - Duplicate paths remaining: `dispatch_flow_run_after_commit` and `dispatch_flow_run_recoverably_after_commit` still own separate post-commit dispatch policies for create/rerun/resume, but they do not duplicate stale queued redispatch claim semantics.
+  - 9/10 follow-up candidate: review whether manual redispatch should expose a typed public error envelope for broker failure instead of relying on the existing unhandled exception adapter; keep this outside PG-14 unless API contract work is scheduled.
+  - Decision or measurement needed: decide whether invalid-principal stale queued rows should become an explicit terminalization/reconciliation slice despite the existing database principal CHECK making them near-unreachable.
+  - What not to preserve: duplicated build/dispatch branches, hidden authorization inside claim callbacks, router-owned runtime orchestration, and success-only manual audit visibility.
+- Validation commands and results:
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check <touched PG-14 backend files/tests> && /home/vscode/.local/bin/uv run ruff format --check <touched PG-14 backend files/tests>` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/application/flow_dispatch.py src/intric/flows/application/stale_queued_redispatch.py src/intric/flows/application/flow_run_service.py src/intric/flows/runtime/tasks.py src/intric/flows/api/flow_run_execution_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 4 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_execution_router.py -k "redispatch_flow_run or dispatch_flow_run_after_commit or dispatch_flow_run_recoverably_after_commit"` -> pass, 8 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_service.py -k "redispatch_run or claim_stale_queued_run_for_redispatch or build_dispatch_request"` -> pass, 10 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_celery_runtime.py -k "redispatch_stale_queued"` -> pass, 4 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_execution_router.py` -> pass, 23 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_service.py` -> pass, 107 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_celery_runtime.py` -> pass, 43 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 4 passed.
+  - `rg -n "build_flow_run_dispatch_request|Failed to redispatch stale queued flow run|Skipping redispatch for run with invalid principal" backend/src/intric/flows` -> only the shared helper owns stale queued dispatch classification; `FlowRunService.build_dispatch_request` remains for create/rerun dispatch request construction.
+- Remaining risk / follow-up:
+  - Manual redispatch claim rides the request transaction, so dispatch failure rolls back the claim and remains immediately retryable; beat keeps commit-before-dispatch because worker visibility requires it.
+  - Broker/API error-envelope taxonomy is intentionally not redesigned in PG-14; this slice only makes the failure audit-visible and keeps the existing caller-visible exception behavior.
+  - Invalid-principal stale queued rows remain skipped/logged rather than terminalized because the current DB constraint makes that branch a defensive recovery path, not a normal product path.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

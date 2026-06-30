@@ -28,6 +28,13 @@ from intric.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
 )
+from intric.flows.application.stale_queued_redispatch import (
+    StaleQueuedRedispatchDispatched,
+    StaleQueuedRedispatchDispatchFailed,
+    StaleQueuedRedispatchInvalidRequest,
+    StaleQueuedRedispatchNotClaimed,
+    redispatch_stale_queued_run,
+)
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_api_error_code import FlowApiErrorCode
@@ -39,9 +46,9 @@ from intric.flows.flow_input_limits import (
 from intric.flows.flow_run_dispatch_request import (
     FlowRunDispatchMalformedPayload,
     FlowRunDispatchMissingPrincipal,
+    FlowRunDispatchSource,
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
-    build_flow_run_dispatch_request,
     parse_flow_run_dispatch_task_kwargs,
 )
 from intric.flows.flow_run_error import FlowRunError
@@ -743,40 +750,32 @@ async def _redispatch_stale_queued_runs_all_tenants(
                     limit=limit,
                 )
             for run in stale_runs:
-                # Commit the atomic claim before dispatching: the celery
-                # worker that picks up the dispatched run reads the run
-                # in a fresh session, so the claim must be visible first.
-                async with session.begin():
-                    claimed = await run_repo.claim_stale_queued_run_for_redispatch(
-                        run_id=run.id,
-                        tenant_id=run.tenant_id,
-                        stale_before=stale_before,
-                    )
-                if claimed is None:
-                    continue
-                try:
-                    dispatch_request = build_flow_run_dispatch_request(claimed)
-                except ValueError:
-                    logger.warning(
-                        "Skipping redispatch for run with invalid principal",
-                        extra={
-                            "run_id": str(claimed.id),
-                            "tenant_id": str(claimed.tenant_id),
-                        },
-                    )
-                    continue
-                try:
-                    await backend.dispatch(request=dispatch_request)
-                    redispatched += 1
-                except Exception:
-                    logger.exception(
-                        "Failed to redispatch stale queued flow run",
-                        extra={
-                            "run_id": str(claimed.id),
-                            "flow_id": str(claimed.flow_id),
-                            "tenant_id": str(claimed.tenant_id),
-                        },
-                    )
+
+                async def claim_run() -> FlowRunDispatchSource | None:
+                    # The worker that picks up the dispatched run reads in a
+                    # fresh session, so the claim must commit before dispatch.
+                    async with session.begin():
+                        return await run_repo.claim_stale_queued_run_for_redispatch(
+                            run_id=run.id,
+                            tenant_id=run.tenant_id,
+                            stale_before=stale_before,
+                        )
+
+                result = await redispatch_stale_queued_run(
+                    claim_run=claim_run,
+                    backend=backend,
+                )
+                match result:
+                    case StaleQueuedRedispatchDispatched():
+                        redispatched += 1
+                    case StaleQueuedRedispatchNotClaimed():
+                        continue
+                    case StaleQueuedRedispatchInvalidRequest():
+                        continue
+                    case StaleQueuedRedispatchDispatchFailed():
+                        continue
+                    case _:
+                        assert_never(result)
     return {"status": "ok", "redispatched": redispatched}
 
 

@@ -16,6 +16,8 @@ from fastapi import BackgroundTasks
 
 import intric.flows.application.flow_dispatch as flow_dispatch_module
 from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
+from intric.audit.domain.outcome import Outcome
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.flows.api import flow_access_context as flow_access_context_module
 from intric.flows.api.flow_models import (
@@ -44,6 +46,9 @@ from intric.flows.application.flow_run_service import (
     FlowRunRedispatchResult,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndTokenUsage,
+)
+from intric.flows.application.stale_queued_redispatch import (
+    StaleQueuedRedispatchDispatchError,
 )
 from intric.flows.domain.flow import (
     FlowRunStatus,
@@ -1100,26 +1105,30 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
     refreshed = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    events: list[str] = []
     run_service = AsyncMock()
-    run_service.redispatch_run.return_value = FlowRunRedispatchResult(
-        run=refreshed,
-        redispatched_count=1,
-    )
+
+    async def redispatch_run(**_kwargs):
+        events.append("redispatch")
+        return FlowRunRedispatchResult(run=refreshed, redispatched_count=1)
+
+    run_service.redispatch_run.side_effect = redispatch_run
     container.flow_run_service.return_value = run_service
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_service.return_value = flow_service
     container.user.return_value = user
-    container.audit_service.return_value = AsyncMock()
+    audit_service = AsyncMock()
+
+    async def log_audit(**_kwargs):
+        events.append("audit")
+
+    audit_service.log_async.side_effect = log_audit
+    container.audit_service.return_value = audit_service
     backend = MagicMock()
     container.flow_execution_backend.return_value = backend
 
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
+    async def enforce_scope(*_args, **_kwargs):
+        events.append("scope")
+
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
 
     response = await redispatch_flow_run(
         id=flow_id,
@@ -1130,6 +1139,11 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
 
     assert response.run.id == refreshed.id
     assert response.redispatched_count == 1
+    assert events == [
+        "scope",
+        "redispatch",
+        "audit",
+    ]
     run_service.redispatch_run.assert_awaited_once_with(
         flow_id=flow_id,
         run_id=run.id,
@@ -1155,19 +1169,15 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
         redispatched_count=0,
     )
     container.flow_run_service.return_value = run_service
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_service.return_value = flow_service
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
-    container.flow_execution_backend.return_value = MagicMock()
+    backend = MagicMock()
+    container.flow_execution_backend.return_value = backend
 
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
+    async def enforce_scope(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
 
     response = await redispatch_flow_run(
         id=flow_id,
@@ -1181,7 +1191,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
     run_service.redispatch_run.assert_awaited_once_with(
         flow_id=flow_id,
         run_id=run.id,
-        execution_backend=container.flow_execution_backend.return_value,
+        execution_backend=backend,
     )
     kwargs = container.audit_service.return_value.log_async.await_args.kwargs
     assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
@@ -1192,24 +1202,26 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
 async def test_redispatch_flow_run_propagates_dispatch_failure(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
     run_service = AsyncMock()
-    run_service.redispatch_run.side_effect = RuntimeError("broker down")
+    error_message = "x" * (MAX_ERROR_MESSAGE_LENGTH + 10)
+    run_service.redispatch_run.side_effect = StaleQueuedRedispatchDispatchError(
+        run=run,
+        cause=RuntimeError(error_message),
+    )
     container.flow_run_service.return_value = run_service
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_service.return_value = flow_service
-    container.flow_execution_backend.return_value = MagicMock()
+    container.user.return_value = user
+    backend = MagicMock()
+    container.flow_execution_backend.return_value = backend
     container.audit_service.return_value = AsyncMock()
 
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
+    async def enforce_scope(*_args, **_kwargs):
+        return None
 
-    with pytest.raises(RuntimeError, match="broker down"):
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
+
+    with pytest.raises(StaleQueuedRedispatchDispatchError):
         await redispatch_flow_run(
             id=flow_id,
             run_id=run.id,
@@ -1217,4 +1229,49 @@ async def test_redispatch_flow_run_propagates_dispatch_failure(monkeypatch):
             container=container,
         )
 
+    run_service.redispatch_run.assert_awaited_once_with(
+        flow_id=flow_id,
+        run_id=run.id,
+        execution_backend=backend,
+    )
+    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
+    assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
+    assert kwargs["entity_id"] == run.id
+    assert kwargs["outcome"] == Outcome.FAILURE
+    assert kwargs["error_message"] == error_message[:MAX_ERROR_MESSAGE_LENGTH]
+
+
+@pytest.mark.asyncio
+async def test_redispatch_flow_run_checks_scope_before_service_or_backend(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run_id = uuid4()
+    events: list[str] = []
+
+    async def enforce_scope(*_args, **_kwargs):
+        events.append("scope")
+        raise NotFoundException("Flow not found.")
+
+    def flow_run_service():
+        events.append("service")
+        return AsyncMock()
+
+    def flow_execution_backend():
+        events.append("backend")
+        return MagicMock()
+
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
+    container.flow_run_service.side_effect = flow_run_service
+    container.flow_execution_backend.side_effect = flow_execution_backend
+    container.audit_service.return_value = AsyncMock()
+
+    with pytest.raises(NotFoundException):
+        await redispatch_flow_run(
+            id=flow_id,
+            run_id=run_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    assert events == ["scope"]
     container.audit_service.return_value.log_async.assert_not_awaited()
