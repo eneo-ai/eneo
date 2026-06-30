@@ -1612,6 +1612,57 @@
   - This packet records current source policy rather than changing it. Rollback is low risk: remove the two governance artifacts and this ledger entry.
   - If product/privacy rejects indefinite active Builder sessions, the next implementation must define an abandoned-active policy explicitly rather than inferring one from terminal retention.
 
+## C8.8
+
+- Slice id: C8.8 Flow AI Builder lifecycle / `PlanningState` ownership proof and invariant cleanup
+- Findings addressed: Gate 0 identified active send lease, `latest_plan_id`, `planning_state_version`, and conversation-derived planning snapshots as the remaining Builder lifecycle truth surface. Verification found one live drift: an approved plan could be marked applied through the no-lease apply path while a send turn still held an active lease.
+- Evidence reviewed:
+  - Active send lease ownership lives in `claim_ai_builder_send_turn` and `AIBuilderRepository` lock methods: `backend/src/intric/flows/ai_builder/ai_builder_send_lease.py:34-62`, `backend/src/intric/flows/ai_builder/ai_builder_repo.py:738-826`, and the all-or-none lock constraint in `backend/src/intric/database/tables/flow_tables.py:2126-2190`.
+  - `send_message` accepts `awaiting_approval`, claims a send lease, and only then moves the session back to `chatting`: `backend/src/intric/flows/ai_builder/ai_builder_planner.py:150-178`.
+  - Session transition rules allow `awaiting_approval -> applied`, but applying a plan uses the no-lease repository path: `backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py:9-21` and `backend/src/intric/flows/ai_builder/ai_builder_repo.py:922-940`.
+  - `latest_plan_id` same-session ownership is guarded by the database FK and existing proposal/revise tests: `backend/src/intric/database/tables/flow_tables.py:2163-2169` and `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:3292-3354`.
+  - `planning_state_version` CAS and conversation-derived snapshots already have typed repository owners and tests: `backend/src/intric/flows/ai_builder/ai_builder_repo.py:974-1045`, `backend/src/intric/flows/ai_builder/ai_builder_repo.py:1093-1145`, `backend/src/intric/flows/ai_builder/ai_builder_plan_store.py:83-130`, `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:1582-1624`, `:1897-2060`, and `backend/tests/unittests/flows/ai_builder/test_planning_state_jsonb_discipline.py:1-114`.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer for Builder lifecycle ownership; direct `rg` and source reads supplied the concrete evidence.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-8-lifecycle-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; it chose `_update_session_status` as the owner because the active-send fence is a no-lease session status transition invariant.
+  - Read-only Codex final gate artifact `.codex/artifacts/c8-8-lifecycle-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no blockers. Its optional full-lock-tuple assertion suggestion was not applied because the existing lease identity assertions cover active-lock preservation without adding redundant timestamp coupling.
+- Red proof:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back -q'` failed before the source fix with `Failed: DID NOT RAISE <class 'intric.main.exceptions.BadRequestException'>`.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_repo.py`
+  - `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No-lease Builder session status transitions now require the active send lock to be absent or expired.
+  - Applying an approved plan while a fresh send lease is active raises `session_send_in_progress`; the existing `mark_plan_applied` savepoint keeps the plan approved, keeps the session awaiting approval, and preserves the active lock.
+  - Expired send locks are cleared by the no-lease lifecycle update instead of being carried into a terminal status.
+  - Flow runtime, Flow API, frontend, OpenAPI/generated clients, retention policy, audit vocabulary, MCP/capability surfaces, and proposal repair/fallback behavior are unchanged.
+- Complexity deleted or owner clarified:
+  - `_update_session_status` is the canonical owner for no-lease session transition lock fencing; `mark_plan_applied` remains the savepoint orchestration owner.
+  - The send-lock SQL availability predicate is shared with latest-plan revision instead of keeping two slightly different copies.
+  - No lifecycle manager, command bus, state framework, new module, public API surface, compatibility path, or product policy was added.
+- Architecture delta:
+  - Canonical owner before: active-send lock fencing existed for send/revise/cancel paths, but the no-lease apply transition did not enforce it.
+  - Canonical owner after: `AIBuilderRepository._update_session_status` owns no-lease lifecycle lock fencing; send-lease claim/refresh/release and planning-state CAS owners stay unchanged.
+  - Duplicate paths remaining: lifecycle state is still distributed across repository persistence, transition validation, send-lease helper, and plan lifecycle orchestration; this slice only removes the apply-path invariant drift.
+  - 9/10 follow-up candidate: question/slot vocabulary consolidation can proceed after lifecycle invariants are proved, unless release owners first need an abandoned-active-session retention policy.
+  - Decision or measurement needed: product/privacy must still decide whether old active `chatting` / `awaiting_approval` sessions should ever expire; C8.8 deliberately keeps current accepted behavior.
+  - What not to preserve: terminal apply under an active send lease, duplicate send-lock availability predicates, terminal sessions retaining expired send lock fields, or a fake lifecycle abstraction for one repository invariant.
+- Validation commands and results:
+  - `docker exec ... cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back -q` -> pass after source fix, 1 passed.
+  - `docker exec ... cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rolls_back_plan_status_when_session_update_fails tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_repo_cancel_session_clears_send_lock_fields tests/integration/flows/test_ai_builder_session_api_regressions.py::test_send_message_status_jump_under_lock_uses_lease -q` -> pass, 6 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_planning_state_jsonb_discipline.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q` -> pass, 44 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format src/intric/flows/ai_builder/ai_builder_repo.py` -> pass, 1 file reformatted.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py && .venv/bin/ruff format --check src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py` -> pass, all checks passed and 2 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_repo.py backend/tests/integration/flows/test_ai_builder_session_api_regressions.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace && git diff --cached --check` -> pass; staged files were exactly `ai_builder_repo.py`, `test_ai_builder_session_api_regressions.py`, and the progress ledger.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < /tmp/c8-8-lifecycle-final-gate-20260630.prompt` -> pass; final gate green and commit-ready.
+- Remaining risk / rollback:
+  - The slice intentionally does not add abandoned-active-session retention, lifecycle service decomposition, frontend/API changes, or repair/fallback pruning.
+  - Rollback is low risk: remove the no-lease lock fence in `_update_session_status`, restore the duplicated latest-plan SQL predicate if desired, remove the focused integration test, and delete this ledger entry. No schema, migration, API, frontend, runtime, audit, retention, or generated-client rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

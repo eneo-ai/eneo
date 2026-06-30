@@ -68,6 +68,19 @@ _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY = (
 )
 
 
+def _session_send_lock_available_clause() -> sa.ColumnElement[bool]:
+    return sa.or_(
+        sa.and_(
+            BuilderSessions.active_request_id.is_(None),
+            BuilderSessions.lock_token.is_(None),
+        ),
+        sa.and_(
+            BuilderSessions.lock_expires_at.is_not(None),
+            BuilderSessions.lock_expires_at <= sa.func.now(),
+        ),
+    )
+
+
 class AIBuilderRepository:
     """Persistence layer for builder sessions and plans."""
 
@@ -445,26 +458,44 @@ class AIBuilderRepository:
                 current=SessionStatus(current_value),
                 next_status=status,
             )
-            stmt = (
-                update(BuilderSessions)
-                .where(
-                    BuilderSessions.id == session_id,
-                    BuilderSessions.tenant_id == tenant_id,
-                    *(_lease_filters(lease) if lease is not None else ()),
-                )
-                .values(
-                    status=status.value,
-                    updated_at=datetime.now(timezone.utc),
-                )
-            )
+            where_clauses = [
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            ]
+            now = datetime.now(timezone.utc)
             if lease is not None:
-                updated_session_id = await self.session.scalar(
-                    stmt.returning(BuilderSessions.id)
+                where_clauses.extend(_lease_filters(lease))
+                stmt = (
+                    update(BuilderSessions)
+                    .where(*where_clauses)
+                    .values(
+                        status=status.value,
+                        updated_at=now,
+                    )
                 )
             else:
-                await self.session.execute(stmt)
-                updated_session_id = session_id
+                where_clauses.append(_session_send_lock_available_clause())
+                stmt = (
+                    update(BuilderSessions)
+                    .where(*where_clauses)
+                    .values(
+                        status=status.value,
+                        active_request_id=None,
+                        lock_token=None,
+                        locked_at=None,
+                        lock_expires_at=None,
+                        updated_at=now,
+                    )
+                )
+            updated_session_id = await self.session.scalar(
+                stmt.returning(BuilderSessions.id)
+            )
             if updated_session_id is None:
+                if lease is None:
+                    raise AIBuilderBadRequestException(
+                        "An active send is currently in progress for this session.",
+                        code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
+                    )
                 raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while updating session status.",
                     code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
@@ -671,24 +702,13 @@ class AIBuilderRepository:
                         "An active send is currently in progress for this session.",
                         code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
                     )
-                expired_lock_is_available = sa.and_(
-                    BuilderSessions.lock_expires_at.is_not(None),
-                    BuilderSessions.lock_expires_at <= sa.func.now(),
-                )
-                lock_is_available = sa.or_(
-                    sa.and_(
-                        BuilderSessions.active_request_id.is_(None),
-                        BuilderSessions.lock_token.is_(None),
-                    ),
-                    expired_lock_is_available,
-                )
                 where_clauses = [
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.status == SessionStatus.AWAITING_APPROVAL.value,
                     # Recheck lock availability in the UPDATE so a fresh claim between
                     # the precheck and write cannot be cleared by this lifecycle update.
-                    lock_is_available,
+                    _session_send_lock_available_clause(),
                 ]
                 values = {
                     "latest_plan_id": plan_id,

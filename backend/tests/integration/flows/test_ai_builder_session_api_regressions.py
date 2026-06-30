@@ -700,6 +700,91 @@ async def test_mark_plan_applied_rolls_back_plan_status_when_session_update_fail
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_mark_plan_applied_rejects_active_send_and_rolls_back(
+    db_container,
+) -> None:
+    async with db_container() as container:
+        user = container.user()
+        space = Spaces(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            name=f"ai-builder-apply-active-send-{uuid4().hex}",
+        )
+        container.session().add(space)
+        await container.session().flush()
+
+        repo = AIBuilderRepository(container.session())
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = await repo.create_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(
+                    spec=_make_builder_plan_spec(existing_step_ref=None)
+                )
+            ),
+        )
+        await repo.update_plan_status(
+            plan_id=plan.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.APPROVED,
+        )
+        await repo.update_session_status_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+        with pytest.raises(BadRequestException) as exc:
+            await repo.mark_plan_applied(
+                plan_id=plan.id,
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                flow_id=None,
+            )
+
+        persisted_plan_status = (
+            await container.session().execute(
+                select(BuilderPlans.status).where(
+                    BuilderPlans.id == plan.id,
+                    BuilderPlans.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one()
+        persisted_session_status, persisted_flow_id = (
+            await container.session().execute(
+                select(BuilderSessions.status, BuilderSessions.flow_id).where(
+                    BuilderSessions.id == session.id,
+                    BuilderSessions.tenant_id == user.tenant_id,
+                )
+            )
+        ).one()
+        lock_row = await _load_session_send_lock(
+            repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert exc.value.code == "session_send_in_progress"
+    assert persisted_plan_status == PlanStatus.APPROVED.value
+    assert persisted_session_status == SessionStatus.AWAITING_APPROVAL.value
+    assert persisted_flow_id is None
+    assert lock_row[0] == turn.lease.request_id
+    assert lock_row[1] == turn.lease.lock_token
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_nulls_in_recency_order(
     client,
     bearer_token,
