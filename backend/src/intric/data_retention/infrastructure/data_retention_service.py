@@ -61,15 +61,34 @@ logger = logging.getLogger(__name__)
 
 # Statement batch size for retention deletes; worker transaction loops decide commit scope.
 RETENTION_BATCH_SIZE = 5000
-TERMINAL_BUILDER_SESSION_STATUS_VALUES = (
+ACTIVE_BUILDER_SESSION_STATUS_VALUES = (
+    SessionStatus.CHATTING.value,
+    SessionStatus.AWAITING_APPROVAL.value,
+)
+RETENTION_ELIGIBLE_BUILDER_SESSION_STATUS_VALUES = (
     SessionStatus.APPLIED.value,
     SessionStatus.CANCELLED.value,
+    *ACTIVE_BUILDER_SESSION_STATUS_VALUES,
 )
 
 
 def _sqlalchemy_affected_row_count(result: object) -> int:
     rowcount = getattr(result, "rowcount", 0)
     return rowcount if isinstance(rowcount, int) else 0
+
+
+def _builder_session_has_no_fresh_send_lock(now: datetime) -> sa.ColumnElement[bool]:
+    return sa.or_(
+        sa.not_(BuilderSessions.status.in_(ACTIVE_BUILDER_SESSION_STATUS_VALUES)),
+        sa.and_(
+            BuilderSessions.active_request_id.is_(None),
+            BuilderSessions.lock_token.is_(None),
+        ),
+        sa.and_(
+            BuilderSessions.lock_expires_at.is_not(None),
+            BuilderSessions.lock_expires_at <= sa.literal(now),
+        ),
+    )
 
 
 class FlowRuntimeCleanupCounts(TypedDict):
@@ -481,7 +500,10 @@ class DataRetentionService:
             )
             .where(
                 sa.and_(
-                    BuilderSessions.status.in_(TERMINAL_BUILDER_SESSION_STATUS_VALUES),
+                    BuilderSessions.status.in_(
+                        RETENTION_ELIGIBLE_BUILDER_SESSION_STATUS_VALUES
+                    ),
+                    _builder_session_has_no_fresh_send_lock(now),
                     effective_retention_days.isnot(None),
                     BuilderSessions.updated_at
                     < sa.literal(now)
@@ -500,7 +522,7 @@ class DataRetentionService:
         return count or 0
 
     async def delete_expired_builder_sessions(self, *, now: datetime) -> int:
-        logger.info("Starting deletion of expired terminal Builder sessions")
+        logger.info("Starting deletion of expired Builder sessions")
         base_subquery = self._build_due_builder_session_retention_query(now=now)
 
         total_deleted = 0
@@ -518,18 +540,18 @@ class DataRetentionService:
 
             total_deleted += batch_deleted
             logger.debug(
-                "Deleted batch of %s expired terminal Builder sessions (total: %s)",
+                "Deleted batch of %s expired Builder sessions (total: %s)",
                 batch_deleted,
                 total_deleted,
             )
 
         if total_deleted > 0:
             logger.info(
-                "Deleted %s expired terminal Builder sessions",
+                "Deleted %s expired Builder sessions",
                 total_deleted,
             )
         else:
-            logger.debug("No expired terminal Builder sessions to delete")
+            logger.debug("No expired Builder sessions to delete")
 
         return total_deleted
 

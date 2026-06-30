@@ -192,8 +192,11 @@ async def create_builder_session_for_retention(
     days_old: int,
     include_plan: bool = False,
     include_file: bool = False,
+    send_lock_expires_at: datetime | None = None,
 ) -> BuilderRetentionFixture:
     retained_at = now - timedelta(days=days_old)
+    active_request_id = uuid4() if send_lock_expires_at is not None else None
+    lock_token = uuid4() if send_lock_expires_at is not None else None
     session = BuilderSessions(
         tenant_id=tenant_id,
         space_id=space_id,
@@ -208,6 +211,10 @@ async def create_builder_session_for_retention(
         ],
         planning_state_jsonb={"stage": "retention-test"},
         planning_state_version=1,
+        active_request_id=active_request_id,
+        lock_token=lock_token,
+        locked_at=now if send_lock_expires_at is not None else None,
+        lock_expires_at=send_lock_expires_at,
         created_at=retained_at,
         updated_at=retained_at,
     )
@@ -788,7 +795,7 @@ async def test_tenant_level_retention_fallback_for_app_runs(
 
 
 @pytest.mark.asyncio
-async def test_builder_retention_deletes_only_expired_terminal_sessions(
+async def test_builder_retention_deletes_expired_and_abandoned_sessions(
     async_session: AsyncSession,
     test_space: Spaces,
     test_tenant,
@@ -849,12 +856,41 @@ async def test_builder_retention_deletes_only_expired_terminal_sessions(
         now=now,
         days_old=45,
     )
+    old_chatting_expired_lock = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.CHATTING,
+        now=now,
+        days_old=45,
+        send_lock_expires_at=now - timedelta(minutes=5),
+    )
+    old_awaiting_approval_fresh_lock = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.AWAITING_APPROVAL,
+        now=now,
+        days_old=45,
+        send_lock_expires_at=now + timedelta(minutes=5),
+    )
+    recent_chatting = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.CHATTING,
+        now=now,
+        days_old=10,
+    )
 
     candidate_count = await retention_service.count_expired_builder_sessions(now=now)
     deleted_count = await retention_service.delete_expired_builder_sessions(now=now)
     await async_session.flush()
 
-    assert candidate_count == 2
+    assert candidate_count == 5
     assert deleted_count == candidate_count
     assert await retention_service.count_expired_builder_sessions(now=now) == 0
 
@@ -863,10 +899,23 @@ async def test_builder_retention_deletes_only_expired_terminal_sessions(
     assert (
         await async_session.get(BuilderSessions, recent_applied.session_id) is not None
     )
-    assert await async_session.get(BuilderSessions, old_chatting.session_id) is not None
+    assert await async_session.get(BuilderSessions, old_chatting.session_id) is None
     assert (
         await async_session.get(BuilderSessions, old_awaiting_approval.session_id)
+        is None
+    )
+    assert (
+        await async_session.get(BuilderSessions, old_chatting_expired_lock.session_id)
+        is None
+    )
+    assert (
+        await async_session.get(
+            BuilderSessions, old_awaiting_approval_fresh_lock.session_id
+        )
         is not None
+    )
+    assert (
+        await async_session.get(BuilderSessions, recent_chatting.session_id) is not None
     )
 
     deleted_plan = await async_session.scalar(

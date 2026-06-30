@@ -2124,6 +2124,55 @@
   - Risk is documentation-only. The next implementation risk is active-session deletion correctness around fresh leases and count/delete predicate drift.
   - Rollback is low risk: restore the previous packet text and delete this C9.1 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, or persisted-data rollback is needed.
 
+## C9.2
+
+- Slice id: C9.2 active abandoned Flow AI Builder session retention in `DataRetentionService`
+- Findings addressed: old abandoned `chatting` and `awaiting_approval` Builder sessions now expire through the same tenant/space conversation retention policy as old terminal Builder sessions, while sessions with a fresh active send lease remain protected.
+- Evidence reviewed:
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md` C9.1 selects `DataRetentionService` as the owner for active abandoned-session expiration and explicitly defers Builder-only global file-row cleanup.
+  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py:491-526` keeps count/delete on the shared `_build_due_builder_session_retention_query`, so the deletion predicate and count predicate remain one owner.
+  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py:64-90` now names active Builder statuses and protects fresh active send leases with the deterministic `now` already passed to retention.
+  - `backend/tests/integration/test_data_retention_hierarchical.py:797-934` proves old terminal sessions, old abandoned active sessions, and old active expired-lock sessions are deleted; recent active sessions and fresh-lock active sessions are kept; session-file links cascade while global `Files` rows remain.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer for the touched retention service and integration test. Direct source reads verified the final claims.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-2-active-builder-retention-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `STOP_OR_PROCEED: proceed`; valid guidance applied: use the existing `DataRetentionService` query, use the fixed `now` for lease expiry comparison, set all send-lock fields together in tests, keep eligible statuses explicit, and rename terminal-only log/test language.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-2-active-builder-retention-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes`; required fixes: none; optional fixes: none.
+- Files changed:
+  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - `backend/tests/integration/test_data_retention_hierarchical.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Old due `applied`, `cancelled`, `chatting`, and `awaiting_approval` Builder sessions are now count/delete candidates under existing hierarchical retention.
+  - Old active sessions with no send lock or an expired send lock are considered abandoned and expire.
+  - Old active sessions with a fresh active send lease are not counted or deleted.
+  - Global `Files` rows are still not deleted by Builder session retention; only session-owned rows and session-file links are removed through existing cascade behavior.
+- Complexity deleted or owner clarified:
+  - No new retention service, lifecycle manager, command bus, or file sweeper was added.
+  - `DataRetentionService._build_due_builder_session_retention_query` remains the single predicate owner for Builder retention count/delete.
+  - Terminal-only language in Builder retention logs/test names was removed because the policy now covers terminal and abandoned active sessions.
+- Architecture delta:
+  - Canonical owner before: `DataRetentionService` counted/deleted only terminal Builder sessions; active abandoned-session retention was documented but not implemented.
+  - Canonical owner after: `DataRetentionService` owns terminal plus abandoned active Builder session retention using one shared predicate and existing tenant/space retention days.
+  - Duplicate paths remaining: none for Builder session count/delete. Builder-only global file-row cleanup remains deliberately unimplemented and unproven.
+  - 9/10 follow-up candidate: decide whether Builder-only global file rows need a first-release cleanup owner; do not add one without candidate-id source, reference guard, and tests.
+  - Decision or measurement needed: branch-level repair/fallback evidence is still needed before pruning proposal repair branches; file-row cleanup remains a separate acceptance decision if first-release posture changes.
+  - What not to preserve: indefinite abandoned active-session retention, terminal-only retention vocabulary, and any new Builder-specific retention service that would duplicate `DataRetentionService`.
+- Red/green proof:
+  - Red proof: after updating only the integration test, `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py::test_builder_retention_deletes_expired_and_abandoned_sessions -q'` failed as expected with `assert 2 == 5`, proving current source still counted only terminal sessions.
+  - Green proof: after the shared predicate change, the same targeted test passed.
+- Validation commands and results:
+  - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `9b6da3cb`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py::test_builder_retention_deletes_expired_and_abandoned_sessions -q'` -> failed red before source change with `assert 2 == 5`; passed after source change.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py -q'` -> passed, `16 passed`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff format --check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed, `2 files already formatted`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pyright --pythonpath .venv/bin/python src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed, `0 errors, 0 warnings, 0 informations`.
+- Remaining risk / rollback:
+  - Runtime risk is bounded to Builder session retention: stale active sessions that exceed retention and have no fresh lease are now deleted on the existing retention path. A rollback is a normal revert of this commit, restoring terminal-only eligibility.
+  - Concurrency risk is mitigated by the fresh-lease predicate and deterministic retention `now`; a session actively being processed with a non-expired lease is not selected.
+  - Builder-only global `Files` row reclamation remains intentionally out of scope and unchanged.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
