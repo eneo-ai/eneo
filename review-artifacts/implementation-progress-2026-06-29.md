@@ -1120,6 +1120,60 @@
   - The run-contract comparison uses the current `FlowTemplateAsset.checksum` read model because PG-D4.3 is scoped to `FlowRunContractService`; upload and publish populate that checksum from the file checksum, and exact `Files.checksum` read parity is recorded above as a separate hardening candidate if future source evidence shows the asset checksum can drift.
   - Rollback is low risk: remove the readiness checksum comparison, the new test, and this ledger entry. No schema, migration, persisted data, runtime execution, generated-client, frontend, or fallback-deletion rollback is needed.
 
+## C8.1
+
+- Slice id: C8.1 Flow AI Builder provider truncation terminal failure
+- Findings addressed: explicit provider truncation metadata was routed into generic proposal repair instead of a typed terminal Builder error.
+- Verified evidence before change:
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:337-371` scopes C8 to Builder structural simplification after ship intent is decided; this slice stays inside provider/proposal failure classification and does not start capability or MCP implementation.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:385-386` records proposal repair pruning as blocked on telemetry and separately records `finish_reason == "length"` as the provider truncation behavior that must not route into generic repair.
+  - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:41-42` accepts typed truncation before repair and failed-turn telemetry as separate C8 concerns; this slice implements only the typed truncation branch.
+  - Fresh source review confirmed provider finish metadata is normalized at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:120-142`, with `LLMCompletionChoice.finish_reason` preserved at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:50-58`.
+  - Fresh source review confirmed first proposal completion is requested at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:230-238`, and before the fix the first response fell through from missing/invalid forced tool response into `_retry_forced_proposal_after_text` at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261-295`.
+  - Fresh source review confirmed repair calls use the same `ProposalTurnContext.max_output_tokens` at `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:180-198`, including self-correction at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:410-419` and forced proposal retry at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:601-608`.
+  - Fresh source review confirmed `AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG` already exists at `backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:58-63`, has a registry entry at `backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:347-352`, and is already present in generated frontend schema output, so no public schema/client change was needed.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer; semantic search was noisy for this narrow Builder path, so all concrete claims were verified with direct source reads and exact `rg`.
+  - `[no-peer-review]`: the user explicitly asked to skip the repo's Claude peer loop for this bounded slice and to use read-only `codex exec` peer gates instead.
+  - Read-only Codex plan gate session `019f180f-9454-79c3-a221-1d1aca141b11` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; valid guidance applied by keeping completion normalization as metadata owner and adding the terminal branch in `ProposalSubmissionOwner` immediately after the no-choices branch.
+  - Read-only Codex commit gate session `019f1819-c5bc-7e73-b379-fb80abf96e0c` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9`, with no blockers or required fixes. During that Codex review, a nested repo Claude-loop attempt hit the monthly spend limit and produced no Claude review output; the green-light verdict used for this slice is the Codex local review only.
+- Red proof:
+  - Before the implementation, `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_propose_plan_explicit_truncation_yields_terminal_error_without_repair -q` failed with `['status'] != ['error']` and logged `missing_submission_tool` repair telemetry, proving explicit provider truncation entered forced proposal repair.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - A first proposal completion whose explicit provider `finish_reason` is exactly `"length"` now yields a terminal Builder error event with `code=planner_output_too_long`, `phase=proposal`, and an actionable retry/shorter-request message.
+  - The truncation branch runs before forced tool dispatch, text fallback repair, or self-correction, so it does not spend the generic repair loop on a known output-budget failure.
+  - No truncation is inferred from malformed JSON, missing braces, token counts, exception text, schema validation failures, or stale repair failures.
+  - Non-truncation paths are unchanged: provider exceptions still yield `planner_upstream_error`; empty choices still yield `proposal_tool_missing`; successful tool-call proposals still dispatch; missing-tool text and malformed tool arguments still use the existing repair paths.
+  - No public API schema, OpenAPI output, generated client, frontend, docs, Flow runtime/API, failed-turn telemetry, structured-answer ingestion, audit vocabulary, retention, materialization eval, capability descriptor, MCP adapter, or PR #480 code changed.
+- Complexity deleted or owner clarified:
+  - `ai_builder_litellm_completion.py` remains the provider completion normalization owner.
+  - `ProposalSubmissionOwner` is now the canonical proposal-submission failure classifier for explicit first-response truncation, because it has request id, phase, user-action message, and repair-routing context.
+  - No new helper, service, abstraction, retry framework, schema field, or compatibility path was added.
+- Architecture delta:
+  - Canonical owner before: finish metadata was preserved by the provider boundary but not consumed by the proposal submission owner, so explicit truncation reached generic missing-tool repair.
+  - Canonical owner after: completion normalization owns metadata capture; `ProposalSubmissionOwner` owns terminal truncation classification before proposal repair.
+  - Duplicate paths remaining: self-correction and forced proposal repair remain for non-truncation malformed/missing-tool cases until failed-turn telemetry and deterministic evals prove whether any branch can be pruned.
+  - 9/10 follow-up candidate: C8.2 should add failed-turn telemetry for final failure kind, repair attempts, LLM calls, token usage, and request/session ids before any repair-path deletion or proposal-family collapse.
+  - Decision or measurement needed: measure real failed Builder turns before deleting fallback repair behavior; decide later whether provider repair completions with explicit truncation need a separate terminal classification slice.
+  - What not to preserve: routing explicit `finish_reason == "length"` into generic repair, heuristic truncation guesses, prompt/model-output logging in error details, or using capability/MCP work to hide unresolved Builder reliability paths.
+- Validation commands and results:
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_propose_plan_explicit_truncation_yields_terminal_error_without_repair -q` -> red before implementation with `['status'] != ['error']`, then pass, 1 passed.
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py -q` -> pass, 59 passed.
+  - `cd /workspace/backend && uv run pyright src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
+  - `cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> initial format check requested formatting for the test file; after `uv run ruff format tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`, check passed.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff --cached --check` -> pass.
+  - `git diff --cached --name-only -- frontend backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web` -> no output.
+  - `git diff --cached -U0 -- backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|phase|slice" || true` -> only legitimate `phase` assertions and one pre-existing MCP fixture string reflowed by ruff; no scope-creep implementation.
+- Remaining risk / rollback:
+  - This classifies only explicit first-response provider truncation, by exact finish metadata. Truncation during repair/self-correction completions is intentionally left for a later bounded slice if release evidence requires it.
+  - The repair loop remains unpruned until C8.2 telemetry/eval proof separates useful recovery from debt.
+  - Rollback is low risk: remove the single finish-reason branch, the focused test, and this ledger entry. No schema, generated-client, frontend, migration, runtime, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

@@ -17,7 +17,10 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
-from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from intric.flows.ai_builder.ai_builder_events import (
+    build_status_event,
+    encode_ai_builder_stream_event,
+)
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_USE_SERVER_PREFIX,
@@ -33,6 +36,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
+    ForcedToolRetryOutcome,
     build_self_correction_error_event,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -90,6 +94,7 @@ def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource
 
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_processor,
+    _make_response_with_text,
     _make_response_with_tool_calls,
     _make_tool_call,
     _make_usage,
@@ -309,6 +314,57 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
     assert payload["code"] == "proposal_tool_missing"
     assert payload["phase"] == "proposal"
     assert payload["request_id"] == "req-empty-first-attempt"
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_explicit_truncation_yields_terminal_error_without_repair() -> (
+    None
+):
+    processor = _make_processor()
+    truncated_response = _make_response_with_text('{"flow_name":"Document analysis"')
+    truncated_response.choices[0].finish_reason = "length"
+    truncated_response.choices[0].message.tool_calls = ()
+    forced_retry = AsyncMock(
+        return_value=ForcedToolRetryOutcome(events=(build_status_event("repairing"),))
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            new=AsyncMock(return_value=truncated_response),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "run_forced_tool_retry_after_text",
+            new=forced_retry,
+        ),
+    ):
+        events = [
+            encode_ai_builder_stream_event(event)
+            async for event in processor.propose_plan(
+                turn=_make_turn(),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=_empty_catalog(),
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-truncated-first-attempt",
+                flow=None,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "planner_output_too_long"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-truncated-first-attempt"
+    assert "cut off" in payload["message"]
+    forced_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -686,7 +742,9 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
         {
             "flow_name": "Time fallback",
             "plan_rationale": "Respond without external tools.",
-            "steps": [{"name": "Answer", "instructions": "Build a response without MCP."}],
+            "steps": [
+                {"name": "Answer", "instructions": "Build a response without MCP."}
+            ],
         },
     )
     processor.litellm_client.acompletion.return_value = _make_response_with_tool_calls(
@@ -1037,7 +1095,9 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
                 {
                     "flow_name": "Unexpected first flow",
                     "plan_rationale": "This should be retried because tool calls were parallel.",
-                    "steps": [{"name": "Classify", "instructions": "Classify the request."}],
+                    "steps": [
+                        {"name": "Classify", "instructions": "Classify the request."}
+                    ],
                 },
                 tool_call_id="call-outline-unexpected-parallel",
             ),

@@ -258,7 +258,21 @@ class ProposalSubmissionOwner:
             )
             return
 
-        message = response.choices[0].message
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            yield build_ai_builder_error_event(
+                message=(
+                    "The AI planner output was cut off before it returned a complete "
+                    "flow proposal. Try again with a shorter request or a model with "
+                    "a larger output limit."
+                ),
+                code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+                phase=AIBuilderErrorPhase.PROPOSAL,
+                request_id=request_id,
+            )
+            return
+
+        message = choice.message
         forced_response = _forced_submission_response(
             message=message,
         )
