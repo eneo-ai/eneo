@@ -1809,6 +1809,69 @@
   - The non-slot support-policy set remains intentionally explicit. Moving it without proving a stronger owner would hide policy inside the catalog and make structured-answer support harder to review.
   - Rollback is low risk: restore the hard-coded `SUPPORTED_STRUCTURED_QUESTION_IDS` set, remove `slot_resolving_legacy_question_ids()`, remove the focused partition tests, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, telemetry, or generated-client rollback is needed.
 
+## C8.12
+
+- Slice id: C8.12 Flow AI Builder non-slot structured-question policy proof
+- Findings addressed: `_NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS` still accepted `output_style`, `output_tone`, and `detail_level` as structured question ids even though current source shows they are answer/runtime-field/family concepts rather than active server-owned structured questions.
+- Evidence reviewed:
+  - C8.11 deliberately left the eight non-slot ids explicit in `ai_builder_canonicalization.py` until each id could be checked against discovery/edit/source owners.
+  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py:50-61` owned the non-slot support policy before this slice; after the fix, `:50-57` keeps only the five live non-slot question ids.
+  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py:63-93`, `:144-190`, `:253-292`, `:325-362`, and `:365-413` define active discovery questions for `processing_scope`, `document_kind`, `comparison_scope`, `output_reader`, and `final_output_scope`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py:474-500` exposes those five ids from `question_suggestion_for_id`; the same table does not expose `output_style`, `output_tone`, or `detail_level`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py:261-280` treats the five live ids as active explicit structured answers and does not include the removed ids.
+  - `backend/src/intric/flows/ai_builder/ai_builder_edit_scope.py:365-388` activates case/output-style edit families from live explicit ids such as `comparison_scope`, `processing_scope`, `final_pdf_type`, `output_reader`, and `final_output_scope`, not from `output_style`, `output_tone`, or `detail_level`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py:511-568` still reads `output_style`, `output_tone`, and `detail_level` as historical answer keys that suppress vague-question prompts; this is not a structured-question support owner.
+  - Exact `rg` after the source change shows `output_style`, `output_tone`, and `detail_level` only in family/answer/runtime-field/test contexts, plus the new rejection tests; no active `question_suggestion_for_id` builder emits them as question ids.
+- Per-id verdicts:
+  - `processing_scope`: active discovery question and case-scope/edit signal; retained as supported.
+  - `document_kind`: active discovery question and input/edit signal; retained as supported.
+  - `comparison_scope`: active discovery question and case-scope/edit signal; retained as supported.
+  - `output_reader`: active discovery question and output-style edit signal; retained as supported.
+  - `final_output_scope`: active discovery question and output-style edit signal; retained as supported.
+  - `output_style`: discovery family / answer-key / runtime-field concept, not an active structured question id; removed from supported structured-question ids.
+  - `output_tone`: historical answer-key suppressor for reader/style vagueness, not an active structured question id; removed from supported structured-question ids.
+  - `detail_level`: historical answer-key and runtime-field concept, not an active structured question id; removed from supported structured-question ids.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but graph/semantic output was sparse for this narrow Builder policy slice; direct source reads, exact `rg`, and focused red tests supplied the concrete evidence.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-12-non-slot-structured-question-policy-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `PLAN_READY: yes`, `SCORE: 9`, with no required fixes. Valid guidance applied: keep `comparison_scope_conflict` out of this slice, do not import discovery-question builders into low-level canonicalization, and reuse existing framework/planner tests.
+  - Read-only Codex final gate artifact `.codex/artifacts/c8-12-non-slot-structured-question-policy-final-gate-20260630.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`, only because unrelated dirty files were present and full-worktree `git diff --check` failed in `.devcontainer/devcontainer.json`; no C8.12 source/test/ledger fixes were required.
+  - Read-only Codex staged-diff final gate artifact `.codex/artifacts/c8-12-non-slot-structured-question-policy-final-gate-staged-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, `SCORE: 9`, after staging exactly the four C8.12 files.
+- Red proof:
+  - Before source changes, `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_rejects_unsupported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_user_question_metadata_rejects_uningestable_structured_answers -q` failed for `output_style`, `output_tone`, and `detail_level`, proving those stale ids were still accepted by the support predicate and structured-answer ingestion.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Explicit structured-question answers for `output_style`, `output_tone`, and `detail_level` now fail as `unsupported_question_id` instead of being accepted as inert metadata.
+  - The five live non-slot discovery/edit question ids remain supported.
+  - Catalog-derived slot-resolving ids from C8.11, direct legal-slot value validation from C8.10, aliases such as `upload_mode` / `final_output_type` / `final_output_format`, metadata persistence for supported answers, and unsupported ids such as `multi_file_strategy` remain unchanged.
+  - No user-facing copy, discovery strategy, planner prompts, question ordering, API/OpenAPI/generated client, frontend, runtime, retention, audit, telemetry, proposal repair/fallback, MCP, or capability surfaces changed.
+- Complexity deleted or owner clarified:
+  - Deleted three stale non-slot question ids from the canonicalization support policy.
+  - `ai_builder_canonicalization.py` remains the owner of explicit non-slot structured-question support policy; discovery questions and edit-scope remain consumers/evidence, not new dependencies.
+  - No generic question registry, vocabulary service, capability framework, prompt rewrite, compatibility layer, broad Builder module split, or new source owner was added.
+- Architecture delta:
+  - Canonical owner before: canonicalization accepted a mixed non-slot set of active question ids plus stale answer/runtime-field concepts.
+  - Canonical owner after: canonicalization keeps only active non-slot structured-question ids; stale answer/runtime-field concepts are no longer treated as supported question ids.
+  - Duplicate paths remaining: the five live non-slot ids remain explicit in canonicalization because deriving them from discovery-question builders would couple a low-level support predicate to localized question construction.
+  - 9/10 follow-up candidate: if future discovery policy grows, consider a tiny typed, non-localized question-id inventory owned near canonicalization only if it can replace the explicit set without creating a registry.
+  - Decision or measurement needed: none for the three removed ids; future changes to discovery question ids should include the existing support/rejection tests.
+  - What not to preserve: stale support for answer-key/runtime-field names, discovery-builder imports in canonicalization, or a generic question registry to avoid a five-item explicit policy set.
+- Validation commands and results:
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_rejects_unsupported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_user_question_metadata_rejects_uningestable_structured_answers -q` -> red before implementation, 6 failed / 6 passed, then pass after source change, covered by the focused and full-file runs below.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_supported_structured_question_ids_partition_catalog_and_policy_ids tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_accepts_supported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_rejects_unsupported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_user_question_metadata_rejects_uningestable_structured_answers -q` -> pass, 24 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q` -> pass, 194 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 3 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
+  - `git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the three Builder source/test files plus this progress ledger.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < staged-final-gate-prompt` -> pass; staged final gate green and commit-ready.
+- Remaining risk / rollback:
+  - Historical persisted metadata may still contain old `output_style` question ids, and tolerant metadata readers remain unchanged; this slice only rejects new explicit structured answers that claim those names are active server-owned questions.
+  - Rollback is low risk: restore the three removed ids in `_NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS`, remove the focused rejection test cases, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, telemetry, or generated-client rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

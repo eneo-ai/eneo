@@ -2083,12 +2083,9 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
     non_slot_policy_ids = frozenset(
         {
             "comparison_scope",
-            "detail_level",
             "document_kind",
             "final_output_scope",
             "output_reader",
-            "output_style",
-            "output_tone",
             "processing_scope",
         }
     )
@@ -2106,11 +2103,13 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
         "flow_input_architecture",
         "final_pdf_type",
         "post_processing_goal",
+        "processing_scope",
+        "document_kind",
+        "comparison_scope",
+        "output_reader",
+        "final_output_scope",
         "structured_io_contract",
         "structured_analysis_need",
-        "output_style",
-        "output_tone",
-        "detail_level",
     ],
 )
 def test_accepts_supported_structured_question_ids(question_id: str) -> None:
@@ -2135,5 +2134,14 @@ def test_structured_question_aliases_are_supported_but_not_public_ids(
     assert alias not in supported_structured_question_ids()
 
 
-def test_rejects_unsupported_structured_question_ids() -> None:
-    assert not is_supported_structured_question_id("multi_file_strategy")
+@pytest.mark.parametrize(
+    "question_id",
+    [
+        "multi_file_strategy",
+        "output_style",
+        "output_tone",
+        "detail_level",
+    ],
+)
+def test_rejects_unsupported_structured_question_ids(question_id: str) -> None:
+    assert not is_supported_structured_question_id(question_id)

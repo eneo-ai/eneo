@@ -469,6 +469,30 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
         (
             {
                 "kind": "structured_question_answer",
+                "question_id": "output_style",
+                "selected_values": ["formal"],
+            },
+            "unsupported_question_id",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
+                "question_id": "output_tone",
+                "selected_values": ["formal"],
+            },
+            "unsupported_question_id",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
+                "question_id": "detail_level",
+                "selected_values": ["detailed"],
+            },
+            "unsupported_question_id",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
                 "question_id": "input_material_mode",
             },
             "empty_question_answer",

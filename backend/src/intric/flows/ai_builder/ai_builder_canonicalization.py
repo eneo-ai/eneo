@@ -54,9 +54,6 @@ _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
         "comparison_scope",
         "output_reader",
         "final_output_scope",
-        "output_style",
-        "output_tone",
-        "detail_level",
     }
 )
 SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = (
