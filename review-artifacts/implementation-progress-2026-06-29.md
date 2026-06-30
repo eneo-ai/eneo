@@ -1486,6 +1486,82 @@
   - Direct `pyright` in the devcontainer does not resolve the project environment; use `backend/scripts/run_pyright_in_devcontainer.sh` for the repo type gate.
   - Rollback is low risk: remove the Builder retention query/count/delete methods, the worker deletion step/count field, the focused tests, and this ledger entry. No schema, migration, API, generated-client, frontend, Flow runtime, file-purge, audit, or proposal-repair rollback is needed.
 
+## C8.7
+
+- Slice id: C8.7 Flow AI Builder audit vocabulary delete-or-wire
+- Findings addressed: Builder audit vocabulary contained enum/category-only actions that did not map to real Builder lifecycle transitions, making audit configuration appear stronger than the emitted audit trail.
+- Verified evidence before change:
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:356` requires resolving dead Builder audit vocabulary for `AI_BUILDER_PLAN_REJECTED` and delete-or-wire proof for `AI_BUILDER_PLAN_PROPOSED`.
+  - `.codex/artifacts/codex-exec-flow-builder-next-roadmap-analysis-20260630.md` recommends keeping session created/cancelled, plan approved, and flow applied while deleting fake plan-rejected vocabulary and not wiring proposal audit unless a real audit requirement exists.
+  - `backend/src/intric/audit/domain/action_types.py:119-125` declared six `AI_BUILDER_*` actions before the fix.
+  - `backend/src/intric/audit/domain/category_mappings.py:115-120` mapped all six Builder actions to `user_actions` before the fix.
+  - Direct `rg` over `backend/src backend/tests` showed only four real emitted/tested actions: session created at `backend/src/intric/flows/ai_builder/ai_builder_router.py:492`, session cancelled at `backend/src/intric/flows/ai_builder/ai_builder_router.py:1080`, plan approved at `backend/src/intric/flows/ai_builder/ai_builder_router.py:1141`, and flow applied at `backend/src/intric/flows/ai_builder/ai_builder_router.py:1228`.
+  - The same direct `rg` showed `AI_BUILDER_PLAN_PROPOSED` and `AI_BUILDER_PLAN_REJECTED` appeared only in `action_types.py` and `category_mappings.py`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:38-42` defines plan status as `proposed`, `approved`, `applied`, and `superseded`; `backend/tests/unittests/flows/ai_builder/test_ai_builder_models.py:256-263` already asserts `rejected` is not a plan status.
+  - `backend/src/intric/audit/schemas/audit_config_schemas.py:13-14`, `:151-153`, and `:223-234` derive action validation, `ActionType` schema, and action update max length directly from the enum, so deleting enum values intentionally contracts the audit-config/OpenAPI action vocabulary.
+- Builder audit action inventory:
+  - `AI_BUILDER_SESSION_CREATED`: emitted by the create-session route and covered by a router audit test; kept and mapped to `user_actions`.
+  - `AI_BUILDER_SESSION_CANCELLED`: emitted by the cancel-session route and covered by a router audit test; kept and mapped to `user_actions`.
+  - `AI_BUILDER_PLAN_APPROVED`: emitted by the approve-plan route and covered by a router audit test; kept and mapped to `user_actions`.
+  - `AI_BUILDER_FLOW_APPLIED`: emitted by the apply-plan route and covered by a router audit test; kept and mapped to `user_actions`.
+  - `AI_BUILDER_PLAN_PROPOSED`: enum/category-only; deleted. Proposal outcomes are covered by Builder proposal-turn telemetry, and no source evidence showed a compliance requirement for an auditable "proposal shown" transition.
+  - `AI_BUILDER_PLAN_REJECTED`: enum/category-only and incompatible with the current plan lifecycle because there is no rejected plan status; deleted.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer for audit action ownership, but direct source reads and exact `rg` supplied the concrete evidence.
+  - `[no-peer-review]`: the user explicitly asked to skip Claude/Antigravity for this bounded slice and use read-only `codex exec` peer gates instead.
+  - Read-only Codex plan gate artifact `.codex/artifacts/builder-audit-vocabulary-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with no blockers. Required guidance applied: delete `PLAN_PROPOSED` and `PLAN_REJECTED`, do not wire artificial events, and keep the guard test in `test_audit_category_mappings.py`.
+  - Read-only Codex commit gate artifact `.codex/artifacts/builder-audit-vocabulary-commit-gate-20260630.md` initially returned `VERDICT: red`, `GREEN_LIGHT: no`; required feedback was applied by updating the generated `ActionType` union and deleting the stale locale keys so the audit UI cannot surface backend-rejected actions.
+  - Read-only Codex final commit gate artifact `.codex/artifacts/builder-audit-vocabulary-final-commit-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no blockers or required fixes. Its optional suggestion to unstage the progress ledger was not applied because this roadmap prompt requires the durable ledger update.
+- Red proof:
+  - Before deleting the enum values, `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unit/test_audit_category_mappings.py::TestCategoryMappings::test_ai_builder_actions_are_real_lifecycle_audit_events -q` failed because `AI_BUILDER_PLAN_PROPOSED` and `AI_BUILDER_PLAN_REJECTED` were extra Builder audit actions.
+- Files changed:
+  - `backend/src/intric/audit/domain/action_types.py`
+  - `backend/src/intric/audit/domain/category_mappings.py`
+  - `backend/tests/unit/test_audit_category_mappings.py`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/apps/web/messages/en.json`
+  - `frontend/apps/web/messages/sv.json`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Audit configuration and OpenAPI action vocabulary no longer expose un-emitted Builder plan proposed/rejected actions.
+  - The generated TypeScript `ActionType` union and admin audit action message catalog no longer expose the deleted actions, so the audit action dropdown cannot present backend-rejected Builder plan proposed/rejected filters.
+  - Live Builder audit actions for session created, session cancelled, plan approved, and flow applied remain unchanged.
+  - No Builder router behavior, lifecycle state, proposal repair/fallback behavior, telemetry, retention policy, Flow runtime/API, migration, global audit schema, capability descriptor, MCP adapter, or PR #480 behavior changed.
+- Complexity deleted or owner clarified:
+  - Builder audit vocabulary now contains only real emitted lifecycle transitions.
+  - Proposal outcome measurement remains in Builder proposal-turn telemetry rather than an un-emitted audit enum value.
+  - No audit abstraction, compatibility alias, fake plan-rejected state, lifecycle router refactor, or frontend filtering workaround was added.
+- Architecture delta:
+  - Canonical owner before: audit enum/category mapping declared two Builder actions without a real lifecycle owner.
+  - Canonical owner after: audit enum/category mapping contains only Builder actions emitted by existing router audit boundaries; generated API types and audit message options mirror that vocabulary; proposal failures and proposal outcomes stay in the telemetry owner.
+  - Duplicate paths remaining: historical roadmap/review artifacts still mention the deleted values as evidence of the completed cleanup; tracked backend/frontend runtime and generated API sources no longer expose them.
+  - 9/10 follow-up candidate: if product/compliance later requires a "proposal shown" audit event, add it as a real lifecycle/audit requirement with router/service evidence and tests instead of reintroducing dead vocabulary.
+  - Decision or measurement needed: decide whether proposal display is compliance-auditable; current source evidence does not justify wiring it.
+  - What not to preserve: enum/category-only Builder audit actions, fake rejected-plan vocabulary, artificial audit events, compatibility aliases, or frontend/generated-client churn inside this bounded cleanup.
+- API / generated-client decision:
+  - This is an intentional OpenAPI enum contraction for audit config actions because `ActionType` is part of the audit config schema.
+  - The app OpenAPI output was checked directly. The generated TypeScript `ActionType` union and locale keys were updated minimally because the admin audit action filter derives options from message keys and casts them to `ActionType`; leaving stale values would preserve selectable backend-rejected actions.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unit/test_audit_category_mappings.py::TestCategoryMappings::test_ai_builder_actions_are_real_lifecycle_audit_events -q'` -> red before deletion with the two extra actions; pass after deletion, 1 passed.
+  - `rg -n "AI_BUILDER_PLAN_(PROPOSED|REJECTED)|ai_builder_plan_(proposed|rejected)" backend/src backend/tests` -> no matches after deletion.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unit/test_audit_category_mappings.py tests/unit/test_audit_config_service.py tests/unit/test_audit_bugs.py -q` -> pass, 86 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestCreateSessionEndpoint::test_logs_audit_event tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestCancelSessionEndpoint::test_cancels_session_and_logs_audit tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestApprovePlanEndpoint::test_logs_audit_event tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestApplyPlanEndpoint::test_logs_audit_event -q` -> pass, 4 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/audit/domain/action_types.py src/intric/audit/domain/category_mappings.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format --check src/intric/audit/domain/action_types.py src/intric/audit/domain/category_mappings.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> initially requested formatting for the new test; after `ruff format`, pass, 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/audit src/intric/flows/ai_builder/ai_builder_router.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace/backend && .venv/bin/python - <<'PY' ... get_application().openapi() ... PY` -> pass; `ai_builder_plan_proposed` and `ai_builder_plan_rejected` absent from the `ActionType` enum, live Builder audit actions still present.
+  - `cd frontend && bun run --filter @intric/intric-js check` on the host because the devcontainer has no `bun`, `node`, or `npm` on `PATH` -> pass.
+  - `cd frontend/apps/web && bun run i18n:compile` on the host because the devcontainer has no frontend runtime on `PATH` -> pass; no tracked `src/lib/paraglide` diff was produced.
+  - `cd frontend && bun x prettier --check packages/intric-js/src/types/schema.d.ts apps/web/messages/en.json apps/web/messages/sv.json` -> pass.
+  - `cd frontend/apps/web && bun run test:unit -- 'src/routes/(app)/admin/audit-logs/audit-i18n.test.ts'` -> pass, 5 passed.
+  - `cd frontend && bun run --filter @intric/web check` -> pass with 0 errors and 1 pre-existing Svelte warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte`.
+- Privacy / safety notes:
+  - The slice deletes dead vocabulary only. It adds no audit metadata, prompts, user messages, model output, file contents, resource names, secrets, or tool arguments.
+- Remaining risk / rollback:
+  - Ignored/generated E2E build artifacts may still contain stale strings until rebuilt; tracked backend/frontend/runtime sources no longer expose the deleted values.
+  - Existing tenants with stored per-action overrides for the removed values may retain inert override keys until a future audit-config maintenance cleanup; the validator now rejects new updates for those deleted values.
+  - Rollback is low risk: restore the two enum values, category mappings, generated TypeScript union members, locale keys, remove the guard test and this ledger entry. No database schema, migration, runtime, retention, proposal-repair, Flow API, or data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
