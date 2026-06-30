@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
 from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     dispatch_server_decision,
@@ -128,6 +129,40 @@ async def test_fallback_text_question_persists_user_and_assistant_turn() -> None
 
 
 @pytest.mark.asyncio
+async def test_server_question_uses_catalog_legacy_question_id_for_slot_rename() -> (
+    None
+):
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    conversation = [ConversationMessage(role="user", content="Build a flow")]
+    decision = AskCanonicalQuestion(
+        slot_name="primary_runtime_input",
+        prompt="What should the runtime input be?",
+    )
+
+    result = await dispatch_server_decision(
+        _request(repo=repo, decision=decision, conversation=conversation)
+    )
+
+    assert [event.event for event in result.events] == ["text", "question"]
+    question_event = result.events[1]
+    assert isinstance(question_event, AIBuilderQuestionEvent)
+    assert question_event.data.question_id == "input_material_mode"
+
+    repo.commit_turn.assert_awaited_once()
+    new_messages = repo.commit_turn.await_args.kwargs["new_messages"]
+    assistant_message = new_messages[-2]
+    assert assistant_message.metadata is not None
+    assert assistant_message.metadata["question_id"] == "input_material_mode"
+    assert assistant_message.tool_calls is not None
+    tool_call = assistant_message.tool_calls[0]
+    arguments = tool_call["arguments"]
+    assert isinstance(arguments, dict)
+    assert arguments["question_id"] == "input_material_mode"
+    assert result.new_planning_state_version == 5
+
+
+@pytest.mark.asyncio
 async def test_architecture_commit_chains_persisted_requirements_confirmation() -> None:
     repo = AsyncMock()
     repo.commit_turn.side_effect = [5, 6]
@@ -159,7 +194,5 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
     first_commit = repo.commit_turn.await_args_list[0].kwargs
     assert first_commit["architecture_commit"] is not None
     second_commit = repo.commit_turn.await_args_list[1].kwargs
-    assert [message.role for message in second_commit["new_messages"]] == [
-        "assistant"
-    ]
+    assert [message.role for message in second_commit["new_messages"]] == ["assistant"]
     assert result.new_planning_state_version == 6

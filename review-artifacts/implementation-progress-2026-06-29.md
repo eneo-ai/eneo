@@ -1663,6 +1663,52 @@
   - The slice intentionally does not add abandoned-active-session retention, lifecycle service decomposition, frontend/API changes, or repair/fallback pruning.
   - Rollback is low risk: remove the no-lease lock fence in `_update_session_status`, restore the duplicated latest-plan SQL predicate if desired, remove the focused integration test, and delete this ledger entry. No schema, migration, API, frontend, runtime, audit, retention, or generated-client rollback is needed.
 
+## C8.9
+
+- Slice id: C8.9 Flow AI Builder question/slot vocabulary consolidation
+- Findings addressed: server-decision dispatch carried a local duplicate slot-to-discovery-question-id bridge for renamed Builder slots even though `question_catalog` already owns the legacy/discovery question-id bridge.
+- Evidence reviewed:
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:102` identifies the duplicate dispatch map/resolver and names `question_catalog.legacy_question_id_for_slot` as the canonical cleanup path.
+  - `backend/src/intric/flows/ai_builder/question_catalog.py:790-825` owns the `primary_runtime_input -> input_material_mode` and `terminal_output -> final_output_mode` bridge plus reverse legacy-question lookup.
+  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py:40-49` and `backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py:452-463` already reuse the catalog bridge for discovery question projection and planning-state answer signals.
+  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:40-52,142-152` still owns a separate direct slot-value validation allowlist; that set is not merged in this slice because it gates answer-value validation policy, not only slot/question-id naming.
+  - `backend/tests/unittests/flows/ai_builder/test_question_catalog.py:443-460` already pins the catalog bridge for renamed slots and reverse legacy question ids.
+- Verification agents used, with verdicts:
+  - CRG was attempted as a first-pass reducer, but returned stale/noisy results for this small Builder slice; direct source reads and exact `rg` supplied the concrete evidence.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-9-question-slot-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; it agreed to delete the local dispatch map/resolver, keep the test behavioral, and defer `_DIRECT_SLOT_VALUE_QUESTION_IDS` to a separate proof because it is validation policy.
+  - Read-only Codex final gate artifact `.codex/artifacts/c8-9-question-slot-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no blockers or required fixes.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Server `AskCanonicalQuestion` dispatch now resolves slot names through `question_catalog.legacy_question_id_for_slot`.
+  - User-facing question ids, structured-answer ingestion, planner prompts, discovery ordering, API/OpenAPI/generated clients, frontend, runtime, retention, audit, proposal repair/fallback, MCP, and capability surfaces are unchanged.
+- Complexity deleted or owner clarified:
+  - Deleted the local server-dispatch slot-to-discovery-question map and private resolver.
+  - `question_catalog` is now the only owner for the slot-name to legacy/discovery question-id bridge used by discovery and server-dispatch paths.
+  - No new registry, service, helper framework, prompt copy, or compatibility layer was added.
+- Architecture delta:
+  - Canonical owner before: `question_catalog` owned the bridge, but `ai_builder_server_decision_dispatch.py` duplicated the two renamed slot mappings locally.
+  - Canonical owner after: `question_catalog.legacy_question_id_for_slot` owns the bridge; server dispatch is a consumer.
+  - Duplicate paths remaining: `_DIRECT_SLOT_VALUE_QUESTION_IDS` remains in `ai_builder_user_question_metadata.py` as a direct structured-answer value-validation policy subset, not yet a proven duplicate of catalog vocabulary ownership.
+  - 9/10 follow-up candidate: prove whether the direct slot-value validation allowlist can be derived from `question_catalog` without changing unsupported-question or unsupported-value behavior; if yes, fold it into the catalog owner with focused ingestion tests.
+  - Decision or measurement needed: measure/prove exact equivalence between supported structured question ids, slot-backed catalog ids, and the direct value-validation subset before deleting `_DIRECT_SLOT_VALUE_QUESTION_IDS`.
+  - What not to preserve: local slot-to-question-id maps, private bridge helpers in consumers, tests asserting private helper names, or a generic question vocabulary service.
+- Validation commands and results:
+  - `docker exec ... cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py -q` -> failed because `uv` is unavailable on this devcontainer shell `PATH`; the existing backend virtualenv commands below were used per prompt.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py -q` -> pass, 3 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py -q` -> pass, 81 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py && .venv/bin/ruff format --check ...` -> initially requested formatting; after `ruff format`, pass, all checks passed and 3 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && ! rg -n "_SERVER_SLOT_TO_DISCOVERY_QUESTION_ID|_discovery_question_id_for_server_slot" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder` -> pass; deleted duplicate symbols are gone.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
+- Remaining risk / rollback:
+  - The direct structured-answer value-validation allowlist remains as an explicit follow-up because merging it into the catalog without proof could change ingestion semantics.
+  - Rollback is low risk: restore the deleted dispatch map/resolver, revert the call site to the local resolver, remove the focused dispatch behavior test, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, or generated-client rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

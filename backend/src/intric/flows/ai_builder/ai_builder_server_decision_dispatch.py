@@ -50,6 +50,7 @@ from intric.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.question_catalog import legacy_question_id_for_slot
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -63,11 +64,6 @@ ServerDecisionKind = Literal[
     "commit_architecture",
     "confirm_requirements",
 ]
-
-_SERVER_SLOT_TO_DISCOVERY_QUESTION_ID: dict[str, str] = {
-    "primary_runtime_input": "input_material_mode",
-    "terminal_output": "final_output_mode",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +113,7 @@ async def _dispatch_question(
     request: ServerDecisionDispatchRequest,
     decision: AskCanonicalQuestion,
 ) -> ServerDecisionDispatchResult:
-    question_id = _discovery_question_id_for_server_slot(decision.slot_name)
+    question_id = legacy_question_id_for_slot(decision.slot_name)
     discovery_followup = build_discovery_followup(
         request.conversation,
         flow=request.flow,
@@ -333,10 +329,6 @@ def _server_turn_telemetry(
         parse_repair_attempts=0,
         architecture_commit_populated=architecture_commit_populated,
     )
-
-
-def _discovery_question_id_for_server_slot(slot_name: str) -> str:
-    return _SERVER_SLOT_TO_DISCOVERY_QUESTION_ID.get(slot_name, slot_name)
 
 
 __all__ = [
