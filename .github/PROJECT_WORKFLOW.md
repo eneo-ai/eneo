@@ -117,7 +117,7 @@ The Epic template fields have these meanings:
 - `Start date`: optional export fallback for the Project `Start date` field.
 - `Target date`: optional export fallback for the Project `Target date` field.
 - `Sponsor / municipality`: optional requester/sponsor shown in committee roadmap output.
-- `Owner / lead`: optional person or team responsible for driving the epic when it is planned.
+- `Owner / lead`: optional person or team explicitly responsible for driving the epic when it is planned. Roadmap export reads only this field or issue-body section and does not infer owners from labels, areas, assignees, or AI-generated text.
 - `Priority`: relative order inside the roadmap version. `P0` is urgent or release-critical; `P3` is lowest priority.
 - `Area`: primary ownership area: `Backend`, `Frontend`, `Infra`, `Docs`, `Security`, or `Other`.
 - `Flow / architecture`: optional Mermaid graph for the main user flow or system relationship.

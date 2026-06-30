@@ -54,8 +54,8 @@ body:
     id: owner
     attributes:
       label: Owner / lead
-      description: Optional. Person or team responsible for driving this epic when it is planned.
-      placeholder: Team Platform
+      description: Optional. Person or team responsible for driving this epic when it is planned. Leave blank if it is not explicitly decided.
+      placeholder: Product lead or team name
 
   - type: dropdown
     id: priority

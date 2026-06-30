@@ -136,8 +136,8 @@ function toEpic(item, index) {
       "",
     ]),
     owner: firstValue([
-      getField(item, ["owner / lead", "owner", "lead", "responsible", "assignee"]),
-      getSectionValue(body, ["Owner / lead", "Owner", "Lead", "Responsible", "Assignee"]),
+      getField(item, ["owner / lead"]),
+      getSectionValue(body, ["Owner / lead"]),
       "",
     ]),
     startDate: firstValue([
@@ -326,16 +326,6 @@ function renderSvgRoadmap(epics, context) {
 
   const lines = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Eneo roadmap">`,
-    "<defs>",
-    "  <style>",
-    "    .title { font: 700 34px Arial, sans-serif; fill: #050505; }",
-    "    .card-title { font: 700 20px Arial, sans-serif; fill: #f8fbfd; }",
-    "    .future-title { font: 700 19px Arial, sans-serif; fill: #0d4774; }",
-    "    .badge { font: 700 13px Arial, sans-serif; fill: #f8fbfd; }",
-    "    .owner { font: 700 12px Arial, sans-serif; fill: #d8edf7; }",
-    "    .footer { font: 700 20px Arial, sans-serif; fill: #0d4774; }",
-    "  </style>",
-    "</defs>",
     `<rect x="0" y="0" width="${width}" height="${height}" fill="#eef7f9"/>`,
   ];
 
@@ -348,7 +338,7 @@ function renderSvgRoadmap(epics, context) {
     if (index > 0) {
       lines.push(`<line x1="${x}" y1="${margin}" x2="${x}" y2="${height - margin}" stroke="#9eb5be" stroke-width="1.5"/>`);
     }
-    lines.push(`<text x="${x + columnWidth / 2}" y="${margin + 72}" text-anchor="middle" class="title">${escapeXml(version)}</text>`);
+    lines.push(`<text x="${x + columnWidth / 2}" y="${margin + 72}" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#050505">${escapeXml(version)}</text>`);
   });
 
   for (const [version, versionEpics] of itemsByVersion) {
@@ -356,11 +346,11 @@ function renderSvgRoadmap(epics, context) {
     const x = margin + index * columnWidth;
     const futureColumn = isFutureVersion(version);
     const columns = versionEpics.length <= 3 || /^2\.0$/i.test(version) ? 1 : 2;
-    const cardGap = 20;
+    const cardGap = columns === 1 ? 20 : 16;
     const rowGap = 24;
     const cardWidth = columns === 1
       ? Math.min(260, columnWidth - 92)
-      : (columnWidth - 72 - cardGap) / 2;
+      : (columnWidth - 52 - cardGap) / 2;
     const cardHeight = 116;
     const startX = x + (columnWidth - (columns * cardWidth + (columns - 1) * cardGap)) / 2;
     const maxRows = Math.max(1, Math.floor((contentHeight + rowGap) / (cardHeight + rowGap)));
@@ -400,12 +390,28 @@ function renderSvgRoadmap(epics, context) {
   }
 
   const footerY = height - footerHeight + 18;
+  const footer = svgFooterMeta(svgEpics, context);
   lines.push(`<line x1="0" y1="${footerY}" x2="${width}" y2="${footerY}" stroke="#003b16" stroke-width="2.5" stroke-dasharray="12 9"/>`);
   lines.push(`<line x1="0" y1="${footerY + 48}" x2="${width}" y2="${footerY + 48}" stroke="#003b16" stroke-width="2.5" stroke-dasharray="12 9"/>`);
-  lines.push(`<text x="${width / 2}" y="${footerY + 32}" text-anchor="middle" class="footer">${escapeXml(svgFooterText(svgEpics, context))}</text>`);
-  lines.push(`<circle cx="${width / 2 + 185}" cy="${footerY + 24}" r="24" fill="#167c29" stroke="#053b12" stroke-width="3"/>`);
-  lines.push(`<text x="${width / 2 + 185}" y="${footerY + 33}" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#fff">!</text>`);
-  lines.push(`<text x="${width - margin - 8}" y="${height - 56}" text-anchor="end" font-family="Arial Black, Arial, sans-serif" font-size="72" font-weight="900" fill="#050505">eneo</text>`);
+  if (footer.attention) {
+    const iconRadius = 24;
+    const gap = 16;
+    const footerTextWidth = textPixelWidth(footer.text, 11.5);
+    const groupWidth = iconRadius * 2 + gap + footerTextWidth;
+    const iconX = width / 2 - groupWidth / 2 + iconRadius;
+    const textX = iconX + iconRadius + gap + footerTextWidth / 2;
+    lines.push(`<circle cx="${iconX}" cy="${footerY + 24}" r="${iconRadius}" fill="#167c29" stroke="#053b12" stroke-width="3"/>`);
+    lines.push(`<text x="${iconX}" y="${footerY + 33}" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#fff">!</text>`);
+    lines.push(`<text x="${textX}" y="${footerY + 32}" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#0d4774">${escapeXml(footer.text)}</text>`);
+  } else {
+    lines.push(`<text x="${width / 2}" y="${footerY + 32}" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#0d4774">${escapeXml(footer.text)}</text>`);
+  }
+  lines.push(renderEneoLogo({
+    x: width - margin - 232,
+    y: height - margin - 66,
+    width: 220,
+    background: "#eef7f9",
+  }));
   lines.push("</svg>");
 
   return lines.join("\n");
@@ -415,32 +421,54 @@ function renderSvgCard(epic, bounds) {
   const fill = bounds.future ? "#d8e8ee" : "#315f7a";
   const stroke = bounds.future ? "#003b16" : "#315f7a";
   const dash = bounds.future ? ' stroke-dasharray="12 9"' : "";
-  const textClass = bounds.future ? "future-title" : "card-title";
+  const titleFill = bounds.future ? "#0d4774" : "#f8fbfd";
   const centerX = bounds.x + bounds.width / 2;
-  const titleLines = wrapText(epic.title, bounds.width < 190 ? 15 : 20, 3);
-  const titleStartY = bounds.y + bounds.height / 2 - (titleLines.length - 1) * 13;
+  const dot = statusDot(epic);
+  const hasTopMeta = Boolean(epic.sponsor || dot);
+  const titleFontSize = bounds.width < 190 ? 18 : 20;
+  const lineHeight = titleFontSize + 4;
+  const titleAreaTop = bounds.y + (hasTopMeta ? 42 : 20);
+  const titleAreaBottom = bounds.y + bounds.height - (epic.owner ? 25 : 16);
+  const titleAreaHeight = Math.max(titleFontSize, titleAreaBottom - titleAreaTop);
+  const maxTitleLines = Math.max(1, Math.min(3, Math.floor(titleAreaHeight / lineHeight)));
+  const titleMaxChars = Math.max(8, Math.floor((bounds.width - 28) / (titleFontSize * 0.56)));
+  const titleLines = wrapText(epic.title, titleMaxChars, maxTitleLines);
+  const titleBlockHeight = (titleLines.length - 1) * lineHeight;
+  const titleStartY = titleAreaTop + titleAreaHeight / 2 - titleBlockHeight / 2 + titleFontSize * 0.35;
   const card = [
-    `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${fill}" stroke="${stroke}" stroke-width="2.5"${dash}/>`,
+    `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="2.5"${dash}/>`,
   ];
 
   if (epic.sponsor) {
-    const badgeText = truncate(epic.sponsor, 22);
-    const badgeWidth = Math.min(bounds.width - 16, 30 + badgeText.length * 7);
-    card.push(`<rect x="${bounds.x - 2}" y="${bounds.y + 10}" width="${badgeWidth}" height="28" rx="4" fill="#244a62"/>`);
-    card.push(`<text x="${bounds.x + 12}" y="${bounds.y + 29}" class="badge">${escapeXml(badgeText)}</text>`);
+    const sponsor = sponsorDisplayName(epic.sponsor);
+    const badgeX = bounds.x + 12;
+    const badgeFontSize = sponsor.length > 13 ? 11 : 12;
+    const badgeCharWidth = badgeFontSize * 0.53;
+    const maxBadgeWidth = Math.max(48, bounds.width - (dot ? 62 : 24));
+    const badgeText = truncateToWidth(sponsor, maxBadgeWidth - 18, badgeCharWidth);
+    const badgeWidth = Math.min(maxBadgeWidth, Math.max(48, 18 + textPixelWidth(badgeText, badgeCharWidth)));
+    card.push(`<rect x="${badgeX}" y="${bounds.y + 12}" width="${badgeWidth}" height="24" rx="4" fill="#244a62"/>`);
+    card.push(`<text x="${badgeX + 9}" y="${bounds.y + 28}" font-family="Arial, sans-serif" font-size="${badgeFontSize}" font-weight="700" fill="#f8fbfd">${escapeXml(badgeText)}</text>`);
   }
 
-  const dot = statusDot(epic);
   if (dot) {
-    card.push(`<circle cx="${bounds.x + bounds.width - 26}" cy="${bounds.y + 28}" r="17" fill="${dot.fill}" stroke="${dot.stroke}" stroke-width="3"/>`);
+    card.push(`<circle cx="${bounds.x + bounds.width - 28}" cy="${bounds.y + 28}" r="15" fill="${dot.fill}" stroke="${dot.stroke}" stroke-width="3"/>`);
   }
 
   titleLines.forEach((line, index) => {
-    card.push(`<text x="${centerX}" y="${titleStartY + index * 25}" text-anchor="middle" class="${textClass}">${escapeXml(line)}</text>`);
+    card.push(`<text x="${centerX}" y="${titleStartY + index * lineHeight}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${titleFontSize}" font-weight="700" fill="${titleFill}">${escapeXml(line)}</text>`);
   });
 
   if (epic.owner) {
-    card.push(`<text x="${centerX}" y="${bounds.y + bounds.height - 14}" text-anchor="middle" class="owner">${escapeXml(truncate(`Owner: ${epic.owner}`, 32))}</text>`);
+    const ownerFontSize = bounds.width < 190 ? 11 : 12;
+    const ownerFill = bounds.future ? "#315f7a" : "#d8edf7";
+    const ownerMaxWidth = bounds.width - 24;
+    const ownerCharWidth = ownerFontSize * 0.55;
+    const ownerWithLabel = `Owner: ${epic.owner}`;
+    const ownerText = textPixelWidth(ownerWithLabel, ownerCharWidth) <= ownerMaxWidth
+      ? ownerWithLabel
+      : truncateToWidth(epic.owner, ownerMaxWidth, ownerCharWidth);
+    card.push(`<text x="${centerX}" y="${bounds.y + bounds.height - 14}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${ownerFontSize}" font-weight="700" fill="${ownerFill}">${escapeXml(ownerText)}</text>`);
   }
 
   return card;
@@ -455,6 +483,61 @@ function renderSvgOverflowCard(count, bounds) {
     `<text x="${centerX}" y="${centerY - 6}" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#24292f">+${count} more</text>`,
     `<text x="${centerX}" y="${centerY + 24}" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#57606a">see Markdown export</text>`,
   ];
+}
+
+function renderEneoLogo({ x, y, width, background }) {
+  const fallback = `<text x="${x + width}" y="${y + 50}" text-anchor="end" font-family="Arial Black, Arial, sans-serif" font-size="58" font-weight="900" fill="#050505">eneo</text>`;
+
+  try {
+    const source = fs.readFileSync(new URL("../docs/assets/Eneo-logo-svg.svg", import.meta.url), "utf8");
+    const match = source.match(/<svg\b[^>]*viewBox="([^"]+)"[^>]*>([\s\S]*?)<\/svg>/i);
+    if (!match) {
+      return fallback;
+    }
+
+    const [, viewBox, body] = match;
+    const [, , viewBoxWidth, viewBoxHeight] = viewBox.split(/\s+/).map(Number);
+    if (!viewBoxWidth || !viewBoxHeight) {
+      return fallback;
+    }
+
+    const scale = width / viewBoxWidth;
+    const height = viewBoxHeight * scale;
+
+    return [
+      `<rect x="${x - 12}" y="${y - 8}" width="${width + 24}" height="${height + 16}" fill="${background}"/>`,
+      `<g transform="translate(${x} ${y}) scale(${scale})">`,
+      body.trim(),
+      "</g>",
+    ].join("\n");
+  } catch {
+    return fallback;
+  }
+}
+
+function sponsorDisplayName(value) {
+  const text = String(value || "").trim();
+  const normalized = text.toLowerCase();
+
+  if (/^sundsvall(s|\b)/.test(normalized)) {
+    return "Sundsvall";
+  }
+
+  if (/^(forsakringskassan|försäkringskassan)\b/.test(normalized)) {
+    return "Forsakringskassan";
+  }
+
+  if (/^(orebro|örebro)\b/.test(normalized)) {
+    return "Orebro";
+  }
+
+  if (/^(borlange|borlänge)\b/.test(normalized)) {
+    return "Borlange";
+  }
+
+  return text
+    .replace(/\s+(kommun|municipality)\b.*$/i, "")
+    .trim() || text;
 }
 
 function svgAudienceEpics(epics, audience) {
@@ -495,15 +578,26 @@ function versionGroup(version) {
   return normalized || "Unscheduled";
 }
 
-function svgFooterText(epics, context) {
+function svgFooterMeta(epics, context) {
   if (context.audience === "standup") {
-    return `${epics.length} active roadmap item${epics.length === 1 ? "" : "s"} for standup follow-up`;
+    return {
+      attention: false,
+      text: `${epics.length} active roadmap item${epics.length === 1 ? "" : "s"} for standup follow-up`,
+    };
   }
 
   const decisionCount = epics.filter(needsDecision).length;
-  return decisionCount > 0
-    ? `${decisionCount} roadmap decision${decisionCount === 1 ? "" : "s"} need attention`
-    : "Roadmap snapshot from GitHub Project data";
+  if (decisionCount > 0) {
+    return {
+      attention: true,
+      text: `${decisionCount} roadmap decision${decisionCount === 1 ? "" : "s"} need attention`,
+    };
+  }
+
+  return {
+    attention: false,
+    text: "Roadmap snapshot from GitHub Project data",
+  };
 }
 
 function statusDot(epic) {
@@ -762,6 +856,15 @@ function truncate(value, maxChars) {
   return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
+function truncateToWidth(value, maxWidth, averageCharWidth) {
+  const maxChars = Math.max(1, Math.floor(maxWidth / averageCharWidth));
+  return truncate(value, maxChars);
+}
+
+function textPixelWidth(value, averageCharWidth) {
+  return String(value || "").length * averageCharWidth;
+}
+
 function escapeMermaid(value) {
   return String(value).replace(/"/g, "'");
 }
@@ -796,7 +899,7 @@ function runSelfTest() {
           "2.7",
           "",
           "## Sponsor / municipality",
-          "Sundsvall",
+          "Sundsvalls kommun verksamhetsstod",
           "",
           "## Owner / lead",
           "Team Platform",
@@ -825,7 +928,7 @@ function runSelfTest() {
       content: {
         number: 103,
         title: "Crawl 2.0",
-        body: "## Roadmap version\nFuture\n",
+        body: "## Roadmap version\nFuture\n## Owner / lead\nSearch\n",
       },
       Status: "Todo",
     },
@@ -871,6 +974,18 @@ function runSelfTest() {
   assert.match(mermaid, /version_2_7\["2\.7"\]/);
   assert.match(mermaid, /version_2_x\["2\.X"\]/);
 
+  const futureSvg = renderOutput(epics, {
+    owner: "eneo-ai",
+    project: "5",
+    format: "svg",
+    audience: "committee",
+    versions: parseVersionList("2.7,Future"),
+  });
+  assert.match(futureSvg, /fill="#315f7a">Owner: Search</);
+  assert.match(futureSvg, />Sundsvall</);
+  assert.doesNotMatch(futureSvg, /Sundsvalls kom/);
+  assert.match(futureSvg, />!<\/text>/, "committee SVG should show attention icon when decisions are needed");
+
   const manyEpics = Array.from({ length: 12 }, (_, index) => ({
     id: `many-${index}`,
     number: 300 + index,
@@ -898,7 +1013,9 @@ function runSelfTest() {
   assert.match(svg, />2\.7</);
   assert.match(svg, />2\.X</);
   assert.match(svg, /\+3 more/);
+  assert.match(svg, /fill="#00879C"/, "SVG should embed the real Eneo logo asset");
   assert.doesNotMatch(svg, /fill="#c7ded1"/, "first dynamic column must not be styled as done");
+  assert.doesNotMatch(svg, />!<\/text>/, "SVG without decisions should not show an attention icon");
 
   console.log("roadmap export self-test passed");
 }
