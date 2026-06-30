@@ -1174,6 +1174,66 @@
   - The repair loop remains unpruned until C8.2 telemetry/eval proof separates useful recovery from debt.
   - Rollback is low risk: remove the single finish-reason branch, the focused test, and this ledger entry. No schema, generated-client, frontend, migration, runtime, or persisted-data rollback is needed.
 
+## C8.2
+
+- Slice id: C8.2 Flow AI Builder failed proposal-turn telemetry
+- Findings addressed: terminal failed proposal-generation turns had user-visible typed error events but no single content-free outcome telemetry record for later repair/fallback pruning decisions.
+- Verified evidence before change:
+  - `/Users/cimen/Downloads/codex_flow_builder_release_hardening_capability_prep_prompt.md:107-116` defines C8.2 as one canonical failed proposal-turn outcome log/telemetry owner with request/session ids, target kind, branch, repair attempts, LLM calls, token counts, final failure kind, and provider finish reason, while forbidding prompts, user content, model output, resource secrets, and content-bearing tool args.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:385-386` records failed-turn telemetry as the prerequisite before proposal repair pruning; this slice measures and does not prune repair/fallback branches.
+  - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:41-42` keeps failed-turn telemetry separate from C8.1 truncation terminalization.
+  - `backend/src/intric/flows/ai_builder/ai_builder_telemetry.py:120-129` explicitly aggregates committed assistant-message turns only, so rejected/parse-failed turns cannot be the canonical failed-turn source.
+  - Before the fix, `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:42-84` owned proposal telemetry constants/taxonomies and `ProposalTurnTelemetry`, but had only first-attempt, repair-invocation, and apply-failure logs.
+  - Before the fix, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:230-310` created the proposal turn tracker and yielded terminal errors for provider exception, empty choices, explicit truncation, and final missing tool after retry without emitting a terminal failed-turn outcome.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer; semantic search returned no useful nodes for this narrow Builder telemetry path, so source/file evidence used direct reads and exact `rg`.
+  - `[no-peer-review]`: the user explicitly asked to skip the repo's default Claude peer loop for this bounded slice and to use read-only `codex exec` peer gates instead.
+  - Read-only Codex plan gate session `019f182b-b6df-7ca2-b1cc-a844c4effb4c` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with no blockers. Valid guidance applied: keep `ai_builder_proposal_telemetry.py` as canonical owner, use typed string literals instead of a new enum framework, cover the four direct terminal active-submission outcomes, avoid deeper self-correction redesign, and keep exception text out of the payload.
+  - Read-only Codex commit gate session `019f1834-59f4-70f2-b246-73e6e8802273` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8/10`, with no blockers or required fixes. Its non-blocking readability nit about a mid-file test import was applied before commit.
+- Red proof:
+  - Before source changes, `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -k "failed_turn or empty_completion_choices or explicit_truncation or create_mode_forces_outline"` failed for empty choices, explicit truncation, and forced retry missing-tool with `len(payloads) == 0`, proving typed error events were emitted without `operation="failed_turn"` telemetry.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Direct terminal proposal-generation failures now emit exactly one `ai_builder_proposal_failed_turn` structured log under the existing `ai_builder_proposal_telemetry` log key.
+  - The typed failed-turn payload records request id, session id, target kind, branch, repair attempts, LLM call count, token counts/source/estimated flag when available, final failure kind, final error code, and provider finish reason.
+  - Covered direct terminal branches are provider completion exception, empty completion choices, explicit provider truncation, and final missing submission tool after forced retry returns no events.
+  - Successful proposal generation emits no failed-turn telemetry.
+  - The new telemetry does not include prompts, user content, model output content, resource names/secrets, exception text, or tool-call arguments.
+  - Public API schema, OpenAPI output, generated clients, frontend code, Flow runtime/API, capability descriptors, MCP adapter, PR #480 behavior, structured-answer ingestion, edit/revise routing, materialization evals, retention policy, audit vocabulary, and durable docs are unchanged.
+- Complexity deleted or owner clarified:
+  - `ProposalTurnTelemetry` remains the canonical source for proposal turn finish metadata, token accounting, LLM call count, and repair count.
+  - `ai_builder_proposal_telemetry.py` now owns the single failed proposal-turn outcome field set through `ProposalFailedTurnTelemetryPayload` and `log_proposal_failed_turn`.
+  - `ProposalSubmissionOwner` remains the canonical active-submission failure classifier and only calls the telemetry owner at direct terminal branches.
+  - No new telemetry subsystem, generic observability framework, service, adapter, compatibility path, public schema, or repair-path abstraction was added.
+- Architecture delta:
+  - Canonical owner before: proposal first-attempt/repair telemetry lived in `ai_builder_proposal_telemetry.py`, but terminal failed-turn outcomes had no canonical owner; committed-turn session telemetry could not see failed proposal turns.
+  - Canonical owner after: `ai_builder_proposal_telemetry.py` owns the content-free failed-turn payload/log; `ProposalSubmissionOwner` owns direct terminal proposal-generation outcome emission.
+  - Duplicate paths remaining: deeper self-correction terminal failures still use first-attempt and repair-invocation telemetry only; repair/fallback branches remain until this new failed-turn outcome plus eval evidence proves pruning is safe.
+  - 9/10 follow-up candidate: C8.3 should use the new failed-turn outcome data and deterministic evals to decide which JSON-text/self-correction/forced-tool repair paths are useful versus deletable debt.
+  - Decision or measurement needed: collect failed-turn telemetry in real/staging Builder runs before deleting repair branches; decide separately whether repair-completion truncation needs its own bounded terminal-classification slice.
+  - What not to preserve: invisible terminal failed proposal turns, duplicate ad hoc outcome dictionaries, content-bearing telemetry, exception-text telemetry, or broad MCP/capability work as a substitute for Builder reliability measurement.
+- Validation commands and results:
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -k "failed_turn or empty_completion_choices or explicit_truncation or create_mode_forces_outline"` -> red before implementation with three missing failed-turn payloads, then pass, 5 passed.
+  - `cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> initial import-order failures while moving the touched test imports; after `uv run ruff check --fix tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`, pass.
+  - `cd /workspace/backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 3 files already formatted.
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py` -> pass, 49 passed.
+  - `cd /workspace/backend && uv run pyright src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 82 passed.
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py` -> final pass after commit-gate import cleanup, 105 passed.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Privacy notes:
+  - The failed-turn outcome is built from existing ids, enum-like literals, token/finish metadata, counts, and stable error codes only.
+  - Tests assert a truncated provider response containing sentinel model output plus user/system prompt sentinels does not leak those values into the failed-turn payload.
+  - Provider exception messages are deliberately excluded because exception text can contain provider payload fragments or secrets.
+- Remaining risk / rollback:
+  - This slice measures the direct terminal active-submission failures only; self-correction terminal failures remain out of scope to avoid redesigning repair internals before C8 pruning evidence exists.
+  - The final forced-tool retry branch test patches the retry owner to return no events, so it proves active-submission outcome emission for that terminal branch without asserting deeper retry-provider call accounting.
+  - Rollback is low risk: remove `ProposalFailedTurnTelemetryPayload`, `log_proposal_failed_turn`, the four submission call sites, the focused tests, and this ledger entry. No schema, migration, public API, generated-client, frontend, runtime, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

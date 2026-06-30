@@ -57,6 +57,7 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalRepairReason,
     ProposalTurnTelemetry,
+    log_proposal_failed_turn,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
     record_proposal_first_attempt,
@@ -238,6 +239,13 @@ class ProposalSubmissionOwner:
             )
         except Exception as error:
             logger.error("AI Builder proposal task failed", exc_info=error)
+            log_proposal_failed_turn(
+                usage_tracker=usage_tracker,
+                session_id=turn.session_id,
+                branch="provider_completion_error",
+                final_failure_kind="provider_error",
+                final_error_code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR.value,
+            )
             yield build_ai_builder_error_event(
                 message="The AI planner failed. Please try again.",
                 code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
@@ -247,6 +255,13 @@ class ProposalSubmissionOwner:
             return
 
         if not response.choices:
+            log_proposal_failed_turn(
+                usage_tracker=usage_tracker,
+                session_id=turn.session_id,
+                branch="empty_completion_choices",
+                final_failure_kind="missing_submission_tool",
+                final_error_code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING.value,
+            )
             yield build_ai_builder_error_event(
                 message=(
                     "The AI planner did not return a valid flow proposal. "
@@ -260,6 +275,13 @@ class ProposalSubmissionOwner:
 
         choice = response.choices[0]
         if choice.finish_reason == "length":
+            log_proposal_failed_turn(
+                usage_tracker=usage_tracker,
+                session_id=turn.session_id,
+                branch="provider_truncation",
+                final_failure_kind="provider_truncation",
+                final_error_code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG.value,
+            )
             yield build_ai_builder_error_event(
                 message=(
                     "The AI planner output was cut off before it returned a complete "
@@ -299,6 +321,13 @@ class ProposalSubmissionOwner:
                 yield event
             return
 
+        log_proposal_failed_turn(
+            usage_tracker=usage_tracker,
+            session_id=turn.session_id,
+            branch="forced_tool_retry_missing_submission",
+            final_failure_kind="missing_submission_tool",
+            final_error_code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING.value,
+        )
         yield build_ai_builder_error_event(
             message=(
                 "The AI planner did not return a valid flow proposal. "

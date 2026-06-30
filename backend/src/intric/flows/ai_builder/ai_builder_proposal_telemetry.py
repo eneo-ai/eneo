@@ -57,6 +57,17 @@ ProposalRepairReason = Literal[
     "quality",
     "missing_submission_tool",
 ]
+ProposalFailedTurnBranch = Literal[
+    "provider_completion_error",
+    "empty_completion_choices",
+    "provider_truncation",
+    "forced_tool_retry_missing_submission",
+]
+ProposalTerminalFailureKind = Literal[
+    "provider_error",
+    "missing_submission_tool",
+    "provider_truncation",
+]
 ApplyFailurePhase = Literal["prepare_authoring", "apply_authoring"]
 MaterializerProgressStage = Literal[
     "flow_created",
@@ -267,6 +278,30 @@ class MaterializerProgressSnapshot(BaseModel):
     flow_updated: bool = False
 
 
+class ProposalFailedTurnTelemetryPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event: Literal["ai_builder.proposal.failed_turn"] = (
+        "ai_builder.proposal.failed_turn"
+    )
+    schema_version: int = PROPOSAL_TELEMETRY_SCHEMA_VERSION
+    operation: Literal["failed_turn"] = "failed_turn"
+    request_id: str
+    session_id: str
+    target_kind: str
+    branch: ProposalFailedTurnBranch
+    repair_attempts: int
+    llm_calls: int
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    token_usage_source: str | None = None
+    token_usage_estimated: bool = False
+    final_failure_kind: ProposalTerminalFailureKind
+    final_error_code: str
+    provider_finish_reason: str | None = None
+
+
 class ApplyFailureTelemetryPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -282,6 +317,57 @@ class ApplyFailureTelemetryPayload(BaseModel):
     code: str | None = None
     changeset_counts: ChangesetCountSummary | None = None
     materializer_progress: MaterializerProgressSnapshot | None = None
+
+
+def build_proposal_failed_turn_payload(
+    *,
+    usage_tracker: ProposalTurnTelemetry,
+    session_id: UUID | str,
+    branch: ProposalFailedTurnBranch,
+    final_failure_kind: ProposalTerminalFailureKind,
+    final_error_code: str,
+) -> ProposalFailedTurnTelemetryPayload:
+    usage = combine_token_usage(usage_tracker.token_usages)
+    return ProposalFailedTurnTelemetryPayload(
+        request_id=usage_tracker.request_id,
+        session_id=str(session_id),
+        target_kind=usage_tracker.target_kind.value,
+        branch=branch,
+        repair_attempts=usage_tracker.repair_attempts,
+        llm_calls=usage_tracker.llm_calls_made,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        token_usage_source=usage.source if usage.has_tokens else None,
+        token_usage_estimated=usage.estimated,
+        final_failure_kind=final_failure_kind,
+        final_error_code=final_error_code,
+        provider_finish_reason=usage_tracker.finish_reason,
+    )
+
+
+def log_proposal_failed_turn(
+    *,
+    usage_tracker: ProposalTurnTelemetry,
+    session_id: UUID | str,
+    branch: ProposalFailedTurnBranch,
+    final_failure_kind: ProposalTerminalFailureKind,
+    final_error_code: str,
+    event_logger: logging.Logger = logger,
+) -> None:
+    payload = build_proposal_failed_turn_payload(
+        usage_tracker=usage_tracker,
+        session_id=session_id,
+        branch=branch,
+        final_failure_kind=final_failure_kind,
+        final_error_code=final_error_code,
+    )
+    event_logger.info(
+        "ai_builder_proposal_failed_turn",
+        extra={
+            PROPOSAL_TELEMETRY_LOG_KEY: payload.model_dump(exclude_none=True),
+        },
+    )
 
 
 def log_apply_failed(

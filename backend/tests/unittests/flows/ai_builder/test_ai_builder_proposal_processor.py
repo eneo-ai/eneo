@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -9,6 +12,9 @@ import pytest
 
 from intric.flows.ai_builder import (
     ai_builder_proposal_processor as proposal_processor_module,
+)
+from intric.flows.ai_builder import (
+    ai_builder_proposal_telemetry as proposal_telemetry_module,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -40,6 +46,7 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     build_self_correction_error_event,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -72,6 +79,14 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_turn,
     _plan_stream_event,
 )
+from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
+    _make_processor,
+    _make_response_with_text,
+    _make_response_with_tool_calls,
+    _make_tool_call,
+    _make_usage,
+    _store_compiled_plan,
+)
 
 
 def _empty_catalog() -> AIBuilderResourceCatalog:
@@ -92,14 +107,43 @@ def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource
     }
 
 
-from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
-    _make_processor,
-    _make_response_with_text,
-    _make_response_with_tool_calls,
-    _make_tool_call,
-    _make_usage,
-    _store_compiled_plan,
-)
+@contextmanager
+def _captured_proposal_telemetry() -> Iterator[list[logging.LogRecord]]:
+    records: list[logging.LogRecord] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = CaptureHandler()
+    old_level = proposal_telemetry_module.logger.level
+    proposal_telemetry_module.logger.setLevel(logging.INFO)
+    proposal_telemetry_module.logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        proposal_telemetry_module.logger.removeHandler(handler)
+        proposal_telemetry_module.logger.setLevel(old_level)
+
+
+def _failed_turn_payloads(
+    records: list[logging.LogRecord],
+) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for record in records:
+        payload = getattr(record, PROPOSAL_TELEMETRY_LOG_KEY, None)
+        if not isinstance(payload, dict) or payload.get("operation") != "failed_turn":
+            continue
+        payloads.append({str(key): value for key, value in payload.items()})
+    return payloads
+
+
+def _single_failed_turn_payload(
+    records: list[logging.LogRecord],
+) -> dict[str, object]:
+    payloads = _failed_turn_payloads(records)
+    assert len(payloads) == 1
+    return payloads[0]
 
 
 def test_proposal_processor_has_no_generic_submission_tool_config() -> None:
@@ -201,6 +245,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
 
     with (
+        _captured_proposal_telemetry() as telemetry_records,
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
@@ -234,6 +279,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         ]
 
     assert [event["event"] for event in events] == ["plan"]
+    assert _failed_turn_payloads(telemetry_records) == []
     assert call_completion.await_args.kwargs["request"].tool_choice == {
         "type": "function",
         "function": {"name": PROPOSE_FLOW_TOOL_NAME},
@@ -249,15 +295,19 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     None
 ):
     processor = _make_processor()
+    session_id = uuid4()
 
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
-        new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+    with (
+        _captured_proposal_telemetry() as telemetry_records,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+        ),
     ):
         events = [
             encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
-                turn=_make_turn(),
+                turn=_make_turn(session_id=session_id),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -278,6 +328,15 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     assert payload["code"] == "planner_upstream_error"
     assert payload["phase"] == "planner"
     assert payload["request_id"] == "req-first-attempt-provider-error"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-first-attempt-provider-error"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "provider_completion_error"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["llm_calls"] == 0
+    assert failed_payload["final_failure_kind"] == "provider_error"
+    assert failed_payload["final_error_code"] == "planner_upstream_error"
 
 
 @pytest.mark.asyncio
@@ -285,15 +344,21 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
     None
 ):
     processor = _make_processor()
+    session_id = uuid4()
+    processor.litellm_client.acompletion.return_value = SimpleNamespace(
+        choices=(),
+        usage=SimpleNamespace(
+            prompt_tokens=9,
+            completion_tokens=0,
+            total_tokens=9,
+        ),
+    )
 
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
-        new=AsyncMock(return_value=SimpleNamespace(choices=())),
-    ):
+    with _captured_proposal_telemetry() as telemetry_records:
         events = [
             encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
-                turn=_make_turn(),
+                turn=_make_turn(session_id=session_id),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -314,6 +379,18 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
     assert payload["code"] == "proposal_tool_missing"
     assert payload["phase"] == "proposal"
     assert payload["request_id"] == "req-empty-first-attempt"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-empty-first-attempt"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "empty_completion_choices"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["llm_calls"] == 1
+    assert failed_payload["prompt_tokens"] == 9
+    assert failed_payload["completion_tokens"] == 0
+    assert failed_payload["total_tokens"] == 9
+    assert failed_payload["final_failure_kind"] == "missing_submission_tool"
+    assert failed_payload["final_error_code"] == "proposal_tool_missing"
 
 
 @pytest.mark.asyncio
@@ -321,18 +398,22 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
     None
 ):
     processor = _make_processor()
-    truncated_response = _make_response_with_text('{"flow_name":"Document analysis"')
+    session_id = uuid4()
+    truncated_response = _make_response_with_text(
+        '{"flow_name":"MODEL OUTPUT SECRET"',
+        prompt_tokens=11,
+        completion_tokens=7,
+        total_tokens=18,
+    )
     truncated_response.choices[0].finish_reason = "length"
     truncated_response.choices[0].message.tool_calls = ()
+    processor.litellm_client.acompletion.return_value = truncated_response
     forced_retry = AsyncMock(
         return_value=ForcedToolRetryOutcome(events=(build_status_event("repairing"),))
     )
 
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
-            new=AsyncMock(return_value=truncated_response),
-        ),
+        _captured_proposal_telemetry() as telemetry_records,
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission."
             "run_forced_tool_retry_after_text",
@@ -342,10 +423,15 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
         events = [
             encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
-                turn=_make_turn(),
-                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                turn=_make_turn(session_id=session_id),
+                conversation=[
+                    ConversationMessage(
+                        role="user",
+                        content="Build a flow with USER SECRET",
+                    )
+                ],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                llm_messages=[{"role": "system", "content": "PROMPT SECRET"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_model_refs=None,
@@ -365,6 +451,77 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
     assert payload["request_id"] == "req-truncated-first-attempt"
     assert "cut off" in payload["message"]
     forced_retry.assert_not_awaited()
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-truncated-first-attempt"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "provider_truncation"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["llm_calls"] == 1
+    assert failed_payload["prompt_tokens"] == 11
+    assert failed_payload["completion_tokens"] == 7
+    assert failed_payload["total_tokens"] == 18
+    assert failed_payload["final_failure_kind"] == "provider_truncation"
+    assert failed_payload["final_error_code"] == "planner_output_too_long"
+    assert failed_payload["provider_finish_reason"] == "length"
+    encoded_payload = json.dumps(failed_payload, default=str)
+    assert "USER SECRET" not in encoded_payload
+    assert "PROMPT SECRET" not in encoded_payload
+    assert "MODEL OUTPUT SECRET" not in encoded_payload
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_missing_tool_after_forced_retry_logs_failed_turn() -> None:
+    processor = _make_processor()
+    session_id = uuid4()
+    processor.litellm_client.acompletion.return_value = _make_response_with_text(
+        "I can help with that.",
+        prompt_tokens=5,
+        completion_tokens=4,
+        total_tokens=9,
+    )
+    forced_retry = AsyncMock(return_value=ForcedToolRetryOutcome(events=None))
+
+    with (
+        _captured_proposal_telemetry() as telemetry_records,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "run_forced_tool_retry_after_text",
+            new=forced_retry,
+        ),
+    ):
+        events = [
+            encode_ai_builder_stream_event(event)
+            async for event in processor.propose_plan(
+                turn=_make_turn(session_id=session_id),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=_empty_catalog(),
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-missing-after-forced-retry",
+                flow=None,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "proposal_tool_missing"
+    forced_retry.assert_awaited_once()
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-missing-after-forced-retry"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "forced_tool_retry_missing_submission"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["llm_calls"] == 1
+    assert failed_payload["final_failure_kind"] == "missing_submission_tool"
+    assert failed_payload["final_error_code"] == "proposal_tool_missing"
 
 
 @pytest.mark.asyncio
