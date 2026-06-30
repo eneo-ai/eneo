@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
 const dryRun = process.argv.includes("--dry-run");
+const selfTest = process.argv.includes("--self-test");
 const marker = "<!-- eneo-project-intake:missing-epic -->";
 const repo = process.env.GITHUB_REPOSITORY || "eneo-ai/eneo";
 const eventPath = process.env.GITHUB_EVENT_PATH;
+
+if (selfTest) {
+  runSelfTest();
+  process.exit(0);
+}
 
 if (!eventPath) {
   console.log("GITHUB_EVENT_PATH is not set. Nothing to validate.");
@@ -92,11 +99,22 @@ function inferIssueKind(item, labels) {
 }
 
 function hasEpicReference(body) {
-  const parentEpicSection = getSection(body, ["Parent epic", "Epic", "Parent issue"]);
-  const candidateText = parentEpicSection || body;
+  const parentEpicSection = getSectionWithPresence(body, [
+    "Parent epic",
+    "Epic",
+    "Parent issue",
+  ]);
 
-  return /(^|\s)#\d+\b/.test(candidateText)
-    || /github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/i.test(candidateText);
+  if (parentEpicSection.found) {
+    return hasIssueReference(parentEpicSection.value);
+  }
+
+  return hasIssueReference(body);
+}
+
+function hasIssueReference(value) {
+  return /(^|\s)#\d+\b/.test(value)
+    || /github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/i.test(value);
 }
 
 function hasHeading(body, heading) {
@@ -104,7 +122,7 @@ function hasHeading(body, heading) {
   return new RegExp(`^#{2,6}\\s+${escaped}\\s*$`, "im").test(body);
 }
 
-function getSection(body, headings) {
+function getSectionWithPresence(body, headings) {
   for (const heading of headings) {
     const escaped = escapeRegExp(heading);
     const pattern = new RegExp(
@@ -114,11 +132,17 @@ function getSection(body, headings) {
     const match = body.match(pattern);
 
     if (match) {
-      return match[1].trim();
+      return {
+        found: true,
+        value: match[1].trim(),
+      };
     }
   }
 
-  return "";
+  return {
+    found: false,
+    value: "",
+  };
 }
 
 function getLabelNames(item) {
@@ -202,4 +226,37 @@ function runGh(args, options = {}) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function runSelfTest() {
+  assert.equal(
+    hasEpicReference([
+      "## Parent epic",
+      "",
+      "## Problem",
+      "This mentions #999 but has no parent epic.",
+    ].join("\n")),
+    false,
+    "empty Parent epic section must not fall back to unrelated issue references",
+  );
+
+  assert.equal(
+    hasEpicReference([
+      "## Parent epic",
+      "#123",
+      "",
+      "## Problem",
+      "Implement the scoped work.",
+    ].join("\n")),
+    true,
+    "Parent epic section with an issue reference should be valid",
+  );
+
+  assert.equal(
+    hasEpicReference("Legacy task created before the form existed. Parent #123."),
+    true,
+    "legacy unstructured task bodies should keep the issue-reference fallback",
+  );
+
+  console.log("project-intake self-test passed");
 }

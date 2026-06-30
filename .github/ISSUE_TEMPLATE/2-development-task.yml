@@ -3,17 +3,18 @@ description: A buildable work item that belongs to an epic.
 title: "[Task]: "
 labels: ["kind:task", "enhancement"]
 projects: ["eneo-ai/5"]
+type: task
 body:
   - type: markdown
     attributes:
       value: |
-        Development tasks must belong to an epic. Add the parent epic as a GitHub sub-issue relationship and reference it below.
+        Development tasks must belong to an epic. Add the parent epic as a GitHub sub-issue relationship and reference it below. This is the main planning field developers need to keep the roadmap connected.
 
   - type: input
     id: parent_epic
     attributes:
       label: Parent epic
-      description: Required. Link the epic issue, for example #123.
+      description: Required. Link the epic issue, for example #123. This is used by automation and roadmap export.
       placeholder: "#123"
     validations:
       required: true

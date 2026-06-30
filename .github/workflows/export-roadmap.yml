@@ -9,7 +9,20 @@ on:
         options:
           - markdown
           - mermaid
+          - svg
         default: markdown
+      audience:
+        description: Output audience
+        type: choice
+        options:
+          - default
+          - committee
+          - standup
+        default: default
+      versions:
+        description: Optional comma-separated version columns, for example 2.0,2.1,2.2,2.X
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -20,19 +33,37 @@ jobs:
     steps:
       - name: Check out export script
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve output extension
+        id: output
+        env:
+          FORMAT: ${{ inputs.format }}
+        run: |
+          case "$FORMAT" in
+            mermaid) echo "extension=mmd" >> "$GITHUB_OUTPUT" ;;
+            svg) echo "extension=svg" >> "$GITHUB_OUTPUT" ;;
+            *) echo "extension=md" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Export roadmap
         run: |
           node scripts/export_github_roadmap.mjs \
             --owner eneo-ai \
             --project 5 \
-            --format "${{ inputs.format }}" \
-            --output roadmap.${{ inputs.format == 'mermaid' && 'mmd' || 'md' }}
+            --format "$FORMAT" \
+            --audience "$AUDIENCE" \
+            --versions "$VERSIONS" \
+            --output roadmap.${{ steps.output.outputs.extension }}
         env:
           GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          FORMAT: ${{ inputs.format }}
+          AUDIENCE: ${{ inputs.audience }}
+          VERSIONS: ${{ inputs.versions }}
 
       - name: Upload roadmap artifact
         uses: actions/upload-artifact@v4
         with:
-          name: eneo-roadmap-${{ inputs.format }}
-          path: roadmap.${{ inputs.format == 'mermaid' && 'mmd' || 'md' }}
+          name: eneo-roadmap-${{ inputs.audience }}-${{ inputs.format }}
+          path: roadmap.${{ steps.output.outputs.extension }}

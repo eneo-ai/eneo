@@ -9,6 +9,7 @@ body:
       value: |
         Use an epic for roadmap work that should be visible by version, such as "planned for 2.1" or "planned for 2.2".
         Development tasks should be linked to the epic as sub-issues or reference the epic issue number.
+        Keep the summary readable for project leads and committee presentations.
 
   - type: textarea
     id: summary
@@ -19,20 +20,42 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: roadmap_version
     attributes:
       label: Roadmap version
-      description: The planned release bucket. Update this issue when planning moves.
-      options:
-        - Unscheduled
-        - 2.1
-        - 2.2
-        - 2.3
-        - Future
-      default: 0
+      description: Release bucket for grouping and export, for example 2.7, 2.7 RC, 2.X, Future, or Unscheduled. Use Project Start date/Target date for timeline placement.
+      placeholder: "2.2"
     validations:
       required: true
+
+  - type: input
+    id: start_date
+    attributes:
+      label: Start date
+      description: Optional fallback for GitHub Project Start date. Use YYYY-MM-DD if known.
+      placeholder: "2026-07-01"
+
+  - type: input
+    id: target_date
+    attributes:
+      label: Target date
+      description: Optional fallback for GitHub Project Target date. Use YYYY-MM-DD if known.
+      placeholder: "2026-07-31"
+
+  - type: input
+    id: sponsor
+    attributes:
+      label: Sponsor / municipality
+      description: Optional. Who requested or sponsors this work, for example Sundsvall, Orebro, Borlange, or Forsakringskassan.
+      placeholder: Sundsvall
+
+  - type: input
+    id: owner
+    attributes:
+      label: Owner / lead
+      description: Optional. Person or team responsible for driving this epic when it is planned.
+      placeholder: Team Platform
 
   - type: dropdown
     id: priority
@@ -94,6 +117,13 @@ body:
       description: Link child development issues here once they exist. Prefer GitHub sub-issues when available.
       value: |
         - [ ] #123
+
+  - type: textarea
+    id: decision_needed
+    attributes:
+      label: Decision needed
+      description: Optional. Add a short note only when this epic needs a committee, product, or architecture decision.
+      placeholder: "Example: Need committee decision on rollout scope."
 
   - type: textarea
     id: acceptance_criteria

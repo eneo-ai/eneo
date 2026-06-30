@@ -196,6 +196,11 @@ jobs:
       - name: Run developer-tooling tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
+      - name: Run project workflow self-tests
+        run: |
+          node .github/scripts/project-intake.mjs --self-test
+          node scripts/export_github_roadmap.mjs --self-test
+
   route-metadata:
     name: Route metadata
     runs-on: ubuntu-latest
