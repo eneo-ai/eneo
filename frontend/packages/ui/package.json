@@ -1,5 +1,5 @@
 {
-  "name": "@intric/ui",
+  "name": "@eneo/ui",
   "sideEffects": false,
   "version": "1.22.0",
   "type": "module",
@@ -7,6 +7,7 @@
     "sync": "svelte-kit sync",
     "dev": "NODE_ENV=development svelte-kit sync && svelte-package --watch",
     "dev:app": "vite dev",
+    "build:dev": "NODE_ENV=development svelte-kit sync && svelte-package",
     "build": "NODE_ENV=production svelte-kit sync && svelte-package && publint",
     "preview": "vite preview",
     "package": "NODE_ENV=production svelte-kit sync && svelte-package && publint",
@@ -29,7 +30,7 @@
     },
     "./styles": "./src/styles/main.css",
     "./styles/prose": "./src/styles/prose.css",
-    "./icons/vite-plugin-intric-icons": "./src/icons/vite-plugin-intric-icons.js",
+    "./icons/vite-plugin-eneo-icons": "./src/icons/vite-plugin-eneo-icons.js",
     "./icons/types": {
       "types": "./src/icons/types.d.ts"
     }
@@ -48,8 +49,8 @@
   "devDependencies": {
     "@eslint/js": "^9.24.0",
     "@internationalized/date": "^3.7.0",
-    "@intric/eslint-plugin": "workspace:*",
-    "@intric/intric-js": "workspace:*",
+    "@eneo/eslint-plugin": "workspace:*",
+    "@eneo/eneo-js": "workspace:*",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "^1.51.1",
     "@sveltejs/adapter-auto": "^6.0.0",

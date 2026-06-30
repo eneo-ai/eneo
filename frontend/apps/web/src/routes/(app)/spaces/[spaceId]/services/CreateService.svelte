@@ -1,9 +1,9 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
@@ -12,7 +12,7 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let newServiceName = "";
   let openServiceAfterCreation = true;
@@ -22,7 +22,7 @@
     isProcessing = true;
 
     try {
-      const service = await intric.services.create({
+      const service = await eneo.services.create({
         spaceId: $currentSpace.id,
         name: newServiceName
       });

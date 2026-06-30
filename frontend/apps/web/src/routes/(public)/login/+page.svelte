@@ -1,13 +1,13 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { enhance } from "$app/forms";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
   import { LoadingScreen } from "$lib/components/layout";
-  import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
+  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -260,9 +260,9 @@
       isAwaitingLoginResponse = true;
 
       // Dynamic import to avoid SSR issues
-      const { intric } = await import("$lib/api/client");
+      const { eneo } = await import("$lib/api/client");
 
-      const response = await intric.auth.initiateAuth({ tenant: slug });
+      const response = await eneo.auth.initiateAuth({ tenant: slug });
 
       // Allow natural browser history navigation - back button returns to tenant selector
       window.location.href = response.authorization_url;
@@ -282,8 +282,8 @@
 
   async function loadTenantsAndMaybeShow({ forceShow = false }: { forceShow?: boolean } = {}) {
     try {
-      const { intric } = await import("$lib/api/client");
-      const response = await intric.auth.listTenants();
+      const { eneo } = await import("$lib/api/client");
+      const response = await eneo.auth.listTenants();
       const tenants = response.tenants ?? [];
       preloadedTenants = tenants;
 
@@ -417,7 +417,7 @@
   >
     <div class="w-full max-w-6xl">
       <h1 class="mb-8 flex justify-center">
-        <IntricWordMark class="text-brand-intric h-16 w-24" />
+        <EneoWordMark class="text-brand-eneo h-16 w-24" />
         <span class="sr-only">{m.app_name()}</span>
       </h1>
 
@@ -444,7 +444,7 @@
   >
     <div class="box w-[400px] justify-center">
       <h1 class="flex justify-center">
-        <IntricWordMark class="text-brand-intric h-16 w-24" />
+        <EneoWordMark class="text-brand-eneo h-16 w-24" />
         <span class="sr-only">{m.app_name()}</span>
       </h1>
 

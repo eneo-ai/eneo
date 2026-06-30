@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { m } from "$lib/paraglide/messages";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -28,7 +28,7 @@
       onNotificationsEnabledChanged: (enabled: boolean) => void;
     }>();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
 
   // Constants
@@ -83,7 +83,7 @@
       return;
     }
     try {
-      const summary = await intric.apiKeys.expiringSoon({
+      const summary = await eneo.apiKeys.expiringSoon({
         days,
         mode: "subscribed"
       });
@@ -97,9 +97,9 @@
     notificationSettingsLoading = true;
     try {
       const [preferences, subscriptions, policy] = await Promise.all([
-        getNotificationPreferences(intric),
-        listNotificationSubscriptions(intric),
-        getAdminNotificationPolicy(intric).catch(() => null)
+        getNotificationPreferences(eneo),
+        listNotificationSubscriptions(eneo),
+        getAdminNotificationPolicy(eneo).catch(() => null)
       ]);
       notificationsEnabled = preferences.enabled;
       notificationPolicyEnabled = policy?.enabled ?? null;
@@ -132,7 +132,7 @@
     onNotificationsEnabledChanged(next);
     notificationSettingsSaving = true;
     try {
-      const updated = await updateNotificationPreferences(intric, { enabled: next });
+      const updated = await updateNotificationPreferences(eneo, { enabled: next });
       notificationsEnabled = updated.enabled;
       reminderDays = pickReminderDays(updated.days_before_expiry);
       reminderDaysInput = String(reminderDays);
@@ -187,7 +187,7 @@
   async function saveReminderDays() {
     notificationSettingsSaving = true;
     try {
-      const updated = await updateNotificationPreferences(intric, {
+      const updated = await updateNotificationPreferences(eneo, {
         days_before_expiry: [reminderDays]
       });
       notificationsEnabled = updated.enabled;
@@ -217,7 +217,7 @@
     autoFollowPublishedAssistants = next;
     notificationSettingsSaving = true;
     try {
-      const updated = await updateNotificationPreferences(intric, {
+      const updated = await updateNotificationPreferences(eneo, {
         auto_follow_published_assistants: next
       });
       notificationsEnabled = updated.enabled;
@@ -248,7 +248,7 @@
     autoFollowPublishedApps = next;
     notificationSettingsSaving = true;
     try {
-      const updated = await updateNotificationPreferences(intric, {
+      const updated = await updateNotificationPreferences(eneo, {
         auto_follow_published_apps: next
       });
       notificationsEnabled = updated.enabled;
@@ -272,7 +272,7 @@
   // Expose a method for parent to trigger follow-change refresh
   export async function refreshSubscriptions() {
     try {
-      const subscriptions = await listNotificationSubscriptions(intric);
+      const subscriptions = await listNotificationSubscriptions(eneo);
       const followedKeyIds = extractFollowedKeyIds(subscriptions);
       const hasSubscriptions = subscriptions.length > 0;
       onFollowedKeysChanged(followedKeyIds, hasSubscriptions);

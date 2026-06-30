@@ -6,7 +6,7 @@
 
 <script lang="ts" generics="T extends unknown">
   import { createEventDispatcher } from "svelte";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
   import Button from "$lib/Button/Button.svelte";
   import { derived, writable } from "svelte/store";
   import { Render, Subscribe } from "svelte-headless-table";

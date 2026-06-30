@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import type { StorageSpaceList } from "@intric/intric-js";
+  import type { StorageSpaceList } from "@eneo/eneo-js";
   import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@intric/ui";
+  import { Button, Table } from "@eneo/ui";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import SpaceMembersChips from "$lib/features/spaces/components/SpaceMembersChips.svelte";
   import StorageSpaceName from "./StorageSpaceName.svelte";

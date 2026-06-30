@@ -20,16 +20,16 @@ from uuid import UUID, uuid4
 import pytest
 from starlette.datastructures import State
 
-from intric.authentication.api_key_resolver import (
+from eneo.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
 )
-from intric.users.user_service import (
+from eneo.users.user_service import (
     _check_basic_method_permission,
     _check_management_permission,
     _check_method_resource_permission,
@@ -92,7 +92,7 @@ def _make_user_service(
     session_scalar_return: Any = None,
 ):
     """Build a minimal UserService for scope enforcement tests."""
-    from intric.users.user_service import UserService
+    from eneo.users.user_service import UserService
 
     svc = object.__new__(UserService)
     svc.feature_flag_service = feature_flag_service
@@ -128,7 +128,7 @@ class TestPublicEndpoints:
 
     def test_version_endpoint_has_no_auth_dependency(self):
         """GET /version must not require auth."""
-        from intric.server.main import get_application
+        from eneo.server.main import get_application
 
         app = get_application()
         version_route = None
@@ -149,7 +149,7 @@ class TestPublicEndpoints:
 
     def test_healthz_endpoint_exists_without_auth(self):
         """GET /api/healthz must not have auth dependencies."""
-        from intric.server.main import get_application
+        from eneo.server.main import get_application
 
         app = get_application()
         healthz_route = None
@@ -169,7 +169,7 @@ class TestPublicEndpoints:
 
     def test_crawler_healthz_endpoint_exists_without_auth(self):
         """GET /api/healthz/crawler must not have auth dependencies."""
-        from intric.server.main import get_application
+        from eneo.server.main import get_application
 
         app = get_application()
         crawler_route = None
@@ -201,7 +201,7 @@ class TestAuthPrecedence:
         # Verify the authenticate method's structure: token checked before api_key
         import inspect
 
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         source = inspect.getsource(UserService.authenticate)
         token_check_pos = source.find("if token is not None")
@@ -215,7 +215,7 @@ class TestAuthPrecedence:
         # Verify _resolve_api_key is called in the api_key branch
         import inspect
 
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         source = inspect.getsource(UserService.authenticate)
         assert "_resolve_api_key" in source
@@ -224,7 +224,7 @@ class TestAuthPrecedence:
         """Bearer token path calls _get_user_from_token, not _resolve_api_key."""
         import inspect
 
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         source = inspect.getsource(UserService.authenticate)
 
@@ -250,8 +250,8 @@ class TestAuthPrecedence:
     @pytest.mark.asyncio
     async def test_invalid_bearer_does_not_fallback_to_valid_api_key(self):
         """Invalid bearer + valid API key must fail by bearer precedence."""
-        from intric.main.exceptions import AuthenticationException
-        from intric.users.user_service import UserService
+        from eneo.main.exceptions import AuthenticationException
+        from eneo.users.user_service import UserService
 
         svc = object.__new__(UserService)
         svc._get_user_from_token = AsyncMock(
@@ -274,7 +274,7 @@ class TestAuthPrecedence:
     @pytest.mark.asyncio
     async def test_bearer_token_ignores_api_key_resource_guards(self):
         """Session-token callers are unaffected by API-key resource guards."""
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         user = SimpleNamespace(id=uuid4())
         svc = object.__new__(UserService)
@@ -405,7 +405,7 @@ class TestScenarioReadOnlyIntegration:
 
     def test_can_get_assistants(self, monkeypatch):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = self._make_read_tenant_key()
@@ -414,10 +414,10 @@ class TestScenarioReadOnlyIntegration:
 
     def test_can_post_ask_assistant_override(self, monkeypatch):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
-        from intric.authentication.auth_dependencies import ASSISTANTS_READ_OVERRIDES
+        from eneo.authentication.auth_dependencies import ASSISTANTS_READ_OVERRIDES
 
         key = self._make_read_tenant_key()
         request = _fake_request("POST", endpoint_name="ask_assistant")
@@ -427,7 +427,7 @@ class TestScenarioReadOnlyIntegration:
 
     def test_cannot_delete_assistant(self, monkeypatch):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = self._make_read_tenant_key()
@@ -519,7 +519,7 @@ class TestScenarioAdminManagement:
 
     def test_can_delete_resources(self, monkeypatch):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = self._make_admin_tenant_key()
@@ -597,7 +597,7 @@ class TestScenarioAssistantChatbot:
 
     def test_cannot_delete_via_permission(self, monkeypatch):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         assistant_id = uuid4()
@@ -662,7 +662,7 @@ class TestGuardrailIndependence:
     def test_each_layer_error_code_is_distinct(self, monkeypatch):
         """Each enforcement layer produces a distinguishable error code."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
 
@@ -717,7 +717,7 @@ class TestGuardrailPolicyEnforcement:
         """enforce_guardrails() must run before permission checks in _resolve_api_key."""
         import inspect
 
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         source = inspect.getsource(UserService._resolve_api_key)
         guardrail_pos = source.find("enforce_guardrails")
@@ -738,7 +738,7 @@ class TestGuardrailPolicyEnforcement:
         """_check_management_permission runs after Layer 1/2 in _resolve_api_key."""
         import inspect
 
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         source = inspect.getsource(UserService._resolve_api_key)
         management_pos = source.find("_check_management_permission")
@@ -752,7 +752,7 @@ class TestGuardrailPolicyEnforcement:
         """_enforce_api_key_scope runs after all permission checks."""
         import inspect
 
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         source = inspect.getsource(UserService._resolve_api_key)
         scope_pos = source.find("_enforce_api_key_scope")
@@ -788,7 +788,7 @@ class TestUserListingEndpointSplitGate:
 
     def _get_users_listing_route(self):
         """Find the GET /users/ route and return it."""
-        from intric.server.routers import router as root
+        from eneo.server.routers import router as root
 
         for route in root.routes:
             path = getattr(route, "path", "")
@@ -832,7 +832,7 @@ class TestUserListingEndpointSplitGate:
         """
         import inspect
 
-        from intric.users.user_router import get_tenant_users
+        from eneo.users.user_router import get_tenant_users
 
         source = inspect.getsource(get_tenant_users)
         assert "validate_permission" not in source, (
@@ -871,7 +871,7 @@ class TestAdminApiKeyGuardContract:
         _check_management_permission(key, ApiKeyPermission.ADMIN.value)
 
     def test_api_keys_list_route_has_scope_but_not_admin_key_guard(self):
-        from intric.server.routers import router as root
+        from eneo.server.routers import router as root
 
         list_route = None
         for route in root.routes:
@@ -907,8 +907,8 @@ class TestModelProvidersBearerRoleContract:
 
     @pytest.mark.asyncio
     async def test_non_admin_denied_on_list(self):
-        from intric.main.exceptions import UnauthorizedException
-        from intric.model_providers.presentation.model_provider_router import (
+        from eneo.main.exceptions import UnauthorizedException
+        from eneo.model_providers.presentation.model_provider_router import (
             list_providers,
         )
 
@@ -921,10 +921,10 @@ class TestModelProvidersBearerRoleContract:
 
     @pytest.mark.asyncio
     async def test_admin_allowed_on_list(self):
-        from intric.model_providers.presentation.model_provider_router import (
+        from eneo.model_providers.presentation.model_provider_router import (
             list_providers,
         )
-        from intric.roles.permissions import Permission
+        from eneo.roles.permissions import Permission
 
         provider = MagicMock()
         provider.to_dict.return_value = self._provider_dict()
@@ -939,8 +939,8 @@ class TestModelProvidersBearerRoleContract:
 
     @pytest.mark.asyncio
     async def test_non_admin_denied_on_get(self):
-        from intric.main.exceptions import UnauthorizedException
-        from intric.model_providers.presentation.model_provider_router import (
+        from eneo.main.exceptions import UnauthorizedException
+        from eneo.model_providers.presentation.model_provider_router import (
             get_provider,
         )
 
@@ -953,10 +953,10 @@ class TestModelProvidersBearerRoleContract:
 
     @pytest.mark.asyncio
     async def test_admin_allowed_on_get(self):
-        from intric.model_providers.presentation.model_provider_router import (
+        from eneo.model_providers.presentation.model_provider_router import (
             get_provider,
         )
-        from intric.roles.permissions import Permission
+        from eneo.roles.permissions import Permission
 
         provider = MagicMock()
         provider.to_dict.return_value = self._provider_dict()
@@ -981,7 +981,7 @@ class TestSuperKeyIsolationContract:
         )
 
     def test_sysadmin_routes_use_super_api_key_only(self):
-        from intric.server.routers import router as root
+        from eneo.server.routers import router as root
 
         sysadmin_routes = [
             route
@@ -998,7 +998,7 @@ class TestSuperKeyIsolationContract:
             ), f"{route.path} should not use authenticate_super_duper_api_key"
 
     def test_module_routes_use_super_duper_key_only(self):
-        from intric.server.routers import router as root
+        from eneo.server.routers import router as root
 
         module_routes = [
             route
@@ -1015,15 +1015,15 @@ class TestSuperKeyIsolationContract:
             ), f"{route.path} should not use authenticate_super_api_key"
 
     def test_super_and_super_duper_keys_are_not_interchangeable(self, monkeypatch):
-        from intric.authentication import auth
-        from intric.main.exceptions import AuthenticationException
+        from eneo.authentication import auth
+        from eneo.main.exceptions import AuthenticationException
 
         settings = SimpleNamespace(
             eneo_super_api_key="super-key",
             eneo_super_duper_api_key="super-duper-key",
             api_key_header_name="X-API-Key",
         )
-        monkeypatch.setattr("intric.authentication.auth.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.authentication.auth.get_settings", lambda: settings)
 
         request_super = SimpleNamespace(headers={"X-API-Key": "super-key"})
         request_super_duper = SimpleNamespace(headers={"X-API-Key": "super-duper-key"})

@@ -39,7 +39,7 @@
         {#snippet child({ props })}
           <Button variant="ghost" class="absolute top-2 right-2" size="icon-sm" {...props}>
             <XIcon />
-            <!-- eslint-disable-next-line intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
+            <!-- eslint-disable-next-line eneo/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
             <span class="sr-only">Close</span>
           </Button>
         {/snippet}

@@ -15,8 +15,8 @@
     EmbeddingModel,
     ModelProviderPublic,
     TranscriptionModel
-  } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
+  } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import {
     Pencil,
@@ -54,7 +54,7 @@
     onEditProvider?: (provider: ModelProviderPublic) => void;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let deleteOpen = $state(false);
   let isDeleting = $state(false);
@@ -73,7 +73,7 @@
     deleteError = null;
     isDeleting = true;
     try {
-      await intric.modelProviders.delete({ id: provider.id });
+      await eneo.modelProviders.delete({ id: provider.id });
       await invalidate("admin:model-providers:load");
       deleteOpen = false;
     } catch (e: unknown) {
@@ -110,7 +110,7 @@
     modelsLoadError = null;
 
     try {
-      const models = await intric.models.list();
+      const models = await eneo.models.list();
       providerModels = [
         ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),
         ...tagModels(models.embeddingModels, "embedding", m.embedding_model(), Box),

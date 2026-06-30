@@ -7,7 +7,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input, Tooltip } from "@intric/ui";
+  import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";

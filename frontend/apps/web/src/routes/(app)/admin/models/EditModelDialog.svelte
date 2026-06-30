@@ -6,7 +6,7 @@
   place. The component owns:
     - converting the API model into the form's draft shape on open
     - building the right Tenant*Update body on submit (a single round-trip;
-      the legacy intric.models.update fallback for security_classification
+      the legacy eneo.models.update fallback for security_classification
       and is_default no longer exists — those fields live on the tenant
       update contract now).
 -->
@@ -20,14 +20,14 @@
     TenantCompletionModelUpdate,
     TenantEmbeddingModelUpdate,
     TenantTranscriptionModelUpdate
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
   import { Loader2 } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getErrorMessage, toastError } from "$lib/core/errors";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -58,7 +58,7 @@
     type: ModelTypeKey;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Open-state bridge (Writable<boolean> ↔ runes) --------------------
   let dialogOpen = $state(false);
@@ -186,11 +186,11 @@
     isSubmitting = true;
     try {
       if (type === "completionModel") {
-        await intric.tenantModels.updateCompletion({ id: model.id }, buildCompletionUpdate());
+        await eneo.tenantModels.updateCompletion({ id: model.id }, buildCompletionUpdate());
       } else if (type === "embeddingModel") {
-        await intric.tenantModels.updateEmbedding({ id: model.id }, buildEmbeddingUpdate());
+        await eneo.tenantModels.updateEmbedding({ id: model.id }, buildEmbeddingUpdate());
       } else {
-        await intric.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
+        await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }
 
       await invalidate("admin:model-providers:load");

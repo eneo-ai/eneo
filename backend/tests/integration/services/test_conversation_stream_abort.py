@@ -19,9 +19,9 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.database import sessionmanager
-from intric.database.tables.questions_table import Questions
-from intric.sessions.session_service import persist_partial_question_answer
+from eneo.database.database import sessionmanager
+from eneo.database.tables.questions_table import Questions
+from eneo.sessions.session_service import persist_partial_question_answer
 
 
 @dataclass

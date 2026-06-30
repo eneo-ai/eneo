@@ -6,7 +6,7 @@
   forms. Works for both completion and transcription models.
 -->
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
-  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
   import { uid } from "uid";
   import { Ban, ChevronsUpDown } from "lucide-svelte";
   import * as Popover from "$lib/components/ui/popover/index.js";

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import type { IntegrationKnowledge } from "@intric/intric-js";
-  import { IconHistory } from "@intric/icons/history";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
+  import { IconHistory } from "@eneo/icons/history";
 
   interface Props {
     knowledge: IntegrationKnowledge;

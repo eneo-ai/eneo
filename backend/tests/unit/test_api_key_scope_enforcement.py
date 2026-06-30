@@ -20,16 +20,16 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import State
 
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_dependencies import require_api_key_scope_check
-from intric.authentication.auth_models import (
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_dependencies import require_api_key_scope_check
+from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
 )
-from intric.conversations.conversations_router import _validate_conversation_scope
-from intric.roles.permissions import Permission
-from intric.users.user import UserState
+from eneo.conversations.conversations_router import _validate_conversation_scope
+from eneo.roles.permissions import Permission
+from eneo.users.user import UserState
 from tests.unit.api_key_test_utils import make_api_key
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ def _make_user_service(
     session_scalar_return: Any = None,
 ):
     """Build a minimal UserService-like object with the methods needed for scope enforcement."""
-    from intric.users.user_service import UserService
+    from eneo.users.user_service import UserService
 
     svc = object.__new__(UserService)
     svc.feature_flag_service = feature_flag_service
@@ -639,7 +639,7 @@ class TestResolveApiKeyScopeWiring:
 
     @staticmethod
     def _build_service(key) -> object:
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         svc = object.__new__(UserService)
         svc.api_key_auth_resolver = SimpleNamespace(
@@ -679,10 +679,10 @@ class TestResolveApiKeyScopeWiring:
                 return None
 
         monkeypatch.setattr(
-            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+            "eneo.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
         )
         monkeypatch.setattr(
-            "intric.users.user_service.get_settings",
+            "eneo.users.user_service.get_settings",
             lambda: SimpleNamespace(
                 api_key_enforce_resource_permissions=False,
                 api_key_last_used_min_interval_seconds=0,
@@ -710,10 +710,10 @@ class TestResolveApiKeyScopeWiring:
                 return None
 
         monkeypatch.setattr(
-            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+            "eneo.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
         )
         monkeypatch.setattr(
-            "intric.users.user_service.get_settings",
+            "eneo.users.user_service.get_settings",
             lambda: SimpleNamespace(
                 api_key_enforce_resource_permissions=False,
                 api_key_last_used_min_interval_seconds=0,
@@ -735,7 +735,7 @@ class TestScopeRouteGuardCoverage:
 
     def test_admin_routes_have_scope_check(self):
         """All admin route mounts should have resource_type='admin' scope check."""
-        from intric.server.routers import router
+        from eneo.server.routers import router
 
         admin_routes_found = []
         for route in router.routes:
@@ -760,7 +760,7 @@ class TestScopeRouteGuardCoverage:
 
     def test_api_key_routes_have_scope_check(self):
         """API key management routes should have admin scope check."""
-        from intric.server.routers import router
+        from eneo.server.routers import router
 
         # api_key_router is mounted without prefix — routes are flattened as
         # top-level APIRoute objects with the scope dependency attached.
@@ -787,7 +787,7 @@ class TestScopeRouteGuardCoverage:
 
     def test_core_resource_routes_have_scope_metadata(self):
         """Core resource routes (spaces, assistants, apps, etc.) have scope checks."""
-        from intric.server.routers import router
+        from eneo.server.routers import router
 
         # Routes are flattened by FastAPI — match by prefix (startswith).
         required_prefixes = {
@@ -830,7 +830,7 @@ class TestScopeRouteGuardCoverage:
 
     def test_settings_patch_endpoints_have_router_level_admin_guards(self):
         """Settings PATCH endpoints should have router-level admin scope + key guards."""
-        from intric.server.routers import router
+        from eneo.server.routers import router
 
         patch_routes = []
         for route in router.routes:
@@ -864,7 +864,7 @@ class TestScopeRouteGuardCoverage:
 
     def test_template_admin_routes_have_scope_check(self):
         """Template admin router mounts should have admin scope check."""
-        from intric.server.routers import router
+        from eneo.server.routers import router
 
         # Template admin routers are mounted with prefix="" but their internal
         # routes start with /admin/templates/. Find mounts with "admin-templates" tag.
@@ -895,7 +895,7 @@ class TestScopeRouteGuardCoverage:
         tenant directory. Those guards are no-ops for bearer tokens — see
         TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
         """
-        from intric.server.routers import router
+        from eneo.server.routers import router
 
         admin_routes = []
         for route in router.routes:
@@ -979,7 +979,7 @@ class TestScopeBodyDriven:
                 return_value=space_by_assistant
             )
         else:
-            from intric.main.exceptions import NotFoundException
+            from eneo.main.exceptions import NotFoundException
 
             space_repo.get_space_by_assistant = AsyncMock(
                 side_effect=NotFoundException()
@@ -990,7 +990,7 @@ class TestScopeBodyDriven:
                 return_value=space_by_group_chat
             )
         else:
-            from intric.main.exceptions import NotFoundException
+            from eneo.main.exceptions import NotFoundException
 
             space_repo.get_space_by_group_chat = AsyncMock(
                 side_effect=NotFoundException()
@@ -999,7 +999,7 @@ class TestScopeBodyDriven:
         if space_by_session is not None:
             space_repo.get_space_by_session = AsyncMock(return_value=space_by_session)
         else:
-            from intric.main.exceptions import NotFoundException
+            from eneo.main.exceptions import NotFoundException
 
             space_repo.get_space_by_session = AsyncMock(side_effect=NotFoundException())
 
@@ -1009,7 +1009,7 @@ class TestScopeBodyDriven:
         if session_obj is not None:
             session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
         elif session_not_found:
-            from intric.main.exceptions import NotFoundException
+            from eneo.main.exceptions import NotFoundException
 
             session_service.get_session_by_uuid = AsyncMock(
                 side_effect=NotFoundException()
@@ -1559,7 +1559,7 @@ class TestRequireFileDeleteScopeGuard:
     @pytest.mark.asyncio
     async def test_stashes_marker_on_delete_request(self):
         """DELETE request → marker stashed on request.state."""
-        from intric.authentication.auth_dependencies import (
+        from eneo.authentication.auth_dependencies import (
             require_file_delete_scope_guard,
         )
 
@@ -1572,7 +1572,7 @@ class TestRequireFileDeleteScopeGuard:
     @pytest.mark.asyncio
     async def test_no_marker_on_get_request(self):
         """GET request → no marker stashed."""
-        from intric.authentication.auth_dependencies import (
+        from eneo.authentication.auth_dependencies import (
             require_file_delete_scope_guard,
         )
 
@@ -1587,7 +1587,7 @@ class TestRequireFileDeleteScopeGuard:
     @pytest.mark.asyncio
     async def test_no_marker_on_post_request(self):
         """POST request → no marker stashed."""
-        from intric.authentication.auth_dependencies import (
+        from eneo.authentication.auth_dependencies import (
             require_file_delete_scope_guard,
         )
 
@@ -1624,7 +1624,7 @@ class TestFileDeleteScopeEnforcement:
 
     @staticmethod
     def _build_service(key) -> object:
-        from intric.users.user_service import UserService
+        from eneo.users.user_service import UserService
 
         svc = object.__new__(UserService)
         svc.api_key_auth_resolver = SimpleNamespace(
@@ -1668,13 +1668,13 @@ class TestFileDeleteScopeEnforcement:
                 return None
 
         monkeypatch.setattr(
-            "intric.users.user_service.ApiKeyPolicyService", _PolicyStub
+            "eneo.users.user_service.ApiKeyPolicyService", _PolicyStub
         )
 
     @staticmethod
     def _patch_settings(monkeypatch):
         monkeypatch.setattr(
-            "intric.users.user_service.get_settings",
+            "eneo.users.user_service.get_settings",
             lambda: SimpleNamespace(
                 api_key_enforce_resource_permissions=False,
                 api_key_last_used_min_interval_seconds=0,

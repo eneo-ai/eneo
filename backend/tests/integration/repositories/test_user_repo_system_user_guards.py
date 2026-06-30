@@ -25,9 +25,9 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.users_table import Users
-from intric.main.exceptions import SystemUserProtected
-from intric.users.user import (
+from eneo.database.tables.users_table import Users
+from eneo.main.exceptions import SystemUserProtected
+from eneo.users.user import (
     PaginationParams,
     SearchFilters,
     SortOptions,
@@ -359,10 +359,10 @@ async def test_system_user_survives_data_retention_cleanup(db_container, admin_u
     the ``users`` table, so a system user with an old marker stays put.
 
     Mirrors the parametrized-survival style suggested by step 014, collapsed
-    to a single test because no cron job under ``intric.worker``,
-    ``intric.audit``, or ``intric.data_retention`` modifies user rows today.
+    to a single test because no cron job under ``eneo.worker``,
+    ``eneo.audit``, or ``eneo.data_retention`` modifies user rows today.
     """
-    from intric.data_retention.infrastructure.data_retention_service import (
+    from eneo.data_retention.infrastructure.data_retention_service import (
         DataRetentionService,
     )
 
@@ -394,7 +394,7 @@ async def test_system_user_survives_data_retention_cleanup(db_container, admin_u
 @pytest.mark.integration
 async def test_system_user_survives_audit_retention_purge(db_container, admin_user):
     """Audit-log retention purge runs per tenant and does not touch users."""
-    from intric.audit.application.retention_service import RetentionService
+    from eneo.audit.application.retention_service import RetentionService
 
     async with db_container() as container:
         session = container.session()

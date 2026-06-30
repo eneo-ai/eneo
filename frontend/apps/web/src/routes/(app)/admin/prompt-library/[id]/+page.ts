@@ -6,9 +6,9 @@
 
 export const load = async (event) => {
   event.depends("admin:prompt-library");
-  const { intric } = await event.parent();
-  const entry = await intric.promptLibrary.get({ id: event.params.id });
-  const versions = await intric.promptLibrary.versions({ id: event.params.id }).catch((err) => {
+  const { eneo } = await event.parent();
+  const entry = await eneo.promptLibrary.get({ id: event.params.id });
+  const versions = await eneo.promptLibrary.versions({ id: event.params.id }).catch((err) => {
     if (err?.status === 404) {
       return { items: [], count: 0 };
     }

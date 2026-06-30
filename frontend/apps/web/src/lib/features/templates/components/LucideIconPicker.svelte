@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as LucideIcons from "lucide-svelte";
-  import { Dialog, Button } from "@intric/ui";
+  import { Dialog, Button } from "@eneo/ui";
   import { Search, X, Sparkles, Check } from "lucide-svelte";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
@@ -253,5 +253,5 @@
 </Dialog.Root>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 </style>

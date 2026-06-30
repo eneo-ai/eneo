@@ -5,12 +5,12 @@
 -->
 
 <script lang="ts">
-  import { Button, Input, Tooltip } from "@intric/ui";
+  import { Button, Input, Tooltip } from "@eneo/ui";
   import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate } from "$app/navigation";
   import { untrack } from "svelte";
-  import type { Intric, components } from "@intric/intric-js";
+  import type { Eneo, components } from "@eneo/eneo-js";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -18,15 +18,10 @@
     mcpServerId: string;
     serverName: string;
     tools: MCPTool[];
-    intricClient: Intric;
+    eneoClient: Eneo;
   };
 
-  const {
-    mcpServerId,
-    serverName: _serverName,
-    tools: initialTools,
-    intricClient
-  }: Props = $props();
+  const { mcpServerId, serverName: _serverName, tools: initialTools, eneoClient }: Props = $props();
 
   let tools: MCPTool[] = $state(untrack(() => initialTools));
   let syncing = $state(false);
@@ -40,8 +35,8 @@
   async function syncTools() {
     syncing = true;
     try {
-      await intricClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
-      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      await eneoClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
+      const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
       await invalidate("spaces:data");
     } catch (error) {
@@ -53,7 +48,7 @@
 
   async function toggleToolEnabled(tool: MCPTool) {
     try {
-      const updated = await intricClient.mcpServers.updateTenantToolEnabled({
+      const updated = await eneoClient.mcpServers.updateTenantToolEnabled({
         tool_id: tool.id,
         is_enabled: !tool.is_enabled_by_default
       });
@@ -67,7 +62,7 @@
 
   // Helper: update tool without invalidating (for bulk operations)
   async function updateToolEnabled(tool: MCPTool, enabled: boolean) {
-    const updated = await intricClient.mcpServers.updateTenantToolEnabled({
+    const updated = await eneoClient.mcpServers.updateTenantToolEnabled({
       tool_id: tool.id,
       is_enabled: enabled
     });
@@ -111,11 +106,11 @@
   async function approveTool(toolId: string) {
     reviewingToolId = toolId;
     try {
-      await intricClient.mcpServers.approveToolChanges({
+      await eneoClient.mcpServers.approveToolChanges({
         mcp_server_id: mcpServerId,
         tool_ids: [toolId]
       });
-      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
       await invalidate("spaces:data");
     } catch (error) {
@@ -128,11 +123,11 @@
   async function rejectTool(toolId: string) {
     reviewingToolId = toolId;
     try {
-      await intricClient.mcpServers.rejectToolChanges({
+      await eneoClient.mcpServers.rejectToolChanges({
         mcp_server_id: mcpServerId,
         tool_ids: [toolId]
       });
-      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
       await invalidate("spaces:data");
     } catch (error) {
@@ -145,10 +140,10 @@
   async function approveAll() {
     bulkUpdating = true;
     try {
-      await intricClient.mcpServers.approveAllToolChanges({
+      await eneoClient.mcpServers.approveAllToolChanges({
         mcp_server_id: mcpServerId
       });
-      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
       await invalidate("spaces:data");
     } catch (error) {
@@ -162,11 +157,11 @@
     bulkUpdating = true;
     try {
       const ids = pendingTools.map((t) => t.id);
-      await intricClient.mcpServers.rejectToolChanges({
+      await eneoClient.mcpServers.rejectToolChanges({
         mcp_server_id: mcpServerId,
         tool_ids: ids
       });
-      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
       await invalidate("spaces:data");
     } catch (error) {

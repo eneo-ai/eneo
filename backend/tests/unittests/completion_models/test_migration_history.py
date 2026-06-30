@@ -14,13 +14,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.completion_models.application.completion_model_migration_history_service import (
+from eneo.completion_models.application.completion_model_migration_history_service import (
     CompletionModelMigrationHistoryService,
 )
-from intric.completion_models.domain.completion_model_migration_history_repo import (
+from eneo.completion_models.domain.completion_model_migration_history_repo import (
     CompletionModelMigrationHistoryRepo,
 )
-from intric.completion_models.presentation.completion_model_models import (
+from eneo.completion_models.presentation.completion_model_models import (
     ModelMigrationHistory,
 )
 

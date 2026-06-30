@@ -1,7 +1,7 @@
 import pytest
 
-from intric.embedding_models.infrastructure.datastore import autocut
-from intric.info_blobs.info_blob import InfoBlobChunkWithEmbedding
+from eneo.embedding_models.infrastructure.datastore import autocut
+from eneo.info_blobs.info_blob import InfoBlobChunkWithEmbedding
 from tests.fixtures import TEST_UUID
 
 

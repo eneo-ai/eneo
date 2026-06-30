@@ -65,18 +65,18 @@ check_container_health() {
 }
 
 
-# Update intric-js types and version
-update_intric_js() {
+# Update eneo-js types and version
+update_eneo_js() {
     local backend_port="$1"
-    local intric_js_dir="$SCRIPT_DIR/frontend/packages/intric-js"
+    local eneo_js_dir="$SCRIPT_DIR/frontend/packages/eneo-js"
 
-    if [[ ! -d "$intric_js_dir" ]]; then
-        echo "intric-js directory not found, skipping"
+    if [[ ! -d "$eneo_js_dir" ]]; then
+        echo "eneo-js directory not found, skipping"
         return 0
     fi
 
-    echo "Updating intric-js types from backend version $BUILD_VERSION..."
-    cd "$intric_js_dir"
+    echo "Updating eneo-js types from backend version $BUILD_VERSION..."
+    cd "$eneo_js_dir"
 
     # Generate types from backend
     if ! command -v bun >/dev/null 2>&1; then
@@ -102,7 +102,7 @@ update_intric_js() {
         exit 1
     fi
 
-    echo "intric-js types updated"
+    echo "eneo-js types updated"
 }
 
 # Update web app version
@@ -226,7 +226,7 @@ main() {
         exit 1
     fi
 
-    update_intric_js "$backend_port"
+    update_eneo_js "$backend_port"
     update_web_app_version
 
     echo "Frontend synchronization completed successfully!"

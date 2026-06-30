@@ -193,7 +193,7 @@ def _tenant_credentials_enabled(test_settings):
     Depends(get_settings) resolves to the override even if another module
     has reassigned the singleton earlier in the same xdist worker.
     """
-    from intric.main.config import set_settings
+    from eneo.main.config import set_settings
 
     enabled_settings = test_settings.model_copy(
         update={"tenant_credentials_enabled": True}

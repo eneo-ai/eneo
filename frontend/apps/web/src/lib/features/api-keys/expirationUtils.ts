@@ -1,4 +1,4 @@
-import type { ApiKeyV2 } from "@intric/intric-js";
+import type { ApiKeyV2 } from "@eneo/eneo-js";
 
 export type ExpiryLevel = "none" | "notice" | "warning" | "urgent" | "expired";
 

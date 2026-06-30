@@ -2,11 +2,11 @@
 
 This directory holds [shadcn-svelte](https://shadcn-svelte.com) components copied
 into the project via the shadcn CLI. They are an entry point for adopting
-shadcn-svelte in eneo and live alongside the existing `@intric/ui` package.
+shadcn-svelte in eneo and live alongside the existing `@eneo/ui` package.
 
 ## Why two UI systems?
 
-`@intric/ui` (in `frontend/packages/ui`) is the existing in-house design system
+`@eneo/ui` (in `frontend/packages/ui`) is the existing in-house design system
 (Svelte 4 syntax, melt-ui, brand tokens). It is **not** going away — it covers
 many components shadcn-svelte does not, and rewriting it has no business value.
 
@@ -16,17 +16,17 @@ shadcn-svelte is being introduced because:
 - "Copy the source into your project" lets us evolve components without
   fighting upstream APIs.
 - Its bits-ui foundation gives us modern, well-maintained primitives where
-  `@intric/ui` would otherwise need new investment.
+  `@eneo/ui` would otherwise need new investment.
 
 ## When to use which
 
-| Use shadcn-svelte (`$lib/components/ui/*`) when… | Use `@intric/ui` when… |
+| Use shadcn-svelte (`$lib/components/ui/*`) when… | Use `@eneo/ui` when… |
 | --- | --- |
-| Building a new primitive that does not yet exist in `@intric/ui` | The component already exists in `@intric/ui` and works |
-| You explicitly want Svelte 5 runes / bits-ui semantics | Touching code that already uses `@intric/ui` — don't mix in the same file |
+| Building a new primitive that does not yet exist in `@eneo/ui` | The component already exists in `@eneo/ui` and works |
+| You explicitly want Svelte 5 runes / bits-ui semantics | Touching code that already uses `@eneo/ui` — don't mix in the same file |
 | The component is web-app-only and unlikely to be shared across apps | The component should be available to other apps in the monorepo |
 
-**Avoid** importing both `@intric/ui` and shadcn primitives in the same file.
+**Avoid** importing both `@eneo/ui` and shadcn primitives in the same file.
 Pick one per surface and convert wholesale if needed.
 
 ## Adding a new shadcn component

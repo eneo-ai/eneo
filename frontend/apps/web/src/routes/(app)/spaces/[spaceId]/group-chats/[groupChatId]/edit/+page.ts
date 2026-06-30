@@ -1,5 +1,5 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
-  const groupChat = await intric.groupChats.get({ id: event.params.groupChatId });
+  const { eneo } = await event.parent();
+  const groupChat = await eneo.groupChats.get({ id: event.params.groupChatId });
   return { groupChat };
 };

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from intric.crawler.parse_html import (
+from eneo.crawler.parse_html import (
     CRAWLABLE_DOCUMENT_MIMETYPES,
     parse_file,
 )

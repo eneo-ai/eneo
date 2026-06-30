@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.api_key_router import _collect_manageable_keys_for_page
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import ApiKeyScopeType
+from eneo.authentication.api_key_router import _collect_manageable_keys_for_page
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_models import ApiKeyScopeType
 from tests.unit.api_key_test_utils import make_api_key
 
 

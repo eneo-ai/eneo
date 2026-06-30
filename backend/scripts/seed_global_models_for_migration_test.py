@@ -30,8 +30,8 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir / "src"))
 
 from sqlalchemy import text
-from intric.database.database import sessionmanager
-from intric.main.config import get_settings
+from eneo.database.database import sessionmanager
+from eneo.main.config import get_settings
 
 
 async def seed_global_models():

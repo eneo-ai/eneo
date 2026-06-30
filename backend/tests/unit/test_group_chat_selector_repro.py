@@ -23,9 +23,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import Completion
-from intric.group_chat.application.group_chat_service import GroupChatService
-from intric.group_chat.domain.entities.group_chat import GroupChatAssistant
+from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.domain.entities.group_chat import GroupChatAssistant
 
 
 def _make_assistant(name: str, description: str) -> GroupChatAssistant:

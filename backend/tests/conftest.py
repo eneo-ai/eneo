@@ -72,7 +72,7 @@ _install_warning_ignores_eagerly()
 
 # Import shared fixture modules
 # These fixtures are automatically discovered by pytest
-# Organized to mirror the backend source structure (src/intric/*)
+# Organized to mirror the backend source structure (src/eneo/*)
 pytest_plugins = [
     "tests.integration.fixtures.completion_models",  # Completion model fixtures
     "tests.integration.fixtures.transcription_models",  # Transcription model fixtures

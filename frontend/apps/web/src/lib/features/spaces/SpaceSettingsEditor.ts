@@ -7,14 +7,14 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Intric, Space } from "@intric/intric-js";
+import type { Eneo, Space } from "@eneo/eneo-js";
 
 const [getSpaceSettingsEditor, setSpaceSettingsEditor] =
   createContext<ReturnType<typeof createSpaceSettingsEditor>>("Space Settings Editor");
 
 type SpaceSettingsEditorParams = {
   space: Space;
-  intric: Intric;
+  eneo: Eneo;
   onUpdateDone?: (space: Space) => void;
 };
 
@@ -26,9 +26,9 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
       data_retention_days: null
     },
     updateResource: async (resource, changes) => {
-      const updated = await data.intric.spaces.update({
+      const updated = await data.eneo.spaces.update({
         space: { id: resource.id },
-        update: changes as Parameters<typeof data.intric.spaces.update>[0]["update"]
+        update: changes as Parameters<typeof data.eneo.spaces.update>[0]["update"]
       });
       data.onUpdateDone?.(updated);
       return updated;
@@ -41,7 +41,7 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
     },
     // Space doesn't have attachments like assistants
     manageAttachements: false,
-    intric: data.intric
+    eneo: data.eneo
   });
 
   return editor;

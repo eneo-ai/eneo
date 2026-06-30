@@ -1,4 +1,4 @@
-import type { AppRun } from "@intric/intric-js";
+import type { AppRun } from "@eneo/eneo-js";
 
 /** Generates a title for this run based on the inputted files' */
 export function getResultTitle(run: Pick<AppRun, "input">) {

@@ -1,4 +1,4 @@
-import type { Assistant, GroupChat } from "@intric/intric-js";
+import type { Assistant, GroupChat } from "@eneo/eneo-js";
 
 const validTypes: (GroupChat["type"] | Assistant["type"])[] = [
   "assistant",

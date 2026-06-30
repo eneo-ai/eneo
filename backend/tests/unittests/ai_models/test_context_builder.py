@@ -5,20 +5,20 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Message,
     MessageToolCall,
 )
-from intric.completion_models.infrastructure.context_builder import (
+from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
     count_tokens,
 )
-from intric.completion_models.infrastructure.static_prompts import (
+from eneo.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
 )
-from intric.files.file_models import File, FileType
-from intric.questions.question import ToolCallInfo
+from eneo.files.file_models import File, FileType
+from eneo.questions.question import ToolCallInfo
 
 QUESTION = "I have a question"
 
@@ -610,7 +610,7 @@ def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
 
 
 def test_attachment_text_is_sent_whole():
-    from intric.completion_models.infrastructure.context_builder import (
+    from eneo.completion_models.infrastructure.context_builder import (
         build_files_string,
     )
 

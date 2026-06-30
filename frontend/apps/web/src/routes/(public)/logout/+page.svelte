@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -24,8 +24,8 @@
 <div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
   <div class="box w-[400px] justify-center">
     <h1 class="flex justify-center">
-      <EneoWordMark class="text-brand-intric h-16 w-20"></EneoWordMark>
-      <span class="hidden">{m.intric()}</span>
+      <EneoWordMark class="text-brand-eneo h-16 w-20"></EneoWordMark>
+      <span class="hidden">{m.eneo()}</span>
     </h1>
 
     <div aria-live="polite">
@@ -39,7 +39,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .shadowed {
     box-shadow: 0px 8px 20px 4px rgba(0, 0, 0, 0.1);
     border: 0.5px solid rgba(54, 54, 54, 0.3);

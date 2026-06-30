@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.conversations.conversation_models import PreflightRequest
+from eneo.conversations.conversation_models import PreflightRequest
 
 
 def test_preflight_request_rejects_multiple_targets():

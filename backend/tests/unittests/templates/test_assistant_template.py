@@ -3,12 +3,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.spaces.api.space_models import TemplateCreate
-from intric.templates.assistant_template.api.assistant_template_models import (
+from eneo.main.exceptions import BadRequestException
+from eneo.spaces.api.space_models import TemplateCreate
+from eneo.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateWizard,
 )
-from intric.templates.assistant_template.assistant_template import AssistantTemplate
+from eneo.templates.assistant_template.assistant_template import AssistantTemplate
 
 template1 = AssistantTemplate(
     id=uuid4(),
@@ -129,5 +129,5 @@ async def test_assistant_template_valid_wizard_data():
 
 
 async def test_organization():
-    assert template1.is_from_intric()
-    assert not template3.is_from_intric()
+    assert template1.is_from_eneo()
+    assert not template3.is_from_eneo()

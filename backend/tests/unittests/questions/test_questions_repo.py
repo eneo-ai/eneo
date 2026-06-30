@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
 
-from intric.questions.questions_repo import QuestionRepository
+from eneo.questions.questions_repo import QuestionRepository
 
 
 async def test_get_by_tenant_filters_out_questions_without_session_id():

@@ -2,7 +2,7 @@ import { createContext } from "$lib/core/context";
 import { m } from "$lib/paraglide/messages";
 import { toast } from "$lib/components/toast";
 import { toastError } from "$lib/core/errors";
-import { type GroupSparse, type TemplateAdditionalField } from "@intric/intric-js";
+import { type GroupSparse, type TemplateAdditionalField } from "@eneo/eneo-js";
 import { derived, get, writable } from "svelte/store";
 import { type Attachment } from "../attachments/AttachmentManager";
 import type { GenericTemplate, TemplateAdapter } from "./TemplateAdapter";

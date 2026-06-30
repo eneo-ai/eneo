@@ -31,12 +31,12 @@ API_V2_DEBT_MODULES = [
 MAX_BARE_UNAUTHORIZED_DEBT = 30
 
 
-def _intric_src() -> Path:
-    return Path(__file__).resolve().parents[2] / "src" / "intric"
+def _eneo_src() -> Path:
+    return Path(__file__).resolve().parents[2] / "src" / "eneo"
 
 
 def _iter_module_files() -> list[Path]:
-    src = _intric_src()
+    src = _eneo_src()
     files: list[Path] = []
     for module in API_V2_CRITICAL_MODULES:
         base = src / module
@@ -47,7 +47,7 @@ def _iter_module_files() -> list[Path]:
 
 
 def _iter_debt_module_files() -> list[Path]:
-    src = _intric_src()
+    src = _eneo_src()
     files: list[Path] = []
     for module in API_V2_DEBT_MODULES:
         base = src / module

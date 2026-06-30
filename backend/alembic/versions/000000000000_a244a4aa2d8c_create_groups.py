@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # from baseline import timestamps
-from intric.database.alembic_utils import timestamps
+from eneo.database.alembic_utils import timestamps
 
 # revision identifiers, used by Alembic
 revision = "a244a4aa2d8c"

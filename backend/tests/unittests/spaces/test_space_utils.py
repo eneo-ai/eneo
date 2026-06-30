@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.spaces.space import Space
-from intric.spaces.utils.space_utils import effective_space_ids
+from eneo.spaces.space import Space
+from eneo.spaces.utils.space_utils import effective_space_ids
 
 
 @pytest.fixture

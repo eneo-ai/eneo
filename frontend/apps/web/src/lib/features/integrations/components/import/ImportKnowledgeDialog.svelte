@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Button, Dialog, Tooltip } from "@intric/ui";
+  import { Button, Dialog, Tooltip } from "@eneo/ui";
   import { getAvailableIntegrations } from "../../AvailableIntegrations";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { writable } from "svelte/store";
-  import type { UserIntegration } from "@intric/intric-js";
+  import type { UserIntegration } from "@eneo/eneo-js";
   import ImportBackdrop from "./ImportBackdrop.svelte";
   import IntegrationVendorIcon from "../IntegrationVendorIcon.svelte";
   import { integrationData } from "../../IntegrationData";
@@ -188,7 +188,7 @@
 {/if}
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .selector {
     @apply border-default flex h-[5.25rem] flex-grow items-center justify-between overflow-hidden rounded-lg border p-3 pr-2 shadow;
   }

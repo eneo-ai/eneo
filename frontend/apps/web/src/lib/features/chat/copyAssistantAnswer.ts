@@ -1,6 +1,6 @@
 import { marked } from "marked";
 
-import type { Settings } from "@intric/intric-js";
+import type { Settings } from "@eneo/eneo-js";
 
 export type AssistantCopyFormat = "markdown" | "richtext";
 

@@ -107,10 +107,10 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Ruff lint
-        run: uv run ruff check src/intric --output-format github
+        run: uv run ruff check src/eneo --output-format github
 
       - name: Ruff format check
-        run: uv run ruff format --check src/intric
+        run: uv run ruff format --check src/eneo
 
       - name: Pyright type check
         run: uv run pyright
@@ -164,12 +164,12 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 2 -m "not integration" --cov=src/intric --cov-report=term:skip-covered tests/
+        run: uv run pytest -v -n 2 -m "not integration" --cov=src/eneo --cov-report=term:skip-covered tests/
 
       - name: Run integration tests
         # --cov-append: add integration coverage on top of the unit run, then
         # emit the combined xml (for diff-cover) + html (human artifact).
-        run: uv run pytest -v -n 2 -m integration --cov=src/intric --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
+        run: uv run pytest -v -n 2 -m integration --cov=src/eneo --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -207,6 +207,17 @@ jobs:
       - name: Check all HTTP route decorators
         run: python3 scripts/check_route_metadata.py --repo-root . --all
 
+  no-intric:
+    name: No intric references
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard against re-introducing the old product name
+        run: python3 scripts/check_no_intric.py --repo-root .
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -234,17 +245,17 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build workspace dependencies
-        run: bun run --filter @intric/ui build
+        run: bun run --filter @eneo/ui build
 
       - name: Run type checks
         run: bun run check
 
       # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
-        run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
+        run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
 
       - name: Run package tests
-        run: FORCE_COLOR=1 bun run --filter '@intric/eslint-plugin' test
+        run: FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
       # matching Playwright browser must be on the runner. Pin the playwright
@@ -255,7 +266,7 @@ jobs:
         run: bun x playwright@1.58.2 install --with-deps chromium chromium-headless-shell
 
       - name: Run web unit & component tests (with coverage)
-        run: FORCE_COLOR=1 bun run --filter '@intric/web' test:coverage
+        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test:coverage
 
       - name: Upload frontend coverage
         if: ${{ !cancelled() }}
@@ -295,7 +306,7 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @intric/ui build
+        run: bun run --filter @eneo/ui build
 
       # Pin to match apps/web's @playwright/test dependency; a bare
       # `bun x playwright` fetches the latest and installs a browser build the
@@ -399,18 +410,18 @@ jobs:
       # it in sync, so a backend model change that skips regeneration silently
       # leaves the frontend types (and any ActionType-driven i18n guards) stale.
       - name: Dump backend OpenAPI spec
-        run: uv run python -c "import json; from intric.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
+        run: uv run python -c "import json; from eneo.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
         working-directory: backend
 
       - name: Regenerate schema.d.ts
         run: |
           bun x openapi-typescript /tmp/openapi.gen.json -o src/types/schema.d.ts --default-non-nullable=false
           bun x prettier --write src/types/schema.d.ts
-        working-directory: frontend/packages/intric-js
+        working-directory: frontend/packages/eneo-js
 
       - name: Fail on schema drift
         run: |
-          SCHEMA=frontend/packages/intric-js/src/types/schema.d.ts
+          SCHEMA=frontend/packages/eneo-js/src/types/schema.d.ts
           if git diff --quiet -- "$SCHEMA"; then
             echo "$SCHEMA is in sync with the backend OpenAPI spec."
             exit 0
@@ -423,7 +434,7 @@ jobs:
             echo "## ❌ schema.d.ts drift detected"
             echo ""
             echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
-            echo "Regenerate it (\`cd frontend/packages/intric-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+            echo "Regenerate it (\`cd frontend/packages/eneo-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
             echo ""
             echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
             echo ""
@@ -499,7 +510,7 @@ jobs:
 
           if [ -f backend/coverage.xml ]; then
             sed -e 's|<source>.*</source>|<source>.</source>|' \
-                -e 's|filename="|filename="backend/src/intric/|g' \
+                -e 's|filename="|filename="backend/src/eneo/|g' \
                 backend/coverage.xml > be.xml
             diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format json:be.json || true
           fi
@@ -634,6 +645,7 @@ jobs:
       - backend-tests
       - script-tests
       - route-metadata
+      - no-intric
       - frontend
       - frontend-e2e
       - schema-drift
@@ -647,6 +659,7 @@ jobs:
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
+          NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
@@ -674,6 +687,7 @@ jobs:
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
+          check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"

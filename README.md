@@ -170,7 +170,7 @@ Eneo is governed by a user association of public sector organizations, ensuring 
 
 **Inspired by**: [Open ePlatform](https://www.openeplatform.org/) - Successfully used by 200+ Swedish municipalities since 2010
 
-**Special Thanks**: InooLabs AB (now Intric AB) for foundational contributions
+**Special Thanks**: InooLabs AB for foundational contributions
 
 ---
 

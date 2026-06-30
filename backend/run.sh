@@ -6,7 +6,7 @@ set -e
 if [[ "${RUN_AS_WORKER,,}" == "true" ]]; then
     echo "Starting ARQ worker for background task processing"
     echo "Launching..."
-    exec arq src.intric.worker.arq.WorkerSettings
+    exec arq src.eneo.worker.arq.WorkerSettings
 fi
 
 # Skip Alembic migrations in OpenAPI-only mode
@@ -22,4 +22,4 @@ fi
 
 echo "Starting Eneo backend with $workers workers"
 
-exec gunicorn src.intric.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+exec gunicorn src.eneo.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000

@@ -1,6 +1,6 @@
 import { dynamicColour } from "$lib/core/colours";
 import { createContext } from "$lib/core/context";
-import type { ConversationTools } from "@intric/intric-js";
+import type { ConversationTools } from "@eneo/eneo-js";
 import type { ActionReturn } from "svelte/action";
 import { derived, get, readonly, writable } from "svelte/store";
 

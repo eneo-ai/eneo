@@ -1,7 +1,7 @@
 <script lang="ts">
   import CreateAssistantBackdrop from "./CreateAssistantBackdrop.svelte";
   import TemplateSmallPreviewGallery from "../gallery/TemplateSmallPreviewGallery.svelte";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { getTemplateController } from "../../TemplateController";
 
   const {

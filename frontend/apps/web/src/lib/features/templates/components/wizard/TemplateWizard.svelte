@@ -2,7 +2,7 @@
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { getAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
@@ -17,13 +17,13 @@
     state: { selectedAttachments, selectedCollections, selectedTemplate }
   } = getTemplateController();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const { limits } = getAppContext();
   const rules = getAttachmentRules({ limits, resource: { completion_model: { vision: false } } });
 
   const {
     state: { attachments }
-  } = initAttachmentManager({ intric, options: { rules } });
+  } = initAttachmentManager({ eneo, options: { rules } });
 
   attachments.subscribe((value) => selectedAttachments.set(value));
 </script>

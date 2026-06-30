@@ -38,7 +38,7 @@ class TestServiceProviderConfig:
     ):
         """The advertised filter.maxResults must equal the value the list
         endpoints actually enforce (clamp_count), or the contract lies."""
-        from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
+        from eneo.scim.constants import SCIM_FILTER_MAX_RESULTS
 
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
         assert res.json()["filter"]["maxResults"] == SCIM_FILTER_MAX_RESULTS

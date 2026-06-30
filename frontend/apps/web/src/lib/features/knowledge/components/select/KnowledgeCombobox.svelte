@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { GroupSparse, WebsiteSparse } from "@intric/intric-js";
+  import type { GroupSparse, WebsiteSparse } from "@eneo/eneo-js";
   import { tick } from "svelte";
-  import { IconPlus } from "@intric/icons/plus";
-  import { IconCollections } from "@intric/icons/collections";
-  import { IconWeb } from "@intric/icons/web";
+  import { IconPlus } from "@eneo/icons/plus";
+  import { IconCollections } from "@eneo/icons/collections";
+  import { IconWeb } from "@eneo/icons/web";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as Command from "$lib/components/ui/command/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

@@ -2,7 +2,7 @@
   import { Page } from "$lib/components/layout";
   import SelectLanguage from "$lib/components/SelectLanguage.svelte";
   import { getAppContext } from "$lib/core/AppContext.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import {
@@ -11,7 +11,7 @@
   } from "$lib/features/chat/copyAssistantAnswer";
   import UpdateUserName from "./UpdateUserName.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   const {
     user,
     settings,
@@ -20,7 +20,7 @@
     featureFlags,
     state: { userInfo }
   } = getAppContext();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let savingPreferredTextFormat = false;
   let preferRichText = $state(getPreferredAssistantCopyFormat(settings) === "richtext");
@@ -33,7 +33,7 @@
 
     savingPreferredTextFormat = true;
     try {
-      const updatedSettings = await intric.settings.update({
+      const updatedSettings = await eneo.settings.update({
         ...settings,
         chatbot_widget: setPreferredAssistantCopyFormat(settings, nextFormat)
       });

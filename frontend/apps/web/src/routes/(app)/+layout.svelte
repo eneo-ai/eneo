@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { Button } from "@intric/ui";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
+  import { Button } from "@eneo/ui";
   import { page } from "$app/stores";
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
   import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import ProfileMenu from "./ProfileMenu.svelte";
-  import { initIntric } from "$lib/core/Intric";
-  import { initIntricSocket } from "$lib/core/IntricSocket";
+  import { initEneo } from "$lib/core/Eneo";
+  import { initEneoSocket } from "$lib/core/EneoSocket";
   import { PageLoadBar } from "$lib/components/layout";
   import { browser } from "$app/environment";
   import { onDestroy } from "svelte";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
-  import { IconEneo } from "@intric/icons/eneo";
+  import { IconEneo } from "@eneo/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
@@ -22,13 +22,13 @@
 
   export let data;
 
-  initIntric(data);
+  initEneo(data);
   initAppContext(data);
   initJobManager(data);
   initExpiringKeysStore(data);
   initAttachmentUrlService(data);
   initFaviconUrlService();
-  const socket = initIntricSocket(data);
+  const socket = initEneoSocket(data);
 
   // Open the socket connection
   // While it would be more intuitive to use onMount to open the socket, onMounts are executed form the bottom up
@@ -88,8 +88,8 @@
     >
       <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/")}>
-        <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
-        <IconEneo class="text-brand-intric -ml-0.5 block md:hidden" viewBox="0 0 330 330"
+        <EneoWordMark class="text-brand-eneo hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
+        <IconEneo class="text-brand-eneo -ml-0.5 block md:hidden" viewBox="0 -21 214 214"
         ></IconEneo>
       </a>
       <!-- eslint-enable svelte/no-navigation-without-resolve -->

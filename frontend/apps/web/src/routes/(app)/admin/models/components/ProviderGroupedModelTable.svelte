@@ -19,8 +19,8 @@
     EmbeddingModel,
     ModelProviderPublic,
     TranscriptionModel
-  } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { Button } from "$lib/components/ui/button/index.js";
   import { createRender } from "svelte-headless-table";
   import { writable } from "svelte/store";

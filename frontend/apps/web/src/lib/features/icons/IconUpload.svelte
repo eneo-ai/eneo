@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconUpload } from "@intric/icons/upload";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { Button, Dialog } from "@intric/ui";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconUpload } from "@eneo/icons/upload";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { Button, Dialog } from "@eneo/ui";
   import { createEventDispatcher } from "svelte";
   import { writable } from "svelte/store";
   import * as m from "$lib/paraglide/messages";

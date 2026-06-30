@@ -20,7 +20,7 @@ function assistantPartner(overrides: Partial<ChatPartner> = {}): ChatPartner {
 
 function chatService(preflight = vi.fn()) {
   return new ChatService({
-    intric: {
+    eneo: {
       conversations: {
         preflight,
         list: vi.fn().mockResolvedValue({

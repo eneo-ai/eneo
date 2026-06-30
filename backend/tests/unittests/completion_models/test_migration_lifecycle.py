@@ -13,11 +13,11 @@ from datetime import datetime
 from uuid import uuid4
 
 
-from intric.completion_models.constants import (
+from eneo.completion_models.constants import (
     ENTITY_TABLE_MAP,
     MIGRATABLE_ENTITY_TYPES,
 )
-from intric.completion_models.domain.completion_model import CompletionModel
+from eneo.completion_models.domain.completion_model import CompletionModel
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ class TestPydanticModelMigrationField:
     """migrated_to_model_id must propagate through the pydantic model chain."""
 
     def test_internal_model_dump_includes_migrated_to_model_id(self):
-        from intric.ai_models.completion_models.completion_model import (
+        from eneo.ai_models.completion_models.completion_model import (
             CompletionModel as CompletionModelAPIModel,
         )
 
@@ -171,7 +171,7 @@ class TestPydanticModelMigrationField:
         assert model.model_dump()["migrated_to_model_id"] == target_id
 
     def test_from_domain_propagates_migrated_to_model_id(self):
-        from intric.ai_models.completion_models.completion_model import (
+        from eneo.ai_models.completion_models.completion_model import (
             CompletionModelPublic,
         )
 
@@ -184,7 +184,7 @@ class TestPydanticModelMigrationField:
         assert public.can_access is False
 
     def test_from_domain_none_when_not_migrated(self):
-        from intric.ai_models.completion_models.completion_model import (
+        from eneo.ai_models.completion_models.completion_model import (
             CompletionModelPublic,
         )
 
@@ -206,7 +206,7 @@ class TestAIModelsServiceCanAccess:
 
     def test_can_access_excludes_migrated(self):
         from unittest.mock import MagicMock
-        from intric.ai_models.ai_models_service import AIModelsService
+        from eneo.ai_models.ai_models_service import AIModelsService
 
         service = AIModelsService.__new__(AIModelsService)
 
@@ -219,7 +219,7 @@ class TestAIModelsServiceCanAccess:
 
     def test_can_access_allows_normal_model(self):
         from unittest.mock import MagicMock
-        from intric.ai_models.ai_models_service import AIModelsService
+        from eneo.ai_models.ai_models_service import AIModelsService
 
         service = AIModelsService.__new__(AIModelsService)
 

@@ -1,13 +1,13 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconSearch } from "@intric/icons/search";
-  import { type IntegrationKnowledgePreview } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconSearch } from "@eneo/icons/search";
+  import { type IntegrationKnowledgePreview } from "@eneo/eneo-js";
+  import { Button, Dialog } from "@eneo/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
@@ -21,7 +21,7 @@
 
   let { goBack, openController, integration }: IntegrationImportDialogProps = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -46,7 +46,7 @@
       return;
     }
 
-    const preview = await intric.integrations.knowledge.preview({ id });
+    const preview = await eneo.integrations.knowledge.preview({ id });
     availableResources = preview.map((space) => {
       return {
         label: space.name,
@@ -75,7 +75,7 @@
     if (!id) return;
 
     try {
-      await intric.integrations.knowledge.import({
+      await eneo.integrations.knowledge.import({
         integration: { id },
         preview: $selected.value,
         embedding_model: selectedEmbeddingModel,

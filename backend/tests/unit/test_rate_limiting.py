@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import redis.exceptions
 
-from intric.audit.infrastructure.rate_limiting import (
+from eneo.audit.infrastructure.rate_limiting import (
     RATE_LIMIT_SCRIPT,
     RateLimitConfig,
     RateLimitResult,

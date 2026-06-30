@@ -1,5 +1,5 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   // Stable dependency key for manual invalidation after mutations
   event.depends("admin:users");
@@ -17,7 +17,7 @@ export const load = async (event) => {
   const state_filter = tab === "inactive" ? "inactive" : "active";
 
   // Backend now returns { items: User[], metadata: PaginationMetadata }
-  const response = await intric.users.list({
+  const response = await eneo.users.list({
     includeDetails: true,
     search_email, // Server-side search
     state_filter, // Server-side state filtering

@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.spaces.api.space_models import SpaceRoleValue
-from intric.spaces.space_service import SpaceService
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.space_service import SpaceService
 from tests.fixtures import TEST_USER
 
 

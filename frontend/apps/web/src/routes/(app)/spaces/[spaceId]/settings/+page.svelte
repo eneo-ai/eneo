@@ -8,7 +8,7 @@
   import { beforeNavigate } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
   import SelectCompletionModels from "./SelectCompletionModels.svelte";
@@ -17,7 +17,7 @@
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
   import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
   import { writable } from "svelte/store";
-  import { getIntric } from "$lib/core/Intric.js";
+  import { getEneo } from "$lib/core/Eneo.js";
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -28,7 +28,7 @@
   import { fade } from "svelte/transition";
   import { untrack } from "svelte";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let { data } = $props();
   let models = $state(untrack(() => data.models));
@@ -57,7 +57,7 @@
   } = initSpaceSettingsEditor({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     space: $currentSpace as any,
-    intric,
+    eneo,
     onUpdateDone: async () => {
       // Sync with SpacesManager so sidebar and other components update
       await spaces.refreshCurrentSpace();
@@ -103,7 +103,7 @@
   let iconError = $state<string | null>(null);
 
   function getIconUrl(id: string | null | undefined): string | null {
-    return id ? intric.icons.url({ id }) : null;
+    return id ? eneo.icons.url({ id }) : null;
   }
 
   // Use the update store's icon_id for displaying current icon
@@ -114,7 +114,7 @@
     iconUploading = true;
     iconError = null;
     try {
-      const newIcon = await intric.icons.upload({ file });
+      const newIcon = await eneo.icons.upload({ file });
       // Update the editor's update store - will be saved with other changes
       $update.icon_id = newIcon.id;
     } catch (error) {
@@ -130,7 +130,7 @@
     try {
       // Delete the icon file from server
       if ($update.icon_id) {
-        await intric.icons.delete({ id: $update.icon_id });
+        await eneo.icons.delete({ id: $update.icon_id });
       }
       // Update the editor's update store - will be saved with other changes
       $update.icon_id = null;
@@ -220,7 +220,7 @@
               classifications={data.classifications}
               onUpdateDone={async () => {
                 // If the classification was changed we update the models to get their availability
-                models = await intric.models.list({ space: $currentSpace });
+                models = await eneo.models.list({ space: $currentSpace });
               }}
             ></ChangeSecurityClassification>
           {/if}

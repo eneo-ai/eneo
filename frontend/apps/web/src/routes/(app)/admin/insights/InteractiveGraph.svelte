@@ -5,11 +5,11 @@
 -->
 
 <script lang="ts">
-  import { IconSession } from "@intric/icons/session";
-  import { IconQuestionMark } from "@intric/icons/question-mark";
-  import { Chart } from "@intric/ui";
+  import { IconSession } from "@eneo/icons/session";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
+  import { Chart } from "@eneo/ui";
   import { Info, BarChart3 } from "lucide-svelte";
-  import type { AnalyticsAggregatedData } from "@intric/intric-js";
+  import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
   import { getConfig, prepareData } from "./prepareData";
   import { m } from "$lib/paraglide/messages";
 

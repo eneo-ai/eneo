@@ -5,7 +5,7 @@
 */
 
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   event.depends("insights:list");
 
@@ -17,7 +17,7 @@ export const load = async (event) => {
   };
 
   return {
-    data: intric.analytics.getAggregated(timeframe),
+    data: eneo.analytics.getAggregated(timeframe),
     timeframe
   };
 };

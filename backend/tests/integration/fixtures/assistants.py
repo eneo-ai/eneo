@@ -1,5 +1,5 @@
 """
-Fixtures for assistants (mirrors src/intric/assistants/).
+Fixtures for assistants (mirrors src/eneo/assistants/).
 
 These fixtures create assistants with completion models.
 """
@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 
-from intric.database.tables.assistant_table import Assistants
+from eneo.database.tables.assistant_table import Assistants
 
 
 @pytest.fixture

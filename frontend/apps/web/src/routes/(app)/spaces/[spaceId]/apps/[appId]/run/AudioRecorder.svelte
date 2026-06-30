@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IconMicrophone } from "@intric/icons/microphone";
-  import { IconStop } from "@intric/icons/stop";
-  import { Tooltip } from "@intric/ui";
+  import { IconMicrophone } from "@eneo/icons/microphone";
+  import { IconStop } from "@eneo/icons/stop";
+  import { Tooltip } from "@eneo/ui";
   import { onDestroy, onMount } from "svelte";
 
   import dayjs from "dayjs";
@@ -494,11 +494,11 @@
         </div>
         {#if maxSizeLabel}
           <div class="size-row">
-            <!-- eslint-disable intric/no-hardcoded-text -->
+            <!-- eslint-disable eneo/no-hardcoded-text -->
             <span class="size-display"
               >{formatMegabytes(recordingStats.totalBytes)} / {maxSizeLabel} MB</span
             >
-            <!-- eslint-enable intric/no-hardcoded-text -->
+            <!-- eslint-enable eneo/no-hardcoded-text -->
             <div class="size-progress-track">
               <div class="size-progress-bar" style="width: {sizePercent}%"></div>
             </div>
@@ -557,7 +557,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   /* Breathing pulse animation for active recording */
   @keyframes breathe-ring {

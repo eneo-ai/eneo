@@ -206,10 +206,10 @@ Navigate to `https://your-domain.com`
 
     ```bash
     # Development (with uv)
-    uv run python -m intric.cli.generate_encryption_key
+    uv run python -m eneo.cli.generate_encryption_key
 
     # Production (Docker)
-    docker compose run --rm backend python -m intric.cli.generate_encryption_key
+    docker compose run --rm backend python -m eneo.cli.generate_encryption_key
 
     # Alternative (Python)
     python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
@@ -714,30 +714,6 @@ docker image prune -a
 # Scale backend instances (with load balancer)
 docker compose up -d --scale backend=3 --scale worker=2
 ```
-
----
-
-## Migration: INTRIC_ to ENEO_ Environment Variables
-
-All `INTRIC_`-prefixed environment variables have been renamed to `ENEO_`. The old names are still accepted but deprecated and will be removed in v3.0.
-
-<Callout type="info">
-  **No immediate action required.** Existing installations using `INTRIC_*` variables will continue to work. A deprecation warning will appear in the logs on startup. Update at your convenience before v3.0.
-</Callout>
-
-| Old variable | New variable |
-|---|---|
-| `INTRIC_SUPER_API_KEY` | `ENEO_SUPER_API_KEY` |
-| `INTRIC_SUPER_DUPER_API_KEY` | `ENEO_SUPER_DUPER_API_KEY` |
-| `INTRIC_BACKEND_URL` | `ENEO_BACKEND_URL` |
-| `INTRIC_BACKEND_SERVER_URL` | `ENEO_BACKEND_SERVER_URL` |
-| `PUBLIC_INTRIC_BACKEND_URL` | `PUBLIC_ENEO_BACKEND_URL` |
-
-**Removed (no replacement needed):**
-- `INTRIC_MARKETPLACE_API_KEY` — was unused
-- `INTRIC_MARKETPLACE_URL` — was unused
-
-To migrate, update your `env_backend.env` and `env_frontend.env` files and restart all services.
 
 ---
 

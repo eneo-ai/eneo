@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { writable } from "svelte/store";
-  import { Button, Dialog, Markdown } from "@intric/ui";
+  import { Button, Dialog, Markdown } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {

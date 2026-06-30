@@ -8,8 +8,8 @@
   import AssistantSwitcher from "$lib/features/chat/components/switcher/AssistantSwitcher.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { Button } from "@intric/ui";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { Button } from "@eneo/ui";
   import { fade } from "svelte/transition";
   import InsightsPage from "./insights/InsightsPage.svelte";
   import { page } from "$app/state";

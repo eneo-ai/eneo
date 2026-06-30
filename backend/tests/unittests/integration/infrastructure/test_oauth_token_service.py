@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.infrastructure.oauth_token_service import OauthTokenService
+from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 
 
 @pytest.fixture

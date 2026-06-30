@@ -39,7 +39,7 @@ branch_labels = None
 depends_on = None
 
 
-# Inlined from intric.model_providers.domain.model_defaults_lookup so this
+# Inlined from the model defaults lookup so this
 # migration stays runnable on a fresh DB even if the app module is later
 # moved or renamed. Keep semantics in sync with that module if either
 # changes — both paths must agree on which LiteLLM row a given

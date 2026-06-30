@@ -25,9 +25,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.models import ModelId
-from intric.roles.role import RoleCreate
-from intric.users.user import UserAdd, UserState
+from eneo.main.models import ModelId
+from eneo.roles.role import RoleCreate
+from eneo.users.user import UserAdd, UserState
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -107,7 +107,7 @@ async def test_non_admin_can_list_user_groups(
     """
     async with db_container() as container:
         group_repo = container.user_groups_repo()
-        from intric.user_groups.user_group import UserGroupCreate
+        from eneo.user_groups.user_group import UserGroupCreate
 
         await group_repo.create_user_group(
             UserGroupCreate(

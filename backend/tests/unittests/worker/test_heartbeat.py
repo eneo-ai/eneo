@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from intric.worker.crawl.heartbeat import (
+from eneo.worker.crawl.heartbeat import (
     HeartbeatFailedError,
     HeartbeatMonitor,
     JobPreemptedError,
@@ -46,7 +46,7 @@ class TestHeartbeatMonitorInterval:
         monitor._execute_heartbeat = tracking_execute
 
         # Tick at time 100 with last_beat=0 - should skip (100-0=100 < 300)
-        with patch("intric.worker.crawl.heartbeat.time.time", return_value=100.0):
+        with patch("eneo.worker.crawl.heartbeat.time.time", return_value=100.0):
             await monitor.tick()
 
         assert execute_call_count == 0
@@ -73,7 +73,7 @@ class TestHeartbeatMonitorInterval:
         monitor._execute_heartbeat = tracking_execute
 
         # Tick at time 350 with last_beat=0 - should execute (350-0=350 >= 300)
-        with patch("intric.worker.crawl.heartbeat.time.time", return_value=350.0):
+        with patch("eneo.worker.crawl.heartbeat.time.time", return_value=350.0):
             await monitor.tick()
 
         assert execute_call_count == 1
@@ -222,13 +222,13 @@ class TestHeartbeatMonitorPreemption:
         with patch.dict(
             "sys.modules",
             {
-                "intric.database.database": MagicMock(
+                "eneo.database.database": MagicMock(
                     sessionmanager=mock_sessionmanager
                 ),
-                "intric.jobs.job_repo": MagicMock(
+                "eneo.jobs.job_repo": MagicMock(
                     JobRepository=MagicMock(return_value=mock_repo)
                 ),
-                "intric.main.models": MagicMock(Status=MockStatus),
+                "eneo.main.models": MagicMock(Status=MockStatus),
             },
         ):
             # Need to reload the module to pick up the patches

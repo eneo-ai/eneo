@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconXMark } from "@intric/icons/x-mark";
+  import { IconXMark } from "@eneo/icons/x-mark";
   import { Button } from "../Button/index.js";
   import { getDialog } from "./ctx.js";
 

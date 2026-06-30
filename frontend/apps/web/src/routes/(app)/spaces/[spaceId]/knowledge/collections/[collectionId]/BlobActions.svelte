@@ -1,22 +1,22 @@
 <script lang="ts">
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog, Dropdown, Input } from "@intric/ui";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
-  import type { InfoBlob } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconEdit } from "@intric/icons/edit";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { InfoBlob } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconEdit } from "@eneo/icons/edit";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   export let blob: InfoBlob;
   export let canEdit: boolean;
 
   let updatableTitle = blob.metadata.title ?? "";
   async function updateBlobName() {
     try {
-      await intric.infoBlobs.update({
+      await eneo.infoBlobs.update({
         blob: { id: blob.id },
         update: { metadata: { title: updatableTitle } }
       });
@@ -31,7 +31,7 @@
 
   async function deleteBlob() {
     try {
-      await intric.infoBlobs.delete(blob);
+      await eneo.infoBlobs.delete(blob);
       invalidate("blobs:list");
       return true;
     } catch (e) {

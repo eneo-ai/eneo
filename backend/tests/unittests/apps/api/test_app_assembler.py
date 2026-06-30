@@ -3,24 +3,24 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
 )
-from intric.apps.apps.api import app_assembler as app_assembler_module
-from intric.apps.apps.api.app_assembler import (
+from eneo.apps.apps.api import app_assembler as app_assembler_module
+from eneo.apps.apps.api.app_assembler import (
     _AUDIO_MAX_FILES,
     _IMAGE_MAX_FILES,
     _TEXT_MAX_FILES,
     AppAssembler,
 )
-from intric.apps.apps.api.app_models import InputField, InputFieldType
-from intric.apps.apps.app import App
-from intric.completion_models.domain import CompletionModel
-from intric.files.audio import AudioMimeTypes
-from intric.files.file_models import AcceptedFileType, Limit
-from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
-from intric.transcription_models.domain import TranscriptionModel
+from eneo.apps.apps.api.app_models import InputField, InputFieldType
+from eneo.apps.apps.app import App
+from eneo.completion_models.domain import CompletionModel
+from eneo.files.audio import AudioMimeTypes
+from eneo.files.file_models import AcceptedFileType, Limit
+from eneo.files.image import ImageMimeTypes
+from eneo.files.text import TextMimeTypes
+from eneo.transcription_models.domain import TranscriptionModel
 from tests.fixtures import TEST_USER, TEST_UUID
 
 # ── Test-specific settings ────────────────────────────────────────────────

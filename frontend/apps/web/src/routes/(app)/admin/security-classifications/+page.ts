@@ -1,7 +1,7 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
-  const securityClassifications = await intric.securityClassifications.list();
+  const securityClassifications = await eneo.securityClassifications.list();
 
   return {
     securityClassifications

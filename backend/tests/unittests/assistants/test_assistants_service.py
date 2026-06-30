@@ -6,22 +6,22 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.api.assistant_models import (
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
-from intric.assistants.assistant import Assistant
-from intric.assistants.assistant_service import AssistantService
-from intric.files.file_models import FileType
-from intric.main.exceptions import (
+from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant_service import AssistantService
+from eneo.files.file_models import FileType
+from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
     UnauthorizedException,
 )
-from intric.main.models import ModelId
-from intric.prompts.api.prompt_models import PromptCreate
+from eneo.main.models import ModelId
+from eneo.prompts.api.prompt_models import PromptCreate
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,

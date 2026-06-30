@@ -4,7 +4,7 @@
   import python from "highlight.js/lib/languages/python";
   import c from "highlight.js/lib/languages/c";
   import xml from "highlight.js/lib/languages/xml";
-  import { IconCopy } from "@intric/icons/copy";
+  import { IconCopy } from "@eneo/icons/copy";
 
   hljs.registerLanguage("javascript", js);
   hljs.registerLanguage("python", python);

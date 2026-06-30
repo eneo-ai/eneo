@@ -7,14 +7,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     Context,
     ResponseType,
 )
-from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 
 
 class _DummyContextBuilder:
@@ -90,7 +90,7 @@ async def test_streaming_wrapper_cancels_pending_approval_ids():
     approval_manager.cancel_approval = AsyncMock(return_value=True)
 
     with patch(
-        "intric.completion_models.infrastructure.completion_service.get_approval_manager",
+        "eneo.completion_models.infrastructure.completion_service.get_approval_manager",
         return_value=approval_manager,
     ):
         response = await service.get_response(

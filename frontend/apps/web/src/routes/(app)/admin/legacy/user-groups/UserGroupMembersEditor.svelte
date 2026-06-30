@@ -6,19 +6,19 @@
 
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
-  import type { UserGroup, UserSparse } from "@intric/intric-js";
-  import { Dialog, Button } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { UserGroup, UserSparse } from "@eneo/eneo-js";
+  import { Dialog, Button } from "@eneo/ui";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { IconSearch } from "@intric/icons/search";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconCheck } from "@intric/icons/check";
+  import { IconSearch } from "@eneo/icons/search";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconCheck } from "@eneo/icons/check";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
   import { UserList } from "$lib/features/users/user-list.svelte";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   type Props = {
     userGroup: UserGroup;
@@ -60,7 +60,7 @@
     if (selectedUsers.length === 0) return;
     try {
       for (const user of selectedUsers) {
-        await intric.userGroups.addUser({ userGroup, user });
+        await eneo.userGroups.addUser({ userGroup, user });
       }
       invalidate("admin:user-groups:load");
       selectedUsers = [];
@@ -73,7 +73,7 @@
 
   const removeUser = createAsyncState(async (user: UserSparse) => {
     try {
-      await intric.userGroups.removeUser({ userGroup, user });
+      await eneo.userGroups.removeUser({ userGroup, user });
       invalidate("admin:user-groups:load");
     } catch (e) {
       toastError(e, m.could_not_remove_user_from_group());

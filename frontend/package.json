@@ -2,8 +2,8 @@
   "version": "1.23.1",
   "private": true,
   "scripts": {
-    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @intric/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @intric/web build",
-    "dev": "NODE_ENV=development FORCE_COLOR=1 bun run --elide-lines=0 --filter @intric/web --filter @intric/ui dev",
+    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/web build",
+    "dev": "NODE_ENV=development FORCE_COLOR=1 bash -c 'bun run --cwd packages/ui build:dev || exit $?; bun run --cwd packages/ui dev & ui_pid=$!; bun run --cwd apps/web dev & web_pid=$!; trap \"kill $ui_pid $web_pid 2>/dev/null\" INT TERM EXIT; wait $web_pid; status=$?; kill $ui_pid 2>/dev/null; wait $ui_pid 2>/dev/null; exit $status'",
     "dev:clean": "bun run clean:cache && bun run dev",
     "clean:cache": "rm -rf apps/web/node_modules/.vite apps/web/.svelte-kit packages/ui/.svelte-kit",
     "lint": "FORCE_COLOR=1 bun run --filter '*' lint",

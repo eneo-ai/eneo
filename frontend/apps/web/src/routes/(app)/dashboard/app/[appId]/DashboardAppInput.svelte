@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import type { App, AppRunInput } from "@intric/intric-js";
+  import type { App, AppRunInput } from "@eneo/eneo-js";
   import InputUpload from "../../../spaces/[spaceId]/apps/[appId]/run/InputUpload.svelte";
   import DashboardInputTextField from "./DashboardInputTextField.svelte";
   import InputAudioRecording from "../../../spaces/[spaceId]/apps/[appId]/run/InputAudioRecording.svelte";

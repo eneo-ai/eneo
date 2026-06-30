@@ -1,12 +1,12 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import type { PageProps } from "./$types";
   import { onDestroy } from "svelte";
   import { IntegrationAuthService } from "$lib/features/integrations/IntegrationAuthService.svelte";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";
   import IntegrationGrid from "$lib/features/integrations/components/IntegrationGrid.svelte";
-  import type { UserIntegration } from "@intric/intric-js";
+  import type { UserIntegration } from "@eneo/eneo-js";
   import UserConnectedSplitButton from "$lib/features/integrations/components/UserConnectedSplitButton.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";

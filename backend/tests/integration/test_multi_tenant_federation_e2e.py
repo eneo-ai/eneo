@@ -12,10 +12,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import AsyncClient
 
-from intric.authentication.auth_service import AuthService
-from intric.database.database import sessionmanager
-from intric.database.tables.tenant_table import Tenants
-from intric.tenants.tenant_repo import TenantRepository
+from eneo.authentication.auth_service import AuthService
+from eneo.database.database import sessionmanager
+from eneo.database.tables.tenant_table import Tenants
+from eneo.tenants.tenant_repo import TenantRepository
 
 
 async def _patch_federation_config(async_session, tenant_id: UUID, new_config: dict):

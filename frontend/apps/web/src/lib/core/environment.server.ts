@@ -24,37 +24,12 @@ function getEnvValue(key: string, defaultValue?: string): string | undefined {
   return value;
 }
 
-/**
- * Read an environment variable with fallback to a legacy name.
- * Logs a one-time deprecation warning if the legacy name is in use.
- */
-const _legacyWarned = new Set<string>();
-
-function getEnvWithFallback(newKey: string, legacyKey: string): string | undefined {
-  const value = env[newKey];
-  if (value != null && value.trim() !== "") return value;
-
-  const legacy = env[legacyKey];
-  if (legacy != null && legacy.trim() !== "") {
-    if (!_legacyWarned.has(legacyKey)) {
-      console.warn(
-        `DEPRECATION: Using ${legacyKey}. Please update to ${newKey}. Legacy vars will be removed in v3.0.`
-      );
-      _legacyWarned.add(legacyKey);
-    }
-    return legacy;
-  }
-  return undefined;
-}
-
-/** Resolve backend URL with INTRIC_ legacy fallback. */
 export function getBackendUrl(): string | undefined {
-  return getEnvWithFallback("ENEO_BACKEND_URL", "INTRIC_BACKEND_URL");
+  return getEnvValue("ENEO_BACKEND_URL");
 }
 
-/** Resolve backend server URL with INTRIC_ legacy fallback. */
 export function getBackendServerUrl(): string | undefined {
-  return getEnvWithFallback("ENEO_BACKEND_SERVER_URL", "INTRIC_BACKEND_SERVER_URL");
+  return getEnvValue("ENEO_BACKEND_SERVER_URL");
 }
 
 /**
@@ -82,7 +57,7 @@ export function getEnvironmentConfig() {
   const integrationRequestFormUrl = getEnvValue("REQUEST_INTEGRATION_FORM_URL");
   const helpCenterUrl = getEnvValue(
     "HELP_CENTER_URL",
-    "https://www.intric.ai/en/external-support-assistant"
+    "https://www.eneo.ai/en/external-support-assistant"
   );
 
   return Object.freeze({

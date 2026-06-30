@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getAttachmentManager } from "../AttachmentManager";
-  import { IconUpload } from "@intric/icons/upload";
+  import { IconUpload } from "@eneo/icons/upload";
 
   export let multiple: true | undefined = undefined;
 

@@ -1,16 +1,16 @@
 <script lang="ts">
-  import type { GroupSparse, InfoBlob, WebsiteSparse } from "@intric/intric-js";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconCollections } from "@intric/icons/collections";
-  import { IconWeb } from "@intric/icons/web";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconTrash } from "@intric/icons/trash";
+  import type { GroupSparse, InfoBlob, WebsiteSparse } from "@eneo/eneo-js";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconCollections } from "@eneo/icons/collections";
+  import { IconWeb } from "@eneo/icons/web";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import KnowledgeBlobList from "./KnowledgeBlobList.svelte";
 
@@ -23,7 +23,7 @@
 
   let { kind, item, modelEnabled, onRemove }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // The discriminant `kind` decides which view of `item` is valid in each branch.
   const collection = $derived(item as GroupSparse);
@@ -54,8 +54,8 @@
     try {
       blobs =
         kind === "collection"
-          ? await intric.groups.listInfoBlobs(collection)
-          : await intric.websites.indexedBlobs.list(website);
+          ? await eneo.groups.listInfoBlobs(collection)
+          : await eneo.websites.indexedBlobs.list(website);
       loaded = true;
     } catch (error) {
       console.error(`Failed to fetch blobs for ${kind} ${item.id}:`, error);

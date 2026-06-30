@@ -7,17 +7,17 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import {
-    IntricError,
+    EneoError,
     type UserSortBy,
     type UserTokenUsage,
     type UserTokenUsageSummary
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import type { CostRateMap } from "$lib/features/ai-models/costRates";
   import UserOverviewBar from "./UserOverviewBar.svelte";
   import UserTokenTable from "./UserTokenTable.svelte";
   import { CalendarDate, type DateValue } from "@internationalized/date";
-  import { getIntric } from "$lib/core/Intric";
-  import { Input } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { m } from "$lib/paraglide/messages";
@@ -42,7 +42,7 @@
     };
   });
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const now = new Date();
   const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
@@ -81,7 +81,7 @@
     isLoading = true;
     error = null;
     try {
-      const result = await intric.usage.tokens.getUsersSummary({
+      const result = await eneo.usage.tokens.getUsersSummary({
         startDate: timeframe.start.toString(),
         // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
         endDate: timeframe.end.add({ days: 1 }).toString(),
@@ -94,7 +94,7 @@
       userStats = result;
     } catch (err: unknown) {
       if (id !== fetchId) return;
-      error = err instanceof IntricError ? err.message : "unknown error";
+      error = err instanceof EneoError ? err.message : "unknown error";
       console.error("Failed to load user token usage:", err);
     } finally {
       if (id === fetchId) {

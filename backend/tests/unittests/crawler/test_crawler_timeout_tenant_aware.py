@@ -22,8 +22,8 @@ import pytest
 # This initializes Twisted's reactor in a way that's compatible with our test process.
 crochet.setup()
 
-from intric.crawler.crawler import Crawler
-from intric.main.exceptions import CrawlTimeoutError
+from eneo.crawler.crawler import Crawler
+from eneo.main.exceptions import CrawlTimeoutError
 
 
 class MockCrawlManager:
@@ -72,7 +72,7 @@ class TestCrawlerTimeoutEnforcement:
             return MockCrawlManager(delay=10, should_timeout=True)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_crawl_with_timeout(
@@ -93,7 +93,7 @@ class TestCrawlerTimeoutEnforcement:
             return MockCrawlManager(delay=10, should_timeout=True)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_sitemap_crawl_with_timeout(
@@ -113,7 +113,7 @@ class TestCrawlerTimeoutEnforcement:
             return MockCrawlManager(delay=0.01, should_timeout=False)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             # Should complete without exception
             await Crawler._run_crawl_with_timeout(
@@ -134,7 +134,7 @@ class TestCrawlerTenantSettingsResolution:
         """When tenant has custom crawl_max_length, it's used."""
         tenant_settings = {"crawl_max_length": 120}  # 2 minutes
 
-        with patch("intric.crawler.crawler.get_crawler_setting") as mock_get_setting:
+        with patch("eneo.crawler.crawler.get_crawler_setting") as mock_get_setting:
             mock_get_setting.return_value = 120
 
             # Mock _crawl to capture the max_length parameter
@@ -164,7 +164,7 @@ class TestCrawlerTenantSettingsResolution:
     @pytest.mark.asyncio
     async def test_uses_default_when_no_tenant_settings(self):
         """When no tenant settings provided, uses environment default."""
-        with patch("intric.crawler.crawler.get_crawler_setting") as mock_get_setting:
+        with patch("eneo.crawler.crawler.get_crawler_setting") as mock_get_setting:
             mock_get_setting.return_value = 7200  # Default 2 hours
 
             captured_max_length = None
@@ -189,11 +189,11 @@ class TestCrawlerTenantSettingsResolution:
     @pytest.mark.asyncio
     async def test_sitemap_crawl_uses_tenant_timeout(self):
         """SITEMAP crawl type also uses tenant-aware timeout."""
-        from intric.websites.domain.crawl_run import CrawlType
+        from eneo.websites.domain.crawl_run import CrawlType
 
         tenant_settings = {"crawl_max_length": 300}
 
-        with patch("intric.crawler.crawler.get_crawler_setting") as mock_get_setting:
+        with patch("eneo.crawler.crawler.get_crawler_setting") as mock_get_setting:
             mock_get_setting.return_value = 300
 
             captured_max_length = None
@@ -228,7 +228,7 @@ class TestCrawlerTimeoutEdgeCases:
 
         start_time = time.time()
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             with pytest.raises(CrawlTimeoutError):
                 await Crawler._run_crawl_with_timeout(
@@ -250,7 +250,7 @@ class TestCrawlerTimeoutEdgeCases:
             return MockCrawlManager(delay=10, should_timeout=True)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             test_url = "https://slow-website.example.com/very/long/path"
             with pytest.raises(CrawlTimeoutError) as exc_info:
@@ -273,7 +273,7 @@ class TestCrawlerTimeoutEdgeCases:
             return MockCrawlManager(delay=10, should_timeout=True)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_mock_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_mock_manager
         ):
             with pytest.raises(CrawlTimeoutError) as exc_info:
                 await Crawler._run_crawl_with_timeout(
@@ -310,7 +310,7 @@ class TestCrawlerTimeoutIsolation:
             return 7200  # Default
 
         with patch(
-            "intric.crawler.crawler.get_crawler_setting",
+            "eneo.crawler.crawler.get_crawler_setting",
             side_effect=mock_get_setting,
         ):
             crawler = Crawler()
@@ -355,7 +355,7 @@ class TestCrawlerNoRegressions:
             return TrackingMockManager(delay=0.01, should_timeout=False)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_tracking_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_tracking_manager
         ):
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
@@ -389,7 +389,7 @@ class TestCrawlerNoRegressions:
             return TrackingMockManager(delay=0.01, should_timeout=False)
 
         with patch(
-            "intric.crawler.crawler.CrawlManager", side_effect=create_tracking_manager
+            "eneo.crawler.crawler.CrawlManager", side_effect=create_tracking_manager
         ):
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SpaceSparse } from "@intric/intric-js";
+  import type { SpaceSparse } from "@eneo/eneo-js";
   import { Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";

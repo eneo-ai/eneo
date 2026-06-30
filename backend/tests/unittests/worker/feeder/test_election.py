@@ -13,7 +13,7 @@ class TestLeaderElectionInit:
 
     def test_initializes_with_defaults(self):
         """Should initialize with sensible defaults."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
         leader = LeaderElection(redis_mock, worker_id="worker-1")
@@ -25,7 +25,7 @@ class TestLeaderElectionInit:
 
     def test_accepts_custom_lock_key_and_ttl(self):
         """Should accept custom lock key and TTL."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
         leader = LeaderElection(
@@ -45,7 +45,7 @@ class TestTryAcquire:
     @pytest.mark.asyncio
     async def test_returns_true_when_lock_acquired(self):
         """Should return True when SET NX succeeds."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
         redis_mock.set = AsyncMock(return_value=True)
@@ -64,7 +64,7 @@ class TestTryAcquire:
     @pytest.mark.asyncio
     async def test_returns_false_when_lock_held_by_another(self):
         """Should return False when another process holds the lock."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
         redis_mock.set = AsyncMock(return_value=None)
@@ -77,7 +77,7 @@ class TestTryAcquire:
     @pytest.mark.asyncio
     async def test_returns_false_on_redis_error(self):
         """Should return False and log warning on Redis error."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
         redis_mock.set = AsyncMock(side_effect=Exception("Connection refused"))
@@ -94,12 +94,12 @@ class TestRefresh:
     @pytest.mark.asyncio
     async def test_returns_true_when_still_owner(self):
         """Should return True when Lua script confirms ownership."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
 
         with patch(
-            "intric.worker.feeder.election.LuaScripts.refresh_leader_lock",
+            "eneo.worker.feeder.election.LuaScripts.refresh_leader_lock",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_refresh:
@@ -117,12 +117,12 @@ class TestRefresh:
     @pytest.mark.asyncio
     async def test_returns_false_when_not_owner(self):
         """Should return False when another process owns the lock."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
 
         with patch(
-            "intric.worker.feeder.election.LuaScripts.refresh_leader_lock",
+            "eneo.worker.feeder.election.LuaScripts.refresh_leader_lock",
             new_callable=AsyncMock,
             return_value=False,
         ):
@@ -134,12 +134,12 @@ class TestRefresh:
     @pytest.mark.asyncio
     async def test_returns_false_on_error(self):
         """Should return False on Lua script error."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
 
         with patch(
-            "intric.worker.feeder.election.LuaScripts.refresh_leader_lock",
+            "eneo.worker.feeder.election.LuaScripts.refresh_leader_lock",
             new_callable=AsyncMock,
             side_effect=Exception("Script error"),
         ):
@@ -155,12 +155,12 @@ class TestRelease:
     @pytest.mark.asyncio
     async def test_returns_true_when_released(self):
         """Should return True when Lua script releases lock."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
 
         with patch(
-            "intric.worker.feeder.election.LuaScripts.release_leader_lock",
+            "eneo.worker.feeder.election.LuaScripts.release_leader_lock",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_release:
@@ -177,12 +177,12 @@ class TestRelease:
     @pytest.mark.asyncio
     async def test_returns_false_when_not_owner(self):
         """Should return False when another process owns the lock."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
 
         with patch(
-            "intric.worker.feeder.election.LuaScripts.release_leader_lock",
+            "eneo.worker.feeder.election.LuaScripts.release_leader_lock",
             new_callable=AsyncMock,
             return_value=False,
         ):
@@ -194,12 +194,12 @@ class TestRelease:
     @pytest.mark.asyncio
     async def test_returns_false_on_error(self):
         """Should return False on Lua script error."""
-        from intric.worker.feeder.election import LeaderElection
+        from eneo.worker.feeder.election import LeaderElection
 
         redis_mock = MagicMock()
 
         with patch(
-            "intric.worker.feeder.election.LuaScripts.release_leader_lock",
+            "eneo.worker.feeder.election.LuaScripts.release_leader_lock",
             new_callable=AsyncMock,
             side_effect=Exception("Script error"),
         ):

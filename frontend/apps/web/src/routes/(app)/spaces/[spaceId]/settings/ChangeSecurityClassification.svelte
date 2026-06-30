@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { type Intric, type SecurityClassification } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { type Eneo, type SecurityClassification } from "@eneo/eneo-js";
+  import { Button, Dialog } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
@@ -21,12 +21,12 @@
     updateSpace
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const showDryRunDialog = writable(false);
 
   let classification = $state($currentSpace.security_classification);
   let result = $state<Awaited<
-    ReturnType<Intric["securityClassifications"]["impactAnalysis"]>
+    ReturnType<Eneo["securityClassifications"]["impactAnalysis"]>
   > | null>(null);
   let affectedModels = $derived.by(() => {
     if (!result) return [];
@@ -58,7 +58,7 @@
       result = null;
       return;
     }
-    result = await intric.securityClassifications.impactAnalysis({
+    result = await eneo.securityClassifications.impactAnalysis({
       space: $currentSpace,
       classification
     });

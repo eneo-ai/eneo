@@ -18,8 +18,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.files.file_models import FileCreate, FileType
-from intric.users.user import UserAdd, UserState
+from eneo.files.file_models import FileCreate, FileType
+from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -104,7 +104,7 @@ async def _create_assistant_with_prompt(
     """Create assistant and seed a selected prompt mapping; return (assistant_id, prompt_id)."""
     import sqlalchemy as sa
 
-    from intric.database.tables.prompts_table import Prompts, PromptsAssistants
+    from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 
     resp = await client.post(
         "/api/v1/assistants/",
@@ -163,7 +163,7 @@ async def _seed_info_blob(
     text: str,
 ) -> str:
     """Create one info blob directly in DB (avoids external embedding dependency)."""
-    from intric.info_blobs.info_blob import InfoBlobAdd
+    from eneo.info_blobs.info_blob import InfoBlobAdd
 
     async with db_container() as container:
         repo = container.info_blob_repo()

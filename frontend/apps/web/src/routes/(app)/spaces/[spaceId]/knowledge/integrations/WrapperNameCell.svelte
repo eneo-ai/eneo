@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconCollections } from "@intric/icons/collections";
+  import { IconCollections } from "@eneo/icons/collections";
 
   interface Props {
     name: string;

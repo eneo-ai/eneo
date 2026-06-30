@@ -32,7 +32,7 @@
 {/if}
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   :global(.question-mention) {
     @apply bg-hover-default rounded-full px-2 py-1;
   }

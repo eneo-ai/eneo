@@ -126,10 +126,10 @@ from testcontainers.redis import RedisContainer
 from alembic import command
 from alembic.config import Config
 from init_db import add_tenant_user
-from intric.database.database import sessionmanager
-from intric.main.config import Settings, reset_settings, set_settings
-from intric.main.container.container import Container
-from intric.server.main import get_application
+from eneo.database.database import sessionmanager
+from eneo.main.config import Settings, reset_settings, set_settings
+from eneo.main.container.container import Container
+from eneo.server.main import get_application
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -360,7 +360,7 @@ def override_settings_for_session(test_settings: Settings):
     #   has a reference to the OLD object
     # - By MUTATING the existing object's model.name attribute, all references
     #   (including the one captured in the function signature) see the new header name
-    import intric.server.dependencies.auth_definitions as auth_defs
+    import eneo.server.dependencies.auth_definitions as auth_defs
 
     auth_defs.API_KEY_HEADER.model.name = test_settings.api_key_header_name
 
@@ -454,7 +454,7 @@ async def setup_database(test_settings: Settings):
             print("✓ pgvector extension available")
 
             # Verify tenant and users exist
-            from intric.main.container.container import Container
+            from eneo.main.container.container import Container
 
             container = Container(session=providers.Object(session))
 
@@ -561,7 +561,7 @@ async def app(setup_database):
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
-    from intric.server.dependencies.lifespan import startup
+    from eneo.server.dependencies.lifespan import startup
 
     await startup()
 
@@ -778,9 +778,9 @@ def legacy_credentials_mode(test_settings):
     """
     from dependency_injector import providers
 
-    from intric.main.config import get_settings, set_settings
-    from intric.main.container.container import Container
-    from intric.settings.encryption_service import EncryptionService
+    from eneo.main.config import get_settings, set_settings
+    from eneo.main.container.container import Container
+    from eneo.settings.encryption_service import EncryptionService
 
     # Save original settings
     original_settings = get_settings()
@@ -817,8 +817,8 @@ def encryption_service(test_settings):
     Auto-used for all integration tests to ensure encryption is enabled,
     overriding the Container's default behavior of disabling encryption in testing mode.
     """
-    from intric.main.container.container import Container
-    from intric.settings.encryption_service import EncryptionService
+    from eneo.main.container.container import Container
+    from eneo.settings.encryption_service import EncryptionService
 
     service = EncryptionService(test_settings.encryption_key)
     Container.encryption_service.override(providers.Object(service))
@@ -835,9 +835,9 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
 
     import jwt as jwt_lib
 
-    from intric.authentication.auth_models import JWTCreds, JWTMeta, JWTPayload
-    from intric.authentication.auth_service import AuthService
-    from intric.users.user import UserInDB
+    from eneo.authentication.auth_models import JWTCreds, JWTMeta, JWTPayload
+    from eneo.authentication.auth_service import AuthService
+    from eneo.users.user import UserInDB
 
     original_get_jwt_payload = AuthService.get_jwt_payload
 
@@ -921,7 +921,7 @@ def jwks_mock(monkeypatch):
         # The router does: from jwt import PyJWKClient as _PyJWKClient; JWKClient = _PyJWKClient
         # Since it's already bound at import time, we must patch the alias directly
         monkeypatch.setattr(
-            "intric.authentication.federation_router.JWKClient",
+            "eneo.authentication.federation_router.JWKClient",
             _FakePyJWKClient,
         )
 
@@ -997,15 +997,15 @@ def oidc_mock(monkeypatch):
         def _client_factory():
             return fake_client
 
-        import intric.main.aiohttp_client as aiohttp_client_module
+        import eneo.main.aiohttp_client as aiohttp_client_module
 
         monkeypatch.setattr(aiohttp_client_module, "aiohttp_client", _client_factory)
         monkeypatch.setattr(
-            "intric.authentication.federation_router.aiohttp_client",
+            "eneo.authentication.federation_router.aiohttp_client",
             _client_factory,
         )
         monkeypatch.setattr(
-            "intric.users.user_router.aiohttp_client",
+            "eneo.users.user_router.aiohttp_client",
             _client_factory,
             raising=False,
         )
@@ -1070,12 +1070,12 @@ async def seed_default_models(setup_database, monkeypatch):
     """
     import sqlalchemy as sa
 
-    from intric.database.database import sessionmanager
-    from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
-    from intric.database.tables.model_providers_table import ModelProviders
-    from intric.database.tables.tenant_table import Tenants
-    from intric.tenants.tenant import TenantBase, TenantInDB
-    from intric.tenants.tenant_service import TenantService
+    from eneo.database.database import sessionmanager
+    from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+    from eneo.database.tables.model_providers_table import ModelProviders
+    from eneo.database.tables.tenant_table import Tenants
+    from eneo.tenants.tenant import TenantBase, TenantInDB
+    from eneo.tenants.tenant_service import TenantService
 
     # Store IDs of created models for the patch function
     completion_model_ids = {}
@@ -1224,7 +1224,7 @@ def mock_transcription_models(monkeypatch):
     """Stub transcription model enablement to avoid external dependencies."""
     from uuid import uuid4
 
-    from intric.transcription_models.infrastructure import (
+    from eneo.transcription_models.infrastructure import (
         enable_transcription_models_service,
     )
 
@@ -1263,8 +1263,8 @@ async def debug_auth_config(test_settings):
     - Whether Settings singleton is working correctly
     - What the actual API key header name is
     """
-    from intric.main.config import get_settings
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
+    from eneo.main.config import get_settings
+    from eneo.server.dependencies.auth_definitions import API_KEY_HEADER
 
     runtime_settings = get_settings()
 

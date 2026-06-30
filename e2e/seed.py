@@ -13,11 +13,11 @@ import asyncio
 
 from sqlalchemy import select
 
-from intric.database.database import sessionmanager
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.model_providers_table import ModelProviders
-from intric.database.tables.tenant_table import Tenants
-from intric.main.config import get_settings
+from eneo.database.database import sessionmanager
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.tenant_table import Tenants
+from eneo.main.config import get_settings
 
 MOCK_ENDPOINT = "http://e2e-mock-model:8200/v1"
 TENANT_NAME = "E2ETenant"

@@ -11,7 +11,7 @@
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import NavigationVersionInfo from "$lib/components/layout/Navigation/NavigationVersionInfo.svelte";
   import AdminMenu from "./AdminMenu.svelte";
-  import { IconFeedback } from "@intric/icons/feedback";
+  import { IconFeedback } from "@eneo/icons/feedback";
   import { m } from "$lib/paraglide/messages";
 
   const { tenant, featureFlags, environment } = getAppContext();

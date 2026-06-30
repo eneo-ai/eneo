@@ -1,10 +1,10 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
-  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import IntegrationNameCell from "../../IntegrationNameCell.svelte";
   import IntegrationSyncStatusCell from "../../IntegrationSyncStatusCell.svelte";
   import IntegrationActions from "../../IntegrationActions.svelte";

@@ -58,9 +58,9 @@ def resource_permissions_enforcement_off(test_settings):
     """
     from dependency_injector import providers
 
-    from intric.main.config import get_settings, set_settings
-    from intric.main.container.container import Container
-    from intric.settings.encryption_service import EncryptionService
+    from eneo.main.config import get_settings, set_settings
+    from eneo.main.container.container import Container
+    from eneo.settings.encryption_service import EncryptionService
 
     original_settings = get_settings()
     override = test_settings.model_copy(

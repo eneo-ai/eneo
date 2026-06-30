@@ -19,7 +19,7 @@ async def test_raises_when_no_key_configured(test_tenant, test_settings):
     In strict mode (tenant_credentials_enabled=True), when tenant has no
     credentials, ValueError should be raised with a clear error message.
     """
-    from intric.settings.credential_resolver import CredentialResolver
+    from eneo.settings.credential_resolver import CredentialResolver
 
     # Use test_tenant which has empty api_credentials by default
     assert test_tenant.api_credentials == {}
@@ -57,8 +57,8 @@ async def test_logging_on_error(test_tenant, test_settings, caplog):
     In strict mode, when tenant has no credentials, error should be logged
     with proper context before raising ValueError.
     """
-    from intric.settings.credential_resolver import CredentialResolver
-    from intric.settings.credential_resolver import logger as cr_logger
+    from eneo.settings.credential_resolver import CredentialResolver
+    from eneo.settings.credential_resolver import logger as cr_logger
 
     # Ensure tenant has no credentials
     assert test_tenant.api_credentials == {}
@@ -101,7 +101,7 @@ async def test_no_tenant_no_global_raises(test_settings):
     When CredentialResolver has no tenant and settings have no global
     API keys, it should raise a clear error.
     """
-    from intric.settings.credential_resolver import CredentialResolver
+    from eneo.settings.credential_resolver import CredentialResolver
 
     # Override settings to ensure strict mode is enabled
     settings = test_settings.model_copy(update={"tenant_credentials_enabled": True})
@@ -128,7 +128,7 @@ async def test_strict_mode_blocks_global_fallback(test_tenant, test_settings):
     Even when global env vars are set, strict mode should NOT use them
     when tenant has no credentials.
     """
-    from intric.settings.credential_resolver import CredentialResolver
+    from eneo.settings.credential_resolver import CredentialResolver
 
     # Ensure tenant has no credentials
     assert test_tenant.api_credentials == {}

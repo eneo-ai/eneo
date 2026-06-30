@@ -1,12 +1,12 @@
 import { getAppContext } from "$lib/core/AppContext";
-import type { Limits, App } from "@intric/intric-js";
+import type { Limits, App } from "@eneo/eneo-js";
 import { derived, type Readable } from "svelte/store";
 import type { AttachmentRules } from "./AttachmentManager";
 
 type Resource = { completion_model?: { vision: boolean } | null };
 
 /**
- * Get intric's default attachment limits based on a resource's capabilites,
+ * Get eneo's default attachment limits based on a resource's capabilites,
  * e.g. whether an assistant's completion model supports images/vision.
  *
  * This function returns a store, so it can automatically react to changes in the underlying resource.
@@ -20,7 +20,7 @@ export function getAttachmentRulesStore(resource: Readable<Resource>) {
 }
 
 /**
- * Get intric's default attachment limits based on a resource's capabilites,
+ * Get eneo's default attachment limits based on a resource's capabilites,
  * e.g. whether an assistant's completion model supports images/vision
  */
 export function getAttachmentRules(params: {

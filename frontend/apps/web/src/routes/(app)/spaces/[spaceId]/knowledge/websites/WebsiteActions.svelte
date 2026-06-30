@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { type WebsiteSparse } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconMove } from "@intric/icons/move";
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog, Dropdown, Select } from "@intric/ui";
+  import { type WebsiteSparse } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconMove } from "@eneo/icons/move";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog, Dropdown, Select } from "@eneo/ui";
   import WebsiteEditor from "./WebsiteEditor.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   export let website: WebsiteSparse;
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     refreshCurrentSpace,
     state: { currentSpace, accessibleSpaces }
@@ -25,7 +25,7 @@
   async function deleteWebsite() {
     isProcessing = true;
     try {
-      await intric.websites.delete({ id: website.id });
+      await eneo.websites.delete({ id: website.id });
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
@@ -39,7 +39,7 @@
     if (!moveDestination) return;
     isProcessing = true;
     try {
-      await intric.websites.transfer({ website, targetSpace: moveDestination });
+      await eneo.websites.transfer({ website, targetSpace: moveDestination });
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {

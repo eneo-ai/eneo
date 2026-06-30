@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
   import { onMount } from "svelte";
-  import { getIntricSocket } from "$lib/core/IntricSocket";
-  import { getIntric } from "$lib/core/Intric";
-  import type { AppRunSparse } from "@intric/intric-js";
+  import { getEneoSocket } from "$lib/core/EneoSocket";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { AppRunSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import DashboardAppRunView from "./DashboardAppRunView.svelte";
@@ -13,7 +13,7 @@
 
   export let data;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let results: AppRunSparse[] = [];
   let activeTab: "run" | "results" = "run";
@@ -23,12 +23,12 @@
   }
   $: updateResultsFromPageLoad(data);
 
-  const { subscribe } = getIntricSocket();
+  const { subscribe } = getEneoSocket();
 
   onMount(() => {
     return subscribe("app_run_updates", async (update) => {
       if (update.app_id === data.app.id) {
-        results = await intric.apps.runs.list({ app: data.app });
+        results = await eneo.apps.runs.list({ app: data.app });
       }
     });
   });

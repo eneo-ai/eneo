@@ -1,6 +1,6 @@
 <script>
-  import { IconNotification } from "@intric/icons/notification";
-  import { IconNotificationDot } from "@intric/icons/notification-dot";
+  import { IconNotification } from "@eneo/icons/notification";
+  import { IconNotificationDot } from "@eneo/icons/notification-dot";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import JobManagerDropdownPanel from "./JobManagerDropdownPanel.svelte";

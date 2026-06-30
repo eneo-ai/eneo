@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.spaces.space_init_service import SpaceInitService
+from eneo.spaces.space_init_service import SpaceInitService
 
 
 def _service(space):

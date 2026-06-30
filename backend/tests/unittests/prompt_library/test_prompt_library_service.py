@@ -4,17 +4,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.prompt_library.application.prompt_library_service import (
+from eneo.prompt_library.application.prompt_library_service import (
     PromptLibraryService,
 )
-from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
-from intric.roles.permissions import Permission
+from eneo.prompt_library.domain.prompt_library import PromptLibraryEntry
+from eneo.roles.permissions import Permission
 
 
 def _admin_user(tenant_id):

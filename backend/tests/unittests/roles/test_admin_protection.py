@@ -12,10 +12,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB, RoleUpdateRequest
-from intric.roles.roles_service import RolesService
+from eneo.main.exceptions import BadRequestException
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB, RoleUpdateRequest
+from eneo.roles.roles_service import RolesService
 from tests.fixtures import TEST_USER
 
 

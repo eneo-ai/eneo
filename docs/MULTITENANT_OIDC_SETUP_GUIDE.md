@@ -23,7 +23,7 @@ This guide applies when `FEDERATION_PER_TENANT_ENABLED=true`. Use this mode if:
 - Each tenant has a slug (`tenant.slug`). Backfill once with:
   ```bash
   cd backend
-  uv run python -m intric.cli.backfill_tenant_slugs
+  uv run python -m eneo.cli.backfill_tenant_slugs
   ```
 
 Terminology

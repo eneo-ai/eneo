@@ -15,12 +15,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.main.models import ModelId
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB
-from intric.users.user import UserState, UserUpdatePublic
-from intric.users.user_service import UserService
+from eneo.main.exceptions import BadRequestException
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
+from eneo.users.user import UserState, UserUpdatePublic
+from eneo.users.user_service import UserService
 from tests.fixtures import TEST_TENANT, TEST_USER
 
 

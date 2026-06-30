@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.apps.apps.api import app_router
-from intric.apps.apps.api.app_models import (
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.apps.apps.api import app_router
+from eneo.apps.apps.api.app_models import (
     AppUpdateRequest,
     InputField,
     InputFieldType,

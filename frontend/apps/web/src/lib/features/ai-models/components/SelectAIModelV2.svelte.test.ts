@@ -1,4 +1,4 @@
-import type { CompletionModel } from "@intric/intric-js";
+import type { CompletionModel } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";

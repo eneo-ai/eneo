@@ -2,12 +2,12 @@ from datetime import timedelta
 
 import pytest
 
-from intric.main.request_context import (
+from eneo.main.request_context import (
     clear_request_context,
     get_request_context,
     set_request_context,
 )
-from intric.observability import debug_toggle, redaction
+from eneo.observability import debug_toggle, redaction
 
 
 class FakeRedisSuccess:

@@ -3,13 +3,13 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 # Import for autocompletion
-import intric.database.tables  # noqa
+import eneo.database.tables  # noqa
 from alembic import context
 
 # Add your model's MetaData object here
 # for 'autogenerate' support
-from intric.database.tables.base_class import Base  # noqa
-from intric.main.config import get_settings
+from eneo.database.tables.base_class import Base  # noqa
+from eneo.main.config import get_settings
 
 # Alembic Config object, which provides access to values within the .ini file
 config = context.config

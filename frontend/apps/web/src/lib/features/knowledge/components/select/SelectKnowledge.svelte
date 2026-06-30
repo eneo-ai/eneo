@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse } from "@intric/intric-js";
+  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse } from "@eneo/eneo-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { isOrgItem, isPersonalItem } from "./knowledgeOrigin";
   import { getSelectedIntegrationDisplay, type IntegrationEntry } from "./knowledgeIntegration";

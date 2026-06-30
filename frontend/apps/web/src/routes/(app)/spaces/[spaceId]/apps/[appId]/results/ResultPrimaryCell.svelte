@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button } from "@intric/ui";
-  import type { App, AppRun } from "@intric/intric-js";
+  import { Button } from "@eneo/ui";
+  import type { App, AppRun } from "@eneo/eneo-js";
   import AppResultInputList from "$lib/features/apps/components/AppResultInputList.svelte";
   import { localizeHref } from "$lib/paraglide/runtime";
   export let run: Pick<AppRun, "input" | "id">;

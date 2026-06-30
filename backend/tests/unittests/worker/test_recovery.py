@@ -20,8 +20,8 @@ class TestRecoveryModuleImports:
     """Tests that the recovery module can be imported from both locations."""
 
     def test_import_from_crawl_package(self):
-        """Recovery functions should be importable from intric.worker.crawl."""
-        from intric.worker.crawl import (
+        """Recovery functions should be importable from eneo.worker.crawl."""
+        from eneo.worker.crawl import (
             calculate_exponential_backoff,
             execute_with_recovery,
             is_invalid_transaction_error,
@@ -41,7 +41,7 @@ class TestRecoveryModuleImports:
 
     def test_import_directly_from_recovery_module(self):
         """Recovery functions should be importable directly from recovery module."""
-        from intric.worker.crawl.recovery import (
+        from eneo.worker.crawl.recovery import (
             execute_with_recovery,
             recover_session,
         )
@@ -55,42 +55,42 @@ class TestIsInvalidTransactionError:
 
     def test_detects_pending_rollback_error(self):
         """Should detect PendingRollbackError as invalid transaction."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = PendingRollbackError("test error")
         assert is_invalid_transaction_error(error) is True
 
     def test_detects_invalid_request_error(self):
         """Should detect InvalidRequestError as invalid transaction."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = InvalidRequestError("test error")
         assert is_invalid_transaction_error(error) is True
 
     def test_detects_invalid_transaction_in_message(self):
         """Should detect 'invalid transaction' string in error message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = Exception("Something invalid transaction happened")
         assert is_invalid_transaction_error(error) is True
 
     def test_detects_cant_reconnect_in_message(self):
         """Should detect \"can't reconnect\" string in error message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = Exception("can't reconnect to database")
         assert is_invalid_transaction_error(error) is True
 
     def test_detects_pending_rollback_in_message(self):
         """Should detect 'pending rollback' string in error message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = Exception("This transaction is pending rollback")
         assert is_invalid_transaction_error(error) is True
 
     def test_returns_false_for_unrelated_errors(self):
         """Should return False for errors not related to transaction state."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = Exception("Connection timeout")
         assert is_invalid_transaction_error(error) is False
@@ -100,7 +100,7 @@ class TestIsInvalidTransactionError:
 
     def test_case_insensitive_message_detection(self):
         """Should detect transaction errors case-insensitively."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error
 
         error = Exception("INVALID TRANSACTION in progress")
         assert is_invalid_transaction_error(error) is True
@@ -111,43 +111,43 @@ class TestIsInvalidTransactionErrorMsg:
 
     def test_returns_false_for_none(self):
         """Should return False for None message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg(None) is False
 
     def test_returns_false_for_empty_string(self):
         """Should return False for empty string."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg("") is False
 
     def test_detects_invalid_transaction(self):
         """Should detect 'invalid transaction' in message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg("invalid transaction") is True
 
     def test_detects_cant_reconnect(self):
         """Should detect \"can't reconnect\" in message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg("can't reconnect") is True
 
     def test_detects_pending_rollback(self):
         """Should detect 'pending rollback' in message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg("pending rollback") is True
 
     def test_detects_autobegin_disabled(self):
         """Should detect 'autobegin is disabled' in message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg("autobegin is disabled") is True
 
     def test_detects_another_operation_in_progress(self):
         """Should detect 'another operation is in progress' in message."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert (
             is_invalid_transaction_error_msg("another operation is in progress") is True
@@ -155,7 +155,7 @@ class TestIsInvalidTransactionErrorMsg:
 
     def test_case_insensitive(self):
         """Should be case insensitive."""
-        from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
+        from eneo.worker.crawl.recovery import is_invalid_transaction_error_msg
 
         assert is_invalid_transaction_error_msg("INVALID TRANSACTION") is True
         assert is_invalid_transaction_error_msg("Pending Rollback") is True
@@ -165,13 +165,13 @@ class TestRecoverSession:
     """Tests for recover_session function.
 
     NOTE: sessionmanager is imported INSIDE recover_session() to avoid circular imports.
-    We must patch at the source module: intric.database.database.sessionmanager
+    We must patch at the source module: eneo.database.database.sessionmanager
     """
 
     @pytest.mark.asyncio
     async def test_creates_new_session_from_sessionmanager(self):
         """Should create a fresh session via sessionmanager.create_session()."""
-        from intric.worker.crawl.recovery import recover_session
+        from eneo.worker.crawl.recovery import recover_session
 
         # Mock old session
         old_session = MagicMock()
@@ -194,7 +194,7 @@ class TestRecoverSession:
         created_sessions = []
         logger = MagicMock()
 
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             result_session, result_uploader = await recover_session(
                 container=mock_container,
                 old_session=old_session,
@@ -219,7 +219,7 @@ class TestRecoverSession:
     @pytest.mark.asyncio
     async def test_cleans_up_old_session_with_timeout(self):
         """Should clean up old session with rollback and close timeouts."""
-        from intric.worker.crawl.recovery import recover_session
+        from eneo.worker.crawl.recovery import recover_session
 
         # Mock old session
         old_session = MagicMock()
@@ -242,7 +242,7 @@ class TestRecoverSession:
         created_sessions = []
         logger = MagicMock()
 
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             await recover_session(
                 container=mock_container,
                 old_session=old_session,
@@ -258,7 +258,7 @@ class TestRecoverSession:
     @pytest.mark.asyncio
     async def test_handles_none_old_session(self):
         """Should handle None old_session gracefully."""
-        from intric.worker.crawl.recovery import recover_session
+        from eneo.worker.crawl.recovery import recover_session
 
         # Mock new session
         new_session = MagicMock()
@@ -275,7 +275,7 @@ class TestRecoverSession:
         created_sessions = []
         logger = MagicMock()
 
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             result_session, _ = await recover_session(
                 container=mock_container,
                 old_session=None,
@@ -301,7 +301,7 @@ class TestExecuteWithRecovery:
     @pytest.mark.asyncio
     async def test_successful_operation_returns_result(self):
         """Should return result when operation succeeds."""
-        from intric.worker.crawl.recovery import execute_with_recovery
+        from eneo.worker.crawl.recovery import execute_with_recovery
 
         async def successful_op(session):
             # Operation receives session from execute_with_recovery
@@ -320,7 +320,7 @@ class TestExecuteWithRecovery:
         mock_sessionmanager = MagicMock()
         mock_sessionmanager.create_session = MagicMock(return_value=mock_session)
 
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
                 container=container,
                 session_holder=session_holder,
@@ -338,7 +338,7 @@ class TestExecuteWithRecovery:
     @pytest.mark.asyncio
     async def test_non_transaction_error_is_reraised(self):
         """Should re-raise non-transaction errors without recovery."""
-        from intric.worker.crawl.recovery import execute_with_recovery
+        from eneo.worker.crawl.recovery import execute_with_recovery
 
         async def failing_op(session):
             raise ValueError("Not a transaction error")
@@ -356,7 +356,7 @@ class TestExecuteWithRecovery:
         mock_sessionmanager = MagicMock()
         mock_sessionmanager.create_session = MagicMock(return_value=mock_session)
 
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             with pytest.raises(ValueError, match="Not a transaction error"):
                 await execute_with_recovery(
                     container=container,
@@ -372,7 +372,7 @@ class TestExecuteWithRecovery:
     @pytest.mark.asyncio
     async def test_transaction_error_triggers_recovery(self):
         """Should trigger recovery on transaction error and retry."""
-        from intric.worker.crawl.recovery import execute_with_recovery
+        from eneo.worker.crawl.recovery import execute_with_recovery
 
         call_count = 0
 
@@ -405,7 +405,7 @@ class TestExecuteWithRecovery:
             side_effect=[primary_session, retry_session]
         )
 
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
                 container=mock_container,
                 session_holder=session_holder,
@@ -429,7 +429,7 @@ class TestResetTenantRetryDelay:
     @pytest.mark.asyncio
     async def test_returns_none_when_redis_is_none(self):
         """Should return None when Redis client is None."""
-        from intric.worker.crawl.recovery import reset_tenant_retry_delay
+        from eneo.worker.crawl.recovery import reset_tenant_retry_delay
 
         # Should not raise
         result = await reset_tenant_retry_delay(tenant_id=uuid4(), redis_client=None)
@@ -438,7 +438,7 @@ class TestResetTenantRetryDelay:
     @pytest.mark.asyncio
     async def test_deletes_backoff_key(self):
         """Should delete the tenant backoff key."""
-        from intric.worker.crawl.recovery import reset_tenant_retry_delay
+        from eneo.worker.crawl.recovery import reset_tenant_retry_delay
 
         mock_redis = MagicMock()
         mock_redis.delete = AsyncMock()
@@ -453,7 +453,7 @@ class TestResetTenantRetryDelay:
     @pytest.mark.asyncio
     async def test_swallows_redis_exceptions(self):
         """Should swallow Redis exceptions (best-effort cleanup)."""
-        from intric.worker.crawl.recovery import reset_tenant_retry_delay
+        from eneo.worker.crawl.recovery import reset_tenant_retry_delay
 
         mock_redis = MagicMock()
         mock_redis.delete = AsyncMock(side_effect=Exception("Redis error"))
@@ -467,7 +467,7 @@ class TestSessionHolderTypedDict:
 
     def test_session_holder_can_be_created(self):
         """SessionHolder should be creatable as a dict."""
-        from intric.worker.crawl.recovery import SessionHolder
+        from eneo.worker.crawl.recovery import SessionHolder
 
         holder: SessionHolder = {
             "session": MagicMock(),
@@ -479,7 +479,7 @@ class TestSessionHolderTypedDict:
 
     def test_session_holder_is_mutable(self):
         """SessionHolder should be mutable for recovery updates."""
-        from intric.worker.crawl.recovery import SessionHolder
+        from eneo.worker.crawl.recovery import SessionHolder
 
         holder: SessionHolder = {
             "session": "old_session",

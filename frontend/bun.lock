@@ -35,20 +35,20 @@
       },
     },
     "apps/web": {
-      "name": "@intric/web",
+      "name": "@eneo/web",
       "version": "1.23.1",
       "dependencies": {
+        "@eneo/ui": "workspace:*",
         "@inlang/paraglide-js": "^2.0.13",
-        "@intric/ui": "workspace:*",
         "dompurify": "^3.2.4",
         "lucide-svelte": "^0.544.0",
         "marked": "^15.0.8",
       },
       "devDependencies": {
+        "@eneo/eneo-js": "workspace:*",
+        "@eneo/eslint-plugin": "workspace:*",
         "@eslint/js": "^9.24.0",
         "@internationalized/date": "^3.12.0",
-        "@intric/eslint-plugin": "workspace:*",
-        "@intric/intric-js": "workspace:*",
         "@lucide/svelte": "^1.11.0",
         "@melt-ui/svelte": "^0.86.5",
         "@playwright/test": "1.58.2",
@@ -88,16 +88,8 @@
         "vitest-browser-svelte": "^1.1.0",
       },
     },
-    "packages/eslint-plugin": {
-      "name": "@intric/eslint-plugin",
-      "version": "1.15.0",
-      "devDependencies": {
-        "eslint": "^9.28.0",
-        "svelte-eslint-parser": "^1.1.2",
-      },
-    },
-    "packages/intric-js": {
-      "name": "@intric/intric-js",
+    "packages/eneo-js": {
+      "name": "@eneo/eneo-js",
       "version": "1.23.0",
       "devDependencies": {
         "@eslint/js": "^9.24.0",
@@ -109,14 +101,22 @@
         "prettier": "^3.5.3",
       },
     },
+    "packages/eslint-plugin": {
+      "name": "@eneo/eslint-plugin",
+      "version": "1.15.0",
+      "devDependencies": {
+        "eslint": "^9.28.0",
+        "svelte-eslint-parser": "^1.1.2",
+      },
+    },
     "packages/ui": {
-      "name": "@intric/ui",
+      "name": "@eneo/ui",
       "version": "1.22.0",
       "devDependencies": {
+        "@eneo/eneo-js": "workspace:*",
+        "@eneo/eslint-plugin": "workspace:*",
         "@eslint/js": "^9.24.0",
         "@internationalized/date": "^3.7.0",
-        "@intric/eslint-plugin": "workspace:*",
-        "@intric/intric-js": "workspace:*",
         "@melt-ui/svelte": "^0.86.5",
         "@playwright/test": "^1.51.1",
         "@sveltejs/adapter-auto": "^6.0.0",
@@ -193,6 +193,14 @@
     "@emnapi/runtime": ["@emnapi/runtime@1.10.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA=="],
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w=="],
+
+    "@eneo/eneo-js": ["@eneo/eneo-js@workspace:packages/eneo-js"],
+
+    "@eneo/eslint-plugin": ["@eneo/eslint-plugin@workspace:packages/eslint-plugin"],
+
+    "@eneo/ui": ["@eneo/ui@workspace:packages/ui"],
+
+    "@eneo/web": ["@eneo/web@workspace:apps/web"],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.4", "", { "os": "aix", "cpu": "ppc64" }, "sha512-cQPwL2mp2nSmHHJlCyoXgHGhbEPMrEEU5xhkcy3Hs/O7nGZqEpZ2sUtLaL9MORLtDfRvVl2/3PAuEkYZH0Ty8Q=="],
 
@@ -347,14 +355,6 @@
     "@inlang/sdk": ["@inlang/sdk@2.9.1", "", { "dependencies": { "@lix-js/sdk": "0.4.9", "@sinclair/typebox": "^0.31.17", "kysely": "^0.28.12", "sqlite-wasm-kysely": "0.3.0", "uuid": "^13.0.0" } }, "sha512-y0C3xaKo6pSGDr3p5OdreRVT3THJpgKVe1lLvG3BE4v9lskp3UfI9cPCbN8X2dpfLt/4ljtehMb5SykpMfJrMg=="],
 
     "@internationalized/date": ["@internationalized/date@3.12.0", "", { "dependencies": { "@swc/helpers": "^0.5.0" } }, "sha512-/PyIMzK29jtXaGU23qTvNZxvBXRtKbNnGDFD+PY6CZw/Y8Ex8pFUzkuCJCG9aOqmShjqhS9mPqP6Dk5onQY8rQ=="],
-
-    "@intric/eslint-plugin": ["@intric/eslint-plugin@workspace:packages/eslint-plugin"],
-
-    "@intric/intric-js": ["@intric/intric-js@workspace:packages/intric-js"],
-
-    "@intric/ui": ["@intric/ui@workspace:packages/ui"],
-
-    "@intric/web": ["@intric/web@workspace:apps/web"],
 
     "@isaacs/cliui": ["@isaacs/cliui@8.0.2", "", { "dependencies": { "string-width": "^5.1.2", "string-width-cjs": "npm:string-width@^4.2.0", "strip-ansi": "^7.0.1", "strip-ansi-cjs": "npm:strip-ansi@^6.0.1", "wrap-ansi": "^8.1.0", "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0" } }, "sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA=="],
 

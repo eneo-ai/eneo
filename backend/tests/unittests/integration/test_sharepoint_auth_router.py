@@ -11,8 +11,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
-from intric.integration.domain.entities.oauth_token import SharePointToken
+from eneo.integration.application.sharepoint_auth_router import SharePointAuthRouter
+from eneo.integration.domain.entities.oauth_token import SharePointToken
 
 
 @dataclass

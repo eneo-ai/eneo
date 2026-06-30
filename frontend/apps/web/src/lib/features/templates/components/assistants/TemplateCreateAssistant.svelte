@@ -3,11 +3,11 @@
   import TemplateSelector from "$lib/features/templates/components/TemplateSelector.svelte";
   import TemplateWizard from "$lib/features/templates/components/wizard/TemplateWizard.svelte";
   import { getTemplateController } from "$lib/features/templates/TemplateController";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import CreateAssistantBackdrop from "./CreateAssistantBackdrop.svelte";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
-  import type { Settings } from "@intric/intric-js";
+  import type { Settings } from "@eneo/eneo-js";
   import type { Snippet } from "svelte";
 
   const {

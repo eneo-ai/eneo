@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { EmbeddingModel } from "@intric/intric-js";
+  import type { EmbeddingModel } from "@eneo/eneo-js";
   import ModelAvailabilityList from "$lib/features/ai-models/components/ModelAvailabilityList.svelte";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";

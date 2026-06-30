@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
     McpSessionLifecycleService,
 )
 

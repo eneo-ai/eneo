@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.groups_legacy.group_service import GroupService
-from intric.info_blobs.info_blob_repo import InfoBlobRepository
-from intric.info_blobs.info_blob_service import InfoBlobService
-from intric.main.exceptions import NameCollisionException, NotFoundException
+from eneo.groups_legacy.group_service import GroupService
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs.info_blob_service import InfoBlobService
+from eneo.main.exceptions import NameCollisionException, NotFoundException
 
 
 @dataclass

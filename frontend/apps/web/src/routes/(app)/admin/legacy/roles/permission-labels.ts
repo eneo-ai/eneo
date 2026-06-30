@@ -8,7 +8,7 @@ type Entry = { label: string; description: string };
 
 export function getPermissionCopy(name: string, fallbackDescription: string): Entry {
   // Permission keys are mostly lower_snake_case, but `AI` is uppercase in the
-  // backend enum (intric.roles.permissions.Permission.AI == "AI"). Match both
+  // backend enum (eneo.roles.permissions.Permission.AI == "AI"). Match both
   // cases explicitly rather than lowercasing, so this stays a pure switch.
   switch (name) {
     case "assistants":

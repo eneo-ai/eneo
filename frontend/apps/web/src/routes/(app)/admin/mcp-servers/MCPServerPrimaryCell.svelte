@@ -33,7 +33,7 @@
         return {
           label: "Bearer",
           icon: Shield,
-          classes: "bg-intric-100 text-intric-700 dark:bg-intric-900/50 dark:text-intric-300"
+          classes: "bg-eneo-100 text-eneo-700 dark:bg-eneo-900/50 dark:text-eneo-300"
         };
       default:
         return {

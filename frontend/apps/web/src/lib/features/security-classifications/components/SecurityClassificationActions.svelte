@@ -5,15 +5,15 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Dropdown, Input } from "@intric/ui";
+  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { type SecurityClassification } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { type SecurityClassification } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";

@@ -17,7 +17,7 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
 ## 🔴 Allvarliga (auktorisering / kontrakt) — fixa före merge
 
 - [x] **1. Preflight tappade behörighetskontroll → info-läcka** ·
-  `backend/src/intric/conversations/application/conversation_service.py:249,254` (verifierad)
+  `backend/src/eneo/conversations/application/conversation_service.py:249,254` (verifierad)
   Gamla `_resolve_preflight_model` anropade `assistant_service.get_assistant()` (kastar
   `UnauthorizedException`). Nya koden anropar `get_effective_completion_model()` som saknar
   all actor-kontroll (`assistant_service.py:789`). `_validate_conversation_scope` returnerar
@@ -26,7 +26,7 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
   `assistant_id` (annans space/tenant) och få `model_name` + `context_window` istället för 403.
 
 - [x] **2. `get_assistant_with_effective_config` tappade personal-default carve-out** ·
-  `backend/src/intric/assistants/assistant_service.py:762` (verifierad, hittad av 3 agenter)
+  `backend/src/eneo/assistants/assistant_service.py:762` (verifierad, hittad av 3 agenter)
   `get_assistant()` har carve-out (rad 731–743): personliga default-assistenten gateas av
   `can_read_default_assistant()` (PERSONAL_CHAT), inte `can_read_assistants()` (ASSISTANTS).
   Nya `get_assistant_with_effective_config()` kollar bara `can_read_assistants()`. Både
@@ -37,7 +37,7 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
   regredierar 200→403.
 
 - [x] **3. `PATCH /spaces/{id}/` tappar `effective_config`** ·
-  `backend/src/intric/spaces/api/space_router.py:326` (verifierad, hittad av 3 agenter)
+  `backend/src/eneo/spaces/api/space_router.py:326` (verifierad, hittad av 3 agenter)
   `update_space` returnerar `assembler.from_space_to_model(space)` direkt istället för nya
   `_space_response()`. Personliga default-assistentens `effective_config` blir `None`. Bryter
   mot kontraktet (memory: `project_governance_effective_config_contract`).
@@ -76,26 +76,26 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
   `getSpacesManager()` kastar vid mount → chat-sidan kraschar.
 
 - [x] **7. Ordningskänslig modelljämförelse → falska audit-events** ·
-  `backend/src/intric/governance_policy/presentation/governance_policy_router.py:25` (verifierad)
+  `backend/src/eneo/governance_policy/presentation/governance_policy_router.py:25` (verifierad)
   `before_models`/`after_models` jämförs som osorterade listor medan `provider_ids`,
   `mcp_servers`, `disabled_mcp_tool_ids` normaliseras via `_ids`/`sorted`. Samma uppsättning i
   annan ordning loggar ett `GOVERNANCE_POLICY_UPDATED`-event med identiskt old/new. Fix: sortera.
 
 - [ ] **8. `repo.save()` = lost update vid samtidiga admins** ·
-  `backend/src/intric/governance_policy/infrastructure/governance_policy_repo_impl.py:106`
+  `backend/src/eneo/governance_policy/infrastructure/governance_policy_repo_impl.py:106`
   (plausibel)
   `save()` raderar och skriver om alla fyra m2m-tabeller från in-memory-objektet utan
   version/lås. Admin A (bara modeller) + admin B (bara MCP, läst före A:s commit) → B skriver
   över A:s whitelist utan fel/audit. Behöver optimistisk versionskontroll.
 
 - [x] **9. `prompt_library` check-then-insert race → 500** ·
-  `backend/src/intric/prompt_library/application/prompt_library_service.py:65,93` (plausibel)
+  `backend/src/eneo/prompt_library/application/prompt_library_service.py:65,93` (plausibel)
   `exists_by_name` + insert utan `IntegrityError`-hantering mot `uq_prompt_library_tenant_name`.
   Samtidiga creates med samma namn → 500 istället för 409. `mcp_server_service` fick
   `NameCollisionException`-catch i samma vända; den här missades.
 
 - [ ] **10. `add_mcp_to_assistant` inkonsekvent med `update_assistant`** ·
-  `backend/src/intric/assistants/assistant_service.py:1580` (plausibel)
+  `backend/src/eneo/assistants/assistant_service.py:1580` (plausibel)
   Dedikerade endpointen kör space-assignment-kontroll före governance och hård-failar, medan
   `update_assistant` hoppar över space-kontrollen när MCP-policyn styr. Policy-tillåten server
   som aktiverades efter space-seed: går via bulk-update men 400 via
@@ -104,7 +104,7 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
 ## 🟡 Prestanda
 
 - [x] **11. `effective_config_service` hämtar hela katalogen även med restriktioner avstängda** ·
-  `backend/src/intric/governance_policy/application/effective_config_service.py:87` (verifierad)
+  `backend/src/eneo/governance_policy/application/effective_config_service.py:87` (verifierad)
   `resolve_for` hämtar alla completion-modeller + alla MCP-servrar (med tools), sekventiellt,
   så fort en policy-rad finns — utan att gate:a på `models_restriction_enabled`/
   `mcp_restriction_enabled`. `get_policy` auto-skapar tom policy när admin öppnar konfig-sidan.
@@ -112,7 +112,7 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
   full-table-hämtningar för noll beteendeändring. Gate på flaggorna + `asyncio.gather`.
 
 - [ ] **12. `update_assistant` gör ~3 fulla space-loads per save** ·
-  `backend/src/intric/assistants/api/assistant_router.py:717` (plausibel)
+  `backend/src/eneo/assistants/api/assistant_router.py:717` (plausibel)
   Modellväljaren PATCHar vid varje byte; avslutande `_assistant_response` om-laddar hela
   space-aggregatet + ny effective_config-resolution fast `updated_assistant` finns i handen.
 
@@ -205,5 +205,5 @@ Status: `[ ]` = ej åtgärdad, `[x]` = åtgärdad, `[~]` = pågår.
 **Kvar (medvetet ej åtgärdade denna omgång):** 8 (optimistisk låsning — större ändring), 10
 (MCP-attach-altitude), 12 (save-loads-perf), samt cleanup 15–21 (bl.a. ta bort dev/chat-demo,
 dela fallback-helper, bits-ui collapsible). Notering: `frontend/apps/web/coverage/` är incheckad
-genererad testoutput som triggar `intric/no-raw-color` i lint — bör gitignore:as (utanför denna
+genererad testoutput som triggar `eneo/no-raw-color` i lint — bör gitignore:as (utanför denna
 gransknings scope).

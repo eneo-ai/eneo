@@ -19,8 +19,8 @@ from uuid import UUID
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.app_template_table import AppTemplates
-from intric.database.tables.assistant_template_table import AssistantTemplates
+from eneo.database.tables.app_template_table import AppTemplates
+from eneo.database.tables.assistant_template_table import AssistantTemplates
 
 _SOFT_DELETED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
 

@@ -6,9 +6,9 @@
 
 <script lang="ts">
   import Button from "$lib/Button/Button.svelte";
-  import { IconSortAsc } from "@intric/icons/sort-asc";
-  import { IconSortAscDesc } from "@intric/icons/sort-asc-desc";
-  import { IconSortDesc } from "@intric/icons/sort-desc";
+  import { IconSortAsc } from "@eneo/icons/sort-asc";
+  import { IconSortAscDesc } from "@eneo/icons/sort-asc-desc";
+  import { IconSortDesc } from "@eneo/icons/sort-desc";
   import type { Readable } from "svelte/store";
 
   export let props: Readable<{

@@ -45,7 +45,7 @@
   --border-on-fill: var(--color-white);
 
   /* Colors */
-  --brand-intric: var(--color-intric-300);
+  --brand-eneo: var(--color-eneo-300);
 
   --accent-stronger: var(--color-ui-blue-100);
   --accent-default: var(--color-ui-blue-300);
@@ -70,7 +70,7 @@
   --chart-red: var(--color-ui-red-500);
   --chart-yellow: var(--color-ui-orange-100);
   --chart-green: var(--color-ui-green-100);
-  --chart-intric: var(--color-intric-300);
+  --chart-eneo: var(--color-eneo-300);
   --chart-violet: var(--color-amethyst-300);
   --chart-moss: var(--color-moss-300);
 
@@ -147,10 +147,10 @@
     --dynamic-dimmer: var(--color-moss-900);
   }
 
-  *[data-dynamic-colour="intric"] {
-    --dynamic-stronger: var(--color-intric-100);
-    --dynamic-default: var(--color-intric-500);
-    --dynamic-dimmer: var(--color-intric-900);
+  *[data-dynamic-colour="eneo"] {
+    --dynamic-stronger: var(--color-eneo-100);
+    --dynamic-default: var(--color-eneo-500);
+    --dynamic-dimmer: var(--color-eneo-900);
   }
 
   *[data-dynamic-colour="blue"] {

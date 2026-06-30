@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { EmbeddingModel } from "@intric/intric-js";
-  import { Select } from "@intric/ui";
+  import type { EmbeddingModel } from "@eneo/eneo-js";
+  import { Select } from "@eneo/ui";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";

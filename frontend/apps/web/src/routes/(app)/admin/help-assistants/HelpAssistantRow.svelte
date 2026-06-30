@@ -5,19 +5,19 @@
 -->
 
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
-  import { IconSparkles } from "@intric/icons/sparkles";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { Button, Input } from "@eneo/ui";
+  import { IconSparkles } from "@eneo/icons/sparkles";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import type { Intric } from "@intric/intric-js";
+  import type { Eneo } from "@eneo/eneo-js";
 
-  type Role = Awaited<ReturnType<Intric["helpAssistants"]["admin"]["listRoles"]>>[number];
+  type Role = Awaited<ReturnType<Eneo["helpAssistants"]["admin"]["listRoles"]>>[number];
 
-  let { role, intric }: { role: Role; intric: Intric } = $props();
+  let { role, eneo }: { role: Role; eneo: Eneo } = $props();
 
   let isOpen = $state(false);
 
@@ -48,7 +48,7 @@
   async function onToggleEnabled({ current, next }: { current: boolean; next: boolean }) {
     if (current === next) return;
     try {
-      await intric.helpAssistants.admin.setEnabled({ kind: role.kind, value: next });
+      await eneo.helpAssistants.admin.setEnabled({ kind: role.kind, value: next });
       await invalidate("admin:help-assistants:load");
     } catch (e) {
       isEnabled = current;
@@ -59,7 +59,7 @@
   async function onToggleVisible({ current, next }: { current: boolean; next: boolean }) {
     if (current === next) return;
     try {
-      await intric.helpAssistants.admin.setVisible({ kind: role.kind, value: next });
+      await eneo.helpAssistants.admin.setVisible({ kind: role.kind, value: next });
       await invalidate("admin:help-assistants:load");
     } catch (e) {
       isVisible = current;
@@ -70,7 +70,7 @@
   const remove = createAsyncState(async () => {
     if (!confirm(m.admin_help_assistants_delete_confirm({ name: displayName }))) return;
     try {
-      await intric.helpAssistants.admin.uninstall({ kind: role.kind });
+      await eneo.helpAssistants.admin.uninstall({ kind: role.kind });
       await invalidate("admin:help-assistants:load");
     } catch (e) {
       toastError(e);

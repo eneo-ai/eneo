@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.completion_models.application.completion_model_usage_service import (
+from eneo.completion_models.application.completion_model_usage_service import (
     CompletionModelUsageService,
 )
 

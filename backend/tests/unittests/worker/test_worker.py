@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from intric.worker.worker import _job_id_from_ctx
+from eneo.worker.worker import _job_id_from_ctx
 
 
 def test_job_id_from_ctx_returns_uuid_from_uuid_value():

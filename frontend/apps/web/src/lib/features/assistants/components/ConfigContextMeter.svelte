@@ -1,7 +1,7 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
 
@@ -14,7 +14,7 @@
   };
   const { assistantId, model, prompt, attachments }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // used = system prompt + attachments — the context every question starts with.
   let used = $state(0);
@@ -60,7 +60,7 @@
     const current = ++gen;
     debounce = setTimeout(async () => {
       try {
-        const res = await intric.conversations.preflight({
+        const res = await eneo.conversations.preflight({
           chatPartner: { id: assistantId, type: "assistant" },
           question: "",
           files: fileIds,

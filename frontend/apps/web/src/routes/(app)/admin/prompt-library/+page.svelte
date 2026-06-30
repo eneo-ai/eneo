@@ -42,7 +42,7 @@
     isDeleting = true;
     deleteError = null;
     try {
-      await data.intric.promptLibrary.delete({ id: confirmDelete.id });
+      await data.eneo.promptLibrary.delete({ id: confirmDelete.id });
       confirmDelete = null;
       await invalidate("admin:prompt-library");
     } catch (e) {
