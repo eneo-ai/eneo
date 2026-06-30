@@ -218,6 +218,7 @@ async def upload_flow_template_file(
 
 @router.delete(
     "/{id}/template-files/{file_id}/",
+    response_model=None,
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     operation_id="delete_flow_template_file",
