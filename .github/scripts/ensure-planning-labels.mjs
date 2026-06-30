@@ -32,6 +32,11 @@ const labels = [
     description: "Development task needs a linked parent epic before it is ready",
   },
   {
+    name: "needs:task-link",
+    color: "fbca04",
+    description: "Pull request needs a linked development task issue",
+  },
+  {
     name: "needs:triage",
     color: "fef2c0",
     description: "Needs product or engineering triage before planning",

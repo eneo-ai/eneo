@@ -24,7 +24,7 @@ body:
     id: roadmap_version
     attributes:
       label: Roadmap version
-      description: Release bucket for grouping and export, for example 2.7, 2.7 RC, 2.X, Future, or Unscheduled. Use Project Start date/Target date for timeline placement.
+      description: Release bucket for grouping and export, for example 2.2, 2.2 RC, 2.X, Future, or Unscheduled. Use Project Start date/Target date for timeline placement.
       placeholder: "2.2"
     validations:
       required: true

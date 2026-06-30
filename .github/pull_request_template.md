@@ -5,10 +5,9 @@
 <!-- Why was this needed? -->
 
 ## Planning
-<!-- Link the issue this PR closes, and the parent epic when relevant. -->
+<!-- Link the development task this PR closes. The task owns the parent epic link. -->
 
-- Issue:
-- Epic:
+- Task: Fixes #
 
 ## Testing
 <!-- How did you test this? -->

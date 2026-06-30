@@ -44,9 +44,9 @@ Epics carry a `Roadmap version` value in the issue body and/or Project field, fo
 
 `Roadmap version` is a release bucket for grouping, filtering, and export. It is not the timeline field for GitHub's Roadmap layout.
 
-Use the version string that is useful for planning. Adding `2.7` or `2.7 RC` should not require a code change; update the issue or Project field value. Project #5 should keep `Roadmap version` as a text field so new version buckets do not require Project option maintenance. The issue body remains a free-form export fallback.
+Use the version string that is useful for planning. Adding `2.2` or `2.2 RC` should not require a code change; update the issue or Project field value. Project #5 should keep `Roadmap version` as a text field so new version buckets do not require Project option maintenance. The issue body remains a free-form export fallback.
 
-GitHub Releases and release-candidate tags are delivery artifacts, not the source of truth for roadmap planning. Use release names such as `2.7 RC` in `Roadmap version` only when the roadmap needs that planning bucket.
+GitHub Releases and release-candidate tags are delivery artifacts, not the source of truth for roadmap planning. Use release names such as `2.2 RC` in `Roadmap version` only when the roadmap needs that planning bucket.
 
 For a real GitHub Roadmap timeline, configure one of these in Project #5:
 
@@ -64,6 +64,7 @@ Recommended views:
 - `Findings`: table, filter `kind:finding` or optional `Kind:Finding`.
 - `Needs triage`: table, filter `label:needs:triage`.
 - `Needs epic`: table, filter `label:needs:epic`.
+- `Needs task link`: table, filter `label:needs:task-link`.
 - `Done since last committee`: table, filter epics/tasks done since the last committee meeting date.
 
 ## Required GitHub setup
@@ -77,7 +78,7 @@ Configure this once after merge:
 - Optional custom issue types later: `Epic`, `Finding`, `Initiative`.
 - Required Project fields: `Kind`, `Status`, `Roadmap version`, `Start date`, `Target date`, `Priority`, `Area`, `Owner / lead`, `Sponsor / municipality`, `Decision needed`.
 - Enable hidden Project fields: `Parent issue`, `Sub-issue progress`.
-- Recommended views: `Committee Roadmap`, `Standup`, `Epics`, `Active work`, `Findings`, `Needs triage`, `Needs epic`, `Done since last committee`.
+- Recommended views: `Committee Roadmap`, `Standup`, `Epics`, `Active work`, `Findings`, `Needs triage`, `Needs epic`, `Needs task link`, `Done since last committee`.
 
 Issue forms also list `projects: ["eneo-ai/5"]` for convenience. If the issue creator lacks write access to the org project, the intake workflow and Project auto-add should still add the item.
 
@@ -140,6 +141,8 @@ Use `Epic` when the idea belongs on the roadmap and may contain several implemen
 
 Use `Development task` when the work is already scoped enough to build. A task should reference an epic in `Parent epic`, for example `#123`. This is the main planning metadata developers need to keep current.
 
+Open pull requests against development tasks, not epics. Put a closing reference such as `Fixes #123` in the PR body, where `#123` is the task issue. The task owns the parent epic relationship.
+
 Use `Finding` when something has been observed but is not yet planned. A finding can later be converted into one or more tasks under an epic.
 
 Use a Project draft item for an initiative that belongs to Eneo as a whole but does not yet belong to a repo. Convert it to an issue once implementation needs tracking in a repo.
@@ -150,6 +153,7 @@ AI-assisted development should follow the same model:
 2. If AI is asked to plan new roadmap work, create or suggest an `Epic`.
 3. If AI is asked to split an approved epic, create `Development task` issues and link each one to the epic.
 4. AI-created tasks must include the parent epic reference in the issue body so automation and exports can resolve the relationship.
+5. AI-created PRs must link the development task with a closing reference such as `Fixes #123`.
 
 Do not create disconnected tasks for roadmap work. If there is no suitable epic, create the epic first and then add tasks under it.
 
@@ -205,6 +209,8 @@ Preferred relationship:
 
 The `Parent epic` body field is intentionally duplicated with the GitHub relationship because it is stable for exports and automation. If the `Parent epic` section exists but is empty, the intake script must keep `needs:epic` even if another issue is mentioned elsewhere in the task.
 
+Pull requests should close the task issue, not the epic. This keeps the roadmap at outcome level and the code review at implementation level.
+
 ## Findings
 
 Findings are not treated as private by default. They remain in the canonical Eneo project with `kind:finding` and `needs:triage`.
@@ -223,8 +229,9 @@ When a finding becomes planned work:
 - adds opened or reopened issues and PRs to project #5;
 - labels structured issues by kind;
 - marks development tasks with `needs:epic` if their `Parent epic` field does not reference an epic issue.
+- marks non-draft PRs with `needs:task-link` if the PR body does not contain a closing task reference such as `Fixes #123`.
 
-The workflow is non-blocking for PRs. It keeps project intake visible without making planning metadata a release gate. If this workflow is expanded later, keep privileged workflow code on the base branch and do not checkout/run PR head code in jobs that use `ADD_TO_PROJECT_PAT`.
+The workflow is non-blocking for PRs. It uses labels to make missing planning links visible without making planning metadata a release gate. If this workflow is expanded later, keep privileged workflow code on the base branch and do not checkout/run PR head code in jobs that use `ADD_TO_PROJECT_PAT`.
 
 When adding workflow inputs or untrusted issue/PR text to a `run:` step, pass the value through `env:` and reference the environment variable in shell. Do not interpolate GitHub contexts directly into shell commands in jobs that use `ADD_TO_PROJECT_PAT`. Checkout steps should keep `persist-credentials: false` unless the job must push back to the repository.
 

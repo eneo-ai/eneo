@@ -32,6 +32,18 @@ Use one item kind per issue or draft item.
 
 The SVG roadmap shows epics only. Tasks still matter because they show how developers deliver each epic.
 
+## Delivery Chain
+
+Use this chain when planned work moves from roadmap discussion to code review.
+
+| Level | GitHub item | Link to keep current |
+| --- | --- | --- |
+| Roadmap card | Epic issue or Project draft item with `Kind: Epic` | Set `Roadmap version`, `Sponsor / municipality`, and `Owner / lead`. |
+| Buildable work | Development task issue with `Kind: Task` | Add `Parent epic: #123` and, when available, add it as a GitHub sub-issue of the epic. |
+| Code review | Pull request | Add `Fixes #456` in the PR body, where `#456` is the development task. |
+
+Do not point PRs at epics. The task connects implementation work to the roadmap card.
+
 ## Fields That Matter
 
 Project #5 uses these planning fields.
@@ -69,7 +81,7 @@ Set `Roadmap version` to the release bucket that should contain the epic:
 2.2
 ```
 
-The export accepts free text. Use values such as `2.2`, `2.3`, `2.7 RC`, `2.X`, `Future`, or `Unscheduled`.
+The export accepts free text. Use values such as `2.2`, `2.2 RC`, `2.3`, `2.X`, `Future`, or `Unscheduled`.
 
 ### Fill in visible roadmap metadata
 
@@ -104,6 +116,20 @@ When GitHub sub-issues are available, add the task as a sub-issue of the epic to
 
 Tasks without a parent epic get the `needs:epic` label. That label means the task needs planning context before the team treats it as roadmap work.
 
+## Open Pull Requests
+
+Pull requests should link to development tasks, not epics. Add a closing reference in the PR body:
+
+```text
+Fixes #123
+```
+
+Use the task issue number. The task owns the `Parent epic` link, and the epic stays at roadmap level.
+
+Non-draft PRs without a closing task reference get the `needs:task-link` label. The label is non-blocking, but it keeps unlinked implementation work visible in Project #5.
+
+Project draft items work well for early planning. Convert a draft item to an issue before implementation starts so developers can link tasks and pull requests to real repository history.
+
 ## Export The Roadmap
 
 Run the manual GitHub Actions workflow:
@@ -132,7 +158,7 @@ Examples:
 | Roadmap version | Export behavior |
 | --- | --- |
 | `2.2` | Places the epic in the `2.2` column. |
-| `2.7 RC` | Places the epic in a `2.7 RC` column when that column is requested or present in data. |
+| `2.2 RC` | Places the epic in a `2.2 RC` column when that column is requested or present in data. |
 | `2.X` | Places the epic in the future bucket. |
 | `Future` | Normalizes to `2.X` in the export. |
 | Empty | Places the epic in `Unscheduled`. |
@@ -177,6 +203,7 @@ The workflows run the script after they validate `ADD_TO_PROJECT_PAT`. You only 
 | A field exists but you cannot see it in the current view. | Open `View` -> `Fields` and tick the field. The export can read hidden fields. |
 | The export workflow says `Missing ADD_TO_PROJECT_PAT`. | Add a repository secret named `ADD_TO_PROJECT_PAT`. |
 | A task gets `needs:epic`. | Add a `Parent epic` issue reference such as `#123`. |
+| A PR gets `needs:task-link`. | Add a closing task reference such as `Fixes #123` to the PR body. |
 | A card is missing from the SVG. | Check that `Kind` is `Epic` or the issue has the `kind:epic` label. |
 
 `Add item` creates a new project item. The `+` in a table header adds or shows fields in that view.

@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Development tasks must belong to an epic. Add the parent epic as a GitHub sub-issue relationship and reference it below. This is the main planning field developers need to keep the roadmap connected.
+        Development tasks must belong to an epic. Add this task as a GitHub sub-issue of the epic when available, and reference the epic below. When you open a pull request for this task, put `Fixes #123` in the PR body so GitHub links the implementation back to this task.
 
   - type: input
     id: parent_epic

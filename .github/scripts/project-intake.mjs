@@ -57,14 +57,20 @@ async function handleIssue(item) {
 }
 
 async function handlePullRequest(item) {
-  const text = `${item.title || ""}\n${item.body || ""}`;
-
-  if (/(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#\d+/i.test(text)) {
+  if (item.draft) {
     return;
   }
 
+  const text = `${item.title || ""}\n${item.body || ""}`;
+
+  if (hasClosingIssueReference(text)) {
+    removeLabel(item.number, "needs:task-link");
+    return;
+  }
+
+  addLabel(item.number, "needs:task-link");
   console.log(
-    `PR #${item.number} has no closing issue reference. Keeping project intake non-blocking.`,
+    `PR #${item.number} has no linked development task. Added needs:task-link.`,
   );
 }
 
@@ -115,6 +121,18 @@ function hasEpicReference(body) {
 function hasIssueReference(value) {
   return /(^|\s)#\d+\b/.test(value)
     || /github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/i.test(value);
+}
+
+function hasClosingIssueReference(value) {
+  const keyword = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
+  const issueReference = [
+    String.raw`#\d+`,
+    String.raw`[^/\s]+\/[^/\s]+#\d+`,
+    String.raw`https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+`,
+  ].join("|");
+  const pattern = new RegExp(`${keyword}:?\\s+(?:${issueReference})\\b`, "i");
+
+  return pattern.test(value);
 }
 
 function hasHeading(body, heading) {
@@ -256,6 +274,19 @@ function runSelfTest() {
     hasEpicReference("Legacy task created before the form existed. Parent #123."),
     true,
     "legacy unstructured task bodies should keep the issue-reference fallback",
+  );
+
+  assert.equal(hasClosingIssueReference("fixes #123"), true);
+  assert.equal(hasClosingIssueReference("Closes: #123"), true);
+  assert.equal(
+    hasClosingIssueReference("Resolves https://github.com/eneo-ai/eneo/issues/123"),
+    true,
+  );
+  assert.equal(hasClosingIssueReference("Fixes: eneo-ai/eneo#123"), true);
+  assert.equal(
+    hasClosingIssueReference("This PR implements #123"),
+    false,
+    "generic issue mentions should not count as task-closing references",
   );
 
   console.log("project-intake self-test passed");
