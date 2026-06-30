@@ -11,13 +11,13 @@
     "update": "node update.js"
   },
   "devDependencies": {
-    "@eslint/js": "^9.24.0",
-    "@types/node": "^22.14.0",
-    "eslint": "^9.28.0",
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.20.0",
+    "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.2",
-    "globals": "^16.0.0",
+    "globals": "^16.5.0",
     "openapi-typescript": "^7.0.0",
-    "prettier": "^3.5.3"
+    "prettier": "^3.9.4"
   },
   "exports": {
     ".": "./index.js"
