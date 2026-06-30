@@ -2173,6 +2173,51 @@
   - Concurrency risk is mitigated by the fresh-lease predicate and deterministic retention `now`; a session actively being processed with a non-expired lease is not selected.
   - Builder-only global `Files` row reclamation remains intentionally out of scope and unchanged.
 
+## C9.3
+
+- Slice id: C9.3 Builder session-file / global `Files` row retention posture
+- Findings addressed: the Gate 1 packet still pointed at completed C9.2 active abandoned-session retention as the next lane and had not recorded an explicit first-release decision for Builder-uploaded global `Files` rows after Builder session pins are removed.
+- Evidence reviewed:
+  - C9.2 implemented terminal plus abandoned active Builder session retention in `DataRetentionService`; eligible statuses and fresh-lease protection are at `backend/src/intric/data_retention/infrastructure/data_retention_service.py:64-90`, and the shared count/delete predicate is at `backend/src/intric/data_retention/infrastructure/data_retention_service.py:491-556`.
+  - C9.2 behavior proof at `backend/tests/integration/test_data_retention_hierarchical.py:841-939` deletes due terminal/abandoned active sessions and `BuilderSessionFiles` links while keeping the global `Files` row.
+  - `BuilderSessionFiles` is a session-owned cascade link table at `backend/src/intric/database/tables/flow_tables.py:2195-2219`.
+  - `AIBuilderRepository` only attaches/detaches Builder file links: cancel detaches at `backend/src/intric/flows/ai_builder/ai_builder_repo.py:223-250`; append-session-message persistence inserts links from message metadata at `backend/src/intric/flows/ai_builder/ai_builder_repo.py:555-610`; attach/list/detach APIs are at `backend/src/intric/flows/ai_builder/ai_builder_repo.py:336-405`.
+  - `FlowRunHistoryPurgeRepository` is candidate-driven for Flow run/template file cleanup: run-history candidates are passed at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:91-104`, template candidates at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:155-160`, and `_delete_unreferenced_files` deletes only provided candidate ids after reference guards at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:249-264` with `BuilderSessionFiles` as one guard at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:339-371`.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer and pointed back to the C9.2 retention service/test surface; exact `rg` and direct source reads verified all concrete claims.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity because Claude was blocked by usage/spend limits.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-3-builder-files-posture-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `STOP_OR_PROCEED: proceed`; required guidance applied: docs-only, remove stale C9.2-next-lane claims, keep global file claims narrow, do not call `FlowRunHistoryPurgeRepository` a Builder cleanup owner, and avoid generic file sweepers or new Builder retention services.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-3-builder-files-posture-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes`; required fixes: none; optional guidance: commit only the two C9.3 review-artifact files because unrelated dirty files exist outside this slice.
+- Files changed:
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No backend source, tests, migrations, frontend, generated clients, API contracts, runtime behavior, MCP/capability code, provider behavior, prompts, repair logic, retention code, or file cleanup code changed.
+- Complexity deleted or owner clarified:
+  - The stale next-lane guidance was removed from the Gate 1 packet.
+  - The packet now explicitly accepts retained Builder-uploaded global `Files` rows for first release after Builder pins are removed, instead of leaving the decision implicit.
+  - It rejects a generic orphan-file sweeper, `AIBuilderRetentionService`, repository wrapper, lifecycle manager, migration, or file-cleaner framework for this posture.
+- Architecture delta:
+  - Canonical owner before: Builder session retention was already in `DataRetentionService`, while Builder global file-row cleanup was an unresolved governance note.
+  - Canonical owner after: Builder session retention remains in `DataRetentionService`; global Builder-uploaded file-row cleanup has no first-release owner because retained rows are accepted and no safe Builder candidate source is proven.
+  - Duplicate paths remaining: none added. Flow run/template file cleanup remains candidate-driven in `FlowRunHistoryPurgeRepository`; Builder file links remain in `AIBuilderRepository` / `BuilderSessionFiles`.
+  - 9/10 follow-up candidate: only revisit Builder global file-row cleanup if release owners reject retained rows or a future Builder upload candidate-id source is added/proven.
+  - Decision or measurement needed: repair/fallback pruning still needs branch-level evidence before any source deletion; no production telemetry claim is made here.
+  - What not to preserve: stale C9.2-next-lane packet text, implicit global file retention posture, generic orphan sweeper ideas, and treating Flow purge reference guards as a Builder cleanup owner.
+- C9.3 decision:
+  - First-release posture: accept retained Builder-uploaded global `Files` rows after Builder session retention removes `BuilderSessionFiles` pins.
+  - Rationale: session conversation/planning/proposal rows and Builder file pins now expire through `DataRetentionService`; global `Files` rows are shared infrastructure with many owners, and deleting them without a Builder-specific candidate source would require broader product/data-retention ownership.
+  - Deletion trigger: revisit only if release owners reject retained global rows, or if a future source owner records Builder upload candidate file ids safely enough to drive cleanup.
+  - Future cleanup acceptance criteria: name the candidate-id source, reuse or extract existing reference-guard semantics, prove cross-owner safety with behavior tests, and document whether migration/schema changes are required.
+- Validation commands and results:
+  - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `e43f12ff`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
+  - `rg -n "BuilderSessionFiles|builder_session_files|_delete_unreferenced_files|delete\\(Files\\)|file_ids_from_metadata|session_files" backend/src/intric backend/tests --glob '!**/.venv/**'` -> no Builder-specific global file cleanup candidate source found; matches were Builder link attach/detach, Flow run/template candidate-driven cleanup, and the C9.2 retention proof.
+  - `rg -n "Active abandoned|Next Implementation Lane|Builder-only global|global file|Files row|C9\\.2|C9\\.3" review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> used before editing to confirm stale packet guidance and after editing to verify C9.3 posture text.
+  - Backend pytest, ruff, and pyright were not run because this slice changed only review-artifact markdown and made no source/test changes.
+- Remaining risk / rollback:
+  - Risk is documentation/governance-only. The accepted first-release posture intentionally leaves Builder-uploaded global `Files` rows retained after Builder pins are removed.
+  - Rollback is low risk: restore the previous Gate 1 packet text and delete this C9.3 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, file data, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
