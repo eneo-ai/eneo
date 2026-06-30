@@ -7,7 +7,10 @@
 # The build context is ./frontend so the bun workspace (packages/*) resolves.
 
 # ---- deps + build -----------------------------------------------------------
-FROM oven/bun:1 AS builder
+# Pin the exact bun version: a floating `oven/bun:1` drifts ahead of the
+# committed bun.lock (generated with bun@1.3.x, see root package.json
+# "packageManager") and breaks `bun install --frozen-lockfile` in CI.
+FROM oven/bun:1.3.4 AS builder
 WORKDIR /repo
 
 # Workspace manifests first for a cached install layer.
