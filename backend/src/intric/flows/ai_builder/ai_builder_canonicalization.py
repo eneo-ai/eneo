@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
+from intric.flows.ai_builder.question_catalog import (
+    slot_resolving_legacy_question_ids,
+)
+
 QUESTION_ID_ALIASES: dict[str, str] = {
     "final_output_format": "final_output_mode",
     "primary_output_format": "final_output_mode",
@@ -43,28 +47,20 @@ OPTION_ID_ALIASES: dict[str, dict[str, str]] = {
     },
 }
 
-SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
+_NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
     {
         "processing_scope",
-        "input_material_mode",
-        "flow_input_architecture",
         "document_kind",
-        "document_material_scope",
-        "post_processing_goal",
-        "structured_io_contract",
         "comparison_scope",
-        "final_output_mode",
-        "docx_output_mode",
         "output_reader",
         "final_output_scope",
-        "runtime_metadata_fields",
-        "structured_analysis_need",
         "output_style",
         "output_tone",
         "detail_level",
-        "final_pdf_type",
-        "pdf_generation_mode",
     }
+)
+SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = (
+    slot_resolving_legacy_question_ids() | _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS
 )
 
 

@@ -1757,6 +1757,58 @@
   - `slot_backed_legacy_question_ids()` currently computes from the immutable catalog on call; this keeps the view obviously derived. If this ever becomes hot, it can be changed to a private derived constant without changing callers.
   - Rollback is low risk: restore `_DIRECT_SLOT_VALUE_QUESTION_IDS`, remove `slot_backed_legacy_question_ids()`, remove the two focused tests, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, or generated-client rollback is needed.
 
+## C8.11
+
+- Slice id: C8.11 Flow AI Builder supported structured-question ownership proof/consolidation
+- Findings addressed: `SUPPORTED_STRUCTURED_QUESTION_IDS` in `ai_builder_canonicalization.py` duplicated the catalog-owned slot-resolving legacy/discovery question ids while also carrying canonicalization-only non-slot support policy.
+- Evidence reviewed:
+  - C8.10 deliberately left `SUPPORTED_STRUCTURED_QUESTION_IDS` in `ai_builder_canonicalization.py` as the broader supported structured-question policy after deleting the direct-answer allowlist duplicate.
+  - `backend/src/intric/flows/ai_builder/question_catalog.py:790-835` owns the slot-name to legacy/discovery question-id bridge, including the extra slot targets `flow_input_architecture -> primary_runtime_input` and `final_pdf_type -> terminal_output`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py:10-17,50-64,151-156` owns question aliases, non-slot structured-question support policy, support checks, and the public sorted support view.
+  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:117-139` still performs unsupported-question rejection first and direct legal-slot value validation only for `slot_backed_legacy_question_ids()`, so C8.11 must not broaden direct value validation to the extra slot-resolving legacy ids.
+  - Current-code measurement with `.venv/bin/python` showed the supported set partitions as: slot-backed direct ids `['document_material_scope', 'docx_output_mode', 'final_output_mode', 'input_material_mode', 'pdf_generation_mode', 'post_processing_goal', 'runtime_metadata_fields', 'structured_analysis_need', 'structured_io_contract']`; slot-mapped extra ids `['final_pdf_type', 'flow_input_architecture']`; canonicalization-only non-slot ids `['comparison_scope', 'detail_level', 'document_kind', 'final_output_scope', 'output_reader', 'output_style', 'output_tone', 'processing_scope']`; aliases `['file_handling_mode', 'final_output_format', 'final_output_type', 'output_format', 'primary_output_format', 'upload_mode']` all normalize to supported canonical ids and do not appear in the public support set.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but graph output was sparse for this narrow Builder slice; direct source reads, exact `rg`, and current-code measurement supplied the concrete evidence.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-11-supported-structured-question-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; valid guidance applied by adding `slot_resolving_legacy_question_ids()` to the existing catalog owner, keeping `slot_backed_legacy_question_ids()` unchanged for direct value validation, and leaving non-slot support policy explicit in canonicalization.
+  - Read-only Codex final gate artifact `.codex/artifacts/c8-11-supported-structured-question-final-gate-20260630.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no` only because unrelated dirty files were present in the worktree; no C8.11 source/test issue was found.
+  - Read-only Codex staged-diff final gate artifact `.codex/artifacts/c8-11-supported-structured-question-final-gate-staged-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no required fixes after staging exactly the five C8.11 files.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/question_catalog.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py`
+  - `backend/tests/unittests/flows/ai_builder/test_question_catalog.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No supported/unsupported structured-question behavior changes are intended.
+  - `SUPPORTED_STRUCTURED_QUESTION_IDS` now derives its catalog-owned slot-resolving subset from `question_catalog.slot_resolving_legacy_question_ids()` and keeps the eight non-slot support-policy ids explicit in canonicalization.
+  - Aliases such as `upload_mode`, `file_handling_mode`, and `final_output_type` remain accepted through canonicalization but are still not exported by `supported_structured_question_ids()`.
+  - Supported extra slot-mapped ids `flow_input_architecture` and `final_pdf_type` remain accepted, while unsupported ids such as `multi_file_strategy` remain rejected.
+  - No user-facing copy, discovery strategy, planner prompts, question ordering, API/OpenAPI/generated client, frontend, runtime, retention, audit, telemetry, proposal repair/fallback, MCP, or capability surfaces changed.
+- Complexity deleted or owner clarified:
+  - The catalog is now the single owner for slot-resolving legacy/discovery question-id vocabulary, including extra legacy ids that map to canonical slots.
+  - Canonicalization remains the owner of alias normalization and non-slot structured-question support policy.
+  - No generic question registry, vocabulary service, capability framework, prompt rewrite, compatibility layer, or broad Builder module split was added.
+- Architecture delta:
+  - Canonical owner before: `question_catalog` owned slot/legacy-id resolution, while `ai_builder_canonicalization.py` duplicated those ids inside the broad support set.
+  - Canonical owner after: `question_catalog.slot_resolving_legacy_question_ids()` owns the slot-resolving subset; `ai_builder_canonicalization.py` owns the explicit non-slot policy subset and combines the two.
+  - Duplicate paths remaining: non-slot support-policy ids remain explicitly listed in canonicalization because source evidence shows they are discovery/edit support policy, not catalog slot vocabulary.
+  - 9/10 follow-up candidate: audit the remaining non-slot structured-question policy against discovery/edit-scope active-question owners and either keep it explicitly named or derive a smaller proven subset if a real source-truth owner already exists.
+  - Decision or measurement needed: before moving non-slot ids, prove whether each one is a discovery compatibility id, edit-scope active question, or product-supported structured answer surface.
+  - What not to preserve: hard-coded catalog-owned slot-resolving ids in canonicalization, alias ids leaking into the public supported set, broad question registries, or forced catalog ownership for non-slot policy ids.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py -q'` -> pass, 237 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check --fix tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, fixed one import-order issue introduced by the new import.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, 1 file reformatted.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace/backend && .venv/bin/python -c '<partition measurement>'` -> pass; catalog/direct/non-slot/alias partitions matched the evidence above.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/question_catalog.py backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py backend/tests/unittests/flows/ai_builder/test_question_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the four Builder source/test files plus this progress ledger.
+- Remaining risk / rollback:
+  - The non-slot support-policy set remains intentionally explicit. Moving it without proving a stronger owner would hide policy inside the catalog and make structured-answer support harder to review.
+  - Rollback is low risk: restore the hard-coded `SUPPORTED_STRUCTURED_QUESTION_IDS` set, remove `slot_resolving_legacy_question_ids()`, remove the focused partition tests, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, telemetry, or generated-client rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

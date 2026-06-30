@@ -827,6 +827,10 @@ def slot_backed_legacy_question_ids() -> frozenset[str]:
     )
 
 
+def slot_resolving_legacy_question_ids() -> frozenset[str]:
+    return frozenset(_SLOT_NAME_BY_LEGACY_QUESTION_ID)
+
+
 def slot_name_for_legacy_question_id(question_id: str) -> str:
     return _SLOT_NAME_BY_LEGACY_QUESTION_ID.get(question_id, question_id)
 

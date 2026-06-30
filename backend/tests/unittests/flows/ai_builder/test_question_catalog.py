@@ -45,6 +45,7 @@ from intric.flows.ai_builder.question_catalog import (
     render_question,
     slot_backed_legacy_question_ids,
     slot_name_for_legacy_question_id,
+    slot_resolving_legacy_question_ids,
 )
 
 _SLOT_DERIVED_ISSUE_IDS = frozenset(
@@ -470,6 +471,17 @@ class TestCatalogInvariants:
         assert "final_output_mode" in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "final_pdf_type" not in question_ids
+
+    def test_slot_resolving_legacy_question_ids_include_extra_slot_targets(
+        self,
+    ) -> None:
+        question_ids = slot_resolving_legacy_question_ids()
+
+        assert question_ids == slot_backed_legacy_question_ids() | frozenset(
+            {"flow_input_architecture", "final_pdf_type"}
+        )
+        assert "processing_scope" not in question_ids
+        assert "output_style" not in question_ids
 
 
 class TestCatalogStaticDiscoveryMetadata:

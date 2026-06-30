@@ -29,6 +29,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     resolve_output_intent,
     resolve_pdf_generation_mode,
     slot_names_blocked_by_explicit_uncertainty,
+    supported_structured_question_ids,
     terminal_output_uncertainty_is_unresolved,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
@@ -37,6 +38,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+)
+from intric.flows.ai_builder.question_catalog import (
+    slot_resolving_legacy_question_ids,
 )
 from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.flow_authoring_spec import (
@@ -2075,14 +2079,61 @@ def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed
     )
 
 
+def test_supported_structured_question_ids_partition_catalog_and_policy_ids() -> None:
+    non_slot_policy_ids = frozenset(
+        {
+            "comparison_scope",
+            "detail_level",
+            "document_kind",
+            "final_output_scope",
+            "output_reader",
+            "output_style",
+            "output_tone",
+            "processing_scope",
+        }
+    )
+
+    assert frozenset(supported_structured_question_ids()) == (
+        slot_resolving_legacy_question_ids() | non_slot_policy_ids
+    )
+    assert non_slot_policy_ids.isdisjoint(slot_resolving_legacy_question_ids())
+
+
+@pytest.mark.parametrize(
+    "question_id",
+    [
+        "final_output_mode",
+        "flow_input_architecture",
+        "final_pdf_type",
+        "post_processing_goal",
+        "structured_io_contract",
+        "structured_analysis_need",
+        "output_style",
+        "output_tone",
+        "detail_level",
+    ],
+)
+def test_accepts_supported_structured_question_ids(question_id: str) -> None:
+    assert is_supported_structured_question_id(question_id)
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "file_handling_mode",
+        "final_output_format",
+        "final_output_type",
+        "output_format",
+        "primary_output_format",
+        "upload_mode",
+    ],
+)
+def test_structured_question_aliases_are_supported_but_not_public_ids(
+    alias: str,
+) -> None:
+    assert is_supported_structured_question_id(alias)
+    assert alias not in supported_structured_question_ids()
+
+
 def test_rejects_unsupported_structured_question_ids() -> None:
-    assert is_supported_structured_question_id("final_output_mode")
-    assert is_supported_structured_question_id("upload_mode")
-    assert is_supported_structured_question_id("final_output_type")
-    assert is_supported_structured_question_id("post_processing_goal")
-    assert is_supported_structured_question_id("structured_io_contract")
-    assert is_supported_structured_question_id("structured_analysis_need")
-    assert is_supported_structured_question_id("output_style")
-    assert is_supported_structured_question_id("output_tone")
-    assert is_supported_structured_question_id("detail_level")
     assert not is_supported_structured_question_id("multi_file_strategy")
