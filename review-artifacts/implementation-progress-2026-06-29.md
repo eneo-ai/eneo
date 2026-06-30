@@ -1989,15 +1989,54 @@
   - Risk is documentation-only. The decision may be superseded by later real branch-level telemetry, at which point a dedicated deletion slice should update this ledger and remove the proven branch at its canonical owner.
   - Rollback is low risk: delete this C8.14 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, or persisted-data rollback is needed.
 
-## 9/10 Follow-Up Candidates
+## C8.15
 
-- Candidate id: PG3-FU-1
-- Area: Builder / maintainability
-- Source evidence: `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:21` defines `build_structured_reference_payload`; `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py:4-37` currently exercises it; deleting `render_structured_reference_block` in PG-3a.2 removes the only production-facing renderer wrapper.
-- Why it is not part of the current PG slice: the PG-3 instructions explicitly require keeping the real implementations behind the `B-DEL-4` wrappers, and Claude's final green-light pass agreed that deletion or rewiring of this retained owner belongs outside PG-3a.2.
-- Likely canonical owner: whichever Builder prompt/request-preparation owner should expose the Flow capability reference to the planner, if the reference is still product-relevant.
-- Deletion/reuse/merge path if known: either wire `build_structured_reference_payload` into the canonical planner prompt/request preparation path with behavior tests, or delete it and its tests in a later Builder cleanup once product need is disproven.
-- Decision or measurement needed: decide whether the planner still needs an explicit structured Flow capability reference after the current server-owned Builder control-plane changes.
+- Slice id: C8.15 Flow AI Builder dead structured capability-reference delete-or-wire proof
+- Findings addressed: resolved the `PG3-FU-1` follow-up by deleting the production-unreferenced `build_structured_reference_payload` helper instead of wiring a new prompt/product behavior path.
+- Evidence reviewed:
+  - The prior `PG3-FU-1` follow-up recorded that after PG-3a.2 deleted `render_structured_reference_block`, `build_structured_reference_payload` was kept only for a later delete-or-wire decision.
+  - Before deletion, exact `rg -n "build_structured_reference_payload|ai_builder_flow_capability_reference|structured_reference|structured reference|reference_payload" backend/src backend/tests frontend --glob '!**/.venv/**' --glob '!frontend/bun.lock'` found `build_structured_reference_payload` only in `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:21,77` and its self-preserving test `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py:3-45`.
+  - CRG `importers_of backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py` found zero importers.
+  - `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py:35-124` already owns the proposal system prompt; `backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py:185,226` routes proposal request preparation through that owner.
+  - `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py:403,440` already owns resource reference material and rendering.
+  - The schema-value sources remain live through canonical tool/schema owners such as `backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py:179-193`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_intent.py:147-150,727-730`, and `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py:24-59`.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer; exact deletion proof came from direct source reads and `rg`.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded deletion slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c8-15-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and conditional `COMMIT_READY: yes`; required fixes: none. Valid guidance applied: delete the helper and self-preserving test, do not wire a new prompt path, and keep post-delete `rg` scoped to source/test/frontend because this ledger intentionally records historical mentions.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c8-15-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes` for exactly the two deletions plus this progress-ledger update; required fixes: none.
+- Files changed:
+  - Deleted `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py`.
+  - Deleted `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py`.
+  - Updated `review-artifacts/implementation-progress-2026-06-29.md`.
+- Behavior changed:
+  - No user-facing Builder behavior changed. The deleted helper had no production caller.
+  - No planner prompt, capability manifest, MCP/capability descriptor, resource catalog, frontend, generated client, runtime, retention, audit, provider, schema, or API behavior changed.
+- Complexity deleted or owner clarified:
+  - Deleted an unused assembled prompt/reference payload that returned `dict[str, Any]`.
+  - Deleted tests that only preserved the unused helper.
+  - Kept canonical owners unchanged: proposal prompt construction stays in `ai_builder_plan_proposal_task.py`, resource prompt material stays in `ai_builder_resource_catalog.py`, and schema/capability values stay in the tool/schema owners.
+- Architecture delta:
+  - Canonical owner before: unclear retained helper after `render_structured_reference_block` deletion.
+  - Canonical owner after: no owner needed because the assembled reference payload does not exist; live concepts remain with their existing prompt/resource/schema owners.
+  - Duplicate paths remaining: none for `build_structured_reference_payload`; historical ledger mentions remain only as evidence.
+  - 9/10 follow-up candidate: none for `PG3-FU-1`; it is resolved by deletion.
+  - Decision or measurement needed: none.
+  - What not to preserve: unused prompt/reference payload builders, tests for dead prompt payloads, and wiring dead helpers into prompts just to keep them alive.
+- Validation commands and results:
+  - `rg -n "build_structured_reference_payload|ai_builder_flow_capability_reference" backend/src backend/tests frontend --glob '!**/.venv/**' --glob '!frontend/bun.lock'` -> no matches after deletion.
+  - `cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py tests/unittests/flows/ai_builder/test_ai_builder_tools.py -q` -> pass, 56 passed.
+  - `cd /workspace/backend && changed_py=$(git -C /workspace diff --name-only --diff-filter=ACMRT -- "*.py" | sed "s#^backend/##"); if [ -n "$changed_py" ]; then .venv/bin/ruff check $changed_py; else echo "No remaining changed Python files to ruff check; Python diff is deletions only."; fi` -> pass; no remaining changed Python files.
+  - `cd /workspace/backend && changed_py=$(git -C /workspace diff --name-only --diff-filter=ACMRT -- "*.py" | sed "s#^backend/##"); if [ -n "$changed_py" ]; then .venv/bin/ruff format --check $changed_py; else echo "No remaining changed Python files to ruff format-check; Python diff is deletions only."; fi` -> pass; no remaining changed Python files.
+  - A broader adjacent `ruff format --check` was attempted on untouched nearby Builder files and reported pre-existing formatting drift in `ai_builder_planner_request_preparation.py`, `ai_builder_proposal_intent.py`, `test_ai_builder_plan_proposal_task.py`, and `test_ai_builder_tools.py`; those files are outside this deletion diff and were left untouched.
+  - `backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py src/intric/flows/ai_builder/ai_builder_proposal_intent.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py tests/unittests/flows/ai_builder/test_ai_builder_tools.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
+- Remaining risk / rollback:
+  - Risk is low: deletion is limited to zero-caller backend code and its self-preserving tests.
+  - Rollback is straightforward: restore the deleted module and test if a future prompt design explicitly needs this payload. No schema, migration, API, generated-client, frontend, runtime, retention, audit, MCP, or capability rollback is needed.
+
+## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
 - Area: maintainability / clean architecture
