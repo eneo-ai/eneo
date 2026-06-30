@@ -5,7 +5,7 @@ TL;DR:
 - Flow AI Builder stays native Eneo authoring; no MCP/capability implementation starts here.
 - C9.2 completed active abandoned-session expiration in `DataRetentionService`.
 - C9.3 accepts retained Builder-uploaded global `Files` rows for first release after Builder session pins are removed.
-- Repair/fallback pruning remains blocked until real branch-level evidence exists.
+- C9.4 records concrete repair/fallback branch decisions; no branch is delete-ready without real branch-level value data.
 
 Primary evidence: `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md`. C9.0 refreshed lifecycle, retention, audit, JSONB ownership, and migration evidence; this packet records the release decisions that follow from that inventory.
 
@@ -52,12 +52,19 @@ Primary evidence: `review-artifacts/flow-builder-release-governance-gate0-2026-0
 | Plan proposed / rejected audit | Keep deleted. `proposed` remains a plan state; `rejected` is not a plan state. | Gate 0 audit inventory; exact `rg` in C9.0 found no `AI_BUILDER_PLAN_PROPOSED` or `AI_BUILDER_PLAN_REJECTED` after C8.7. |
 | Proposal-shown audit | Not a release blocker. Add later only if product/compliance names a real auditable transition. | No source evidence currently justifies wiring an artificial event. |
 
-## Repair / Fallback Decision
+## Repair / Fallback Branch Decisions
 
-| Area | Gate 1 decision | Evidence |
-|---|---|---|
-| JSON-text fallback, forced-tool retry, self-correction | Do not prune. Measure branch value first. | C8.14 records pruning as blocked until branch-level telemetry/eval evidence exists in `review-artifacts/implementation-progress-2026-06-29.md:1940`. |
-| New telemetry/eval framework | Do not add one from this packet. | C8.13/C8.14 already improved failed-turn logging; the missing piece is real branch data, not a generic framework. |
+Current evidence is source reachability, unit behavior coverage, typed failed-turn telemetry coverage, and deterministic materialization goldens. That is useful engineering proof, but it is not real provider-output branch-value data. Do not prune repair/fallback code until a future slice can show branch frequency, recovery contribution, failed cost, final error-code distribution, provider finish reason where available, and content-free payload verification.
+
+| Branch family | Owner / reachability | Existing evidence | Decision | Future prune/delete acceptance criteria |
+|---|---|---|---|---|
+| JSON/text fallback | `ai_builder_proposal_repair.py` owns JSON-text parsing and processing at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:757`; forced retry reaches it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:663`. | C8.14 cites behavior coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:419-531`; deterministic goldens prove materialization coverage, not live provider branch value, at `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:142`. | Blocked: keep until real branch-level value data exists. | Delete only if real branch data proves it never saves proposals, is harmful, or is fully replaced by a stronger live branch. |
+| Forced-tool retry after conversational/non-tool output | Proposal submission routes text-only missing-tool output into forced retry at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:314` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:621`; repair owns the forced retry at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:656`. | C8.14 cites tests for typed invocation, feedback, and information-request preservation at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:336-417` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:535-588`. | Blocked: keep until real branch-level value data exists. | Delete only if branch data proves retry cost exceeds recovery value or another branch handles the same reachable provider output better. |
+| Self-correction / repair for malformed or invalid tool arguments | Proposal submission routes malformed/invalid `propose_flow` tool submissions into self-correction at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:547`; repair owns retry and terminal routing at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:440`. | C8.13 added terminal failed-turn telemetry; C8.14 cites retry/recovery coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:695-743` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:1223-1415`, plus failed-turn coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:867-1220`. | Blocked: keep until real branch-level value data exists. | Delete or simplify only after branch data plus deterministic materialization review proves a sub-branch is dead, harmful, or redundant. |
+| Direct terminal proposal failures | Proposal submission logs provider completion error, empty choices, provider truncation, and final forced-tool missing submission at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240`; failed-turn payload ownership is `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:291`. | C8.2/C8.13 cover content-free failed-turn payloads; C8.14 cites provider truncation and forced-tool terminal coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:397-524`. | Keep: these are classifiers/observability, not repair code. | Do not delete unless a future telemetry taxonomy replacement preserves the same release-readiness signal. |
+| Architecture-error terminal paths | Architecture errors are not `ProposalFailedTurnBranch` values at `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60`; they record first-attempt architecture failure at `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:51` and sanitized proposal error events at `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:68`. Live catch paths are at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:580`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:403`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:741`. | Tests prove sanitized architecture errors and first-attempt telemetry at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py:240-295` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:1443-1603`. | Keep: separate terminal architecture classification; do not treat as failed-turn pruning evidence. | Revisit only if product/observability owners choose a unified terminal-outcome taxonomy; do not fold it into repair pruning by default. |
+
+Do not add a telemetry framework, eval framework, metric schema, event bus, or repair-policy layer from this packet. The missing evidence is branch value from real or production-like Builder runs, not more framework code.
 
 ## Completed Lanes
 
@@ -66,27 +73,28 @@ Primary evidence: `review-artifacts/flow-builder-release-governance-gate0-2026-0
 | Builder retention/deletion/count | Done in C8.6 and C9.2. `DataRetentionService` owns terminal and abandoned active Builder count/delete; session rows are the deletion unit; plans and session-file links cascade; global files are not directly deleted. |
 | Builder audit vocabulary delete-or-wire | Done in C8.7. Fake plan proposed/rejected audit actions were deleted; live emitted actions remain. |
 | Lifecycle active-send/apply invariant | Done in C8.8. No-lease lifecycle transitions now respect active send locks. |
-| Repair pruneability decision | Done in C8.14. No branch was pruned; branch-level evidence is still required. |
+| Repair pruneability evidence and packet reconciliation | Done in C8.14 and reconciled in C9.4. No branch was pruned; no branch is delete-ready; real branch-level value data is required before any pruning slice. |
 | Builder global file posture | Done in C9.3. Retained Builder-uploaded global `Files` rows are accepted for first release after Builder pins are removed; no generic file cleaner is added. |
 
-## Next Implementation Lane
+## Next Release Lane
 
 | Rank | Lane | Release value | Boundary |
 |---|---|---|---|
-| 1 | Repair/fallback branch-data review | Repair pruning remains blocked by missing branch-level evidence, not by missing framework code. | Read-only evidence review first; no pruning unless real telemetry/eval data proves a branch is dead, harmful, or too expensive. |
+| 1 | Real branch-value data review | C9.4 closes the source/test inventory loop: no repair/fallback branch is delete-ready from repo evidence alone. The next pruning-related work is to inspect real or production-like Builder branch data, if available. | Evidence/readiness only; no source pruning, telemetry framework, eval framework, provider rewrite, prompt rewrite, MCP/capability work, API/frontend work, or runtime changes. Stop if no real branch-value artifact exists. |
 
 Deferred future risk: Builder-only global file-row cleanup is accepted for first release, not selected as the next lane. Revisit only if retained global file rows after Builder pin removal become unacceptable, and only with a named candidate-id source, reference guard, owner, and tests. Do not add a generic sweeper.
 
-Question/slot cleanup and broader Builder maintainability can resume after the repair/fallback evidence review or if release owners decide repair pruning is no longer a release blocker.
+Question/slot cleanup and broader Builder maintainability can resume if release owners accept that repair pruning is blocked until real branch-value data exists. Do not send another source-pruning slice for these branches without that data.
 
 ## Recommended Next Bounded Prompt
 
-Continue with exactly one bounded evidence/readiness slice: Flow AI Builder repair/fallback branch-data review.
+Continue with exactly one bounded evidence/readiness slice: Flow AI Builder real repair/fallback branch-value data review.
 
 Required acceptance criteria:
-- Inventory JSON-text fallback, forced-tool retry, self-correction, and direct terminal failure branches against current C8.2/C8.5/C8.13 telemetry/eval evidence.
-- Decide keep/delete/blocked for each branch, with file:line evidence and no production telemetry claims unless real artifacts exist.
-- Do not prune source unless a branch is proven dead, unreachable, or harmful.
+- Inspect available staging, production-like, or persisted log artifacts for `ai_builder.proposal.failed_turn`, `ai_builder.proposal.repair_invoked`, first-attempt architecture failures, and successful proposal outcomes by branch.
+- If no real branch-value artifacts exist, stop with an explicit no-data blocker instead of adding frameworks or editing repair/fallback source.
+- If data exists, decide keep/delete/blocked for each branch with artifact provenance, privacy posture, and file:line owner evidence.
+- Do not prune source unless a branch is proven dead, unreachable, harmful, or redundant by real branch-value data plus the existing source/test inventory.
 - Do not add telemetry frameworks, eval frameworks, MCP/capability descriptors, frontend/API/generated clients, Flow runtime changes, audit vocabulary, retention changes, or schema/migrations.
 
 ## Remaining Builder Release Blockers
@@ -94,7 +102,7 @@ Required acceptance criteria:
 | Blocker | Why it remains | Next action |
 |---|---|---|
 | Builder-only global file-row cleanup | C9.3 accepts retained global `Files` rows for first release after Builder pins are removed. | Not a release blocker unless product/privacy owners reject this posture; if rejected, use a separate candidate-driven cleanup slice. |
-| Repair branch deletion evidence | Existing evidence does not prove repair/fallback branches are dead or harmful. | Collect/review branch-level evidence before any pruning slice. |
+| Repair branch deletion evidence | Existing source/test/eval evidence is concrete but not branch-value evidence. No branch is delete-ready, and deterministic goldens do not prove live provider branch value. | Collect/review real or production-like branch data before any pruning slice; otherwise accept the branches for first release. |
 
 ## What Not To Do Next
 

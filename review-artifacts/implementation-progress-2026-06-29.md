@@ -2218,6 +2218,55 @@
   - Risk is documentation/governance-only. The accepted first-release posture intentionally leaves Builder-uploaded global `Files` rows retained after Builder pins are removed.
   - Rollback is low risk: restore the previous Gate 1 packet text and delete this C9.3 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, file data, or persisted-data rollback is needed.
 
+## C9.4
+
+- Slice id: C9.4 Flow AI Builder repair/fallback branch-data review
+- Findings addressed: reconciled the Gate 1 packet with the already-completed C8.14 source/test branch inventory so repair/fallback pruning is no longer a vague next lane.
+- Evidence reviewed:
+  - C8.14 already recorded the concrete branch-family inventory and delete blockers at `review-artifacts/implementation-progress-2026-06-29.md:1938-1990`.
+  - The Gate 1 packet still selected a repair/fallback branch-data review as the next lane at `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:72-90`, even though C8.14 had already completed the repo evidence inventory.
+  - Direct terminal proposal outcomes remain owned by `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240-330` and failed-turn payload ownership remains in `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80,291-380`.
+  - JSON/text fallback, forced-tool retry, and self-correction remain live reachable branches at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:314-321,547-616,621-642` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:440-650,656-805`.
+  - Architecture-error terminal paths are separate from `ProposalFailedTurnBranch`; they record first-attempt architecture failure at `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:51-65` and sanitized proposal error events at `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:68-91`, with catch paths in `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:580-595`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:403-437`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:741-754`.
+  - C8.5 deterministic materialization goldens at `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:142-166` and `backend/tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py:728-748` prove materialization coverage, not live provider-output branch value.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer and pointed back to the Flow AI Builder proposal/repair surface; exact `rg` and direct source reads verified the branch owner claims.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity because Claude was blocked by usage/spend limits.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-4-repair-fallback-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, and `STOP_OR_PROCEED: proceed`; required guidance applied: keep the slice docs-only, reconcile the packet rather than redoing C8.14, add architecture-error paths as a keep row, and change the next lane to real branch-value data collection before any pruning slice.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-4-repair-fallback-final-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, and `COMMIT_READY: no`; required fix applied: stage only the two C9.4 review-artifact docs and leave unrelated dirty files out of the commit. Content verdict: packet decisions are concrete, architecture-error paths stay separate from failed-turn pruning, no source deletion is justified, and the next lane is real branch-value data review.
+- Files changed:
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No backend source, tests, migrations, frontend, generated clients, API contracts, runtime behavior, MCP/capability code, provider behavior, prompts, repair logic, retention code, audit code, schema, or file cleanup code changed.
+  - No repair/fallback branch was pruned.
+- Complexity deleted or owner clarified:
+  - The stale packet loop that pointed at an already-completed C8.14 evidence review was removed.
+  - The packet now distinguishes repair/fallback branches that are blocked by missing real branch-value data from direct terminal classifiers and architecture-error paths that should be kept as observability/classification.
+  - No telemetry framework, eval framework, metric schema, event bus, repair-policy layer, MCP/capability path, or generic Builder abstraction was added.
+- Architecture delta:
+  - Canonical owner before: `ProposalSubmissionOwner` owned direct terminal outcomes, `ai_builder_proposal_repair.py` owned repair/fallback execution, and `ai_builder_proposal_telemetry.py` owned failed-turn payloads; the Gate 1 packet still asked for another branch-data review.
+  - Canonical owner after: source ownership is unchanged; the release packet now records that JSON/text fallback, forced-tool retry, and self-correction are blocked from pruning until real branch-value data exists, while direct terminal classifiers and architecture-error handling are keep decisions.
+  - Duplicate paths remaining: none added. Branch-specific repair code remains because current source/test evidence proves reachability, not deadness or harm.
+  - 9/10 follow-up candidate: inspect real or production-like Builder logs for branch frequency, recovery contribution, failed cost, final error-code distribution, provider finish reason where available, and content-free payload verification before reopening pruning.
+  - Decision or measurement needed: real branch-value data is required for any future pruning slice; if no such artifacts exist, accept the current repair/fallback branches for first release.
+  - What not to preserve: repeated docs-only repair-pruning reviews without new data, source pruning from unit/static evidence alone, and framework-building to compensate for missing branch-value artifacts.
+- Branch-family decisions:
+  - JSON/text fallback: blocked from deletion; keep until real branch data proves it never saves proposals, is harmful, or is replaced by a stronger branch.
+  - Forced-tool retry after conversational/non-tool output: blocked from deletion; keep until real branch data proves retry cost exceeds recovery value or duplicates another stronger branch.
+  - Self-correction / repair for malformed or invalid tool arguments: blocked from deletion; keep until real branch data plus deterministic materialization review proves a sub-branch is dead, harmful, or redundant.
+  - Direct terminal proposal failures: keep as classifiers/observability, not repair code.
+  - Architecture-error terminal paths: keep as separate architecture classification; do not fold into failed-turn pruning by default.
+- Validation commands and results:
+  - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `2ea8ea12`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
+  - `rg -n "forced.*tool|forced_tool|text fallback|json text|self[-_ ]correction|repair|malformed|invalid_tool|failed_turn|architecture_error|ProposalTurnTelemetry" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder review-artifacts/implementation-progress-2026-06-29.md` -> verified source/test/ledger branch owners and existing coverage; no production branch-value artifact was claimed.
+  - `rg -n "C8\\.2|C8\\.5|C8\\.13|C8\\.14|C9\\.4|repair/fallback|branch-level|prune|pruning" review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> verified the packet now records concrete C9.4 branch decisions and no longer points at a vague repo-only repair review.
+  - `git diff --check -- review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - Backend pytest, ruff, and pyright were not run because this slice changed only review-artifact markdown and made no source/test changes.
+- Remaining risk / rollback:
+  - Risk is documentation/governance-only. Real branch-value data can supersede this decision and justify a later dedicated source deletion slice.
+  - Rollback is low risk: restore the previous Gate 1 packet text and delete this C9.4 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, provider, prompt, file data, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
