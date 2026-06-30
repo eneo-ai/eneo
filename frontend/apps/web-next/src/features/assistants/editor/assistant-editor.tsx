@@ -140,8 +140,10 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
   return (
     <SaveStatusProvider>
       {/* Cancel the space layout's p-6 so the header can sit flush at the scroll
-          top and span full width; content re-pads itself and stays centered. */}
-      <div className="-m-6 flex min-h-[calc(100%+3rem)] flex-col">
+          top and span full width; content re-pads itself and stays centered.
+          shrink-0 keeps this taller than the scroll viewport (it's a flex item)
+          so the sticky header stays pinned through the whole scroll. */}
+      <div className="-m-6 flex shrink-0 flex-col">
         <header className="bg-background sticky -top-6 z-30 border-b">
           <div className="mx-auto w-full max-w-4xl px-6">
             <div className="flex items-center justify-between gap-3 py-3">
