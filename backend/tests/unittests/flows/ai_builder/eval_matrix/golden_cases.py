@@ -2,9 +2,10 @@
 
 Each `BuildableGoldenCase` is a real, domain-neutral `FlowDraftSpecCore` the AI
 Builder can author. The suite proves every one passes the critic draft preflight
-with no architecture blocker, resolves its declared form fields, and that its
-declared composition columns match what the spec shape derives. End-to-end
-materialization is the live-eval runner's job, not this deterministic fence.
+with no architecture blocker, resolves its declared form fields, matches its
+declared composition columns, and reaches deterministic create-mode
+materialization through the canonical authoring command owner. LLM-output
+quality remains the live-eval runner's job, not this deterministic fence.
 
 The set covers every AI-Builder-expressible capability row across the composition
 columns, meeting each row's complexity policy and the global coverage thresholds

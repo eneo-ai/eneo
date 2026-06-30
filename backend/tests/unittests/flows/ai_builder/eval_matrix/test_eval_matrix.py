@@ -11,10 +11,10 @@ Capabilities the builder cannot author yet (HTTP) are recorded as explicit
 ratchet keeps that honest: every row is classified `buildable`, `gap`, or
 `planned`, and a gap that silently becomes authorable fails the suite.
 
-Canonical command preparation is asserted here; LLM-output quality
-(prompt-token cost, edit/revise behaviour on real planner output) lives in the
-local live-eval runner (`scripts/flow_ai_builder_live_eval.py`), which needs a
-running API and model.
+Canonical command preparation and deterministic create-mode materialization are
+asserted here; LLM-output quality (prompt-token cost, edit/revise behaviour on
+real planner output) lives in the local live-eval runner
+(`scripts/flow_ai_builder_live_eval.py`), which needs a running API and model.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from intric.flows.flow_authoring_spec import (
     StepSpec,
 )
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
+    assert_create_spec_materializes_through_authoring_command_async,
     assert_create_spec_prepares_through_authoring_command,
 )
 
@@ -140,8 +141,8 @@ def test_known_gaps_runtime_support_is_real_but_not_authorable(
 
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)
 def test_each_golden_has_no_architecture_blockers(case: BuildableGoldenCase) -> None:
-    # Draft preflight only (no materializer run): the spec is buildable on its
-    # own terms. End-to-end materialization stays the live-eval runner's job.
+    # Draft preflight checks architecture blockers before the canonical
+    # authoring/materialization assertion below exercises the execution boundary.
     blockers = architecture_blockers(
         case.spec, aggregation_intent=case.aggregation_intent
     )
@@ -155,6 +156,14 @@ def test_buildable_golden_prepares_through_canonical_authoring_command(
     case: BuildableGoldenCase,
 ) -> None:
     assert_create_spec_prepares_through_authoring_command(case.spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)
+async def test_buildable_golden_materializes_through_canonical_authoring_command(
+    case: BuildableGoldenCase,
+) -> None:
+    await assert_create_spec_materializes_through_authoring_command_async(case.spec)
 
 
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)

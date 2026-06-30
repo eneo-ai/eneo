@@ -1362,6 +1362,60 @@
   - Pre-existing no-op scoped requests still return `None` when the selected step already has the requested model/output type; leave that as a separate product/DX follow-up if an explicit "already applied" notice is desired.
   - Rollback is low risk: restore the old scoped outcome flag/processor condition, revert the two stale test expectations, and remove this ledger entry. No schema, migration, public API, generated-client, frontend, Flow runtime, telemetry, or persisted-data rollback is needed.
 
+## C8.5
+
+- Slice id: C8.5 Flow AI Builder deterministic materialization evals
+- Findings addressed: buildable Builder goldens previously proved draft preflight and `FlowAuthoringCommandService.prepare` only; they did not prove representative semantic Builder specs reached the canonical authoring/materializer boundary before future repair/fallback pruning decisions.
+- Verified evidence before change:
+  - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:43` accepts deterministic Builder materialization coverage as release-hardening work and requires goldens to pass through materialization, not only preflight/critic fences.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:360` records that, if Builder ships, deterministic goldens must pass through materialization rather than only preflight/critic fences.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:385` keeps proposal repair pruning blocked until failed-turn telemetry or deterministic proof exists.
+  - Before the fix, `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:14-17` described command preparation and live evals, and `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:153-158` asserted only `assert_create_spec_prepares_through_authoring_command`.
+  - `backend/src/intric/flows/application/flow_authoring_command.py:132-172` is the canonical preparation owner, and `backend/src/intric/flows/application/flow_authoring_command.py:194-220` applies prepared changesets through the real `FlowDraftMaterializer`.
+  - `backend/tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py:728-748` defines 19 buildable goldens; target categories are represented by simple flow, form/intake at `golden_cases.py:155-164`, DOCX/PDF at `golden_cases.py:168-208` and `golden_cases.py:330-348`, and audio/transcription at `golden_cases.py:352-410`.
+- Golden inventory / proof depth:
+  - Before: all buildable goldens were preflight-proofed, form-field checked, composition-column checked, and prepared through `FlowAuthoringCommandService.prepare`; materialization proof depth stayed in separate low-level materializer tests and live evals.
+  - After: all 19 `GOLDEN_CASES` also call `assert_create_spec_materializes_through_authoring_command_async`, which prepares the AI Builder create command, applies the prepared changeset through `FlowAuthoringCommandService.apply_prepared`, and verifies materialized `FlowStep` fields and metadata against the prepared compiled changeset.
+  - Covered cases include simple flow, form/intake, DOCX template fill, DOCX create, PDF report, audio transcription, audio-to-DOCX, comparison, and advanced multi-step chains.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but semantic search was noisy/empty for this narrow test seam; direct source reads and exact `rg` provided the concrete evidence.
+  - `[no-peer-review]`: the user explicitly asked to skip Claude/Antigravity for this bounded slice and use read-only `codex exec` peer gates instead.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-5-materialization-evals-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`. Required guidance applied: reuse `FlowAuthoringCommandService` and the existing eval matrix, use all `GOLDEN_CASES`, keep the fake FlowService concrete and minimal, do not assert every low-level assistant call, and update stale live-eval-only wording.
+  - Read-only Codex commit gate artifact `.codex/artifacts/c8-5-materialization-evals-commit-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with no blockers or required fixes. Its optional Ponytail notes were reviewed and left as follow-up pressure only: keep the four reviewed paths staged, keep the prepare-only test until matrix noise justifies deletion, and avoid expanding this ledger entry further.
+- Red proof:
+  - No product-source red failure was expected or invented: the gap was deterministic coverage depth. The new test is the regression guard that would fail if any buildable golden cannot cross the canonical authoring/materializer boundary.
+- Files changed:
+  - `backend/tests/unittests/flows/ai_builder/authoring_command_assertions.py`
+  - `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py`
+  - `backend/tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No production runtime, public API, OpenAPI output, generated client, frontend, schema, Flow runtime, retention, audit vocabulary, capability descriptor, MCP adapter, or PR #480 behavior changed.
+  - The deterministic Builder eval matrix now fails if a buildable golden can preflight/prepare but cannot create-mode materialize through the canonical authoring command owner and real materializer.
+- Complexity deleted or owner clarified:
+  - The eval matrix remains the single source of truth for buildable Builder goldens; no second hand-picked C8.5 target list, eval framework, registry, snapshot system, live runner, production helper, or new dependency was added.
+  - `FlowAuthoringCommandService` remains the canonical proposal-to-authoring/materialization boundary; the test helper adds only a narrow in-test service for the existing materializer's create-mode boundary.
+  - Stale comments claiming deterministic materialization stayed only in live evals were removed/reworded.
+- Architecture delta:
+  - Canonical owner before: deterministic Builder goldens ended at preflight and authoring-command preparation; materialization confidence lived in separate materializer tests and local live evals.
+  - Canonical owner after: the existing eval matrix owns deterministic buildable-golden coverage through `FlowAuthoringCommandService.prepare` and `apply_prepared` into `FlowDraftMaterializer`.
+  - Duplicate paths remaining: low-level materializer tests still own detailed resource-binding/assistant ordering cases; live evals still own LLM-output quality and provider behavior.
+  - 9/10 follow-up candidate: use C8.1-C8.5 telemetry/eval evidence to decide which proposal repair/fallback branches can be pruned, and continue with the retention/deletion policy slice before adding new stored Builder payloads.
+  - Decision or measurement needed: measure real failed-turn telemetry against the deterministic materialization matrix before deleting JSON-text, forced-tool retry, or self-correction repair paths.
+  - What not to preserve: prepare-only claims for buildable goldens, duplicate target-case lists, materialization proof only in live evals, or broad MCP/capability work as a substitute for deterministic Builder materialization evidence.
+- Validation commands and results:
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py -q` -> pass, 140 passed.
+  - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/test_flow_authoring_command.py tests/unittests/flows/test_flow_draft_materialization_executor.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py -q` -> pass, 226 passed.
+  - `cd /workspace/backend && uv run ruff check tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py && uv run ruff format --check tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py` -> initial format check requested formatting for `authoring_command_assertions.py`; after `uv run ruff format`, pass, 3 files already formatted.
+  - `cd /workspace/backend && uv run pyright ...` on the touched test/source scope -> failed before the wrapper with devcontainer dependency-resolution errors such as unresolved `pydantic`; the repo wrapper below is the type gate for this slice.
+  - `cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/application/flow_authoring_command.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/application/flow_draft_materialization_executor.py tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py` -> pass, 0 errors.
+- Privacy / safety notes:
+  - The new tests use deterministic in-repo golden specs only. They make no live LLM calls, no network calls, no timing sleeps, no provider-output snapshots, and add no content-bearing telemetry or persisted runtime data.
+- Remaining risk / rollback:
+  - Current buildable goldens do not use model, knowledge, or MCP resource refs. If a future golden adds portable resource refs, the materialization helper should add explicit local bindings instead of carving that case out.
+  - The seam is create-mode only; edit-mode materialization remains covered by scoped/edit-specific tests and can get a separate deterministic eval if future repair-pruning decisions depend on edit goldens.
+  - Rollback is low risk: remove the materialization helper, the new eval-matrix test, the stale wording updates, and this ledger entry. No production, schema, API, generated-client, frontend, runtime, retention, audit, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
