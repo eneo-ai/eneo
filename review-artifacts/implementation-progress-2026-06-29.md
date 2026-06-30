@@ -1872,6 +1872,69 @@
   - Historical persisted metadata may still contain old `output_style` question ids, and tolerant metadata readers remain unchanged; this slice only rejects new explicit structured answers that claim those names are active server-owned questions.
   - Rollback is low risk: restore the three removed ids in `_NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS`, remove the focused rejection test cases, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, telemetry, or generated-client rollback is needed.
 
+## C8.13
+
+- Slice id: C8.13 Flow AI Builder self-correction failed-turn telemetry completeness
+- Findings addressed: terminal self-correction proposal-repair failures emitted user-facing error events but did not emit the same content-free `ai_builder.proposal.failed_turn` payload as direct proposal terminal failures.
+- Evidence reviewed:
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:62,97-102` keeps repair/fallback pruning blocked until branch-level telemetry/eval evidence exists.
+  - `review-artifacts/implementation-progress-2026-06-29.md:1213-1217,1233` records C8.2 as the direct proposal failed-turn owner and explicitly left deeper self-correction terminal failures out of scope.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` owns the typed failed-turn branch and terminal-failure value set; `:291-312` owns the typed content-free payload fields; `:332-380` owns the payload builder and log helper.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240-330` already logs direct proposal terminal failures for provider completion error, empty completion choices, explicit provider truncation, and forced-tool retry missing submission.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:470-650` owns the terminal self-correction returns for repair completion exception, empty repair choices, malformed repaired tool arguments, invalid repaired tool result, forced-text retry failure, and missing tool response; the red proof below showed those paths previously emitted zero failed-turn payloads.
+  - `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:62-99` records completed LLM responses into `ProposalTurnTelemetry`, including `counts_as_repair`; tests that bypass that production wrapper now explicitly record fake completion usage before asserting payload counts.
+- Terminal self-correction branch inventory:
+  - `repair completion exception` -> branch `self_correction_completion_error`, final kind `provider_error`, final code `planner_upstream_error`.
+  - `empty repair choices` -> branch `self_correction_empty_completion_choices`, final kind `invalid_repair_response`, final code `planner_invalid_repair_response`.
+  - `malformed repaired tool arguments after retry budget` -> branch `self_correction_malformed_tool_arguments`, final kind `invalid_repair_payload`, final code `self_correction_invalid_payload`.
+  - `processed repaired tool result still invalid after retry budget` -> branch `self_correction_invalid_tool_result`, final kind maps `parse -> invalid_repair_payload`, `quality -> repair_quality_failure`, otherwise `invalid_repair_plan`, with the existing self-correction error code.
+  - `conversational text forced retry cannot recover` -> branch `self_correction_text_forced_retry_failed`, same failure-kind/code mapping as processed repaired tool result.
+  - `repair response has no usable tool call or text` -> branch `self_correction_missing_tool_response`, final kind `invalid_repair_response`, final code `planner_invalid_repair_response`.
+  - Architecture-error repair paths intentionally remain on the existing architecture-failure telemetry path and were not converted to failed-turn logs in this slice.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but graph/semantic output was stale or sparse for this narrow Builder telemetry slice; direct source reads and exact `rg` supplied the concrete evidence.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c8-13-plan-gate-20260630.md` returned `VERDICT: GREEN_LIGHT yes` with no blockers. Valid guidance applied: keep the context-aware log call in `ai_builder_proposal_repair.py`, keep payload/log ownership in `ai_builder_proposal_telemetry.py`, do not log inside `run_forced_tool_retry_after_text`, do not log architecture-error paths as failed turns, and do not bump the telemetry schema version because the payload shape is unchanged.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c8-13-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no findings and no required Ponytail simplification.
+- Red proof:
+  - Before source changes, `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_uses_request_id_on_forced_retry_validation_error tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_handles_empty_completion_choices tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_rejects_malformed_correction_tool_arguments -q` failed with zero captured failed-turn payloads for all three terminal repair branches, proving the telemetry gap.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Terminal self-correction proposal-repair failures now emit exactly one content-free `ai_builder.proposal.failed_turn` payload when a `ProposalTurnTelemetry` tracker is present.
+  - The payload records existing request id, session id, target kind, branch, repair attempts, LLM calls, token counts/source/estimated flag when available, final failure kind, final error code, and provider finish reason when available.
+  - User-facing stream events, error codes, error messages, retry budgets, repair prompts, forced-tool retry behavior, JSON-text fallback behavior, successful repair behavior, and legitimate clarification text behavior are unchanged.
+  - No repair/fallback branch was pruned, no public API/OpenAPI/generated client/frontend/runtime/retention/audit/MCP/capability surface changed, and no persistent telemetry table or event bus was added.
+- Complexity deleted or owner clarified:
+  - `ai_builder_proposal_telemetry.py` remains the single typed payload/log owner for failed proposal turns.
+  - `ai_builder_proposal_repair.py` now owns only the local decision that a terminal self-correction branch has happened and delegates payload construction/logging to the existing telemetry helper.
+  - The self-correction error-code mapping is now reused by both stream error construction and failed-turn logging, preventing terminal code drift.
+  - No generic telemetry framework, event bus, pass-through service, new provider abstraction, prompt rewrite, or broad Builder split was added.
+- Architecture delta:
+  - Canonical owner before: direct proposal terminal failures emitted failed-turn telemetry through `ProposalSubmissionOwner`; self-correction terminal failures only emitted stream errors plus first-attempt/repair-invocation telemetry.
+  - Canonical owner after: `ai_builder_proposal_telemetry.py` owns the shared failed-turn contract; `ai_builder_proposal_submission.py` emits direct terminal outcomes; `ai_builder_proposal_repair.py` emits self-correction terminal outcomes.
+  - Duplicate paths remaining: direct proposal and self-correction repair still have separate branch-specific call sites because they are different terminal owners, but they share the same typed payload/log helper.
+  - 9/10 follow-up candidate: review staged failed-turn data plus deterministic materialization evals before deciding whether JSON-text fallback, forced-tool retry, or self-correction branches are useful or deletable.
+  - Decision or measurement needed: collect/inspect branch-level failed-turn telemetry in staging or production-like runs before pruning any repair/fallback path.
+  - What not to preserve: terminal repair errors without outcome telemetry, content-bearing telemetry payloads, duplicate error-code mapping, or a generic telemetry framework for a single existing payload.
+- Validation commands and results:
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_uses_request_id_on_forced_retry_validation_error tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_handles_empty_completion_choices tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_rejects_malformed_correction_tool_arguments -q` -> red before implementation, 3 failed with zero failed-turn payloads; pass after source change, 3 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q` -> pass, 35 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q` -> pass, 74 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` -> pass, 1 file reformatted after initial `ruff format --check` reported formatting drift.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 3 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace && git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the three Builder source/test files plus this progress ledger.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
+- Remaining risk / rollback:
+  - Payload shape and schema version are unchanged; only branch/failure literal values and emission sites expand. Strict external telemetry consumers that hard-code old branch values should treat the new values as new measurable outcomes, not a schema break.
+  - Failed LLM calls that raise before a provider response are still counted as zero completed `llm_calls`, matching existing direct provider-error behavior.
+  - Rollback is low risk: remove the self-correction branch/failure literals, remove the repair-local log helper/call sites, remove the focused telemetry assertions, and delete this ledger entry. Stream error behavior would revert to the prior state. No schema, migration, API, frontend, runtime, retention, audit, MCP, or generated-client rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

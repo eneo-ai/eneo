@@ -62,11 +62,21 @@ ProposalFailedTurnBranch = Literal[
     "empty_completion_choices",
     "provider_truncation",
     "forced_tool_retry_missing_submission",
+    "self_correction_completion_error",
+    "self_correction_empty_completion_choices",
+    "self_correction_malformed_tool_arguments",
+    "self_correction_invalid_tool_result",
+    "self_correction_text_forced_retry_failed",
+    "self_correction_missing_tool_response",
 ]
 ProposalTerminalFailureKind = Literal[
     "provider_error",
     "missing_submission_tool",
     "provider_truncation",
+    "invalid_repair_response",
+    "invalid_repair_payload",
+    "invalid_repair_plan",
+    "repair_quality_failure",
 ]
 ApplyFailurePhase = Literal["prepare_authoring", "apply_authoring"]
 MaterializerProgressStage = Literal[

@@ -34,9 +34,12 @@ from intric.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalFailedTurnBranch,
+    ProposalTerminalFailureKind,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
     assistant_metadata_with_usage,
+    log_proposal_failed_turn,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
@@ -133,6 +136,58 @@ def _invalid_tool_arguments_message(error: Exception) -> str:
     return f"Invalid tool call arguments: {error}"
 
 
+def _self_correction_error_code(
+    failure_kind: ToolProcessingFailureKind | None,
+) -> AIBuilderErrorCode:
+    if failure_kind == "parse":
+        return AIBuilderErrorCode.SELF_CORRECTION_INVALID_PAYLOAD
+    if failure_kind == "quality":
+        return AIBuilderErrorCode.SELF_CORRECTION_QUALITY_FAILURE
+    return AIBuilderErrorCode.SELF_CORRECTION_INVALID_PLAN
+
+
+def _self_correction_terminal_failure_kind(
+    failure_kind: ToolProcessingFailureKind | None,
+) -> ProposalTerminalFailureKind:
+    if failure_kind == "parse":
+        return "invalid_repair_payload"
+    if failure_kind == "quality":
+        return "repair_quality_failure"
+    return "invalid_repair_plan"
+
+
+def _log_self_correction_failed_turn(
+    *,
+    ctx: ProposalTurnContext,
+    branch: ProposalFailedTurnBranch,
+    final_failure_kind: ProposalTerminalFailureKind,
+    final_error_code: AIBuilderErrorCode,
+) -> None:
+    if ctx.usage_tracker is None:
+        return
+    log_proposal_failed_turn(
+        usage_tracker=ctx.usage_tracker,
+        session_id=ctx.session_id,
+        branch=branch,
+        final_failure_kind=final_failure_kind,
+        final_error_code=final_error_code.value,
+    )
+
+
+def _log_self_correction_validation_failed_turn(
+    *,
+    ctx: ProposalTurnContext,
+    branch: ProposalFailedTurnBranch,
+    failure_kind: ToolProcessingFailureKind | None,
+) -> None:
+    _log_self_correction_failed_turn(
+        ctx=ctx,
+        branch=branch,
+        final_failure_kind=_self_correction_terminal_failure_kind(failure_kind),
+        final_error_code=_self_correction_error_code(failure_kind),
+    )
+
+
 def build_self_correction_error_event(
     *,
     feedback: str | None,
@@ -143,15 +198,9 @@ def build_self_correction_error_event(
         feedback=feedback,
         failure_kind=failure_kind,
     )
-    if failure_kind == "parse":
-        code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PAYLOAD
-    elif failure_kind == "quality":
-        code = AIBuilderErrorCode.SELF_CORRECTION_QUALITY_FAILURE
-    else:
-        code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PLAN
     return build_ai_builder_error_event(
         message=message,
-        code=code,
+        code=_self_correction_error_code(failure_kind),
         phase=AIBuilderErrorPhase.SELF_CORRECTION,
         request_id=request_id,
     )
@@ -420,6 +469,12 @@ async def _request_self_correction_events(
             )
         except Exception as error:
             logger.error("Self-correction LLM call failed", exc_info=error)
+            _log_self_correction_failed_turn(
+                ctx=ctx,
+                branch="self_correction_completion_error",
+                final_failure_kind="provider_error",
+                final_error_code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+            )
             yield build_ai_builder_error_event(
                 message="The AI planner failed. Please try again.",
                 code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
@@ -429,6 +484,12 @@ async def _request_self_correction_events(
             return
 
         if not response.choices:
+            _log_self_correction_failed_turn(
+                ctx=ctx,
+                branch="self_correction_empty_completion_choices",
+                final_failure_kind="invalid_repair_response",
+                final_error_code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
+            )
             yield build_ai_builder_error_event(
                 message="The AI planner failed to return a valid repair. Please try again.",
                 code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
@@ -462,6 +523,11 @@ async def _request_self_correction_events(
                             ),
                         )
                         break
+                    _log_self_correction_validation_failed_turn(
+                        ctx=ctx,
+                        branch="self_correction_malformed_tool_arguments",
+                        failure_kind="parse",
+                    )
                     yield build_self_correction_error_event(
                         feedback=_invalid_tool_arguments_message(error),
                         failure_kind="parse",
@@ -492,6 +558,11 @@ async def _request_self_correction_events(
                             ),
                         )
                         break
+                    _log_self_correction_validation_failed_turn(
+                        ctx=ctx,
+                        branch="self_correction_invalid_tool_result",
+                        failure_kind=repair_outcome.failure_kind,
+                    )
                     yield build_self_correction_error_event(
                         feedback=repair_outcome.feedback,
                         failure_kind=repair_outcome.failure_kind,
@@ -555,6 +626,11 @@ async def _request_self_correction_events(
                 "Self-correction bailed to conversational text after forced retry: %s",
                 assistant_text,
             )
+            _log_self_correction_validation_failed_turn(
+                ctx=ctx,
+                branch="self_correction_text_forced_retry_failed",
+                failure_kind=forced_failure_kind,
+            )
             yield build_self_correction_error_event(
                 feedback=forced_outcome.feedback,
                 failure_kind=forced_failure_kind,
@@ -562,6 +638,12 @@ async def _request_self_correction_events(
             )
             return
 
+        _log_self_correction_failed_turn(
+            ctx=ctx,
+            branch="self_correction_missing_tool_response",
+            final_failure_kind="invalid_repair_response",
+            final_error_code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
+        )
         yield build_ai_builder_error_event(
             message="The AI planner failed. Please try again.",
             code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,

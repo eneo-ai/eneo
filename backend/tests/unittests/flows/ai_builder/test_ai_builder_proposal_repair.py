@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+import logging
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -9,6 +11,9 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder import (
+    ai_builder_proposal_telemetry as proposal_telemetry_module,
+)
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -35,6 +40,7 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     run_tool_self_correction,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -58,12 +64,52 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_context,
     _plan_stream_event,
 )
+from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_usage
 
 
 def _wire_events(
     events: list[AIBuilderStreamEvent] | tuple[AIBuilderStreamEvent, ...],
 ) -> list[dict[str, str]]:
     return [encode_ai_builder_stream_event(event) for event in events]
+
+
+@contextmanager
+def _captured_proposal_telemetry() -> Iterator[list[logging.LogRecord]]:
+    records: list[logging.LogRecord] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = CaptureHandler()
+    old_level = proposal_telemetry_module.logger.level
+    proposal_telemetry_module.logger.setLevel(logging.INFO)
+    proposal_telemetry_module.logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        proposal_telemetry_module.logger.removeHandler(handler)
+        proposal_telemetry_module.logger.setLevel(old_level)
+
+
+def _failed_turn_payloads(
+    records: list[logging.LogRecord],
+) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for record in records:
+        payload = getattr(record, PROPOSAL_TELEMETRY_LOG_KEY, None)
+        if not isinstance(payload, dict) or payload.get("operation") != "failed_turn":
+            continue
+        payloads.append({str(key): value for key, value in payload.items()})
+    return payloads
+
+
+def _single_failed_turn_payload(
+    records: list[logging.LogRecord],
+) -> dict[str, object]:
+    payloads = _failed_turn_payloads(records)
+    assert len(payloads) == 1
+    return payloads[0]
 
 
 def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNamespace:
@@ -821,6 +867,11 @@ async def test_run_tool_self_correction_emits_error_event_when_planner_bails_to_
 async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validation_error() -> (
     None
 ):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-repair-feedback",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
     text_response = SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -842,8 +893,17 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
     responses = [text_response, tool_response]
 
     async def call_proposal_completion(
-        _: ProposalCompletionRequest,
+        request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason="tool_calls",
+            usage=_make_usage(
+                prompt_tokens=7,
+                completion_tokens=3,
+                total_tokens=10,
+            ),
+            counts_as_repair=request.counts_as_repair,
+        )
         return responses.pop(0)
 
     async def process_invocation(
@@ -854,67 +914,259 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
             failure_kind="validation",
         )
 
-    events: list[dict[str, str]] = []
-    async for event in run_tool_self_correction(
-        _make_self_correction_request(
-            request_id="req-repair-feedback",
-            error_message="Invalid propose_flow draft.",
-            llm_messages=[{"role": "user", "content": "build flow"}],
-            self_correction_temperature=0.35,
-            self_correction_bumped_temperature=0.6,
-            max_self_correction_retries=0,
-            forced_proposal_temperature=0.1,
-            repair_completion=call_proposal_completion,
-            process_tool_invocation=process_invocation,
-            target_kind=TargetKind.CREATE,
+    request = _make_self_correction_request(
+        request_id="req-repair-feedback",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow USER SECRET"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+    session_id = request.ctx.session_id
+
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
         )
-    ):
-        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
     assert payload["request_id"] == "req-repair-feedback"
     assert payload["code"] == "self_correction_invalid_plan"
     assert "Invalid step reference" not in payload["message"]
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-repair-feedback"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "self_correction_text_forced_retry_failed"
+    assert failed_payload["repair_attempts"] == 2
+    assert failed_payload["llm_calls"] == 2
+    assert failed_payload["prompt_tokens"] == 14
+    assert failed_payload["completion_tokens"] == 6
+    assert failed_payload["total_tokens"] == 20
+    assert failed_payload["final_failure_kind"] == "invalid_repair_plan"
+    assert failed_payload["final_error_code"] == "self_correction_invalid_plan"
+    encoded_payload = json.dumps(failed_payload, default=str)
+    assert "USER SECRET" not in encoded_payload
+    assert "Invalid step reference" not in encoded_payload
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_completion_error_logs_failed_turn() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-repair-provider-error",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+
+    async def call_proposal_completion(
+        _: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        raise RuntimeError("provider unavailable")
+
+    request = _make_self_correction_request(
+        request_id="req-repair-provider-error",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=AsyncMock(),
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
+        )
+
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "planner_upstream_error"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["branch"] == "self_correction_completion_error"
+    assert failed_payload["final_failure_kind"] == "provider_error"
+    assert failed_payload["final_error_code"] == "planner_upstream_error"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["llm_calls"] == 0
 
 
 @pytest.mark.asyncio
 async def test_run_tool_self_correction_handles_empty_completion_choices() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-empty-choices",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+
     async def call_proposal_completion(
-        _: ProposalCompletionRequest,
+        request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason=None,
+            usage=_make_usage(prompt_tokens=4, completion_tokens=0, total_tokens=4),
+            counts_as_repair=request.counts_as_repair,
+        )
         return SimpleNamespace(choices=())
 
-    events: list[dict[str, str]] = []
-    async for event in run_tool_self_correction(
-        _make_self_correction_request(
-            request_id="req-empty-choices",
-            error_message="Invalid propose_flow draft.",
-            llm_messages=[{"role": "user", "content": "build flow"}],
-            self_correction_temperature=0.35,
-            self_correction_bumped_temperature=0.6,
-            max_self_correction_retries=0,
-            forced_proposal_temperature=0.1,
-            repair_completion=call_proposal_completion,
-            process_tool_invocation=AsyncMock(),
-            target_kind=TargetKind.CREATE,
+    request = _make_self_correction_request(
+        request_id="req-empty-choices",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=AsyncMock(),
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
         )
-    ):
-        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
     assert payload["request_id"] == "req-empty-choices"
     assert payload["code"] == "planner_invalid_repair_response"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["branch"] == "self_correction_empty_completion_choices"
+    assert failed_payload["final_failure_kind"] == "invalid_repair_response"
+    assert failed_payload["final_error_code"] == "planner_invalid_repair_response"
+    assert failed_payload["repair_attempts"] == 1
+    assert failed_payload["llm_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_invalid_tool_result_logs_failed_turn() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-quality-repair",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+
+    async def call_proposal_completion(
+        request: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason="tool_calls",
+            usage=_make_usage(prompt_tokens=8, completion_tokens=3, total_tokens=11),
+            counts_as_repair=request.counts_as_repair,
+        )
+        return _bad_tool_response(1)
+
+    async def process_invocation(_: ToolRetryInvocation) -> ToolProcessingResult:
+        return ToolProcessingResult(feedback="still bad", failure_kind="quality")
+
+    request = _make_self_correction_request(
+        request_id="req-quality-repair",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
+        )
+
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "self_correction_quality_failure"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["branch"] == "self_correction_invalid_tool_result"
+    assert failed_payload["final_failure_kind"] == "repair_quality_failure"
+    assert failed_payload["final_error_code"] == "self_correction_quality_failure"
+    assert failed_payload["repair_attempts"] == 1
+    assert failed_payload["llm_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_missing_tool_response_logs_failed_turn() -> (
+    None
+):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-missing-repair-tool",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(message=SimpleNamespace(content="", tool_calls=None)),
+        ]
+    )
+
+    async def call_proposal_completion(
+        request: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason="stop",
+            usage=_make_usage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
+            counts_as_repair=request.counts_as_repair,
+        )
+        return response
+
+    request = _make_self_correction_request(
+        request_id="req-missing-repair-tool",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=AsyncMock(),
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
+        )
+
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "planner_invalid_repair_response"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["branch"] == "self_correction_missing_tool_response"
+    assert failed_payload["final_failure_kind"] == "invalid_repair_response"
+    assert failed_payload["final_error_code"] == "planner_invalid_repair_response"
+    assert failed_payload["provider_finish_reason"] == "stop"
 
 
 @pytest.mark.asyncio
 async def test_run_tool_self_correction_rejects_malformed_correction_tool_arguments() -> (
     None
 ):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-malformed-repair",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
     tool_call = SimpleNamespace(
         id="call_invalid_repair",
-        function=SimpleNamespace(name=PROPOSE_FLOW_TOOL_NAME, arguments="{not json"),
+        function=SimpleNamespace(
+            name=PROPOSE_FLOW_TOOL_NAME,
+            arguments="{not json MODEL OUTPUT SECRET",
+        ),
     )
     response = SimpleNamespace(
         choices=[
@@ -926,32 +1178,45 @@ async def test_run_tool_self_correction_rejects_malformed_correction_tool_argume
     process_invocation = AsyncMock()
 
     async def call_proposal_completion(
-        _: ProposalCompletionRequest,
+        request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason="tool_calls",
+            usage=_make_usage(prompt_tokens=6, completion_tokens=2, total_tokens=8),
+            counts_as_repair=request.counts_as_repair,
+        )
         return response
 
-    events: list[dict[str, str]] = []
-    async for event in run_tool_self_correction(
-        _make_self_correction_request(
-            request_id="req-malformed-repair",
-            error_message="Invalid propose_flow draft.",
-            llm_messages=[{"role": "user", "content": "build flow"}],
-            self_correction_temperature=0.35,
-            self_correction_bumped_temperature=0.6,
-            max_self_correction_retries=0,
-            forced_proposal_temperature=0.1,
-            repair_completion=call_proposal_completion,
-            process_tool_invocation=process_invocation,
-            target_kind=TargetKind.CREATE,
+    request = _make_self_correction_request(
+        request_id="req-malformed-repair",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
         )
-    ):
-        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
     assert payload["request_id"] == "req-malformed-repair"
     assert payload["code"] == "self_correction_invalid_payload"
     process_invocation.assert_not_awaited()
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["branch"] == "self_correction_malformed_tool_arguments"
+    assert failed_payload["final_failure_kind"] == "invalid_repair_payload"
+    assert failed_payload["final_error_code"] == "self_correction_invalid_payload"
+    assert failed_payload["repair_attempts"] == 1
+    assert failed_payload["llm_calls"] == 1
+    assert "MODEL OUTPUT SECRET" not in json.dumps(failed_payload, default=str)
 
 
 @pytest.mark.asyncio
