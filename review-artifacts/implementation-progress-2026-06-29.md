@@ -1562,6 +1562,56 @@
   - Existing tenants with stored per-action overrides for the removed values may retain inert override keys until a future audit-config maintenance cleanup; the validator now rejects new updates for those deleted values.
   - Rollback is low risk: restore the two enum values, category mappings, generated TypeScript union members, locale keys, remove the guard test and this ledger entry. No database schema, migration, runtime, retention, proposal-repair, Flow API, or data rollback is needed.
 
+## C8 Governance Gate 0/1
+
+- Slice id: Flow AI Builder release-governance Gate 0 + Gate 1 packet
+- Findings addressed: documentation-only reconciliation of Builder ship-path governance after C8.6 terminal session retention and C8.7 audit vocabulary cleanup.
+- Artifacts created:
+  - `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md`
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`
+- Evidence reviewed:
+  - C8.6 retention source and tests in `backend/src/intric/data_retention/infrastructure/data_retention_service.py:64-67,472-534`, `backend/src/intric/data_retention/infrastructure/data_retention_worker.py:204-219,313-328`, and `backend/tests/integration/test_data_retention_hierarchical.py:790-890`.
+  - C8.7 audit source and tests in `backend/src/intric/audit/domain/action_types.py:119-123`, `backend/src/intric/audit/domain/category_mappings.py:115-118`, `backend/src/intric/flows/ai_builder/ai_builder_router.py:489-504,1075-1089,1135-1150,1222-1243`, and `backend/tests/unit/test_audit_category_mappings.py:104-119`.
+  - Lifecycle state source in `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:31-42`, `backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py:9-21`, `backend/src/intric/database/tables/flow_tables.py:2074-2259`, and `backend/src/intric/flows/ai_builder/ai_builder_repo.py:613-826,909-1013,1118-1137`.
+  - Repair-pruning readiness source in `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:281-303,322-370`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:242-295,324-339`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:58,574-585`.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer and reported this docs-only changed-file set as low risk, with `ActionType`, `TestCategoryMappings`, and `test_ai_builder_actions_are_real_lifecycle_audit_events` as the key entities.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded governance slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/flow-builder-governance-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; its wording fixes were applied by avoiding claims that Builder retention deletes audit logs globally, avoiding claims that global files are guaranteed purged after Builder pins are removed, and naming the retention source as the existing hierarchical data/conversation policy.
+  - Read-only Codex final gate artifact `.codex/artifacts/flow-builder-governance-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`; no blockers were found.
+- Behavior changed:
+  - No source, test, backend, frontend, generated-client, OpenAPI, runtime, retention, audit, proposal-repair, MCP, or capability behavior changed.
+  - The new governance artifacts record the release decisions already implemented by C8.6 and C8.7 and name the remaining active-session and lifecycle/readability decisions.
+- Complexity deleted or owner clarified:
+  - The docs make `DataRetentionService` the retained terminal Builder session cleanup owner, audit enum/category mapping the retained audit vocabulary owner, and `AIBuilderRepository` / send-lease / plan-lifecycle code the current lifecycle truth surface for the next slice to verify.
+  - No new planning artifact family, PRD, governance framework, source abstraction, lifecycle manager, or retention subsystem was introduced.
+- Architecture delta:
+  - Canonical owner before: C8.6 and C8.7 had implemented retention and audit cleanup, but there was no single release-governance packet tying those decisions to Gate 0 / Gate 1.
+  - Canonical owner after: the two governance artifacts are the small handoff packet for release decisions; source ownership remains unchanged.
+  - Duplicate paths remaining: active-session lifecycle truth still spans send lease fields, `latest_plan_id`, `planning_state_version`, conversation-derived planning state, and plan lifecycle methods; this packet does not alter those owners.
+  - 9/10 follow-up candidate: lifecycle / `PlanningState` ownership proof and invariant cleanup should be the next bounded implementation slice before broader question/slot cleanup.
+  - Decision or measurement needed: release owner must accept that old active `chatting` / `awaiting_approval` sessions are kept by current policy, or send an attended active-abandonment retention slice; repair/fallback pruning still needs branch-level telemetry/eval evidence.
+  - What not to preserve: fake audit vocabulary, indefinite terminal Builder session retention, broad governance PRDs, MCP/capability work as a substitute for Builder release hardening, or repair pruning without evidence.
+- Gate 1 decisions recorded:
+  - Terminal `applied` and `cancelled` sessions use existing hierarchical data/conversation retention; active `chatting` and `awaiting_approval` sessions are kept by current policy.
+  - Applied conversations, planning state, and plans/proposals are retained with the session until terminal session retention deletes the session row.
+  - Builder session-file links are removed by explicit cancel or session deletion, while global `files` rows remain outside Builder retention.
+  - Builder session retention does not delete audit logs; audit logs have their own retention path.
+  - Real Builder audit actions are session created, session cancelled, plan approved, and flow applied; plan proposed/rejected remain deleted fake audit vocabulary.
+  - Cleanup is tenant/space policy driven through existing retention owners, not a Builder-specific hard-coded duration or user-scoped job.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && git status --short --branch && git rev-parse --short HEAD && git branch --show-current'` -> pass; branch `refactor/flows-clean`, HEAD `d4f0db1a`, only unrelated dirty files before docs.
+  - `docker exec ... rg -n "AI_BUILDER_" backend/src backend/tests frontend` and direct `nl -ba` source reads -> pass; evidence anchors verified before writing the packet.
+  - `docker exec ... rg -n "flow-builder-release-governance-gate0-2026-06-30|flow-builder-release-governance-packet-2026-06-30" review-artifacts/implementation-progress-2026-06-29.md review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md review-artifacts/flow-builder-release-governance-packet-2026-06-30.md` -> pass; packet and ledger links resolve.
+  - `docker exec ... rg -n "TODO|TBD|PLACEHOLDER|<date>|\\| \\| \\|" review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md review-artifacts/flow-builder-release-governance-packet-2026-06-30.md` -> pass; no placeholder rows or unresolved markers found.
+  - `docker exec ... git diff --check -- review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the two governance artifacts plus the progress ledger.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < /tmp/flow-builder-governance-plan-gate-20260630.prompt` -> pass; plan gate green.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < /tmp/flow-builder-governance-final-gate-20260630.prompt` -> pass; final gate green and commit-ready.
+- Remaining risk / rollback:
+  - This packet records current source policy rather than changing it. Rollback is low risk: remove the two governance artifacts and this ledger entry.
+  - If product/privacy rejects indefinite active Builder sessions, the next implementation must define an abandoned-active policy explicitly rather than inferring one from terminal retention.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
