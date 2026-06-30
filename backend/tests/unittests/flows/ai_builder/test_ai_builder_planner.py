@@ -411,6 +411,107 @@ async def test_resolve_user_question_metadata_preserves_requirements_confirmatio
 
 
 @pytest.mark.asyncio
+async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -> None:
+    planner = _make_planner()
+
+    result = await resolve_user_question_metadata(
+        litellm_client=planner.litellm_client,
+        conversation=[],
+        message="documents",
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": "input_material_mode",
+            "selected_values": ["documents"],
+        },
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+    )
+
+    assert result.metadata == {
+        "question_answer": {
+            "question_id": "input_material_mode",
+            "selected_values": ["documents"],
+        }
+    }
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="documents",
+                metadata=result.metadata,
+            )
+        ]
+    )
+    slot = state.resolved_slots["primary_runtime_input"]
+    assert slot.value == "documents"
+    assert slot.source == "structured_answer"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question_answer", "reason"),
+    [
+        (
+            {
+                "kind": "structured_question_answer",
+                "selected_values": ["documents"],
+            },
+            "missing_question_id",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
+                "question_id": "multi_file_strategy",
+                "selected_values": ["same_run"],
+            },
+            "unsupported_question_id",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
+                "question_id": "input_material_mode",
+            },
+            "empty_question_answer",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
+                "question_id": "input_material_mode",
+                "selected_values": ["banana"],
+            },
+            "unsupported_question_value",
+        ),
+        (
+            {
+                "kind": "structured_question_answer",
+                "question_id": "document_material_scope",
+                "selected_values": ["single_document_case", "banana"],
+            },
+            "unsupported_question_value",
+        ),
+    ],
+)
+async def test_resolve_user_question_metadata_rejects_uningestable_structured_answers(
+    question_answer: dict[str, object],
+    reason: str,
+) -> None:
+    planner = _make_planner()
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await resolve_user_question_metadata(
+            litellm_client=planner.litellm_client,
+            conversation=[],
+            message="documents",
+            question_answer=question_answer,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {"reason": reason}
+
+
+@pytest.mark.asyncio
 async def test_resolve_user_question_metadata_does_not_adjudicate_without_pending_question() -> (
     None
 ):
@@ -1147,7 +1248,9 @@ async def test_send_message_releases_lease_after_server_dispatch_exception(
     session_id = uuid4()
     _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
 
-    async def fail_dispatch(_: ServerDecisionDispatchRequest) -> ServerDecisionDispatchResult:
+    async def fail_dispatch(
+        _: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
         raise RuntimeError("dispatch failed")
 
     monkeypatch.setattr(
