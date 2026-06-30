@@ -44,6 +44,13 @@ Use this chain when planned work moves from roadmap discussion to code review.
 
 Do not point PRs at epics. The task connects implementation work to the roadmap card.
 
+```mermaid
+flowchart LR
+  PR["PR #140<br/>Fixes #456"] --> Task["Task #456<br/>Build role filter"]
+  Task --> Epic["Epic #123<br/>Improved role management"]
+  Epic --> Roadmap["Roadmap export<br/>2.2"]
+```
+
 ## Fields That Matter
 
 Project #5 uses these planning fields.
