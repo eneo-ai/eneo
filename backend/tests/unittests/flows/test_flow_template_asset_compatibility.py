@@ -134,6 +134,7 @@ async def test_publish_flow_resolves_legacy_template_file_id_through_flow_asset(
         template_asset_id
     )
     assert published_step["output_config"]["template_file_id"] == str(template_file_id)
+    assert published_step["output_config"]["template_checksum"] == "checksum-1"
     template_asset_repo.get_by_flow_file.assert_awaited_once_with(
         flow_id=flow.id,
         file_id=template_file_id,
@@ -228,6 +229,7 @@ async def test_publish_flow_promotes_legacy_template_file_id_into_flow_asset_whe
     published_step = definition_json["steps"][0]
     assert published_step["output_config"]["template_asset_id"] == str(created_asset_id)
     assert published_step["output_config"]["template_file_id"] == str(template_file_id)
+    assert published_step["output_config"]["template_checksum"] == "legacy-checksum"
 
 
 @pytest.mark.asyncio

@@ -5,11 +5,16 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.flow_tables import FlowVersions
+from intric.database.tables.files_table import Files
+from intric.database.tables.flow_tables import FlowTemplateAssets, FlowVersions
 from intric.flows.domain.flow import FlowPersistedJsonObject, FlowVersion
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.published_definition import (
+    PublishedTemplateIdentityAuditResult,
+    PublishedTemplateIdentityAuditSnapshot,
+    PublishedTemplateIdentityLiveAsset,
     PublishedTemplateReferenceScan,
+    audit_published_template_identity_readiness,
     merge_published_template_reference_scans,
     published_definition_checksum,
     scan_published_template_references,
@@ -32,6 +37,66 @@ async def scan_flow_version_template_references(
     definitions = (await session.execute(stmt)).scalars().all()
     return merge_published_template_reference_scans(
         scan_published_template_references(item) for item in definitions
+    )
+
+
+async def audit_flow_version_template_identity_readiness(
+    session: AsyncSession,
+    *,
+    sample_limit: int = 50,
+) -> PublishedTemplateIdentityAuditResult:
+    definition_stmt = sa.select(
+        FlowVersions.tenant_id,
+        FlowVersions.flow_id,
+        FlowVersions.version,
+        FlowVersions.definition_json,
+    ).order_by(
+        FlowVersions.tenant_id,
+        FlowVersions.flow_id,
+        FlowVersions.version,
+    )
+    definition_rows = (await session.execute(definition_stmt)).tuples().all()
+
+    asset_stmt = (
+        sa.select(
+            FlowTemplateAssets.tenant_id,
+            FlowTemplateAssets.flow_id,
+            FlowTemplateAssets.id,
+            FlowTemplateAssets.file_id,
+            Files.checksum,
+        )
+        .join(Files, Files.id == FlowTemplateAssets.file_id)
+        .where(FlowTemplateAssets.deleted_at.is_(None))
+        .order_by(
+            FlowTemplateAssets.tenant_id,
+            FlowTemplateAssets.flow_id,
+            FlowTemplateAssets.file_id,
+            FlowTemplateAssets.id,
+        )
+    )
+    asset_rows = (await session.execute(asset_stmt)).tuples().all()
+
+    return audit_published_template_identity_readiness(
+        snapshots=(
+            PublishedTemplateIdentityAuditSnapshot(
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                version=version,
+                definition_json=definition_json,
+            )
+            for tenant_id, flow_id, version, definition_json in definition_rows
+        ),
+        live_assets=(
+            PublishedTemplateIdentityLiveAsset(
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                asset_id=asset_id,
+                file_id=file_id,
+                checksum=file_checksum,
+            )
+            for tenant_id, flow_id, asset_id, file_id, file_checksum in asset_rows
+        ),
+        sample_limit=sample_limit,
     )
 
 

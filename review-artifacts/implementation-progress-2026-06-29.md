@@ -1002,6 +1002,77 @@
   - The legacy fallback deliberately keeps file-id-only published snapshots runnable; deleting it before a data proof would risk breaking old FlowVersions.
   - The later fallback-deletion slice must prove asset-backed published definitions retain checksum pinning, because once `template_file_id` is removed the checksum becomes the runtime reproducibility guard.
 
+## PG-D4.2
+
+- Slice id: PG-D4 template identity step 2
+- Findings addressed: read-only published-definition audit/proof for template-fill asset coverage and checksum readiness before any later `template_file_id` fallback deletion.
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:47` scopes PG-D4 to staged template/evidence migration, with runtime asset-first resolution, backfill/proof, then later file fallback deletion.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:105` identifies the dual `template_asset_id` / `template_file_id` path and requires temporary staged compatibility to carry an explicit sunset trigger.
+  - `review-artifacts/implementation-progress-2026-06-29.md:954-1007` records PG-D4.1's sunset trigger: keep the file-id fallback only until a backfill/audit proves every runtime-relevant template-fill definition carries a valid `template_asset_id` and preserved checksum.
+  - Fresh source review confirmed publish writes `template_asset_id`, `template_file_id`, and `template_checksum` at `backend/src/intric/flows/application/flow_service.py:911-916`.
+  - Fresh source review confirmed runtime parses asset/file/checksum config at `backend/src/intric/flows/runtime/template_fill_runtime.py:284-309`, resolves by asset id first while retaining file-id fallback at `backend/src/intric/flows/runtime/template_fill_runtime.py:359-386`, and verifies the loaded file checksum only when `template_checksum` is present at `backend/src/intric/flows/runtime/template_fill_runtime.py:411-415`.
+  - Fresh source review confirmed execution validates `definition_checksum` before parsing/execution at `backend/src/intric/flows/runtime/executor.py:611-617,2156-2170`, so this slice must not rewrite `flow_versions.definition_json` or `definition_checksum`.
+  - Fresh source review confirmed the existing retention scanner in `backend/src/intric/flows/published_definition.py:415-474` is key-based for blob retention, not suitable as the fallback-deletion readiness proof because the new proof must identify steps by persisted `output_mode == "template_fill"`.
+  - Fresh source review confirmed active template asset lookup excludes soft-deleted rows in `backend/src/intric/flows/flow_template_asset_repo.py:123-131`, and `backend/src/intric/database/tables/flow_tables.py:434-453` has no active unique constraint for `(tenant_id, flow_id, file_id)`, so duplicate file-to-asset mapping is a real file-id-only ambiguity.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer but was noisy for this small internal slice; all concrete claims were verified with direct source reads and exact `rg`.
+  - Read-only verifier agents reviewed published-definition audit semantics, runtime/checksum/data-integrity safety, and public API/frontend/generated-client surface area. Valid findings applied: keep the audit in `published_definition.py`, project active assets through `flow_version_repo.py`, compare published checksum to the file-row checksum runtime uses, keep soft-delete liveness aligned with runtime instead of inventing status semantics, and record run-contract checksum readiness drift as a follow-up.
+  - Claude peer-loop session `pgd4-template-identity-readiness-audit-20260630` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by keeping the proof in the existing published-definition owner, adding DB-backed projection coverage if a repository scanner is added, and not bending the retention scanner into a runtime deletion-readiness API.
+  - Claude iteration 2 could not run because the account hit the monthly spend limit. The project fallback wrapper `scripts/run_codex_review.sh` was not present, so a direct read-only `codex exec --sandbox read-only` fallback reviewed the narrowed plan and returned `VERDICT: green`, `GREEN_LIGHT: yes`; valid feedback applied by keeping file checksum semantics runtime-shaped, treating duplicate file-id mappings as a real ambiguity, and keeping the run-contract checksum-readiness mismatch out of this proof-only slice.
+  - Commit-gate Claude run could not complete because the same monthly spend limit remained. Direct read-only Codex fallback returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; valid feedback applied by preserving raw non-empty `template_checksum` strings exactly like runtime instead of trimming whitespace, then adding a checksum-whitespace mismatch unit test.
+  - Post-fix Claude retry still could not run because of the monthly spend limit. A staged-only read-only Codex fallback reviewed the final staged diff and returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9`.
+- Red proof:
+  - Before implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_published_definition_template_identity_audit.py` failed during collection with `ImportError: cannot import name 'PublishedTemplateIdentityAuditSnapshot'`, proving the typed deletion-readiness audit did not exist.
+- Files changed:
+  - `backend/src/intric/flows/published_definition.py`
+  - `backend/src/intric/flows/infrastructure/flow_version_repo.py`
+  - `backend/tests/unittests/flows/test_published_definition_template_identity_audit.py`
+  - `backend/tests/integration/flows/test_flow_version_repository.py`
+  - `backend/tests/unittests/flows/test_flow_template_asset_compatibility.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Added a read-only, typed audit result in `backend/src/intric/flows/published_definition.py:69-129` and audit logic in `backend/src/intric/flows/published_definition.py:181-412`.
+  - The audit identifies runtime-relevant rows by known-schema `steps[*].output_mode == "template_fill"` and fails closed for unknown schema, unreadable steps/config, missing or invalid asset id, missing checksum, non-live asset, asset/file mismatch, checksum mismatch, and ambiguous file-id-only mapping.
+  - Added `audit_flow_version_template_identity_readiness` in `backend/src/intric/flows/infrastructure/flow_version_repo.py:43-100`, which scans all FlowVersion rows and projects active, non-deleted template assets joined to `Files.checksum`.
+  - Existing publish behavior is unchanged, but compatibility tests now assert that legacy file-id publish paths emit the checksum along with the asset/file ids.
+  - No FlowVersion data is mutated, no migration/backfill is added, no runtime `template_file_id` fallback is deleted, and no CLI/API/endpoint/frontend/generated-client surface is added.
+- Complexity deleted or owner clarified:
+  - `published_definition.py` remains the canonical owner for published snapshot parsing/proof logic.
+  - `flow_version_repo.py` remains the canonical owner for FlowVersion DB scanning/projection.
+  - The existing retention scanner remains retention-owned and key-based; fallback-deletion readiness gets its own narrow typed proof instead of overloading retention semantics.
+- Architecture delta:
+  - Canonical owner before: no canonical owner existed for fallback-deletion readiness; only runtime resolution and blob-retention reference scanning existed.
+  - Canonical owner after: `published_definition.py` owns the pure readiness audit contract; `flow_version_repo.py` owns the read-only FlowVersion/active-asset projection that feeds it.
+  - Duplicate paths remaining: runtime and published snapshots still support both `template_asset_id` and `template_file_id`; the legacy file-id fallback and legacy runtime tests remain until a later zero-blocker audit/backfill proves they can be deleted.
+  - 9/10 follow-up candidate: run the audit against the target database, backfill or repair any blockers in an attended data slice, then delete the runtime file-id fallback and legacy tests once the audit returns zero blockers.
+  - Decision or measurement needed: measure real persisted FlowVersions with the audit; separately decide whether run-contract readiness should compare published checksum to current asset/file checksum instead of exposing a current-asset checksum that can false-green drift.
+  - What not to preserve: checksum-less template-fill snapshots, file-id-only published snapshots, ambiguous file-id-to-asset derivation, permanent dual identity, or unattended JSON rewrites without recomputing `definition_checksum`.
+- Measured readiness state:
+  - Unit coverage proves the audit reports blockers for missing `template_asset_id`, invalid `template_asset_id`, missing/empty `template_checksum`, non-live asset, asset/file mismatch, checksum mismatch including runtime-shaped whitespace mismatch, ambiguous file-id-only mapping, unknown schema, and unreadable output config.
+  - Integration fixture coverage in `backend/tests/integration/flows/test_flow_version_repository.py:284-386` measured `total_versions=3`, `template_fill_steps=2`, `ready_template_fill_steps=1`, `blocked_template_fill_steps=1`, with the blocked row classified as `ASSET_NOT_LIVE`.
+  - No local/dev application database audit was run in this slice. That is deliberate: the slice adds the read-only audit owner and tests only; local DB counts would not be production proof and there is no invocation surface by design.
+- Fallback deletion preconditions:
+  - Before deleting the runtime `template_file_id` fallback, run the read-only audit against the target persisted FlowVersion set and require zero blockers across all runtime-relevant published template-fill snapshots.
+  - Any blocker means a separate attended data/backfill/product-decision slice is required. The deletion slice must not proceed if unknown schema, unreadable values, missing asset id, missing checksum, non-live asset, asset/file mismatch, checksum mismatch, ambiguous file-id-only mapping, or incompatible runtime relevance remains.
+  - Missing `template_checksum` blocks fallback deletion because once file-id fallback is removed, checksum verification is the durable guard that the asset id still points to the originally published bytes.
+- Validation commands and results:
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_published_definition_template_identity_audit.py` -> red before implementation with missing audit import, then pass, 12 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_published_definition_template_references.py tests/unittests/flows/test_flow_template_asset_compatibility.py` -> pass, 8 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/integration/flows/test_flow_version_repository.py` -> pass, 3 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_published_definition_template_references.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py tests/unittests/flows/test_template_fill_runtime.py` -> pass, 46 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_service.py::test_publish_flow_pins_template_metadata_for_template_fill` -> pass, 1 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/published_definition.py src/intric/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass after formatting `published_definition.py` and the new audit test file.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/published_definition.py src/intric/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass, 0 errors.
+  - `git diff --cached --check` -> pass.
+  - `git diff --cached --name-only -- frontend backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web` -> no staged frontend/API/generated-client files.
+  - `git diff --cached -U0 -- backend/src backend/tests | rg -n "PG-|roadmap|phase|slice"` -> no matches.
+- Remaining risk / rollback:
+  - This is proof-only code, not a data readiness claim; target database readiness is unknown until the audit is run in an attended data slice.
+  - Rollback is low risk: remove the audit function, the read-only repository projection, and the tests. No schema, runtime execution, public API, generated client, frontend, or persisted data changes need rollback.
+  - Adjacent follow-up: `FlowRunContractService` readiness currently derives checksum/name from the current active asset rather than proving published checksum still matches; keep that out of PG-D4.2, but address before treating readiness UI/API as checksum-drift proof.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

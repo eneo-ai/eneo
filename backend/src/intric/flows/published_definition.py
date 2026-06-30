@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -11,6 +12,7 @@ from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from intric.flows.enums import FlowOutputMode
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_metadata import (
     FlowMetadata,
@@ -64,6 +66,69 @@ class PublishedTemplateReferenceScan:
         )
 
 
+class PublishedTemplateIdentityBlockerReason(str, Enum):
+    UNKNOWN_SCHEMA = "unknown_schema"
+    STEPS_UNREADABLE = "steps_unreadable"
+    STEP_UNREADABLE = "step_unreadable"
+    UNREADABLE_OUTPUT_CONFIG = "unreadable_output_config"
+    MISSING_TEMPLATE_ASSET_ID = "missing_template_asset_id"
+    INVALID_TEMPLATE_ASSET_ID = "invalid_template_asset_id"
+    INVALID_TEMPLATE_FILE_ID = "invalid_template_file_id"
+    MISSING_TEMPLATE_CHECKSUM = "missing_template_checksum"
+    ASSET_NOT_LIVE = "asset_not_live"
+    ASSET_FILE_MISMATCH = "asset_file_mismatch"
+    TEMPLATE_CHECKSUM_MISMATCH = "template_checksum_mismatch"
+    AMBIGUOUS_FILE_TO_ASSET_MAPPING = "ambiguous_file_to_asset_mapping"
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedTemplateIdentityAuditSnapshot:
+    tenant_id: UUID
+    flow_id: UUID
+    version: int
+    definition_json: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedTemplateIdentityLiveAsset:
+    tenant_id: UUID
+    flow_id: UUID
+    asset_id: UUID
+    file_id: UUID
+    checksum: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedTemplateIdentityBlockerCount:
+    reason: PublishedTemplateIdentityBlockerReason
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedTemplateIdentityBlockerSample:
+    tenant_id: UUID
+    flow_id: UUID
+    version: int
+    step_order: int | None
+    reason: PublishedTemplateIdentityBlockerReason
+    template_asset_id: UUID | None = None
+    template_file_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedTemplateIdentityAuditResult:
+    total_versions: int
+    template_fill_steps: int
+    ready_template_fill_steps: int
+    blocked_template_fill_steps: int
+    blocker_counts: tuple[PublishedTemplateIdentityBlockerCount, ...]
+    samples: tuple[PublishedTemplateIdentityBlockerSample, ...]
+
+    @property
+    def is_ready_for_template_file_fallback_deletion(self) -> bool:
+        return not self.blocker_counts
+
+
 def _step_order_sort_key(step: FlowPersistedJsonObject) -> int:
     step_order = step.get("step_order")
     if isinstance(step_order, int) and not isinstance(step_order, bool):
@@ -75,6 +140,10 @@ def _is_json_object(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
+def _is_json_array(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _normalized_uuid(value: object) -> UUID | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -82,6 +151,12 @@ def _normalized_uuid(value: object) -> UUID | None:
         return UUID(value)
     except ValueError:
         return None
+
+
+def _runtime_optional_string(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 def _template_reference_from_output_config(
@@ -93,6 +168,247 @@ def _template_reference_from_output_config(
         return None, False
     normalized = _normalized_uuid(value)
     return normalized, normalized is None
+
+
+def _published_template_step_order(step: Mapping[str, object]) -> int | None:
+    step_order = step.get("step_order")
+    if isinstance(step_order, int) and not isinstance(step_order, bool):
+        return step_order
+    return None
+
+
+def audit_published_template_identity_readiness(
+    *,
+    snapshots: Iterable[PublishedTemplateIdentityAuditSnapshot],
+    live_assets: Iterable[PublishedTemplateIdentityLiveAsset],
+    sample_limit: int = 50,
+) -> PublishedTemplateIdentityAuditResult:
+    live_assets_by_id: dict[
+        tuple[UUID, UUID, UUID], PublishedTemplateIdentityLiveAsset
+    ] = {}
+    live_assets_by_file: dict[
+        tuple[UUID, UUID, UUID], list[PublishedTemplateIdentityLiveAsset]
+    ] = {}
+    for asset in live_assets:
+        live_assets_by_id[(asset.tenant_id, asset.flow_id, asset.asset_id)] = asset
+        live_assets_by_file.setdefault(
+            (asset.tenant_id, asset.flow_id, asset.file_id), []
+        ).append(asset)
+
+    max_samples = max(sample_limit, 0)
+    counts: Counter[PublishedTemplateIdentityBlockerReason] = Counter()
+    samples: list[PublishedTemplateIdentityBlockerSample] = []
+    total_versions = 0
+    template_fill_steps = 0
+    ready_template_fill_steps = 0
+    blocked_template_fill_steps = 0
+
+    def add_blocker(
+        *,
+        snapshot: PublishedTemplateIdentityAuditSnapshot,
+        step_order: int | None,
+        reason: PublishedTemplateIdentityBlockerReason,
+        template_asset_id: UUID | None = None,
+        template_file_id: UUID | None = None,
+    ) -> None:
+        counts[reason] += 1
+        if len(samples) >= max_samples:
+            return
+        samples.append(
+            PublishedTemplateIdentityBlockerSample(
+                tenant_id=snapshot.tenant_id,
+                flow_id=snapshot.flow_id,
+                version=snapshot.version,
+                step_order=step_order,
+                reason=reason,
+                template_asset_id=template_asset_id,
+                template_file_id=template_file_id,
+            )
+        )
+
+    for snapshot in snapshots:
+        total_versions += 1
+        if (
+            snapshot.definition_json.get("schema_version")
+            != FLOW_DEFINITION_SCHEMA_VERSION
+        ):
+            add_blocker(
+                snapshot=snapshot,
+                step_order=None,
+                reason=PublishedTemplateIdentityBlockerReason.UNKNOWN_SCHEMA,
+            )
+            continue
+
+        raw_steps = snapshot.definition_json.get("steps")
+        if not _is_json_array(raw_steps):
+            add_blocker(
+                snapshot=snapshot,
+                step_order=None,
+                reason=PublishedTemplateIdentityBlockerReason.STEPS_UNREADABLE,
+            )
+            continue
+
+        for raw_step in raw_steps:
+            if not _is_json_object(raw_step):
+                add_blocker(
+                    snapshot=snapshot,
+                    step_order=None,
+                    reason=PublishedTemplateIdentityBlockerReason.STEP_UNREADABLE,
+                )
+                continue
+            if raw_step.get("output_mode") != FlowOutputMode.TEMPLATE_FILL.value:
+                continue
+
+            template_fill_steps += 1
+            step_order = _published_template_step_order(raw_step)
+            raw_output_config = raw_step.get("output_config")
+            if not _is_json_object(raw_output_config):
+                add_blocker(
+                    snapshot=snapshot,
+                    step_order=step_order,
+                    reason=(
+                        PublishedTemplateIdentityBlockerReason.UNREADABLE_OUTPUT_CONFIG
+                    ),
+                )
+                blocked_template_fill_steps += 1
+                continue
+
+            step_blocked = False
+            template_asset_id, unreadable_asset_reference = (
+                _template_reference_from_output_config(
+                    raw_output_config,
+                    "template_asset_id",
+                )
+            )
+            template_file_id, unreadable_file_reference = (
+                _template_reference_from_output_config(
+                    raw_output_config,
+                    "template_file_id",
+                )
+            )
+            template_checksum = _runtime_optional_string(
+                raw_output_config.get("template_checksum")
+            )
+
+            if unreadable_asset_reference:
+                add_blocker(
+                    snapshot=snapshot,
+                    step_order=step_order,
+                    reason=(
+                        PublishedTemplateIdentityBlockerReason.INVALID_TEMPLATE_ASSET_ID
+                    ),
+                    template_file_id=template_file_id,
+                )
+                step_blocked = True
+            elif template_asset_id is None:
+                add_blocker(
+                    snapshot=snapshot,
+                    step_order=step_order,
+                    reason=(
+                        PublishedTemplateIdentityBlockerReason.MISSING_TEMPLATE_ASSET_ID
+                    ),
+                    template_file_id=template_file_id,
+                )
+                step_blocked = True
+
+            if unreadable_file_reference:
+                add_blocker(
+                    snapshot=snapshot,
+                    step_order=step_order,
+                    reason=(
+                        PublishedTemplateIdentityBlockerReason.INVALID_TEMPLATE_FILE_ID
+                    ),
+                    template_asset_id=template_asset_id,
+                )
+                step_blocked = True
+
+            if template_checksum is None:
+                add_blocker(
+                    snapshot=snapshot,
+                    step_order=step_order,
+                    reason=(
+                        PublishedTemplateIdentityBlockerReason.MISSING_TEMPLATE_CHECKSUM
+                    ),
+                    template_asset_id=template_asset_id,
+                    template_file_id=template_file_id,
+                )
+                step_blocked = True
+
+            if template_asset_id is None:
+                if template_file_id is not None:
+                    mapped_assets = live_assets_by_file.get(
+                        (snapshot.tenant_id, snapshot.flow_id, template_file_id),
+                        [],
+                    )
+                    if len(mapped_assets) > 1:
+                        add_blocker(
+                            snapshot=snapshot,
+                            step_order=step_order,
+                            reason=(
+                                PublishedTemplateIdentityBlockerReason.AMBIGUOUS_FILE_TO_ASSET_MAPPING
+                            ),
+                            template_file_id=template_file_id,
+                        )
+                        step_blocked = True
+            else:
+                live_asset = live_assets_by_id.get(
+                    (snapshot.tenant_id, snapshot.flow_id, template_asset_id)
+                )
+                if live_asset is None:
+                    add_blocker(
+                        snapshot=snapshot,
+                        step_order=step_order,
+                        reason=PublishedTemplateIdentityBlockerReason.ASSET_NOT_LIVE,
+                        template_asset_id=template_asset_id,
+                        template_file_id=template_file_id,
+                    )
+                    step_blocked = True
+                else:
+                    if (
+                        template_file_id is not None
+                        and live_asset.file_id != template_file_id
+                    ):
+                        add_blocker(
+                            snapshot=snapshot,
+                            step_order=step_order,
+                            reason=(
+                                PublishedTemplateIdentityBlockerReason.ASSET_FILE_MISMATCH
+                            ),
+                            template_asset_id=template_asset_id,
+                            template_file_id=template_file_id,
+                        )
+                        step_blocked = True
+                    if (
+                        template_checksum is not None
+                        and live_asset.checksum != template_checksum
+                    ):
+                        add_blocker(
+                            snapshot=snapshot,
+                            step_order=step_order,
+                            reason=(
+                                PublishedTemplateIdentityBlockerReason.TEMPLATE_CHECKSUM_MISMATCH
+                            ),
+                            template_asset_id=template_asset_id,
+                            template_file_id=template_file_id,
+                        )
+                        step_blocked = True
+
+            if step_blocked:
+                blocked_template_fill_steps += 1
+            else:
+                ready_template_fill_steps += 1
+
+    return PublishedTemplateIdentityAuditResult(
+        total_versions=total_versions,
+        template_fill_steps=template_fill_steps,
+        ready_template_fill_steps=ready_template_fill_steps,
+        blocked_template_fill_steps=blocked_template_fill_steps,
+        blocker_counts=tuple(
+            PublishedTemplateIdentityBlockerCount(reason=reason, count=counts[reason])
+            for reason in sorted(counts, key=lambda item: item.value)
+        ),
+        samples=tuple(samples),
+    )
 
 
 def scan_published_template_references(
