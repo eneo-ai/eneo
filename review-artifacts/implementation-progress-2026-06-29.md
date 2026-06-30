@@ -1935,6 +1935,60 @@
   - Failed LLM calls that raise before a provider response are still counted as zero completed `llm_calls`, matching existing direct provider-error behavior.
   - Rollback is low risk: remove the self-correction branch/failure literals, remove the repair-local log helper/call sites, remove the focused telemetry assertions, and delete this ledger entry. Stream error behavior would revert to the prior state. No schema, migration, API, frontend, runtime, retention, audit, MCP, or generated-client rollback is needed.
 
+## C8.14
+
+- Slice id: C8.14 Flow AI Builder repair/fallback pruneability evidence
+- Findings addressed: review of JSON-text fallback, forced-tool retry, self-correction repair, and direct failed-turn branches after C8.13 to decide whether any repair/fallback code can be safely pruned.
+- Evidence reviewed:
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:62,97-102` already records the release decision: do not prune repair/fallback branches until branch-level evidence proves a branch is dead or harmful.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` owns the typed failed-turn branch/failure literals; `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:291-312` owns the content-free failed-turn payload fields; `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:332-380` owns the payload builder and log helper.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240-330` logs direct terminal proposal outcomes for provider completion error, empty choices, provider truncation, and final forced-tool missing submission.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:502-516,547-616` routes malformed/invalid `propose_flow` tool submissions into self-correction, proving self-correction is reachable from the production proposal owner.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:314-321,621-642` routes text-only missing-tool output into forced retry, proving forced-tool retry is reachable from the production proposal owner.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:440-650` owns self-correction retry/success/terminal routing; `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:656-805` owns forced-tool retry and JSON-text fallback.
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:419-531` proves JSON-text fallback accepts fenced/plain JSON arguments and preserves validation feedback without spending another completion call.
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:336-417,535-588` proves forced-tool retry builds a typed invocation, surfaces user messages, preserves parse feedback, and leaves legitimate information requests unforced.
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:695-743,1223-1415` proves self-correction retry budget, terminal user-safe errors, a text-fallback-plus-invalid-tool retry that recovers to a plan, bounded text feedback retries, and legitimate information requests.
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:867-1220` proves terminal self-correction branches now emit exactly one content-free failed-turn payload with repair attempts, LLM calls, token usage, final error code, and no prompt/model-output content.
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:397-524` proves provider truncation bypasses repair and final forced-tool missing submission emits failed-turn telemetry.
+  - `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:142-166` runs every buildable golden through critic, canonical authoring command preparation, and deterministic materialization; `backend/tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py:728-748` lists the 19 buildable goldens. This proves materialization coverage, not live provider-output branch value.
+- Branch pruneability decision:
+
+  | Branch family | Current decision | Evidence basis | Deletion blocker |
+  |---|---|---|---|
+  | JSON-text fallback | Keep; not prunable. | Live production forced-retry owner plus tests accepting fenced/plain JSON text without another completion. | Need real branch-level telemetry showing the branch never saves proposals or is harmful. |
+  | Forced-tool retry | Keep; not prunable. | Live production text-only missing-tool path plus tests covering typed invocation, feedback, and information-request preservation. | Need real branch-level telemetry showing retry cost exceeds recovery value or duplicates another stronger path. |
+  | Self-correction retry/repair | Keep; not prunable. | Live production malformed/invalid-tool path plus tests covering recovery, bounded retries, terminal errors, and C8.13 failed-turn payloads. | Need real branch-level telemetry, reviewed against deterministic materialization goldens, before deciding any self-correction branch is debt. |
+  | Direct failed-turn branches | Keep as measurement/classification. | Direct terminal proposal branches already log typed failed-turn payloads. | These are terminal classifiers, not repair code; deleting them would remove observability needed for future pruning. |
+
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer; it identified the C8.13 self-correction helpers, but exact branch evidence came from direct source reads and `rg`.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded evidence slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c8-14-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes` for a short docs-only progress-ledger entry. Valid guidance applied: do not prune source/test code, do not update the governance packet, cross-reference existing C8.13 inventory rather than duplicating it, and include the proposal-submission reachability citations.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c8-14-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes`; required fixes: none.
+- Files changed:
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No backend source, tests, public API, OpenAPI output, generated client, frontend code, Flow runtime, telemetry payload shape, retention, audit, MCP, capability, prompt, provider strategy, model call strategy, or proposal repair/fallback behavior changed.
+  - No repair/fallback branch was pruned.
+- Complexity deleted or owner clarified:
+  - No source complexity was added. The durable decision is that existing repair branches remain owned by their current proposal submission/repair/telemetry owners until real branch data justifies deletion.
+  - This slice prevents speculative deletion and prevents a parallel telemetry/eval framework from being introduced merely to make a pruning decision.
+- Architecture delta:
+  - Canonical owner before: `ProposalSubmissionOwner` owns direct proposal terminal outcomes, `ai_builder_proposal_repair.py` owns repair/fallback execution, and `ai_builder_proposal_telemetry.py` owns failed-turn payloads.
+  - Canonical owner after: unchanged.
+  - Duplicate paths remaining: direct proposal and self-correction repair still have branch-specific call sites because they are different terminal owners; JSON-text fallback, forced-tool retry, and self-correction remain live bounded repair paths.
+  - 9/10 follow-up candidate: collect or replay branch-level failed-turn/success telemetry from staging or production-like Builder runs and compare it to the deterministic materialization golden matrix before any pruning slice.
+  - Decision or measurement needed: require per-branch frequency, recovery/success contribution, failed cost, final error code distribution, provider finish reason where available, and content-free payload verification before reopening pruning.
+  - What not to preserve: repair pruning based only on unit tests, deterministic goldens, or deletion bias without real branch-level evidence; generic telemetry/eval frameworks; content-bearing logs; MCP/capability work as a substitute for Builder reliability evidence.
+- Validation commands and results:
+  - `git diff --check -- review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
+  - Backend pytest, ruff, and pyright were not run because this slice changed only the progress ledger and made no source/test changes.
+- Remaining risk / rollback:
+  - Risk is documentation-only. The decision may be superseded by later real branch-level telemetry, at which point a dedicated deletion slice should update this ledger and remove the proven branch at its canonical owner.
+  - Rollback is low risk: delete this C8.14 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
