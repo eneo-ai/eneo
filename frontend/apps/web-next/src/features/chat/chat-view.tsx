@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bot, Copy, Globe, Paperclip } from "lucide-react";
+import { Copy, Globe, Paperclip, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -58,6 +58,72 @@ import {
 import { useAttachments } from "./use-attachments";
 
 const NO_MENTION = "__none__";
+
+function PersonalAssistantWelcome({
+  title,
+  description,
+  onSelectPrompt
+}: {
+  title: string;
+  description: string;
+  onSelectPrompt: (prompt: string) => void;
+}) {
+  const t = useTranslations();
+  const suggestions = [
+    {
+      label: t("personal_assistant_suggestion_summarize"),
+      prompt: t("personal_assistant_prompt_summarize")
+    },
+    {
+      label: t("personal_assistant_suggestion_draft"),
+      prompt: t("personal_assistant_prompt_draft")
+    },
+    {
+      label: t("personal_assistant_suggestion_plan"),
+      prompt: t("personal_assistant_prompt_plan")
+    }
+  ];
+
+  return (
+    <ConversationEmptyState className="px-4 py-10">
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-6">
+        <div
+          aria-hidden="true"
+          className="bg-card relative grid size-16 place-items-center rounded-2xl border shadow-sm"
+        >
+          <div className="absolute inset-1 rounded-[0.875rem] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--primary)_18%,transparent),color-mix(in_oklab,var(--chart-2)_14%,transparent),color-mix(in_oklab,var(--chart-5)_14%,transparent))]" />
+          <div className="bg-background/85 relative grid size-11 place-items-center rounded-xl shadow-inner backdrop-blur">
+            <Sparkles className="text-primary size-5" />
+          </div>
+        </div>
+
+        <div className="space-y-3 text-center">
+          <p className="text-primary text-xs font-semibold">{t("personal_assistant_eyebrow")}</p>
+          <h2 className="text-foreground text-3xl font-semibold sm:text-4xl">{title}</h2>
+          <p className="text-muted-foreground mx-auto max-w-xl text-base leading-7">
+            {description}
+          </p>
+        </div>
+
+        <div className="grid w-full gap-2 sm:grid-cols-3">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.label}
+              type="button"
+              className="group bg-card hover:border-primary/40 hover:bg-accent focus-visible:border-ring focus-visible:ring-ring/50 flex min-h-16 items-center gap-3 rounded-lg border px-3 py-3 text-left text-sm font-medium shadow-sm transition-colors focus-visible:ring-[3px]"
+              onClick={() => onSelectPrompt(suggestion.prompt)}
+            >
+              <span className="bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground grid size-8 shrink-0 place-items-center rounded-md transition-colors">
+                <Sparkles className="size-4" />
+              </span>
+              <span>{suggestion.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </ConversationEmptyState>
+  );
+}
 
 export function ChatView({
   partner,
@@ -224,12 +290,12 @@ export function ChatView({
         <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-0 py-6">
           {messages.length === 0 &&
             (partner.type === "default-assistant" ? (
-              <ConversationEmptyState
-                icon={<Bot className="size-10" />}
+              <PersonalAssistantWelcome
                 title={t("hi_firstname", {
                   firstName: user.username || user.email.split("@")[0] || user.email
                 })}
                 description={t("personal_assistant_welcome")}
+                onSelectPrompt={setInput}
               />
             ) : (
               <ConversationEmptyState title={partner.name} description={t("ask_a_question")} />

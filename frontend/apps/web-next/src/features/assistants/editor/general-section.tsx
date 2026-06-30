@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useReportDirty } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,6 +42,7 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
   const [description, setDescription] = useState(assistant.description ?? "");
 
   const dirty = name !== assistant.name || description !== (assistant.description ?? "");
+  useReportDirty("general", dirty);
 
   return (
     <SettingsGroup title={t("general")}>

@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useReportDirty } from "@/components/composites/save-status";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
 import { SaveRow } from "./general-section";
@@ -34,6 +35,7 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
   const [selections, setSelections] = useState<KnowledgeSelections>(saved);
 
   const dirty = toIds(selections) !== toIds(saved);
+  useReportDirty("knowledge", dirty);
 
   const hasAnyKnowledge =
     selections.collections.length +

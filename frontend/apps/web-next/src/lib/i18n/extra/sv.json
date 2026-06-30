@@ -121,5 +121,18 @@
   "try_again": "Försök igen",
   "back_to_home": "Tillbaka till start",
   "test": "Testa",
-  "unsaved_changes": "{count, plural, one {# osparad ändring} other {# osparade ändringar}}"
+  "unsaved_changes": "{count, plural, one {# osparad ändring} other {# osparade ändringar}}",
+  "markdown_supported": "Markdown stöds",
+  "expand": "Expandera",
+  "characters": "tecken",
+  "reasoning_effort_help": "Högre nivå ger mer noggrant resonemang och långsammare svar.",
+  "context_window": "kontext",
+  "personal_assistant_welcome": "Jag kan hjälpa dig att tänka igenom, sammanfatta och komma vidare. Börja med en fråga, ett utkast eller en fil.",
+  "personal_assistant_eyebrow": "Din AI-arbetsyta",
+  "personal_assistant_suggestion_summarize": "Sammanfatta något",
+  "personal_assistant_prompt_summarize": "Sammanfatta detta och lyft fram de viktigaste punkterna:\n\n",
+  "personal_assistant_suggestion_draft": "Skriv ett utkast",
+  "personal_assistant_prompt_draft": "Hjälp mig skriva ett tydligt utkast till: ",
+  "personal_assistant_suggestion_plan": "Gör en plan",
+  "personal_assistant_prompt_plan": "Gör en konkret plan för: "
 }

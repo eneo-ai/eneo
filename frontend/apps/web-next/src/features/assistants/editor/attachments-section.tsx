@@ -3,8 +3,8 @@
 import { File, FileImage, FileText, Paperclip, UploadCloud, X } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useReportDirty } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,14 +17,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { useSpace } from "@/features/spaces/use-space";
 import { cn } from "@/lib/utils";
 import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 type Attachment = NonNullable<Assistant["attachments"]>[number];
-
-const BYTES_PER_TOKEN = 4;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -54,13 +51,6 @@ function compactTokens(value: number): string {
   );
 }
 
-/** token_count is computed server-side; estimate from extracted text until it arrives. */
-function attachmentTokens(file: Attachment): number {
-  if (file.token_count != null) return file.token_count;
-  if (file.transcription) return Math.ceil(file.transcription.length / BYTES_PER_TOKEN);
-  return 0;
-}
-
 function FileIcon({ mimetype }: { mimetype: string }) {
   const className = "text-muted-foreground size-5 shrink-0";
   if (mimetype.startsWith("image/")) return <FileImage aria-hidden="true" className={className} />;
@@ -77,7 +67,6 @@ function FileIcon({ mimetype }: { mimetype: string }) {
 export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const format = useFormatter();
-  const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -90,19 +79,9 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   const dirty =
     JSON.stringify(files.map((file) => file.id).sort()) !==
     JSON.stringify(saved.map((file) => file.id).sort());
+  useReportDirty("attachments", dirty);
 
   const totalSize = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
-  const promptTokens = Math.ceil((assistant.prompt?.text?.length ?? 0) / BYTES_PER_TOKEN);
-  const filesTokens = files.reduce((sum, file) => sum + attachmentTokens(file), 0);
-  const model =
-    space.completion_models.find((candidate) => candidate.id === assistant.completion_model?.id) ??
-    null;
-  const maxTokens = model?.token_limit ?? null;
-
-  const segments: ContextSegment[] = [
-    { key: "prompt", label: t("prompt"), tokens: promptTokens, className: "bg-chart-1" },
-    { key: "attachments", label: t("attachments"), tokens: filesTokens, className: "bg-chart-2" }
-  ];
 
   function metaLine(file: Attachment): string {
     return [
@@ -151,11 +130,9 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   }
 
   return (
-    <SettingsGroup title={t("attachments")}>
-      <SettingsRow title={t("attachments")} description={t("attachments_description")}>
+    <SettingsGroup title={t("attachments")} description={t("attachments_description")}>
+      <SettingsRow>
         <div className="flex flex-col gap-3">
-          <ContextBudget segments={segments} maxTokens={maxTokens} />
-
           {files.length > 0 && (
             <div className="rounded-lg border">
               <div className="text-muted-foreground border-b px-3 py-2 text-xs">

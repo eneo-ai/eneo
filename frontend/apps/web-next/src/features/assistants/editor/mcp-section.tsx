@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useReportDirty } from "@/components/composites/save-status";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useSpace } from "@/features/spaces/use-space";
@@ -25,6 +26,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   const [selected, setSelected] = useState<Set<string>>(new Set(savedIds));
 
   const dirty = JSON.stringify([...selected].sort()) !== JSON.stringify([...savedIds].sort());
+  useReportDirty("mcp", dirty);
 
   const hasKnowledge =
     assistant.groups.length +
@@ -45,8 +47,8 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   }
 
   return (
-    <SettingsGroup title={t("mcp_servers")}>
-      <SettingsRow title={t("mcp_servers")} description={t("mcp_servers_description")}>
+    <SettingsGroup title={t("mcp_servers")} description={t("mcp_servers_description")}>
+      <SettingsRow>
         <div className="flex flex-col gap-2">
           {disabledByKnowledge && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">

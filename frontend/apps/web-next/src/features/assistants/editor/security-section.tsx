@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useReportDirty } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSpace } from "@/features/spaces/use-space";
@@ -17,6 +18,7 @@ export function SecuritySection({ assistant }: { assistant: Assistant }) {
   const saved = assistant.data_retention_days?.toString() ?? "";
   const [days, setDays] = useState(saved);
   const dirty = days !== saved;
+  useReportDirty("security", dirty);
 
   const inherited = space.data_retention_days ? `${space.data_retention_days} ${t("days")}` : "∞";
 

@@ -9,6 +9,7 @@ Dev server runs on port **3100** (the SvelteKit app owns 3000):
 
 ```bash
 bun run dev      # next dev -p 3100
+bun run dev:clean # clear .next/node cache, then start next dev -p 3100
 bun run build    # production build
 bun run check    # tsc --noEmit
 bun run lint     # prettier --check + eslint

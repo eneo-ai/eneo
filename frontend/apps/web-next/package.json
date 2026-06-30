@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3100",
+    "dev:clean": "bun run clean:cache && bun run dev",
+    "clean:cache": "rm -rf .next node_modules/.cache",
     "build": "next build",
     "start": "next start",
     "lint": "node scripts/check-i18n.mjs && prettier --check . && eslint",

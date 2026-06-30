@@ -1111,7 +1111,7 @@
   "what_users_can_manage": "What users of this role can manage",
   "what_users_of_this_role_can_manage": "What users of this role can manage",
   "security_classifications": "Security classifications",
-  "personal_assistant_welcome": "Welcome to Eneo. I'm your personal assistant and ready to help. Ask me a question to get started.",
+  "personal_assistant_welcome": "I can help you think through work, summarize context, and move forward. Start with a question, draft, or file.",
   "hi_firstname": "Hi, {firstName}!",
   "personal_assistant": "Personal assistant",
   "personal_chat_no_access_title": "You don't have access to the personal chat",
@@ -3703,5 +3703,17 @@
   "try_again": "Try again",
   "back_to_home": "Back to home",
   "test": "Test",
-  "unsaved_changes": "{count, plural, one {# unsaved change} other {# unsaved changes}}"
+  "unsaved_changes": "{count, plural, one {# unsaved change} other {# unsaved changes}}",
+  "markdown_supported": "Markdown supported",
+  "expand": "Expand",
+  "characters": "characters",
+  "reasoning_effort_help": "Higher effort means more thorough reasoning and slower replies.",
+  "context_window": "context",
+  "personal_assistant_eyebrow": "Your AI workspace",
+  "personal_assistant_suggestion_summarize": "Summarize something",
+  "personal_assistant_prompt_summarize": "Summarize this and highlight the most important points:\n\n",
+  "personal_assistant_suggestion_draft": "Write a draft",
+  "personal_assistant_prompt_draft": "Help me write a clear draft for: ",
+  "personal_assistant_suggestion_plan": "Make a plan",
+  "personal_assistant_prompt_plan": "Make a concrete plan for: "
 }

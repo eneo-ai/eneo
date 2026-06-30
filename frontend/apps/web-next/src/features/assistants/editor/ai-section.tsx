@@ -1,10 +1,13 @@
 "use client";
 
+import { Brain, Eye, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
+import { useReportDirty } from "@/components/composites/save-status";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -14,7 +17,10 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { formatCostPerMillionTokens, formatTokens } from "@/features/ai-models/format-model-stats";
 import { useSpace } from "@/features/spaces/use-space";
+import type { Schema } from "@/lib/api/models";
+import { cn } from "@/lib/utils";
 import {
   BEHAVIOUR_LIST,
   behaviourFromKwargs,
@@ -30,6 +36,8 @@ import {
 } from "./model-kwargs";
 import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
+
+type CompletionModel = Schema<"CompletionModelPublic">;
 
 const NUMERIC_DEFAULT_MAX: Partial<Record<ModelKwargName, number>> = {
   top_p: 1,
@@ -72,6 +80,108 @@ function optionLabel(option: string, t: (key: string) => string): string {
   }
 }
 
+/** Compact capability/context/price chips for the selected model. */
+function ModelSummary({
+  model,
+  showPricing,
+  t
+}: {
+  model: CompletionModel;
+  showPricing: boolean;
+  t: (key: string, values?: Record<string, string>) => string;
+}) {
+  const inputPrice = formatCostPerMillionTokens(model.input_cost_per_token);
+  const outputPrice = formatCostPerMillionTokens(model.output_cost_per_token);
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {model.max_input_tokens > 0 && (
+        <Badge variant="secondary" className="font-normal tabular-nums">
+          {formatTokens(model.max_input_tokens)} {t("context_window")}
+        </Badge>
+      )}
+      {model.vision && (
+        <Badge variant="secondary" className="font-normal">
+          <Eye aria-hidden="true" className="size-3" />
+          {t("model_label_vision")}
+        </Badge>
+      )}
+      {model.supports_tool_calling && (
+        <Badge variant="secondary" className="font-normal">
+          <Wrench aria-hidden="true" className="size-3" />
+          {t("model_label_tool_calling")}
+        </Badge>
+      )}
+      {model.reasoning && (
+        <Badge variant="secondary" className="font-normal">
+          <Brain aria-hidden="true" className="size-3" />
+          {t("model_label_reasoning")}
+        </Badge>
+      )}
+      {showPricing && inputPrice && (
+        <Badge variant="outline" className="font-normal tabular-nums">
+          {t("model_selector_input_price")}: {inputPrice}
+        </Badge>
+      )}
+      {showPricing && outputPrice && (
+        <Badge variant="outline" className="font-normal tabular-nums">
+          {t("model_selector_output_price")}: {outputPrice}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+/** Segmented "default + options" control for the reasoning-effort kwarg. */
+function ReasoningSegmentedControl({
+  id,
+  value,
+  options,
+  onChange,
+  t
+}: {
+  id: string;
+  value: string | null | undefined;
+  options: string[];
+  onChange: (value: string | null) => void;
+  t: (key: string) => string;
+}) {
+  const segments: { key: string; value: string | null; label: string }[] = [
+    { key: "__default", value: null, label: t("default_behavior") },
+    ...options.map((option) => ({ key: option, value: option, label: optionLabel(option, t) }))
+  ];
+  const active = value ?? null;
+
+  return (
+    <div
+      id={id}
+      role="group"
+      aria-label={t("reasoning_effort")}
+      className="inline-flex overflow-hidden rounded-md border"
+    >
+      {segments.map((segment) => {
+        const selected = active === segment.value;
+        return (
+          <button
+            key={segment.key}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(segment.value)}
+            className={cn(
+              "border-l px-3 py-1.5 text-sm transition-colors first:border-l-0",
+              selected
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+          >
+            {segment.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AiSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -87,8 +197,10 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
   const behaviour = behaviourFromKwargs(kwargs);
   const presetsSupported = model === null || supportsBehaviorPresets(model);
   const specificKwargs = modelSpecificKwargs(model);
+  const showModelPricing = tenant.show_model_pricing === true;
 
   const dirty = modelId !== savedModelId || JSON.stringify(kwargs) !== JSON.stringify(savedKwargs);
+  useReportDirty("ai", dirty);
 
   function selectBehaviour(next: ModelBehaviour) {
     const preset = kwargsForBehaviour(next);
@@ -131,8 +243,9 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
           selectedId={modelId}
           onSelect={setModelId}
           className="w-full justify-between"
-          showPricing={tenant.show_model_pricing}
+          showPricing={showModelPricing}
         />
+        {model && <ModelSummary model={model} showPricing={showModelPricing} t={t} />}
       </SettingsRow>
 
       {presetsSupported && (
@@ -195,6 +308,25 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
           <div className="flex flex-col gap-3">
             {specificKwargs.map((name) => {
               const capability = kwargCapability(model, name);
+
+              if (name === "reasoning_effort") {
+                return (
+                  <div key={name} className="flex flex-col gap-1.5">
+                    <Label htmlFor={`kwarg-${name}`} className="text-muted-foreground font-normal">
+                      {kwargLabel(name, t)}
+                    </Label>
+                    <ReasoningSegmentedControl
+                      id={`kwarg-${name}`}
+                      value={kwargs[name] as string | null | undefined}
+                      options={capability?.options ?? []}
+                      onChange={(value) => setKwargs((current) => ({ ...current, [name]: value }))}
+                      t={t}
+                    />
+                    <p className="text-muted-foreground text-sm">{t("reasoning_effort_help")}</p>
+                  </div>
+                );
+              }
+
               return (
                 <div key={name} className="flex items-center justify-between gap-4">
                   <Label htmlFor={`kwarg-${name}`} className="text-muted-foreground font-normal">
