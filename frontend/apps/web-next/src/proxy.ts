@@ -7,7 +7,7 @@ import {
   sealSession,
   type SessionPayload
 } from "@/lib/auth/session-codec";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { OIDC_SESSION_MAX_AGE_SECONDS, SESSION_COOKIE } from "@/lib/auth/session";
 
 /**
  * Optimistic auth gating + the sliding OIDC refresh. Real authorization is
@@ -26,8 +26,6 @@ const PUBLIC_PREFIXES = [
   "/invite",
   "/integrations/callback"
 ];
-
-const OIDC_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

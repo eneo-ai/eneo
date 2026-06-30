@@ -1,10 +1,9 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Textarea } from "@/components/ui/textarea";
-import { SaveRow } from "@/features/assistants/editor/general-section";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
 
@@ -16,9 +15,11 @@ export function InstructionsSection({ app }: { app: App }) {
   const t = useTranslations();
   const update = useUpdateApp(app.id);
 
-  const saved = app.prompt?.text ?? "";
-  const [prompt, setPrompt] = useState(saved);
-  const dirty = prompt !== saved;
+  const prompt = useAutosaveField({
+    key: "instructions",
+    value: app.prompt?.text ?? "",
+    save: (value) => update.mutateAsync({ prompt: { text: value } })
+  });
 
   return (
     <SettingsGroup title={t("instructions")}>
@@ -29,15 +30,10 @@ export function InstructionsSection({ app }: { app: App }) {
       >
         <Textarea
           id="app-prompt"
-          value={prompt}
+          value={prompt.value}
           rows={6}
-          onChange={(event) => setPrompt(event.target.value)}
-        />
-        <SaveRow
-          dirty={dirty}
-          pending={update.isPending}
-          onSave={() => update.mutate({ prompt: { text: prompt } })}
-          onRevert={() => setPrompt(saved)}
+          onChange={(event) => prompt.setValue(event.target.value)}
+          onBlur={() => prompt.commit()}
         />
       </SettingsRow>
     </SettingsGroup>

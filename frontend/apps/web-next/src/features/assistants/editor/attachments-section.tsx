@@ -23,9 +23,9 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useReportDirty } from "@/components/composites/save-status";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -35,7 +35,6 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 type Attachment = NonNullable<Assistant["attachments"]>[number];
@@ -228,9 +227,10 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const format = useFormatter();
   const update = useUpdateAssistant(assistant.id);
+  const autosave = useAutosave("attachments");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const saved: Attachment[] = assistant.attachments ?? [];
+  const saved: Attachment[] = useMemo(() => assistant.attachments ?? [], [assistant.attachments]);
   const [files, setFiles] = useState<Attachment[]>(saved);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -239,10 +239,22 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
   const [sortAscending, setSortAscending] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const dirty =
-    JSON.stringify(files.map((file) => file.id).sort()) !==
-    JSON.stringify(saved.map((file) => file.id).sort());
-  useReportDirty("attachments", dirty);
+  // Adopt server changes (our own save landing, or an edit elsewhere) unless the
+  // user diverged locally. Attachments persist immediately on add/remove.
+  const savedKey = JSON.stringify(saved.map((file) => file.id).sort());
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    setFiles((current) => {
+      const currentKey = JSON.stringify(current.map((file) => file.id).sort());
+      return currentKey === previous ? saved : current;
+    });
+  }, [savedKey, saved]);
+
+  const persist = (next: Attachment[]) =>
+    autosave(() => update.mutateAsync({ attachments: next.map((file) => ({ id: file.id })) }));
 
   const totalSize = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
 
@@ -303,6 +315,7 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
     if (selected.length === 0) return;
     setUploading(true);
     try {
+      const added: Attachment[] = [];
       for (const file of selected) {
         const body = new FormData();
         body.append("upload_file", file);
@@ -312,18 +325,20 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
             bodySerializer: (formData: unknown) => formData as FormData
           })
         );
-        setFiles((current) => [
-          ...current,
-          {
-            id: uploaded.id,
-            name: uploaded.name ?? file.name,
-            mimetype: uploaded.mimetype ?? file.type,
-            size: uploaded.size ?? file.size,
-            created_at: uploaded.created_at ?? null,
-            token_count: uploaded.token_count ?? null,
-            transcription: uploaded.transcription ?? null
-          }
-        ]);
+        added.push({
+          id: uploaded.id,
+          name: uploaded.name ?? file.name,
+          mimetype: uploaded.mimetype ?? file.type,
+          size: uploaded.size ?? file.size,
+          created_at: uploaded.created_at ?? null,
+          token_count: uploaded.token_count ?? null,
+          transcription: uploaded.transcription ?? null
+        });
+      }
+      if (added.length > 0) {
+        const next = [...files, ...added];
+        setFiles(next);
+        void persist(next);
       }
     } catch (error) {
       toastApiError(error, t);
@@ -417,9 +432,11 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
                         variant="ghost"
                         size="icon"
                         aria-label={`${t("remove")} ${file.name}`}
-                        onClick={() =>
-                          setFiles((current) => current.filter((other) => other.id !== file.id))
-                        }
+                        onClick={() => {
+                          const next = files.filter((other) => other.id !== file.id);
+                          setFiles(next);
+                          void persist(next);
+                        }}
                       >
                         <Trash2 className="size-4" />
                       </Button>
@@ -482,13 +499,6 @@ export function AttachmentsSection({ assistant }: { assistant: Assistant }) {
           />
         </div>
       </SettingsRow>
-
-      <SaveRow
-        dirty={dirty}
-        pending={update.isPending}
-        onSave={() => update.mutate({ attachments: files.map((file) => ({ id: file.id })) })}
-        onRevert={() => setFiles(saved)}
-      />
 
       {preview && <AttachmentPreview file={preview} onClose={() => setPreview(null)} />}
     </SettingsGroup>

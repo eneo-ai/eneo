@@ -1,9 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { Button } from "@/components/ui/button";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
 import { useSpace } from "@/features/spaces/use-space";
 import type { App } from "../apps";
@@ -15,9 +14,14 @@ export function SecuritySection({ app }: { app: App }) {
   const { space } = useSpace();
   const update = useUpdateApp(app.id);
 
-  const saved = app.data_retention_days?.toString() ?? "";
-  const [days, setDays] = useState(saved);
-  const dirty = days !== saved;
+  const days = useAutosaveField({
+    key: "security",
+    value: app.data_retention_days?.toString() ?? "",
+    save: (value) =>
+      update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),
+    // Empty inherits the space policy; otherwise require a positive whole number.
+    validate: (value) => value === "" || (Number.isInteger(Number(value)) && Number(value) >= 1)
+  });
 
   const inherited = space.data_retention_days ? `${space.data_retention_days} ${t("days")}` : "∞";
 
@@ -34,22 +38,12 @@ export function SecuritySection({ app }: { app: App }) {
             type="number"
             min={1}
             className="w-32"
-            value={days}
+            value={days.value}
             placeholder={inherited}
-            onChange={(event) => setDays(event.target.value)}
+            onChange={(event) => days.setValue(event.target.value)}
+            onBlur={() => days.commit()}
           />
           <span className="text-muted-foreground text-sm">{t("days")}</span>
-          {dirty && (
-            <Button
-              size="sm"
-              disabled={update.isPending}
-              onClick={() =>
-                update.mutate({ data_retention_days: days === "" ? null : Number(days) })
-              }
-            >
-              {update.isPending ? t("loading") : t("save_changes")}
-            </Button>
-          )}
         </div>
       </SettingsRow>
     </SettingsGroup>

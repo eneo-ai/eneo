@@ -3,6 +3,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { toast } from "sonner";
+import {
+  ConfirmedPasswordField,
+  isConfirmedPasswordValid
+} from "@/components/composites/confirmed-password-field";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -132,7 +137,13 @@ export function WebsiteDialog({
   const [httpAuthEnabled, setHttpAuthEnabled] = useState(website?.requires_http_auth ?? false);
   const [httpAuthUsername, setHttpAuthUsername] = useState("");
   const [httpAuthPassword, setHttpAuthPassword] = useState("");
+  const [httpAuthPasswordConfirmation, setHttpAuthPasswordConfirmation] = useState("");
   const [existingOnOrg, setExistingOnOrg] = useState<ExistingWebsite | null>(null);
+
+  function clearHttpAuthPassword() {
+    setHttpAuthPassword("");
+    setHttpAuthPasswordConfirmation("");
+  }
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
@@ -185,6 +196,7 @@ export function WebsiteDialog({
     onSuccess: () => {
       invalidate();
       setExistingOnOrg(null);
+      clearHttpAuthPassword();
       onOpenChange(false);
     },
     onError: (error) => toastApiError(error, t)
@@ -201,7 +213,28 @@ export function WebsiteDialog({
     onError: () => save.mutate()
   });
 
+  const httpAuthPasswordTouched =
+    httpAuthPassword.length > 0 || httpAuthPasswordConfirmation.length > 0;
+  const httpAuthNeedsNewCredentials =
+    httpAuthEnabled && (!website?.requires_http_auth || httpAuthPasswordTouched);
+  const httpAuthValid =
+    !httpAuthEnabled ||
+    (httpAuthNeedsNewCredentials
+      ? httpAuthUsername.trim().length > 0 &&
+        isConfirmedPasswordValid({
+          value: httpAuthPassword,
+          confirmation: httpAuthPasswordConfirmation,
+          required: true
+        })
+      : true);
+
   function submit() {
+    if (!httpAuthValid) {
+      toast.warning(
+        httpAuthUsername.trim().length === 0 ? t("required_field") : t("passwords_do_not_match")
+      );
+      return;
+    }
     if (website || space.organization) save.mutate();
     else checkUrl.mutate();
   }
@@ -212,7 +245,13 @@ export function WebsiteDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) clearHttpAuthPassword();
+          onOpenChange(next);
+        }}
+      >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -270,7 +309,7 @@ export function WebsiteDialog({
                   setHttpAuthEnabled(checked);
                   if (!checked) {
                     setHttpAuthUsername("");
-                    setHttpAuthPassword("");
+                    clearHttpAuthPassword();
                   }
                 }}
               />
@@ -295,21 +334,20 @@ export function WebsiteDialog({
                     onChange={(event) => setHttpAuthUsername(event.target.value)}
                   />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="http-auth-password">{t("password")}</Label>
-                  <Input
-                    id="http-auth-password"
-                    type="password"
-                    value={httpAuthPassword}
-                    autoComplete="current-password"
-                    onChange={(event) => setHttpAuthPassword(event.target.value)}
-                  />
-                  {website?.requires_http_auth && (
-                    <p className="text-muted-foreground text-sm">
-                      {t("leave_blank_keep_password")}
-                    </p>
-                  )}
-                </div>
+                <ConfirmedPasswordField
+                  id="http-auth-password"
+                  label={t("password")}
+                  confirmLabel={t("confirm_password")}
+                  value={httpAuthPassword}
+                  confirmation={httpAuthPasswordConfirmation}
+                  onValueChange={setHttpAuthPassword}
+                  onConfirmationChange={setHttpAuthPasswordConfirmation}
+                  errorMessage={t("passwords_do_not_match")}
+                  description={
+                    website?.requires_http_auth ? t("leave_blank_keep_password") : undefined
+                  }
+                  required={!website?.requires_http_auth}
+                />
               </div>
             )}
 
@@ -378,7 +416,7 @@ export function WebsiteDialog({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 {t("cancel")}
               </Button>
-              <Button type="submit" disabled={pending || noModels || !url}>
+              <Button type="submit" disabled={pending || noModels || !url || !httpAuthValid}>
                 {website
                   ? pending
                     ? t("saving")

@@ -3,7 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
+import {
+  ConfirmedPasswordField,
+  isConfirmedPasswordValid
+} from "@/components/composites/confirmed-password-field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,20 +26,18 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { ModelCatalogStep } from "./model-catalog-step";
 import {
   completionProviderTypes,
-  createCompletionModel,
   createProvider,
   modelProvidersQueryOptions,
   providerCapabilitiesQueryOptions,
-  providerFields,
-  type ProviderCapabilities
+  type ProviderCapabilities,
+  providerDisplayName,
+  providerFields
 } from "./model-providers";
-import { MODELS_KEY } from "./models";
-import { providerDisplayName } from "./credentials";
 
 type Step = "provider" | "credentials" | "models";
 
@@ -55,12 +56,23 @@ function fieldLabel(t: (key: string) => string, name: string): string {
   }
 }
 
+function confirmFieldLabel(t: (key: string) => string, name: string): string {
+  switch (name) {
+    case "api_key":
+      return t("confirm_api_key");
+    default:
+      return t("confirm_secret");
+  }
+}
+
 export function AddModelWizard({
   open,
-  onOpenChange
+  onOpenChange,
+  initialProviderId
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialProviderId?: string;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -76,32 +88,20 @@ export function AddModelWizard({
   const [providerType, setProviderType] = useState("openai");
   const [providerName, setProviderName] = useState("");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [fieldConfirmations, setFieldConfirmations] = useState<Record<string, string>>({});
   const [providerId, setProviderId] = useState<string | null>(null);
 
-  // Single model draft (re-run the wizard to add more).
-  const [name, setName] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [maxInput, setMaxInput] = useState("");
-  const [maxOutput, setMaxOutput] = useState("");
-  const [vision, setVision] = useState(false);
-  const [reasoning, setReasoning] = useState(false);
-  const [tools, setTools] = useState(false);
-
   function reset() {
-    setStep("provider");
-    setMode(hasProviders ? "existing" : "new");
-    setExistingId(providers.data?.[0]?.id ?? "");
+    const preselect = initialProviderId ?? providers.data?.[0]?.id ?? "";
+    const startExisting = Boolean(initialProviderId) || hasProviders;
+    setStep(initialProviderId ? "models" : "provider");
+    setMode(startExisting ? "existing" : "new");
+    setExistingId(preselect);
     setProviderType("openai");
     setProviderName("");
     setFieldValues({});
-    setProviderId(null);
-    setName("");
-    setDisplayName("");
-    setMaxInput("");
-    setMaxOutput("");
-    setVision(false);
-    setReasoning(false);
-    setTools(false);
+    setFieldConfirmations({});
+    setProviderId(initialProviderId ?? null);
   }
 
   function handleOpenChange(next: boolean) {
@@ -130,31 +130,10 @@ export function AddModelWizard({
     },
     onSuccess: (provider) => {
       void queryClient.invalidateQueries({ queryKey: ["admin-model-providers"] });
+      setFieldValues({});
+      setFieldConfirmations({});
       setProviderId(provider.id);
       setStep("models");
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const createModelMut = useMutation({
-    mutationFn: () => {
-      const target = mode === "existing" ? existingId : providerId;
-      if (!target) throw new Error("missing provider");
-      return createCompletionModel(browserApi, {
-        provider_id: target,
-        name: name.trim(),
-        display_name: displayName.trim() || name.trim(),
-        max_input_tokens: maxInput ? Number(maxInput) : 0,
-        max_output_tokens: maxOutput ? Number(maxOutput) : 0,
-        vision,
-        reasoning,
-        supports_tool_calling: tools
-      });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      toast.success(t("model_created_success"));
-      onOpenChange(false);
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -162,11 +141,28 @@ export function AddModelWizard({
   const requiredFieldsFilled = fields
     .filter((field) => field.required)
     .every((field) => (fieldValues[field.name] ?? "").trim() !== "");
+  const secretFieldsConfirmed = fields
+    .filter((field) => field.secret)
+    .every((field) => {
+      const value = fieldValues[field.name] ?? "";
+      const confirmation = fieldConfirmations[field.name] ?? "";
+      return isConfirmedPasswordValid({
+        value,
+        confirmation,
+        required: field.required || value.length > 0 || confirmation.length > 0
+      });
+    });
 
   function goNextFromProvider() {
     if (mode === "existing") setStep("models");
     else setStep("credentials");
   }
+
+  // Resolve the provider the model step adds to, plus its type (drives the catalog).
+  const targetProviderId = mode === "existing" ? existingId : (providerId ?? "");
+  const existingProvider = providers.data?.find((provider) => provider.id === existingId);
+  const targetProviderType =
+    mode === "existing" ? (existingProvider?.provider_type ?? "") : providerType;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -249,7 +245,7 @@ export function AddModelWizard({
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              createProviderMut.mutate();
+              if (requiredFieldsFilled && secretFieldsConfirmed) createProviderMut.mutate();
             }}
           >
             <div className="flex flex-col gap-1.5">
@@ -261,115 +257,70 @@ export function AddModelWizard({
                 onChange={(event) => setProviderName(event.target.value)}
               />
             </div>
-            {fields.map((field) => (
-              <div key={field.name} className="flex flex-col gap-1.5">
-                <Label htmlFor={`wizard-field-${field.name}`}>
-                  {fieldLabel(t, field.name)}
-                  {field.required && <span aria-hidden="true"> *</span>}
-                </Label>
-                <Input
+            {fields.map((field) =>
+              field.secret ? (
+                <ConfirmedPasswordField
+                  key={field.name}
                   id={`wizard-field-${field.name}`}
-                  type={field.secret ? "password" : "text"}
+                  label={fieldLabel(t, field.name)}
+                  confirmLabel={confirmFieldLabel(t, field.name)}
+                  value={fieldValues[field.name] ?? ""}
+                  confirmation={fieldConfirmations[field.name] ?? ""}
+                  onValueChange={(value) =>
+                    setFieldValues((current) => ({ ...current, [field.name]: value }))
+                  }
+                  onConfirmationChange={(value) =>
+                    setFieldConfirmations((current) => ({ ...current, [field.name]: value }))
+                  }
+                  errorMessage={t("secret_values_do_not_match")}
                   autoComplete="off"
                   required={field.required}
-                  value={fieldValues[field.name] ?? ""}
-                  onChange={(event) =>
-                    setFieldValues((current) => ({ ...current, [field.name]: event.target.value }))
-                  }
                 />
-              </div>
-            ))}
+              ) : (
+                <div key={field.name} className="flex flex-col gap-1.5">
+                  <Label htmlFor={`wizard-field-${field.name}`}>
+                    {fieldLabel(t, field.name)}
+                    {field.required && <span aria-hidden="true"> *</span>}
+                  </Label>
+                  <Input
+                    id={`wizard-field-${field.name}`}
+                    type="text"
+                    autoComplete="off"
+                    required={field.required}
+                    value={fieldValues[field.name] ?? ""}
+                    onChange={(event) =>
+                      setFieldValues((current) => ({
+                        ...current,
+                        [field.name]: event.target.value
+                      }))
+                    }
+                  />
+                </div>
+              )
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setStep("provider")}>
                 {t("back")}
               </Button>
-              <Button type="submit" disabled={!requiredFieldsFilled || createProviderMut.isPending}>
+              <Button
+                type="submit"
+                disabled={
+                  !requiredFieldsFilled || !secretFieldsConfirmed || createProviderMut.isPending
+                }
+              >
                 {createProviderMut.isPending ? t("saving") : t("next")}
               </Button>
             </DialogFooter>
           </form>
         )}
 
-        {step === "models" && (
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              createModelMut.mutate();
-            }}
-          >
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="wizard-model-name">{t("model_identifier")}</Label>
-              <Input
-                id="wizard-model-name"
-                value={name}
-                required
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="wizard-model-display">{t("display_name")}</Label>
-              <Input
-                id="wizard-model-display"
-                value={displayName}
-                placeholder={name}
-                onChange={(event) => setDisplayName(event.target.value)}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="wizard-model-max-input">{t("max_input_tokens")}</Label>
-                <Input
-                  id="wizard-model-max-input"
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={maxInput}
-                  onChange={(event) => setMaxInput(event.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="wizard-model-max-output">{t("max_output_tokens")}</Label>
-                <Input
-                  id="wizard-model-max-output"
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={maxOutput}
-                  onChange={(event) => setMaxOutput(event.target.value)}
-                />
-              </div>
-            </div>
-            <fieldset className="flex flex-col gap-3">
-              <legend className="text-muted-foreground mb-1 text-xs font-semibold tracking-wider uppercase">
-                {t("capabilities")}
-              </legend>
-              <Label className="flex items-center justify-between gap-2 font-normal">
-                {t("capability_vision")}
-                <Switch checked={vision} onCheckedChange={setVision} />
-              </Label>
-              <Label className="flex items-center justify-between gap-2 font-normal">
-                {t("reasoning")}
-                <Switch checked={reasoning} onCheckedChange={setReasoning} />
-              </Label>
-              <Label className="flex items-center justify-between gap-2 font-normal">
-                {t("model_label_tool_calling")}
-                <Switch checked={tools} onCheckedChange={setTools} />
-              </Label>
-            </fieldset>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setStep(mode === "existing" ? "provider" : "credentials")}
-              >
-                {t("back")}
-              </Button>
-              <Button type="submit" disabled={!name.trim() || createModelMut.isPending}>
-                {createModelMut.isPending ? t("saving") : t("create")}
-              </Button>
-            </DialogFooter>
-          </form>
+        {step === "models" && targetProviderId && (
+          <ModelCatalogStep
+            providerId={targetProviderId}
+            providerType={targetProviderType}
+            onCreated={() => onOpenChange(false)}
+            onBack={() => setStep(mode === "existing" ? "provider" : "credentials")}
+          />
         )}
       </DialogContent>
     </Dialog>

@@ -34,7 +34,7 @@ export default async function HelpAssistantEditRoute({
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
       <SpaceProvider routeId="organization">
-        <HelpAssistantEditor assistantId={role.assistant_id} />
+        <HelpAssistantEditor assistantId={role.assistant_id} helperKind={kind as HelperKind} />
       </SpaceProvider>
     </HydrationBoundary>
   );

@@ -4,8 +4,8 @@ import { AppWindow } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { iconUrl } from "@/components/composites/icon-field";
+import { ResourceTileActions, ResourceTileCard } from "@/components/composites/resource-tile";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { useSpace } from "@/features/spaces/use-space";
 import { AppActions } from "./actions";
 import type { AppSparse } from "./apps";
@@ -17,10 +17,10 @@ export function AppTile({ app, showStatus }: { app: AppSparse; showStatus: boole
   const icon = iconUrl(app.icon_id);
 
   return (
-    <Card className="group hover:border-primary/40 relative gap-0 p-4 transition-colors">
+    <ResourceTileCard>
       <Link
         href={`/spaces/${routeId}/apps/${app.id}`}
-        className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0"
+        className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0 focus-visible:outline-none"
         aria-label={app.name}
       >
         <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-xl">
@@ -41,9 +41,9 @@ export function AppTile({ app, showStatus }: { app: AppSparse; showStatus: boole
           </Badge>
         </div>
       )}
-      <div className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+      <ResourceTileActions>
         <AppActions app={app} />
-      </div>
-    </Card>
+      </ResourceTileActions>
+    </ResourceTileCard>
   );
 }

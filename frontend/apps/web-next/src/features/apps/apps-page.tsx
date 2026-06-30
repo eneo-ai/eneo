@@ -33,7 +33,9 @@ export function AppsPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <PageHeader title={t("apps")}>{can("create", "app") && <CreateAppButton />}</PageHeader>
       {items.length === 0 ? (
-        <EmptyState title={t("there_are_currently_no_apps_configured")} />
+        <EmptyState title={t("there_are_currently_no_apps_configured")}>
+          {can("create", "app") && <CreateAppButton />}
+        </EmptyState>
       ) : groupByStatus ? (
         <div className="flex flex-col gap-6">
           {published.length > 0 && (

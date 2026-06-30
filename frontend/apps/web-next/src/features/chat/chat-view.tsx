@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copy, Globe, Paperclip, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -27,10 +27,9 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
+  type AttachmentsContext,
   type PromptInputMessage
 } from "@/components/ai-elements/prompt-input";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
-import { Shimmer } from "@/components/ai-elements/shimmer";
 import { useAppContext } from "@/components/providers/app-context";
 import {
   Select,
@@ -44,6 +43,7 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
+import { ActivityTimeline } from "./activity-timeline";
 import { ComposerAttachments } from "./attachments";
 import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
@@ -51,7 +51,6 @@ import {
   GeneratedFile,
   MessageFiles,
   MessageSources,
-  MessageTool,
   ToolApprovalCard,
   WebSources
 } from "./message-parts";
@@ -244,15 +243,28 @@ export function ChatView({
   });
 
   const busy = status === "submitted" || status === "streaming";
-
-  // Translated reasoning header: shimmering while thinking, elapsed once done.
-  const thinkingMessage = (isStreaming: boolean, duration?: number): ReactNode => {
-    if (isStreaming || duration === 0) {
-      return <Shimmer duration={1}>{t("chat_reasoning_thinking")}</Shimmer>;
-    }
-    if (duration === undefined) return <span>{t("chat_reasoning_thought")}</span>;
-    return <span>{t("chat_reasoning_thought_for", { seconds: duration })}</span>;
-  };
+  const openAttachmentDialog = useCallback(() => {
+    fileInput.current?.click();
+  }, []);
+  const promptAttachments = useMemo<AttachmentsContext>(
+    () => ({
+      add: (files) => {
+        void attachments.addFiles(Array.from(files));
+      },
+      clear: attachments.clear,
+      fileInputRef: fileInput,
+      files: attachments.attachments.map((attachment) => ({
+        filename: attachment.name,
+        id: attachment.key,
+        mediaType: attachment.mimetype,
+        type: "file" as const,
+        url: attachment.previewUrl ?? ""
+      })),
+      openFileDialog: openAttachmentDialog,
+      remove: attachments.removeAttachment
+    }),
+    [attachments, openAttachmentDialog]
+  );
 
   function submit(message: PromptInputMessage) {
     const text = message.text?.trim();
@@ -317,14 +329,13 @@ export function ChatView({
                       @{answering.handle}
                     </span>
                   )}
+                  {isAssistant && (
+                    <ActivityTimeline parts={message.parts} isStreaming={isStreamingThis} />
+                  )}
                   {message.parts.map((part, index) => {
-                    if (part.type === "reasoning") {
-                      return (
-                        <Reasoning key={index} isStreaming={part.state === "streaming"}>
-                          <ReasoningTrigger getThinkingMessage={thinkingMessage} />
-                          <ReasoningContent>{part.text}</ReasoningContent>
-                        </Reasoning>
-                      );
+                    // Reasoning and tool calls are grouped into ActivityTimeline above.
+                    if (part.type === "reasoning" || part.type === "dynamic-tool") {
+                      return null;
                     }
                     if (part.type === "text") {
                       return isAssistant ? (
@@ -334,9 +345,6 @@ export function ChatView({
                           {part.text}
                         </span>
                       );
-                    }
-                    if (part.type === "dynamic-tool") {
-                      return <MessageTool key={index} part={part} />;
                     }
                     if (part.type === "data-tool-approval") {
                       return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
@@ -408,7 +416,11 @@ export function ChatView({
           turnCount={cumulative.turns}
           onNewConversation={onNewConversation}
         />
-        <PromptInput onSubmit={submit}>
+        <PromptInput
+          accept={attachments.acceptString}
+          attachments={promptAttachments}
+          onSubmit={submit}
+        >
           <PromptInputBody>
             <PromptInputTextarea
               value={input}
@@ -421,7 +433,7 @@ export function ChatView({
               {modelSelector}
               <PromptInputButton
                 variant="outline"
-                onClick={() => fileInput.current?.click()}
+                onClick={openAttachmentDialog}
                 aria-label={t("attachments")}
               >
                 <Paperclip className="text-muted-foreground size-4" /> {t("attachments")}

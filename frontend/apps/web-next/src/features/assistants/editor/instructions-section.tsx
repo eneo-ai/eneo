@@ -1,11 +1,12 @@
 "use client";
 
-import { FileText, History, Maximize2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { FileText, History, Maximize2, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
 import { SettingsGroup } from "@/components/composites/settings-rows";
-import { useReportDirty } from "@/components/composites/save-status";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,8 +16,15 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { browserApi } from "@/lib/api/browser";
+import { formatDateTime } from "@/lib/format";
+import {
+  promptGuideAvailabilityQueryOptions,
+  type HelperAvailability
+} from "@/features/help-assistants/prompt-guide/helper-runs";
+import { PromptGuideDialog } from "@/features/help-assistants/prompt-guide/prompt-guide-dialog";
 import { useSpace } from "@/features/spaces/use-space";
-import { SaveRow } from "./general-section";
 import { PromptVersionDialog } from "./prompt-version-dialog";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
@@ -42,21 +50,53 @@ function PromptMeta({ text }: { text: string }) {
 }
 
 /**
- * The prompt. Prompt version history and the prompt-guide helper are deferred
- * (tracked in the migration ledger); saving creates a new prompt version
- * backend-side either way.
+ * The prompt. Saving creates a new prompt version backend-side; Prompt Guide
+ * only mutates local editor state and relies on this same save path.
  */
-export function InstructionsSection({ assistant }: { assistant: Assistant }) {
+export function InstructionsSection({
+  assistant,
+  promptGuide = true
+}: {
+  assistant: Assistant;
+  promptGuide?: boolean;
+}) {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
+  const autosave = useAutosave("instructions");
   const savedPrompt = assistant.prompt?.text ?? "";
   const [prompt, setPrompt] = useState(savedPrompt);
+  const [promptDescription, setPromptDescription] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [showPromptGuide, setShowPromptGuide] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const promptGuideAvailability = useQuery({
+    ...promptGuideAvailabilityQueryOptions(browserApi, assistant.id),
+    enabled: promptGuide
+  });
 
   const dirty = prompt !== savedPrompt;
-  useReportDirty("instructions", dirty);
+
+  // Adopt the saved prompt when it changes server-side (our save landing, or a
+  // version restored elsewhere) unless the user has unsaved local edits.
+  const serverRef = useRef(savedPrompt);
+  useEffect(() => {
+    if (serverRef.current === savedPrompt) return;
+    const previous = serverRef.current;
+    serverRef.current = savedPrompt;
+    setPrompt((current) => (current === previous ? savedPrompt : current));
+  }, [savedPrompt]);
+
+  // Each save creates a new prompt version, so commit on blur or an explicit
+  // apply rather than on every keystroke.
+  const commit = useCallback(
+    async (text = prompt, description = promptDescription) => {
+      if (text === savedPrompt) return;
+      const result = await autosave(() => update.mutateAsync({ prompt: { text, description } }));
+      if (result !== undefined) setPromptDescription("");
+    },
+    [autosave, prompt, promptDescription, savedPrompt, update]
+  );
 
   const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
   const attachmentTokens = (assistant.attachments ?? []).reduce(
@@ -76,6 +116,26 @@ export function InstructionsSection({ assistant }: { assistant: Assistant }) {
     }
   ];
 
+  function promptGuideDisabledTooltip(
+    reason: HelperAvailability["disabled_reason"] | null | undefined
+  ): string {
+    switch (reason) {
+      case "role_disabled":
+        return t("prompt_guide_disabled_role_disabled");
+      case "role_not_visible":
+        return t("prompt_guide_disabled_role_not_visible");
+      case "no_completion_model":
+        return t("prompt_guide_disabled_no_completion_model");
+      case "no_edit_rights":
+        return t("prompt_guide_disabled_no_edit_rights");
+      case "no_assignment":
+      default:
+        return t("prompt_guide_disabled_no_assignment");
+    }
+  }
+
+  const availability = promptGuideAvailability.data;
+
   return (
     <SettingsGroup title={t("instructions")}>
       <div className="flex flex-col gap-2">
@@ -87,6 +147,28 @@ export function InstructionsSection({ assistant }: { assistant: Assistant }) {
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {promptGuide && availability && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={!availability.available}
+                      onClick={() => setShowPromptGuide(true)}
+                    >
+                      <Sparkles className="size-4" /> {t("prompt_guide_button")}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {availability.available
+                    ? t("prompt_guide_button_tooltip")
+                    : promptGuideDisabledTooltip(availability.disabled_reason)}
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Button type="button" variant="ghost" size="sm" onClick={() => setShowHistory(true)}>
               <History className="size-4" /> {t("show_prompt_history")}
             </Button>
@@ -107,27 +189,43 @@ export function InstructionsSection({ assistant }: { assistant: Assistant }) {
           value={prompt}
           rows={12}
           className="min-h-72 w-full resize-y text-base leading-6"
-          onChange={(event) => setPrompt(event.target.value)}
+          onChange={(event) => {
+            setPrompt(event.target.value);
+            setPromptDescription("");
+          }}
+          onBlur={() => void commit()}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <ContextBudget segments={budgetSegments} maxTokens={model?.token_limit ?? null} />
           <PromptMeta text={prompt} />
         </div>
-
-        <SaveRow
-          dirty={dirty}
-          pending={update.isPending}
-          onSave={() => update.mutate({ prompt: { text: prompt, description: "" } })}
-          onRevert={() => setPrompt(savedPrompt)}
-        />
       </div>
 
+      <PromptGuideDialog
+        open={showPromptGuide}
+        onOpenChange={setShowPromptGuide}
+        targetId={assistant.id}
+        targetPrompt={prompt}
+        hasUnsavedPromptChanges={dirty}
+        onApply={(text) => {
+          const description = t("prompt_guide_apply_description", {
+            date: formatDateTime(new Date().toISOString())
+          });
+          setPrompt(text);
+          setPromptDescription(description);
+          void commit(text, description);
+        }}
+      />
       <PromptVersionDialog
         assistantId={assistant.id}
         open={showHistory}
         onOpenChange={setShowHistory}
-        onUseVersion={(text) => setPrompt(text)}
+        onUseVersion={(text) => {
+          setPrompt(text);
+          setPromptDescription("");
+          void commit(text, "");
+        }}
       />
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <DialogContent className="flex h-[82vh] max-h-[760px] max-w-[calc(100%-2rem)] flex-col gap-5 p-5 sm:min-h-[560px] sm:max-w-5xl sm:p-6">
@@ -139,7 +237,11 @@ export function InstructionsSection({ assistant }: { assistant: Assistant }) {
             aria-label={t("prompt")}
             value={prompt}
             className="min-h-0 flex-1 resize-none text-base leading-6"
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => {
+              setPrompt(event.target.value);
+              setPromptDescription("");
+            }}
+            onBlur={() => void commit()}
           />
           <div className="flex justify-end">
             <PromptMeta text={prompt} />

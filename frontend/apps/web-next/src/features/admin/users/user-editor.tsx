@@ -4,6 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  ConfirmedPasswordField,
+  isConfirmedPasswordValid
+} from "@/components/composites/confirmed-password-field";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -76,6 +80,7 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
   const [email, setEmail] = useState(user?.email ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [roleIds, setRoleIds] = useState<Set<string>>(
     new Set((user?.roles ?? []).map((role) => role.id))
   );
@@ -123,13 +128,34 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
   });
 
   const pending = create.isPending || updateUser.isPending;
+  const passwordTouched = password.length > 0 || passwordConfirmation.length > 0;
+  const passwordRequired = mode === "create";
+  const passwordConfirmed = isConfirmedPasswordValid({
+    value: password,
+    confirmation: passwordConfirmation,
+    required: passwordRequired || passwordTouched
+  });
+  const passwordLongEnough = !passwordTouched || password.length >= 7;
+  const formValid =
+    email.trim().length > 0 &&
+    (mode === "update" || username.trim().length > 0) &&
+    passwordConfirmed &&
+    passwordLongEnough;
 
   function submit() {
+    if (!email.trim() || (mode === "create" && !username.trim())) {
+      toast.warning(t("required_field"));
+      return;
+    }
+    if (!passwordConfirmed) {
+      toast.warning(t("passwords_do_not_match"));
+      return;
+    }
+    if (!passwordLongEnough) {
+      toast.warning(t("password_needs_7_chars"));
+      return;
+    }
     if (mode === "create") {
-      if (!username.trim() || !email.trim() || !password) {
-        toast.warning(t("required_field"));
-        return;
-      }
       create.mutate();
     } else {
       if (!user?.username) {
@@ -175,18 +201,20 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
           />
         </div>
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="user-password">{t("password")}</Label>
-          <Input
-            id="user-password"
-            type="password"
-            autoComplete="off"
-            value={password}
-            placeholder={mode === "update" ? "••••••••" : undefined}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">{t("password_needs_7_chars")}</p>
-        </div>
+        <ConfirmedPasswordField
+          id="user-password"
+          label={t("password")}
+          confirmLabel={t("confirm_password")}
+          value={password}
+          confirmation={passwordConfirmation}
+          onValueChange={setPassword}
+          onConfirmationChange={setPasswordConfirmation}
+          errorMessage={t("passwords_do_not_match")}
+          description={t("password_needs_7_chars")}
+          required={passwordRequired}
+          autoComplete="new-password"
+          placeholder={mode === "update" ? "••••••••" : undefined}
+        />
 
         <RolePicker
           selected={roleIds}
@@ -205,7 +233,7 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
         <Button variant="outline" disabled={pending} onClick={onDone}>
           {t("cancel")}
         </Button>
-        <Button disabled={pending} onClick={submit}>
+        <Button disabled={pending || !formValid} onClick={submit}>
           {pending ? t("loading") : mode === "create" ? t("create_user") : t("save_changes")}
         </Button>
       </DialogFooter>

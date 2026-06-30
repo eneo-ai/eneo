@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -67,6 +68,7 @@ function PublishStatusRow({ assistant }: { assistant: Assistant }) {
 export function PublishingSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const update = useUpdateAssistant(assistant.id);
+  const autosave = useAutosave("publishing");
 
   const permissions = assistant.permissions ?? [];
   const canPublish = permissions.includes("publish");
@@ -85,7 +87,9 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
           <Switch
             checked={assistant.insight_enabled}
             disabled={!canToggleInsights || update.isPending}
-            onCheckedChange={(checked) => update.mutate({ insight_enabled: checked })}
+            onCheckedChange={(checked) =>
+              autosave(() => update.mutateAsync({ insight_enabled: checked }))
+            }
           />
         </Label>
       </SettingsRow>

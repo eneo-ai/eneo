@@ -4,6 +4,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  ConfirmedPasswordField,
+  isConfirmedPasswordValid
+} from "@/components/composites/confirmed-password-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +27,10 @@ export function ChangePasswordCard() {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  const mismatch = confirm.length > 0 && confirm !== next;
-  const valid = current.length >= 7 && next.length >= 7 && confirm === next;
+  const valid =
+    current.length >= 7 &&
+    next.length >= 7 &&
+    isConfirmedPasswordValid({ value: next, confirmation: confirm, required: true });
 
   const change = useMutation({
     mutationFn: () =>
@@ -62,32 +68,17 @@ export function ChangePasswordCard() {
               onChange={(event) => setCurrent(event.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-password">{t("new_password")}</Label>
-            <Input
-              id="new-password"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(event) => setNext(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="confirm-password">{t("confirm_password")}</Label>
-            <Input
-              id="confirm-password"
-              type="password"
-              autoComplete="new-password"
-              aria-invalid={mismatch}
-              value={confirm}
-              onChange={(event) => setConfirm(event.target.value)}
-            />
-            {mismatch && (
-              <p className="text-xs text-red-600 dark:text-red-400" aria-live="polite">
-                {t("passwords_do_not_match")}
-              </p>
-            )}
-          </div>
+          <ConfirmedPasswordField
+            id="new-password"
+            label={t("new_password")}
+            confirmLabel={t("confirm_password")}
+            value={next}
+            confirmation={confirm}
+            onValueChange={setNext}
+            onConfirmationChange={setConfirm}
+            errorMessage={t("passwords_do_not_match")}
+            required
+          />
           <Button type="submit" className="w-fit" disabled={!valid || change.isPending}>
             {change.isPending ? t("saving") : t("save")}
           </Button>

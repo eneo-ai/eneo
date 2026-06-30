@@ -1,10 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -15,7 +16,6 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { useSpace } from "@/features/spaces/use-space";
-import { SaveRow } from "@/features/assistants/editor/general-section";
 import {
   BEHAVIOUR_LIST,
   behaviourFromKwargs,
@@ -80,11 +80,15 @@ export function AiSection({ app }: { app: App }) {
   const { space } = useSpace();
   const { tenant } = useAppContext();
   const update = useUpdateApp(app.id);
+  const autosave = useAutosave("ai");
 
   const usesAudio = app.input_fields.some((field) => AUDIO_INPUT_TYPES.includes(field.type));
 
   const savedModelId = app.completion_model?.id ?? "";
-  const savedKwargs = app.completion_model_kwargs ?? {};
+  const savedKwargs = useMemo<ModelKwargs>(
+    () => app.completion_model_kwargs ?? {},
+    [app.completion_model_kwargs]
+  );
   const savedTranscriptionId = app.transcription_model?.id ?? "";
 
   const [modelId, setModelId] = useState(savedModelId);
@@ -97,17 +101,58 @@ export function AiSection({ app }: { app: App }) {
   const specificKwargs = modelSpecificKwargs(model);
   const temperatureCap = kwargCapability(model, "temperature");
 
-  const dirty =
-    modelId !== savedModelId ||
-    JSON.stringify(kwargs) !== JSON.stringify(savedKwargs) ||
-    transcriptionId !== savedTranscriptionId;
+  // Adopt server changes (our own save landing) unless the user diverged.
+  const savedKey = JSON.stringify([savedModelId, savedKwargs, savedTranscriptionId]);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    if (JSON.stringify([modelId, kwargs, transcriptionId]) === previous) {
+      setModelId(savedModelId);
+      setKwargs(savedKwargs);
+      setTranscriptionId(savedTranscriptionId);
+    }
+  }, [savedKey, savedModelId, savedKwargs, savedTranscriptionId, modelId, kwargs, transcriptionId]);
+
+  // Completion model + kwargs + transcription model persist together; discrete
+  // choices save immediately, free-text numbers on blur.
+  const persist = useCallback(
+    (nextModelId: string, nextKwargs: ModelKwargs, nextTranscriptionId: string) => {
+      const targetModel =
+        space.completion_models.find((candidate) => candidate.id === nextModelId) ?? null;
+      return autosave(() =>
+        update.mutateAsync({
+          completion_model: nextModelId ? { id: nextModelId } : null,
+          completion_model_kwargs: filterSupportedKwargs(nextKwargs, targetModel),
+          transcription_model: nextTranscriptionId ? { id: nextTranscriptionId } : null
+        })
+      );
+    },
+    [autosave, space.completion_models, update]
+  );
+
+  function changeModel(nextModelId: string) {
+    setModelId(nextModelId);
+    void persist(nextModelId, kwargs, transcriptionId);
+  }
+
+  function changeTranscription(nextTranscriptionId: string) {
+    setTranscriptionId(nextTranscriptionId);
+    void persist(modelId, kwargs, nextTranscriptionId);
+  }
+
+  function changeKwargs(next: ModelKwargs, save = true) {
+    setKwargs(next);
+    if (save) void persist(modelId, next, transcriptionId);
+  }
 
   function selectBehaviour(next: ModelBehaviour) {
     const preset = kwargsForBehaviour(next);
     if (preset) {
-      setKwargs((current) => ({ ...current, temperature: preset.temperature }));
+      changeKwargs({ ...kwargs, temperature: preset.temperature });
     } else if (behaviourFromKwargs(kwargs) !== "custom") {
-      setKwargs((current) => ({ ...current, temperature: 1 }));
+      changeKwargs({ ...kwargs, temperature: 1 });
     }
   }
 
@@ -119,7 +164,7 @@ export function AiSection({ app }: { app: App }) {
           description={t("transcription_model_description")}
           htmlFor="app-transcription-model"
         >
-          <Select value={transcriptionId} onValueChange={setTranscriptionId}>
+          <Select value={transcriptionId} onValueChange={changeTranscription}>
             <SelectTrigger id="app-transcription-model" className="w-full">
               <SelectValue placeholder={t("select_a_model")} />
             </SelectTrigger>
@@ -143,7 +188,7 @@ export function AiSection({ app }: { app: App }) {
           id="app-completion-model"
           models={space.completion_models}
           selectedId={modelId}
-          onSelect={setModelId}
+          onSelect={changeModel}
           className="w-full justify-between"
           showPricing={tenant.show_model_pricing}
         />
@@ -192,11 +237,9 @@ export function AiSection({ app }: { app: App }) {
                   step={temperatureCap?.step ?? 0.05}
                   value={kwargs.temperature ?? 1}
                   onChange={(event) =>
-                    setKwargs((current) => ({
-                      ...current,
-                      temperature: Number(event.target.value)
-                    }))
+                    changeKwargs({ ...kwargs, temperature: Number(event.target.value) }, false)
                   }
+                  onBlur={() => void persist(modelId, kwargs, transcriptionId)}
                 />
               </div>
             )}
@@ -221,10 +264,7 @@ export function AiSection({ app }: { app: App }) {
                     <Select
                       value={(kwargs[name] as string | null | undefined) ?? "__default"}
                       onValueChange={(value) =>
-                        setKwargs((current) => ({
-                          ...current,
-                          [name]: value === "__default" ? null : value
-                        }))
+                        changeKwargs({ ...kwargs, [name]: value === "__default" ? null : value })
                       }
                     >
                       <SelectTrigger id={`app-kwarg-${name}`} className="w-44">
@@ -250,11 +290,15 @@ export function AiSection({ app }: { app: App }) {
                       value={(kwargs[name] as number | null | undefined) ?? ""}
                       placeholder="—"
                       onChange={(event) =>
-                        setKwargs((current) => ({
-                          ...current,
-                          [name]: event.target.value === "" ? null : Number(event.target.value)
-                        }))
+                        changeKwargs(
+                          {
+                            ...kwargs,
+                            [name]: event.target.value === "" ? null : Number(event.target.value)
+                          },
+                          false
+                        )
                       }
+                      onBlur={() => void persist(modelId, kwargs, transcriptionId)}
                     />
                   )}
                 </div>
@@ -263,23 +307,6 @@ export function AiSection({ app }: { app: App }) {
           </div>
         </SettingsRow>
       )}
-
-      <SaveRow
-        dirty={dirty}
-        pending={update.isPending}
-        onSave={() =>
-          update.mutate({
-            completion_model: modelId ? { id: modelId } : null,
-            completion_model_kwargs: filterSupportedKwargs(kwargs, model),
-            transcription_model: transcriptionId ? { id: transcriptionId } : null
-          })
-        }
-        onRevert={() => {
-          setModelId(savedModelId);
-          setKwargs(savedKwargs);
-          setTranscriptionId(savedTranscriptionId);
-        }}
-      />
     </SettingsGroup>
   );
 }

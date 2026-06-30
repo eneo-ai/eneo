@@ -2,11 +2,11 @@
 
 import { Brain, Eye, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
-import { useReportDirty } from "@/components/composites/save-status";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,7 +34,6 @@ import {
   type ModelKwargName,
   type ModelKwargs
 } from "./model-kwargs";
-import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
@@ -187,9 +186,13 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
   const { space } = useSpace();
   const { tenant } = useAppContext();
   const update = useUpdateAssistant(assistant.id);
+  const autosave = useAutosave("ai");
 
   const savedModelId = assistant.completion_model?.id ?? "";
-  const savedKwargs = assistant.completion_model_kwargs ?? {};
+  const savedKwargs = useMemo<ModelKwargs>(
+    () => assistant.completion_model_kwargs ?? {},
+    [assistant.completion_model_kwargs]
+  );
   const [modelId, setModelId] = useState(savedModelId);
   const [kwargs, setKwargs] = useState<ModelKwargs>(savedKwargs);
 
@@ -199,36 +202,56 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
   const specificKwargs = modelSpecificKwargs(model);
   const showModelPricing = tenant.show_model_pricing === true;
 
-  const dirty = modelId !== savedModelId || JSON.stringify(kwargs) !== JSON.stringify(savedKwargs);
-  useReportDirty("ai", dirty);
+  // Adopt server changes (our own save landing, or an edit elsewhere) unless the
+  // user has diverged locally.
+  const savedKey = JSON.stringify([savedModelId, savedKwargs]);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    if (JSON.stringify([modelId, kwargs]) === previous) {
+      setModelId(savedModelId);
+      setKwargs(savedKwargs);
+    }
+  }, [savedKey, savedModelId, savedKwargs, modelId, kwargs]);
+
+  // Model + kwargs persist together. Selecting a model or a discrete option
+  // saves immediately; free-text numbers save on blur.
+  const persist = useCallback(
+    (nextModelId: string, nextKwargs: ModelKwargs) => {
+      const targetModel =
+        space.completion_models.find((candidate) => candidate.id === nextModelId) ?? null;
+      return autosave(() =>
+        update.mutateAsync({
+          completion_model: nextModelId ? { id: nextModelId } : null,
+          completion_model_kwargs: filterSupportedKwargs(nextKwargs, targetModel)
+        })
+      );
+    },
+    [autosave, space.completion_models, update]
+  );
+
+  function changeModel(nextModelId: string) {
+    setModelId(nextModelId);
+    void persist(nextModelId, kwargs);
+  }
+
+  function changeKwargs(next: ModelKwargs, save = true) {
+    setKwargs(next);
+    if (save) void persist(modelId, next);
+  }
 
   function selectBehaviour(next: ModelBehaviour) {
     const preset = kwargsForBehaviour(next);
     if (preset) {
-      setKwargs((current) => ({ ...current, temperature: preset.temperature }));
+      changeKwargs({ ...kwargs, temperature: preset.temperature });
     } else if (behaviourFromKwargs(kwargs) !== "custom") {
-      setKwargs((current) => ({ ...current, temperature: 1 }));
+      changeKwargs({ ...kwargs, temperature: 1 });
     }
   }
 
   const temperatureCap = kwargCapability(model, "temperature");
-
-  const saveRow = (
-    <SaveRow
-      dirty={dirty}
-      pending={update.isPending}
-      onSave={() =>
-        update.mutate({
-          completion_model: modelId ? { id: modelId } : null,
-          completion_model_kwargs: filterSupportedKwargs(kwargs, model)
-        })
-      }
-      onRevert={() => {
-        setModelId(savedModelId);
-        setKwargs(savedKwargs);
-      }}
-    />
-  );
 
   return (
     <SettingsGroup title={t("ai_settings")}>
@@ -241,7 +264,7 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
           id="assistant-completion-model"
           models={space.completion_models}
           selectedId={modelId}
-          onSelect={setModelId}
+          onSelect={changeModel}
           className="w-full justify-between"
           showPricing={showModelPricing}
         />
@@ -291,11 +314,9 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
                   step={temperatureCap?.step ?? 0.05}
                   value={kwargs.temperature ?? 1}
                   onChange={(event) =>
-                    setKwargs((current) => ({
-                      ...current,
-                      temperature: Number(event.target.value)
-                    }))
+                    changeKwargs({ ...kwargs, temperature: Number(event.target.value) }, false)
                   }
+                  onBlur={() => void persist(modelId, kwargs)}
                 />
               </div>
             )}
@@ -319,7 +340,7 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
                       id={`kwarg-${name}`}
                       value={kwargs[name] as string | null | undefined}
                       options={capability?.options ?? []}
-                      onChange={(value) => setKwargs((current) => ({ ...current, [name]: value }))}
+                      onChange={(value) => changeKwargs({ ...kwargs, [name]: value })}
                       t={t}
                     />
                     <p className="text-muted-foreground text-sm">{t("reasoning_effort_help")}</p>
@@ -336,10 +357,7 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
                     <Select
                       value={(kwargs[name] as string | null | undefined) ?? "__default"}
                       onValueChange={(value) =>
-                        setKwargs((current) => ({
-                          ...current,
-                          [name]: value === "__default" ? null : value
-                        }))
+                        changeKwargs({ ...kwargs, [name]: value === "__default" ? null : value })
                       }
                     >
                       <SelectTrigger id={`kwarg-${name}`} className="w-44">
@@ -365,11 +383,15 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
                       value={(kwargs[name] as number | null | undefined) ?? ""}
                       placeholder="—"
                       onChange={(event) =>
-                        setKwargs((current) => ({
-                          ...current,
-                          [name]: event.target.value === "" ? null : Number(event.target.value)
-                        }))
+                        changeKwargs(
+                          {
+                            ...kwargs,
+                            [name]: event.target.value === "" ? null : Number(event.target.value)
+                          },
+                          false
+                        )
                       }
+                      onBlur={() => void persist(modelId, kwargs)}
                     />
                   )}
                 </div>
@@ -378,8 +400,6 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
           </div>
         </SettingsRow>
       )}
-
-      {saveRow}
     </SettingsGroup>
   );
 }

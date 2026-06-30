@@ -1,22 +1,30 @@
 # Eneo Frontend
 
 Multirepo containing:
+
 - The Eneo Web GUI, a SvelteKit app in `/apps/web`
+- The React/Next.js Web GUI in `/apps/web-next`
 - The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
 - The Eneo UI Library, offering reusable Svelte components for our frontend applications in `packages/ui`
 
 ## Setup
+
 ### Installing
+
 ```bash
 bun -w run setup
 ```
+
 Will install all required dependencies. Have a look at the README files in the respective subfolders for further instructions.
 
 ### Local dev server
+
 If you want to develop the Web GUI while also working on the UI librart at the same time run
+
 ```bash
 bun -w run dev
 ```
+
 This will start the dev task in all relevant subfolders. More info in the `app/web` directory.
 
 ### Formatting & Linting
@@ -33,7 +41,7 @@ The same goes for linting, you can run it via
 bun run lint
 ```
 
-__Hint:__ The linter will also check formatting, so it makes sense to first format your code befor running the linter.
+**Hint:** The linter will also check formatting, so it makes sense to first format your code befor running the linter.
 
 ### Testing
 
@@ -41,9 +49,10 @@ The stack is **Vitest** (unit + component) and **Playwright** (E2E). From this d
 
 ```bash
 bun run test          # unit + component (one-shot)
-bun run test:watch    # same, watch mode for local dev
-bun run test:e2e      # E2E against an isolated throwaway backend (needs Docker)
-bun run test:e2e:ui   # E2E in Playwright's interactive runner
+bun run test:web-next # React/Next.js unit + component tests only
+bun run test:watch    # React/Next.js watch mode for local dev
+bun run test:e2e      # E2E for both web apps against an isolated throwaway backend (needs Docker)
+bun run test:e2e:ui   # React/Next.js E2E in Playwright's interactive runner
 bun run test:all      # everything (installs Chromium if missing)
 ```
 

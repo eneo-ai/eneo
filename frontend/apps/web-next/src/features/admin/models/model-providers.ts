@@ -97,3 +97,8 @@ export function completionProviderTypes(caps: ProviderCapabilities): string[] {
     .map(([type]) => type)
     .sort();
 }
+
+/** "openai" → "Openai". Title-cases a provider type for display. */
+export function providerDisplayName(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}

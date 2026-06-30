@@ -1,12 +1,23 @@
 "use client";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { useState } from "react";
+import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
@@ -17,18 +28,34 @@ import {
   type HelperTemplate,
   type RoleAssignment,
   ROLES_KEY,
+  TEMPLATES_KEY,
   helpRolesQueryOptions,
   helpTemplatesQueryOptions
 } from "@/features/admin/help-assistants/help-assistants";
 
-function HelperCard({ template, role }: { template: HelperTemplate; role?: RoleAssignment }) {
-  const t = useTranslations();
+function roleKindLabel(kind: HelperKind, t: (key: string) => string): string {
+  switch (kind) {
+    case "prompt_guide":
+      return t("admin_help_assistants_role_kind_prompt_guide");
+    default:
+      return kind;
+  }
+}
+
+function useInvalidateHelpAssistants() {
   const queryClient = useQueryClient();
-  const kind = template.kind;
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ROLES_KEY });
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ROLES_KEY });
+    void queryClient.invalidateQueries({ queryKey: TEMPLATES_KEY });
+  };
+}
+
+function AddHelpAssistant({ templates }: { templates: HelperTemplate[] }) {
+  const t = useTranslations();
+  const invalidate = useInvalidateHelpAssistants();
 
   const install = useMutation({
-    mutationFn: () =>
+    mutationFn: (kind: HelperKind) =>
       unwrap(
         browserApi.POST("/api/v1/admin/help-assistants/roles/{kind}/", {
           params: { path: { kind } }
@@ -37,6 +64,47 @@ function HelperCard({ template, role }: { template: HelperTemplate; role?: RoleA
     onSuccess: invalidate,
     onError: (error) => toastApiError(error, t)
   });
+
+  const noneAvailable = templates.length === 0;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          disabled={noneAvailable || install.isPending}
+          title={noneAvailable ? t("admin_help_assistants_add_none_available") : undefined}
+        >
+          <Plus className="size-4" />
+          {t("admin_help_assistants_add_button")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
+        <DropdownMenuLabel>{t("admin_help_assistants_add_menu_label")}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {templates.map((template) => (
+          <DropdownMenuItem
+            key={template.kind}
+            className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal"
+            onClick={() => install.mutate(template.kind)}
+          >
+            <span className="font-medium">{template.name}</span>
+            <span className="text-muted-foreground text-xs leading-snug">
+              {template.description}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function HelpAssistantRow({ role }: { role: RoleAssignment }) {
+  const t = useTranslations();
+  const invalidate = useInvalidateHelpAssistants();
+  const kind = role.kind;
+  const displayName = role.assistant_name ?? roleKindLabel(kind, t);
+
   const uninstall = useMutation({
     mutationFn: () =>
       unwrap(
@@ -71,55 +139,69 @@ function HelperCard({ template, role }: { template: HelperTemplate; role?: RoleA
   });
 
   return (
-    <Card className="flex flex-col gap-4 p-5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <span className="font-medium">{template.name}</span>
-          <p className="text-muted-foreground text-sm">{template.description}</p>
+    <div className="border-b last:border-b-0">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span className="bg-secondary text-secondary-foreground grid size-9 shrink-0 place-items-center rounded-md">
+          <Sparkles className="size-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{roleKindLabel(kind, t)}</span>
+            <Badge variant="secondary">{t("admin_help_assistants_kind_badge")}</Badge>
+          </div>
+          <p className="text-muted-foreground truncate text-sm">{displayName}</p>
         </div>
-        <Badge variant={role ? "default" : "outline"}>
-          {role ? t("help_assistant_installed") : t("help_assistant_available")}
-        </Badge>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/admin/help-assistants/${kind}`}>
+            {t("admin_help_assistants_open_settings")}
+            <ChevronRight className="size-4" />
+          </Link>
+        </Button>
       </div>
 
-      {role ? (
-        <div className="flex flex-col gap-3">
-          <Label className="flex items-center justify-between gap-2 font-normal">
-            {t("enabled")}
-            <Switch
-              checked={role.is_enabled}
-              disabled={toggleEnabled.isPending}
-              onCheckedChange={(value) => toggleEnabled.mutate(value)}
-            />
-          </Label>
-          <Label className="flex items-center justify-between gap-2 font-normal">
-            {t("help_assistant_visible_to_users")}
-            <Switch
-              checked={role.is_visible_to_users}
-              disabled={toggleVisible.isPending}
-              onCheckedChange={(value) => toggleVisible.mutate(value)}
-            />
-          </Label>
-          <div className="flex gap-2">
-            <Button asChild size="sm" className="flex-1">
-              <Link href={`/admin/help-assistants/${kind}`}>{t("edit")}</Link>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={uninstall.isPending}
-              onClick={() => uninstall.mutate()}
-            >
-              {t("help_assistant_uninstall")}
-            </Button>
-          </div>
+      <div className="bg-muted/20 flex flex-col gap-4 border-t px-4 py-4">
+        <Label className="flex items-center justify-between gap-4 font-normal">
+          <span className="flex flex-col gap-0.5">
+            <span className="font-medium">{t("admin_help_assistants_toggle_enabled")}</span>
+            <span className="text-muted-foreground text-sm">
+              {t("admin_help_assistants_toggle_enabled_description")}
+            </span>
+          </span>
+          <Switch
+            checked={role.is_enabled}
+            disabled={toggleEnabled.isPending}
+            onCheckedChange={(value) => toggleEnabled.mutate(value)}
+          />
+        </Label>
+        <Label className="flex items-center justify-between gap-4 font-normal">
+          <span className="flex flex-col gap-0.5">
+            <span className="font-medium">{t("admin_help_assistants_toggle_visible")}</span>
+            <span className="text-muted-foreground text-sm">
+              {t("admin_help_assistants_toggle_visible_description")}
+            </span>
+          </span>
+          <Switch
+            checked={role.is_visible_to_users}
+            disabled={toggleVisible.isPending}
+            onCheckedChange={(value) => toggleVisible.mutate(value)}
+          />
+        </Label>
+        <div className="flex justify-end">
+          <ConfirmDialog
+            trigger={
+              <Button type="button" variant="outline" size="sm" disabled={uninstall.isPending}>
+                {t("admin_help_assistants_delete_button")}
+              </Button>
+            }
+            title={t("admin_help_assistants_delete_button")}
+            description={t("admin_help_assistants_delete_confirm", { name: displayName })}
+            confirmLabel={t("admin_help_assistants_delete_button")}
+            pending={uninstall.isPending}
+            onConfirm={() => uninstall.mutateAsync()}
+          />
         </div>
-      ) : (
-        <Button size="sm" disabled={install.isPending} onClick={() => install.mutate()}>
-          {t("help_assistant_install")}
-        </Button>
-      )}
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -127,21 +209,47 @@ export function HelpAssistantsPage() {
   const t = useTranslations();
   const { data: roles } = useSuspenseQuery(helpRolesQueryOptions(browserApi));
   const { data: templates } = useSuspenseQuery(helpTemplatesQueryOptions(browserApi));
+  const [filter, setFilter] = useState("");
 
-  const roleByKind = new Map<HelperKind, RoleAssignment>(roles.map((role) => [role.kind, role]));
+  const normalizedFilter = filter.trim().toLowerCase();
+  const filteredRoles = roles.filter((role) => {
+    const haystack = `${role.assistant_name ?? ""} ${roleKindLabel(role.kind, t)}`.toLowerCase();
+    return haystack.includes(normalizedFilter);
+  });
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      <PageHeader title={t("admin_help_assistants_nav_label")} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {templates.map((template) => (
-          <HelperCard
-            key={template.kind}
-            template={template}
-            role={roleByKind.get(template.kind)}
+      <PageHeader title={t("admin_help_assistants_page_title")}>
+        <AddHelpAssistant templates={templates} />
+      </PageHeader>
+      <p className="text-muted-foreground max-w-3xl">{t("admin_help_assistants_page_intro")}</p>
+
+      {roles.length === 0 ? (
+        <div className="text-muted-foreground rounded-md border border-dashed px-5 py-10 text-center">
+          {t("admin_help_assistants_roles_empty")}
+        </div>
+      ) : (
+        <>
+          <Input
+            value={filter}
+            placeholder={t("admin_help_assistants_filter_placeholder")}
+            className="max-w-md"
+            aria-label={t("admin_help_assistants_filter_placeholder")}
+            onChange={(event) => setFilter(event.target.value)}
           />
-        ))}
-      </div>
+          {filteredRoles.length === 0 ? (
+            <div className="text-muted-foreground rounded-md border border-dashed px-5 py-10 text-center">
+              {t("admin_help_assistants_filter_empty")}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-md border">
+              {filteredRoles.map((role) => (
+                <HelpAssistantRow key={role.id} role={role} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

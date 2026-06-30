@@ -38,38 +38,19 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
-
-type ApiKey = Schema<"ApiKeyV2">;
-type ApiKeyState = Schema<"ApiKeyState">;
-type ApiKeyPermission = Schema<"ApiKeyPermission">;
-
-const STATES: ApiKeyState[] = ["active", "suspended", "revoked", "expired"];
-
-const STATE_BADGE_VARIANT: Record<
-  ApiKeyState,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  active: "default",
-  suspended: "secondary",
-  revoked: "destructive",
-  expired: "outline"
-};
-
-// Radix Select items need non-empty values; "never" encodes no expiration.
-const EXPIRY_PRESETS = [
-  { key: "api_keys_exp_no_expiration", value: "never" },
-  { key: "api_keys_exp_30_days", value: "30" },
-  { key: "api_keys_exp_90_days", value: "90" },
-  { key: "api_keys_exp_1_year", value: "365" }
-] as const;
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString();
-}
+import {
+  API_KEY_EXPIRY_PRESETS,
+  API_KEY_STATE_BADGE_VARIANT,
+  API_KEY_STATES,
+  buildTenantApiKeyCreateBody,
+  formatApiKeyDate,
+  type ApiKey,
+  type ApiKeyExpiryPresetValue,
+  type ApiKeyPermission,
+  type ApiKeyState
+} from "./api-keys";
 
 function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void }) {
   const t = useTranslations();
@@ -77,26 +58,20 @@ function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void })
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [permission, setPermission] = useState<ApiKeyPermission>("read");
-  const [expiryDays, setExpiryDays] = useState<string>("30");
+  const [expiryDays, setExpiryDays] = useState<ApiKeyExpiryPresetValue>("30");
 
   const createKey = useMutation({
-    mutationFn: () => {
-      const days = expiryDays === "never" ? null : Number(expiryDays);
-      return unwrap(
+    mutationFn: () =>
+      unwrap(
         browserApi.POST("/api/v1/api-keys", {
-          body: {
-            name: name.trim(),
-            key_type: "sk_",
-            permission,
-            scope_type: "tenant",
+          body: buildTenantApiKeyCreateBody({
+            name,
             ownership: "user",
-            expires_at: days
-              ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-              : null
-          }
+            permission,
+            expiryDays
+          })
         })
-      );
-    },
+      ),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["api-keys"] });
       setOpen(false);
@@ -151,12 +126,15 @@ function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void })
           </div>
           <div className="flex flex-col gap-2">
             <Label>{t("api_keys_expiration")}</Label>
-            <Select value={expiryDays} onValueChange={setExpiryDays}>
+            <Select
+              value={expiryDays}
+              onValueChange={(value) => setExpiryDays(value as ApiKeyExpiryPresetValue)}
+            >
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {EXPIRY_PRESETS.map((preset) => (
+                {API_KEY_EXPIRY_PRESETS.map((preset) => (
                   <SelectItem key={preset.key} value={preset.value}>
                     {t(preset.key)}
                   </SelectItem>
@@ -287,7 +265,7 @@ export function ApiKeys() {
       <div className="flex items-center justify-between gap-4">
         <Tabs value={stateFilter} onValueChange={(value) => setStateFilter(value as ApiKeyState)}>
           <TabsList>
-            {STATES.map((state) => (
+            {API_KEY_STATES.map((state) => (
               <TabsTrigger key={state} value={state}>
                 {stateLabels[state]}
               </TabsTrigger>
@@ -324,15 +302,15 @@ export function ApiKeys() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={STATE_BADGE_VARIANT[apiKey.state]}>
+                    <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
                       {stateLabels[apiKey.state]}
                     </Badge>
                   </TableCell>
                   <TableCell className="capitalize">{apiKey.permission}</TableCell>
                   <TableCell>
-                    {apiKey.expires_at ? formatDate(apiKey.expires_at) : t("api_keys_never")}
+                    {apiKey.expires_at ? formatApiKeyDate(apiKey.expires_at) : t("api_keys_never")}
                   </TableCell>
-                  <TableCell>{formatDate(apiKey.created_at)}</TableCell>
+                  <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
                   <TableCell>
                     <KeyActions
                       apiKey={apiKey}

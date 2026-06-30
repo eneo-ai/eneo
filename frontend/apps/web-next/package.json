@@ -14,7 +14,9 @@
     "gen:api": "node scripts/gen-api.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.204",

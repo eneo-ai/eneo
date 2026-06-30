@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { toastApiError } from "@/lib/api/toast";
 import { setLocale } from "@/lib/i18n/actions";
 import { locales } from "@/lib/i18n/locales";
 
@@ -47,8 +48,12 @@ export function AccountProfile() {
           value={locale}
           onValueChange={(next) =>
             startTransition(async () => {
-              await setLocale(next);
-              router.refresh();
+              try {
+                await setLocale(next);
+                router.refresh();
+              } catch (error) {
+                toastApiError(error, t);
+              }
             })
           }
         >

@@ -3,6 +3,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import {
+  ConfirmedPasswordField,
+  isConfirmedPasswordValid
+} from "@/components/composites/confirmed-password-field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +30,14 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { MCP_KEY, type McpAuthType, type McpServer } from "./mcp";
 
+type McpServerPayload = {
+  name: string;
+  http_url: string;
+  http_auth_type: McpAuthType;
+  description: string | null;
+  http_auth_config_schema?: { token: string } | null;
+};
+
 /** Create or edit a global MCP server (admin catalog, HTTP transport only). */
 export function McpServerDialog({
   open,
@@ -48,17 +60,37 @@ export function McpServerDialog({
     (server?.http_auth_type as McpAuthType) ?? "none"
   );
   const [bearerToken, setBearerToken] = useState("");
+  const [bearerTokenConfirmation, setBearerTokenConfirmation] = useState("");
+  const bearerTokenTouched = bearerToken.length > 0 || bearerTokenConfirmation.length > 0;
+  const bearerTokenRequired = authType === "bearer" && (!editing || bearerTokenTouched);
+  const bearerTokenConfirmed = isConfirmedPasswordValid({
+    value: bearerToken,
+    confirmation: bearerTokenConfirmation,
+    required: bearerTokenRequired
+  });
+  const bearerTokenValid =
+    authType !== "bearer" ||
+    (bearerTokenRequired
+      ? bearerToken.trim().length > 0 && bearerTokenConfirmed
+      : bearerTokenConfirmed);
+
+  function clearBearerToken() {
+    setBearerToken("");
+    setBearerTokenConfirmation("");
+  }
 
   const save = useMutation({
     mutationFn: async (): Promise<void> => {
-      const body = {
+      const body: McpServerPayload = {
         name: name.trim(),
         http_url: httpUrl.trim(),
         http_auth_type: authType,
-        description: description.trim() || null,
-        http_auth_config_schema:
-          authType === "bearer" && bearerToken ? { token: bearerToken } : null
+        description: description.trim() || null
       };
+      if (authType === "none") body.http_auth_config_schema = null;
+      else if (bearerToken) body.http_auth_config_schema = { token: bearerToken };
+      else if (!server) body.http_auth_config_schema = null;
+
       if (server) {
         await unwrap(
           browserApi.POST("/api/v1/mcp-servers/{id}/", {
@@ -72,15 +104,22 @@ export function McpServerDialog({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MCP_KEY });
+      clearBearerToken();
       onOpenChange(false);
     },
     onError: (error) => toastApiError(error, t)
   });
 
-  const valid = name.trim().length > 0 && httpUrl.trim().length > 0;
+  const valid = name.trim().length > 0 && httpUrl.trim().length > 0 && bearerTokenValid;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) clearBearerToken();
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{editing ? t("edit_mcp_server") : t("add_mcp_server")}</DialogTitle>
@@ -111,7 +150,15 @@ export function McpServerDialog({
           </div>
           <div className="flex flex-col gap-2">
             <Label>{t("mcp_authentication")}</Label>
-            <Select value={authType} onValueChange={(value) => setAuthType(value as McpAuthType)}>
+            <Select
+              value={authType}
+              onValueChange={(value) => {
+                setAuthType(value as McpAuthType);
+                if (value === "none") {
+                  clearBearerToken();
+                }
+              }}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -122,17 +169,20 @@ export function McpServerDialog({
             </Select>
           </div>
           {authType === "bearer" && (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="mcp-bearer">{t("bearer_token")}</Label>
-              <Input
-                id="mcp-bearer"
-                type="password"
-                autoComplete="off"
-                placeholder={editing ? "••••••••" : undefined}
-                value={bearerToken}
-                onChange={(event) => setBearerToken(event.target.value)}
-              />
-            </div>
+            <ConfirmedPasswordField
+              id="mcp-bearer"
+              label={t("bearer_token")}
+              confirmLabel={t("confirm_bearer_token")}
+              value={bearerToken}
+              confirmation={bearerTokenConfirmation}
+              onValueChange={setBearerToken}
+              onConfirmationChange={setBearerTokenConfirmation}
+              errorMessage={t("secret_values_do_not_match")}
+              description={editing ? t("leave_blank_keep_secret") : undefined}
+              autoComplete="off"
+              placeholder={editing ? "••••••••" : undefined}
+              required={!editing}
+            />
           )}
         </div>
         <DialogFooter>

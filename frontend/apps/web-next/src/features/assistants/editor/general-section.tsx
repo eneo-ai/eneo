@@ -1,48 +1,28 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useReportDirty } from "@/components/composites/save-status";
-import { Button } from "@/components/ui/button";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
-export function SaveRow({
-  dirty,
-  pending,
-  onSave,
-  onRevert
-}: {
-  dirty: boolean;
-  pending: boolean;
-  onSave: () => void;
-  onRevert: () => void;
-}) {
-  const t = useTranslations();
-  if (!dirty) return null;
-  return (
-    <div className="flex justify-end gap-2">
-      <Button variant="outline" size="sm" disabled={pending} onClick={onRevert}>
-        {t("cancel")}
-      </Button>
-      <Button size="sm" disabled={pending} onClick={onSave}>
-        {pending ? t("loading") : t("save_changes")}
-      </Button>
-    </div>
-  );
-}
-
 export function GeneralSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const update = useUpdateAssistant(assistant.id);
-  const [name, setName] = useState(assistant.name);
-  const [description, setDescription] = useState(assistant.description ?? "");
 
-  const dirty = name !== assistant.name || description !== (assistant.description ?? "");
-  useReportDirty("general", dirty);
+  const name = useAutosaveField({
+    key: "general",
+    value: assistant.name,
+    save: (value) => update.mutateAsync({ name: value }),
+    normalize: (value) => value.trim()
+  });
+  const description = useAutosaveField({
+    key: "general",
+    value: assistant.description ?? "",
+    save: (value) => update.mutateAsync({ description: value })
+  });
 
   return (
     <SettingsGroup title={t("general")}>
@@ -51,7 +31,13 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
         description={t("assistant_name_description")}
         htmlFor="assistant-name"
       >
-        <Input id="assistant-name" value={name} onChange={(event) => setName(event.target.value)} />
+        <Input
+          id="assistant-name"
+          value={name.value}
+          onChange={(event) => name.setValue(event.target.value)}
+          // An assistant must keep a name — revert an emptied field on blur.
+          onBlur={() => (name.value.trim() ? name.commit() : name.reset())}
+        />
       </SettingsRow>
       <SettingsRow
         title={t("description")}
@@ -60,19 +46,11 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
       >
         <Textarea
           id="assistant-description"
-          value={description}
+          value={description.value}
           rows={4}
-          placeholder={t("assistant_placeholder", { name })}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-        <SaveRow
-          dirty={dirty}
-          pending={update.isPending}
-          onSave={() => update.mutate({ name: name.trim(), description })}
-          onRevert={() => {
-            setName(assistant.name);
-            setDescription(assistant.description ?? "");
-          }}
+          placeholder={t("assistant_placeholder", { name: name.value })}
+          onChange={(event) => description.setValue(event.target.value)}
+          onBlur={() => description.commit()}
         />
       </SettingsRow>
       <SettingsRow title={t("avatar")} description={t("avatar_description")}>

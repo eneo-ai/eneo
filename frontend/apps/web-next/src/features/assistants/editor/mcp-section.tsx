@@ -1,14 +1,15 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useReportDirty } from "@/components/composites/save-status";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useSpace } from "@/features/spaces/use-space";
-import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
+
+const sortedKey = (ids: Iterable<string>) => JSON.stringify([...ids].sort());
 
 /**
  * MCP server picker. MCP servers and knowledge are mutually exclusive: when the
@@ -20,13 +21,21 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
+  const autosave = useAutosave("mcp");
 
   const available = space.mcp_servers ?? [];
   const savedIds = (assistant.mcp_servers ?? []).map((server) => server.id);
   const [selected, setSelected] = useState<Set<string>>(new Set(savedIds));
 
-  const dirty = JSON.stringify([...selected].sort()) !== JSON.stringify([...savedIds].sort());
-  useReportDirty("mcp", dirty);
+  // Adopt server changes (e.g. our own save landing) unless the user diverged.
+  const savedKey = sortedKey(savedIds);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    setSelected((current) => (sortedKey(current) === previous ? new Set(savedIds) : current));
+  }, [savedKey, savedIds]);
 
   const hasKnowledge =
     assistant.groups.length +
@@ -38,12 +47,11 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   if (available.length === 0) return null;
 
   function toggle(id: string, on: boolean) {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+    const next = new Set(selected);
+    if (on) next.add(id);
+    else next.delete(id);
+    setSelected(next);
+    void autosave(() => update.mutateAsync({ mcp_servers: [...next].map((id) => ({ id })) }));
   }
 
   return (
@@ -84,12 +92,6 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
           </fieldset>
         </div>
       </SettingsRow>
-      <SaveRow
-        dirty={dirty}
-        pending={update.isPending}
-        onSave={() => update.mutate({ mcp_servers: [...selected].map((id) => ({ id })) })}
-        onRevert={() => setSelected(new Set(savedIds))}
-      />
     </SettingsGroup>
   );
 }

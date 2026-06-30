@@ -40,6 +40,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -85,6 +87,10 @@
   --accent-foreground: oklch(0.3 0.04 256);
   --destructive: oklch(0.585 0.218 27);
   --destructive-foreground: oklch(0.985 0.005 256);
+  /* Status accents tuned for AA text contrast on white and on their /10 tints
+     (paired with an icon, never color alone). Lighter siblings live in .dark. */
+  --success: oklch(0.52 0.12 152);
+  --warning: oklch(0.5 0.1 80);
   --border: oklch(0.917 0.006 256);
   --input: oklch(0.917 0.006 256);
   --ring: oklch(0.548 0.171 256);
@@ -120,6 +126,8 @@
   --accent-foreground: oklch(0.962 0.005 256);
   --destructive: oklch(0.66 0.2 25);
   --destructive-foreground: oklch(0.962 0.005 256);
+  --success: oklch(0.8 0.13 152);
+  --warning: oklch(0.82 0.12 84);
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 13%);
   --ring: oklch(0.665 0.158 256);

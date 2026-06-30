@@ -23,6 +23,7 @@ import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 
 type Policy = Schema<"ApiKeyPolicyResponse">;
+type PolicyUpdate = Schema<"ApiKeyPolicyUpdate">;
 type SuperKeyStatus = Schema<"SuperApiKeyStatus">;
 
 const POLICY_KEY = ["admin-api-key-policy"];
@@ -88,9 +89,27 @@ function PolicyForm({
   const save = useMutation({
     mutationFn: () => {
       // ApiKeyPolicyUpdate is extra="forbid" — send only changed fields.
-      const body: Record<string, unknown> = {};
-      for (const key of Object.keys(draft) as (keyof Policy)[]) {
-        if (draft[key] !== policy[key]) body[key] = draft[key];
+      const body: PolicyUpdate = {};
+      if (draft.require_expiration !== policy.require_expiration) {
+        body.require_expiration = draft.require_expiration ?? null;
+      }
+      if (draft.max_expiration_days !== policy.max_expiration_days) {
+        body.max_expiration_days = draft.max_expiration_days ?? null;
+      }
+      if (draft.auto_expire_unused_days !== policy.auto_expire_unused_days) {
+        body.auto_expire_unused_days = draft.auto_expire_unused_days ?? null;
+      }
+      if (draft.max_rate_limit_override !== policy.max_rate_limit_override) {
+        body.max_rate_limit_override = draft.max_rate_limit_override ?? null;
+      }
+      if (draft.rotation_grace_hours !== policy.rotation_grace_hours) {
+        body.rotation_grace_hours = draft.rotation_grace_hours ?? null;
+      }
+      if (draft.max_delegation_depth !== policy.max_delegation_depth) {
+        body.max_delegation_depth = draft.max_delegation_depth ?? null;
+      }
+      if (draft.revocation_cascade_enabled !== policy.revocation_cascade_enabled) {
+        body.revocation_cascade_enabled = draft.revocation_cascade_enabled ?? null;
       }
       return unwrap(browserApi.PATCH("/api/v1/admin/api-key-policy", { body }));
     },
@@ -103,15 +122,22 @@ function PolicyForm({
 
   const dirty = (Object.keys(draft) as (keyof Policy)[]).some((key) => draft[key] !== policy[key]);
 
-  const setField = (key: keyof Policy, value: number | boolean | null) =>
+  const setField = (key: keyof PolicyUpdate, value: number | boolean | null) =>
     setDraft((prev) => ({ ...prev, [key]: value }));
 
   const numberValue = (value: number | null | undefined) =>
     value === null || value === undefined ? "" : String(value);
-  const onNumber = (key: keyof Policy) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = event.target.value.trim();
-    setField(key, raw === "" ? null : Number(raw));
-  };
+  const onNumber =
+    (key: keyof PolicyUpdate, min: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
+      const raw = event.target.value.trim();
+      if (raw === "") {
+        setField(key, null);
+        return;
+      }
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < min) return;
+      setField(key, value);
+    };
 
   return (
     <>
@@ -129,7 +155,7 @@ function PolicyForm({
           suffix={t("api_keys_admin_policy_suffix_days")}
           min={1}
           value={numberValue(draft.max_expiration_days)}
-          onChange={onNumber("max_expiration_days")}
+          onChange={onNumber("max_expiration_days", 1)}
         />
         <NumberRow
           label={t("api_keys_admin_policy_auto_expire")}
@@ -138,7 +164,7 @@ function PolicyForm({
           suffix={t("api_keys_admin_policy_suffix_days")}
           min={1}
           value={numberValue(draft.auto_expire_unused_days)}
-          onChange={onNumber("auto_expire_unused_days")}
+          onChange={onNumber("auto_expire_unused_days", 1)}
         />
         <NumberRow
           label={t("api_keys_admin_policy_max_rate_limit")}
@@ -147,7 +173,7 @@ function PolicyForm({
           suffix={t("api_keys_admin_policy_suffix_req_hr")}
           min={1}
           value={numberValue(draft.max_rate_limit_override)}
-          onChange={onNumber("max_rate_limit_override")}
+          onChange={onNumber("max_rate_limit_override", 1)}
         />
         <NumberRow
           label={t("api_keys_admin_policy_rotation_grace")}
@@ -156,7 +182,7 @@ function PolicyForm({
           suffix={t("api_keys_admin_policy_suffix_hours")}
           min={0}
           value={numberValue(draft.rotation_grace_hours)}
-          onChange={onNumber("rotation_grace_hours")}
+          onChange={onNumber("rotation_grace_hours", 0)}
         />
         <NumberRow
           label={t("api_keys_admin_policy_max_delegation")}
@@ -165,7 +191,7 @@ function PolicyForm({
           suffix={t("api_keys_admin_policy_suffix_levels")}
           min={1}
           value={numberValue(draft.max_delegation_depth)}
-          onChange={onNumber("max_delegation_depth")}
+          onChange={onNumber("max_delegation_depth", 1)}
         />
         <ToggleRow
           label={t("api_keys_admin_policy_revocation_cascade")}

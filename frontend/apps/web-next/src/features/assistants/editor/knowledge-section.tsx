@@ -1,12 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useReportDirty } from "@/components/composites/save-status";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
-import { SaveRow } from "./general-section";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 function toIds(selections: KnowledgeSelections): string {
@@ -26,16 +25,38 @@ function toIds(selections: KnowledgeSelections): string {
 export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const update = useUpdateAssistant(assistant.id);
+  const autosave = useAutosave("knowledge");
 
-  const saved: KnowledgeSelections = {
-    collections: assistant.groups,
-    websites: assistant.websites,
-    integrationKnowledge: assistant.integration_knowledge_list
-  };
+  const saved: KnowledgeSelections = useMemo(
+    () => ({
+      collections: assistant.groups,
+      websites: assistant.websites,
+      integrationKnowledge: assistant.integration_knowledge_list
+    }),
+    [assistant.groups, assistant.websites, assistant.integration_knowledge_list]
+  );
   const [selections, setSelections] = useState<KnowledgeSelections>(saved);
 
-  const dirty = toIds(selections) !== toIds(saved);
-  useReportDirty("knowledge", dirty);
+  // Adopt server changes (e.g. our own save landing) unless the user diverged.
+  const savedKey = toIds(saved);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    setSelections((current) => (toIds(current) === previous ? saved : current));
+  }, [savedKey, saved]);
+
+  function handleChange(next: KnowledgeSelections) {
+    setSelections(next);
+    void autosave(() =>
+      update.mutateAsync({
+        groups: next.collections.map((item) => ({ id: item.id })),
+        websites: next.websites.map((item) => ({ id: item.id })),
+        integration_knowledge_list: next.integrationKnowledge.map((item) => ({ id: item.id }))
+      })
+    );
+  }
 
   const hasAnyKnowledge =
     selections.collections.length +
@@ -60,7 +81,7 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
           <KnowledgePicker
             origin="personal"
             selections={selections}
-            onChange={setSelections}
+            onChange={handleChange}
             disabled={disabledByMcp}
           />
         </div>
@@ -74,25 +95,11 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
           <KnowledgePicker
             origin="organization"
             selections={selections}
-            onChange={setSelections}
+            onChange={handleChange}
             disabled={disabledByMcp}
           />
         </div>
       </SettingsRow>
-      <SaveRow
-        dirty={dirty}
-        pending={update.isPending}
-        onSave={() =>
-          update.mutate({
-            groups: selections.collections.map((item) => ({ id: item.id })),
-            websites: selections.websites.map((item) => ({ id: item.id })),
-            integration_knowledge_list: selections.integrationKnowledge.map((item) => ({
-              id: item.id
-            }))
-          })
-        }
-        onRevert={() => setSelections(saved)}
-      />
     </SettingsGroup>
   );
 }

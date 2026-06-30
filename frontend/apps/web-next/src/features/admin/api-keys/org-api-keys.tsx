@@ -43,37 +43,24 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import {
+  API_KEY_EXPIRY_PRESETS,
+  API_KEY_STATE_BADGE_VARIANT,
+  API_KEY_STATES,
+  buildTenantApiKeyCreateBody,
+  formatApiKeyDate,
+  type ApiKey,
+  type ApiKeyExpiryPresetValue,
+  type ApiKeyPermission,
+  type ApiKeyScopeType,
+  type ApiKeyState,
+  type ApiKeyType
+} from "@/features/api-keys/api-keys";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
 import { NotificationPolicyDialog } from "./notification-policy-dialog";
 import { ApiKeyPolicyDialog } from "./policy-panel";
 import { ApiKeyUsageDialog } from "./usage-dialog";
-
-type ApiKey = Schema<"ApiKeyV2">;
-type ApiKeyState = Schema<"ApiKeyState">;
-type ApiKeyPermission = Schema<"ApiKeyPermission">;
-type ApiKeyScopeType = Schema<"ApiKeyScopeType">;
-type ApiKeyType = Schema<"ApiKeyType">;
-
-const STATES: ApiKeyState[] = ["active", "suspended", "revoked", "expired"];
-const STATE_VARIANT: Record<ApiKeyState, "default" | "secondary" | "destructive" | "outline"> = {
-  active: "default",
-  suspended: "secondary",
-  revoked: "destructive",
-  expired: "outline"
-};
-const EXPIRY_PRESETS = [
-  { key: "api_keys_exp_no_expiration", value: "never" },
-  { key: "api_keys_exp_30_days", value: "30" },
-  { key: "api_keys_exp_90_days", value: "90" },
-  { key: "api_keys_exp_1_year", value: "365" }
-] as const;
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString();
-}
 
 function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void }) {
   const t = useTranslations();
@@ -81,26 +68,20 @@ function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void })
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [permission, setPermission] = useState<ApiKeyPermission>("read");
-  const [expiryDays, setExpiryDays] = useState("30");
+  const [expiryDays, setExpiryDays] = useState<ApiKeyExpiryPresetValue>("30");
 
   const create = useMutation({
-    mutationFn: () => {
-      const days = expiryDays === "never" ? null : Number(expiryDays);
-      return unwrap(
+    mutationFn: () =>
+      unwrap(
         browserApi.POST("/api/v1/api-keys", {
-          body: {
-            name: name.trim(),
-            key_type: "sk_",
-            permission,
-            scope_type: "tenant",
+          body: buildTenantApiKeyCreateBody({
+            name,
             ownership: "service",
-            expires_at: days
-              ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-              : null
-          }
+            permission,
+            expiryDays
+          })
         })
-      );
-    },
+      ),
     onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ["admin-api-keys"] });
       setOpen(false);
@@ -154,12 +135,15 @@ function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void })
           </div>
           <div className="flex flex-col gap-2">
             <Label>{t("api_keys_expiration")}</Label>
-            <Select value={expiryDays} onValueChange={setExpiryDays}>
+            <Select
+              value={expiryDays}
+              onValueChange={(value) => setExpiryDays(value as ApiKeyExpiryPresetValue)}
+            >
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {EXPIRY_PRESETS.map((preset) => (
+                {API_KEY_EXPIRY_PRESETS.map((preset) => (
                   <SelectItem key={preset.key} value={preset.value}>
                     {t(preset.key)}
                   </SelectItem>
@@ -336,7 +320,7 @@ export function OrgApiKeysPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs value={state} onValueChange={(value) => setState(value as ApiKeyState)}>
           <TabsList>
-            {STATES.map((value) => (
+            {API_KEY_STATES.map((value) => (
               <TabsTrigger key={value} value={value}>
                 {t(`api_keys_status_${value}`)}
               </TabsTrigger>
@@ -399,12 +383,12 @@ export function OrgApiKeysPage() {
                 </TableCell>
                 <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
                 <TableCell>
-                  <Badge variant={STATE_VARIANT[apiKey.state]}>
+                  <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
                     {t(`api_keys_status_${apiKey.state}`)}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
-                  {formatDate(apiKey.expires_at)}
+                  {formatApiKeyDate(apiKey.expires_at)}
                 </TableCell>
                 <TableCell>
                   <KeyActions apiKey={apiKey} onRotated={setSecret} />

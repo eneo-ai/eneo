@@ -16,7 +16,7 @@ export const TXN_COOKIE = "eneo_oidc_txn";
 /** OIDC sessions slide with the refresh token; 30 days matches typical IdP
  * refresh-token lifetimes. Password sessions live exactly as long as the
  * backend-issued JWT (no refresh until RB-3 ships). */
-const OIDC_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+export const OIDC_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 function sessionMaxAge(session: SessionPayload): number {
   if (session.mode === "oidc") return OIDC_SESSION_MAX_AGE_SECONDS;

@@ -3,10 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
+import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,21 +18,22 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { useSpace } from "@/features/spaces/use-space";
+import { SpaceModelSelect } from "./space-model-select";
 
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
 
 function useUpdateSpace() {
-  const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
 
+  // Feedback is owned by the caller's autosave wrapper (useAutosave); this
+  // mutation only refreshes the cache.
   return useMutation({
     mutationFn: (body: SpaceUpdate) =>
       unwrap(
@@ -43,8 +45,7 @@ function useUpdateSpace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
       queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
-    },
-    onError: (error) => toastApiError(error, t)
+    }
   });
 }
 
@@ -52,43 +53,42 @@ function GeneralSection() {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateSpace();
-  const [name, setName] = useState(space.name);
-  const [description, setDescription] = useState(space.description ?? "");
 
-  const dirty = name !== space.name || description !== (space.description ?? "");
+  const name = useAutosaveField({
+    key: "general",
+    value: space.name,
+    save: (value) => update.mutateAsync({ name: value }),
+    normalize: (value) => value.trim()
+  });
+  const description = useAutosaveField({
+    key: "general",
+    value: space.description ?? "",
+    save: (value) => update.mutateAsync({ description: value })
+  });
 
   return (
-    <SettingsGroup title={t("general")}>
-      <SettingsRow title={t("name")} description={t("space_name_description")}>
-        <Input value={name} onChange={(event) => setName(event.target.value)} />
-      </SettingsRow>
-      <SettingsRow title={t("description")} description={t("space_description_description")}>
-        <Textarea
-          value={description}
-          rows={4}
-          onChange={(event) => setDescription(event.target.value)}
+    <SettingsGroup id="general" title={t("general")}>
+      <SettingsRow title={t("name")} description={t("space_name_description")} htmlFor="space-name">
+        <Input
+          id="space-name"
+          value={name.value}
+          onChange={(event) => name.setValue(event.target.value)}
+          // A space must keep a name — revert an emptied field on blur.
+          onBlur={() => (name.value.trim() ? name.commit() : name.reset())}
         />
-        <div className="flex justify-end gap-2">
-          {dirty && (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setName(space.name);
-                  setDescription(space.description ?? "");
-                }}
-              >
-                {t("cancel")}
-              </Button>
-              <Button
-                disabled={update.isPending || !name.trim()}
-                onClick={() => update.mutate({ name: name.trim(), description })}
-              >
-                {update.isPending ? t("loading") : t("save_changes")}
-              </Button>
-            </>
-          )}
-        </div>
+      </SettingsRow>
+      <SettingsRow
+        title={t("description")}
+        description={t("space_description_description")}
+        htmlFor="space-description"
+      >
+        <Textarea
+          id="space-description"
+          value={description.value}
+          rows={4}
+          onChange={(event) => description.setValue(event.target.value)}
+          onBlur={() => description.commit()}
+        />
       </SettingsRow>
       <StorageSection />
     </SettingsGroup>
@@ -136,6 +136,7 @@ function SecuritySection() {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateSpace();
+  const autosave = useAutosave("security");
 
   const { data: security } = useQuery({
     queryKey: ["security-classifications"],
@@ -145,7 +146,7 @@ function SecuritySection() {
   const NONE = "__none__";
 
   return (
-    <SettingsGroup title={t("security_and_privacy")}>
+    <SettingsGroup id="security" title={t("security_and_privacy")}>
       {security?.security_enabled && (
         <SettingsRow
           title={t("security_classification")}
@@ -155,7 +156,11 @@ function SecuritySection() {
             value={space.security_classification?.id ?? NONE}
             disabled={update.isPending}
             onValueChange={(value) =>
-              update.mutate({ security_classification: value === NONE ? null : { id: value } })
+              autosave(() =>
+                update.mutateAsync({
+                  security_classification: value === NONE ? null : { id: value }
+                })
+              )
             }
           >
             <SelectTrigger className="w-64">
@@ -181,10 +186,15 @@ function RetentionSection() {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateSpace();
-  const [days, setDays] = useState<string>(space.data_retention_days?.toString() ?? "");
 
-  const current = space.data_retention_days?.toString() ?? "";
-  const dirty = days !== current;
+  const days = useAutosaveField({
+    key: "security",
+    value: space.data_retention_days?.toString() ?? "",
+    save: (value) =>
+      update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),
+    // Empty means "keep forever"; otherwise require a positive whole number.
+    validate: (value) => value === "" || (Number.isInteger(Number(value)) && Number(value) >= 1)
+  });
 
   return (
     <SettingsRow
@@ -200,85 +210,12 @@ function RetentionSection() {
           type="number"
           min={1}
           className="w-32"
-          value={days}
+          value={days.value}
           placeholder="∞"
-          onChange={(event) => setDays(event.target.value)}
+          onChange={(event) => days.setValue(event.target.value)}
+          onBlur={() => days.commit()}
         />
         <span className="text-muted-foreground text-sm">{t("days")}</span>
-        {dirty && (
-          <Button
-            size="sm"
-            disabled={update.isPending}
-            onClick={() =>
-              update.mutate({ data_retention_days: days === "" ? null : Number(days) })
-            }
-          >
-            {update.isPending ? t("loading") : t("save_changes")}
-          </Button>
-        )}
-      </div>
-    </SettingsRow>
-  );
-}
-
-type ToggleableModel = {
-  id: string;
-  name: string;
-  nickname?: string | null;
-  is_org_enabled?: boolean;
-  is_deprecated?: boolean;
-  meets_security_classification?: boolean | null;
-};
-
-function ModelToggleRow({
-  models,
-  selectedIds,
-  title,
-  description,
-  onChange,
-  pending
-}: {
-  models: ToggleableModel[];
-  selectedIds: string[];
-  title: string;
-  description: string;
-  onChange: (ids: string[]) => void;
-  pending: boolean;
-}) {
-  const t = useTranslations();
-
-  function toggle(modelId: string) {
-    const next = selectedIds.includes(modelId)
-      ? selectedIds.filter((id) => id !== modelId)
-      : [...selectedIds, modelId];
-    onChange(next);
-  }
-
-  return (
-    <SettingsRow title={title} description={description}>
-      <div className="flex flex-col">
-        {models.map((model) => {
-          const meetsClassification = model.meets_security_classification ?? true;
-          return (
-            <div
-              key={model.id}
-              className={`border-border flex items-center justify-between gap-4 border-b py-3 ${
-                meetsClassification ? "" : "opacity-60"
-              }`}
-              title={
-                meetsClassification ? undefined : t("model_does_not_meet_security_classification")
-              }
-            >
-              <span className="text-sm font-medium">{model.nickname ?? model.name}</span>
-              <Switch
-                checked={selectedIds.includes(model.id)}
-                disabled={pending || !meetsClassification}
-                onCheckedChange={() => toggle(model.id)}
-                aria-label={model.nickname ?? model.name}
-              />
-            </div>
-          );
-        })}
       </div>
     </SettingsRow>
   );
@@ -288,6 +225,7 @@ function ModelsSection() {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateSpace();
+  const autosave = useAutosave("models");
 
   const { data: models } = useQuery({
     queryKey: ["ai-models", space.id],
@@ -308,30 +246,33 @@ function ModelsSection() {
   const toIds = (modelIds: string[]) => modelIds.map((id) => ({ id }));
 
   return (
-    <SettingsGroup title={t("advanced_settings")}>
-      <ModelToggleRow
+    <SettingsGroup id="models" title={t("advanced_settings")}>
+      <SpaceModelSelect
+        kind="completion"
         title={t("completion_models")}
         description={t("completion_models_description")}
         models={completionModels}
         selectedIds={space.completion_models.map((model) => model.id)}
         pending={update.isPending}
-        onChange={(ids) => update.mutate({ completion_models: toIds(ids) })}
+        onChange={(ids) => autosave(() => update.mutateAsync({ completion_models: toIds(ids) }))}
       />
-      <ModelToggleRow
+      <SpaceModelSelect
+        kind="embedding"
         title={t("embedding_models")}
         description={t("embedding_models_description")}
         models={embeddingModels}
         selectedIds={space.embedding_models.map((model) => model.id)}
         pending={update.isPending}
-        onChange={(ids) => update.mutate({ embedding_models: toIds(ids) })}
+        onChange={(ids) => autosave(() => update.mutateAsync({ embedding_models: toIds(ids) }))}
       />
-      <ModelToggleRow
+      <SpaceModelSelect
+        kind="transcription"
         title={t("transcription_models")}
         description={t("transcription_models_description")}
         models={transcriptionModels}
         selectedIds={space.transcription_models.map((model) => model.id)}
         pending={update.isPending}
-        onChange={(ids) => update.mutate({ transcription_models: toIds(ids) })}
+        onChange={(ids) => autosave(() => update.mutateAsync({ transcription_models: toIds(ids) }))}
       />
       {/* MCP server selection is stubbed until Phase 6 owns the MCP UI. */}
     </SettingsGroup>
@@ -380,12 +321,16 @@ export function SpaceSettings() {
   const isOrgSpace = space.organization;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
-      <PageHeader title={t("settings")} />
-      {!isOrgSpace && <GeneralSection />}
-      {!isOrgSpace && <SecuritySection />}
-      <ModelsSection />
-      {!isOrgSpace && can("delete", "space") && <DangerSection />}
-    </div>
+    <SaveStatusProvider>
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageHeader title={t("settings")}>
+          <SaveStatusIndicator />
+        </PageHeader>
+        {!isOrgSpace && <GeneralSection />}
+        {!isOrgSpace && <SecuritySection />}
+        <ModelsSection />
+        {!isOrgSpace && can("delete", "space") && <DangerSection />}
+      </div>
+    </SaveStatusProvider>
   );
 }

@@ -20,7 +20,9 @@ export function ServicesPage() {
         {can("create", "service") && <CreateServiceButton />}
       </PageHeader>
       {services.length === 0 ? (
-        <EmptyState title={t("there_are_currently_no_services_configured")} />
+        <EmptyState title={t("there_are_currently_no_services_configured")}>
+          {can("create", "service") && <CreateServiceButton />}
+        </EmptyState>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {services.map((service) => (

@@ -38,7 +38,9 @@ export function AssistantsPage() {
         {can("create", "assistant") && <CreateChatAppMenu />}
       </PageHeader>
       {items.length === 0 ? (
-        <EmptyState title={t("there_are_currently_no_assistants_configured")} />
+        <EmptyState title={t("there_are_currently_no_assistants_configured")}>
+          {can("create", "assistant") && <CreateChatAppMenu />}
+        </EmptyState>
       ) : groupByStatus ? (
         <div className="flex flex-col gap-6">
           {published.length > 0 && (

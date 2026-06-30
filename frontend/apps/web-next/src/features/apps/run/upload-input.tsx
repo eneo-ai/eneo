@@ -38,6 +38,8 @@ function friendlyType(mime: string): string {
 }
 
 export function FileChip({ file, onRemove }: { file: RunFile; onRemove?: () => void }) {
+  const t = useTranslations();
+
   return (
     <div className="border-border bg-background flex items-center gap-2 rounded-lg border px-3 py-2">
       {file.uploading ? (
@@ -46,7 +48,13 @@ export function FileChip({ file, onRemove }: { file: RunFile; onRemove?: () => v
       <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
       <span className="text-muted-foreground shrink-0 text-xs">{formatBytes(file.size)}</span>
       {onRemove && (
-        <Button variant="ghost" size="icon" className="size-6 shrink-0" onClick={onRemove}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6 shrink-0"
+          aria-label={t("remove_attachment")}
+          onClick={onRemove}
+        >
           <X className="size-4" />
         </Button>
       )}

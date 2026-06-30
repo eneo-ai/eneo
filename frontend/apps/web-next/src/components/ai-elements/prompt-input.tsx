@@ -464,6 +464,8 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" 
   maxFiles?: number;
   // bytes
   maxFileSize?: number;
+  /** External attachment owner. When provided, paste/drop/file input writes there. */
+  attachments?: AttachmentsContext;
   onError?: (err: { code: "max_files" | "max_file_size" | "accept"; message: string }) => void;
   onSubmit: (
     message: PromptInputMessage,
@@ -479,6 +481,7 @@ export const PromptInput = ({
   syncHiddenInput,
   maxFiles,
   maxFileSize,
+  attachments: externalAttachments,
   onError,
   onSubmit,
   children,
@@ -487,6 +490,8 @@ export const PromptInput = ({
   // Try to use a provider controller if present
   const controller = useOptionalPromptInputController();
   const usingProvider = !!controller;
+  const attachmentsOwner = externalAttachments ?? controller?.attachments;
+  const usingOwnedAttachments = !!attachmentsOwner;
 
   // Refs
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -494,7 +499,7 @@ export const PromptInput = ({
 
   // ----- Local attachments (only used when no provider)
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
-  const files = usingProvider ? controller.attachments.files : items;
+  const files = attachmentsOwner ? attachmentsOwner.files : items;
 
   // ----- Local referenced sources (always local to PromptInput)
   const [referencedSources, setReferencedSources] = useState<
@@ -594,8 +599,8 @@ export const PromptInput = ({
     []
   );
 
-  // Wrapper that validates files before calling provider's add
-  const addWithProviderValidation = useCallback(
+  // Wrapper that validates files before calling an owned attachment store.
+  const addWithOwnedValidation = useCallback(
     (fileList: File[] | FileList) => {
       const incoming = [...fileList];
       const accepted = incoming.filter((f) => matchesAccept(f));
@@ -628,16 +633,16 @@ export const PromptInput = ({
       }
 
       if (capped.length > 0) {
-        controller?.attachments.add(capped);
+        attachmentsOwner?.add(capped);
       }
     },
-    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller]
+    [matchesAccept, maxFileSize, maxFiles, onError, files.length, attachmentsOwner]
   );
 
   const clearAttachments = useCallback(
     () =>
-      usingProvider
-        ? controller?.attachments.clear()
+      usingOwnedAttachments
+        ? attachmentsOwner?.clear()
         : setItems((prev) => {
             for (const file of prev) {
               if (file.url) {
@@ -646,16 +651,14 @@ export const PromptInput = ({
             }
             return [];
           }),
-    [usingProvider, controller]
+    [usingOwnedAttachments, attachmentsOwner]
   );
 
   const clearReferencedSources = useCallback(() => setReferencedSources([]), []);
 
-  const add = usingProvider ? addWithProviderValidation : addLocal;
-  const remove = usingProvider ? controller.attachments.remove : removeLocal;
-  const openFileDialog = usingProvider
-    ? controller.attachments.openFileDialog
-    : openFileDialogLocal;
+  const add = usingOwnedAttachments ? addWithOwnedValidation : addLocal;
+  const remove = attachmentsOwner ? attachmentsOwner.remove : removeLocal;
+  const openFileDialog = attachmentsOwner ? attachmentsOwner.openFileDialog : openFileDialogLocal;
 
   const clear = useCallback(() => {
     clearAttachments();
@@ -664,11 +667,11 @@ export const PromptInput = ({
 
   // Let provider know about our hidden file input so external menus can call openFileDialog()
   useEffect(() => {
-    if (!usingProvider) {
+    if (!usingProvider || externalAttachments) {
       return;
     }
     controller.__registerFileInput(inputRef, () => inputRef.current?.click());
-  }, [usingProvider, controller]);
+  }, [usingProvider, controller, externalAttachments]);
 
   // Note: File input cannot be programmatically set for security reasons
   // The syncHiddenInput prop is no longer functional
@@ -738,7 +741,7 @@ export const PromptInput = ({
 
   useEffect(
     () => () => {
-      if (!usingProvider) {
+      if (!usingOwnedAttachments) {
         for (const f of filesRef.current) {
           if (f.url) {
             URL.revokeObjectURL(f.url);
@@ -746,7 +749,7 @@ export const PromptInput = ({
         }
       }
     },
-    [usingProvider]
+    [usingOwnedAttachments]
   );
 
   const handleChange: ChangeEventHandler<HTMLInputElement> = useCallback(

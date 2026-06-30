@@ -2,8 +2,9 @@
 
 import { Edit, FileAudio, FileImage, FileText, Mic } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -14,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { SaveRow } from "@/features/assistants/editor/general-section";
 import type { App, InputFieldType } from "../apps";
 import { useUpdateApp } from "./use-app";
 
@@ -84,19 +84,45 @@ function InputTypeSelect({
 export function InputSection({ app }: { app: App }) {
   const t = useTranslations();
   const update = useUpdateApp(app.id);
+  const autosave = useAutosave("input");
 
-  const saved: EditableField[] = app.input_fields.map((field) => ({
-    type: field.type,
-    description: field.description ?? ""
-  }));
+  const saved: EditableField[] = useMemo(
+    () =>
+      app.input_fields.map((field) => ({
+        type: field.type,
+        description: field.description ?? ""
+      })),
+    [app.input_fields]
+  );
   const [fields, setFields] = useState<EditableField[]>(saved);
 
-  const dirty = JSON.stringify(fields) !== JSON.stringify(saved);
+  // Adopt server changes (our own save landing) unless the user diverged.
+  const savedKey = JSON.stringify(saved);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    setFields((current) => (JSON.stringify(current) === previous ? saved : current));
+  }, [savedKey, saved]);
 
-  const patchField = (index: number, patch: Partial<EditableField>) =>
-    setFields((current) =>
-      current.map((field, position) => (position === index ? { ...field, ...patch } : field))
+  const persist = (next: EditableField[]) =>
+    autosave(() =>
+      update.mutateAsync({
+        input_fields: next.map((field) => ({
+          type: field.type,
+          description: field.description || null
+        }))
+      })
     );
+
+  function patchField(index: number, patch: Partial<EditableField>, save = true) {
+    const next = fields.map((field, position) =>
+      position === index ? { ...field, ...patch } : field
+    );
+    setFields(next);
+    if (save) void persist(next);
+  }
 
   return (
     <SettingsGroup title={t("input")}>
@@ -110,7 +136,8 @@ export function InputSection({ app }: { app: App }) {
             <Input
               id={`app-input-${index}-description`}
               value={field.description}
-              onChange={(event) => patchField(index, { description: event.target.value })}
+              onChange={(event) => patchField(index, { description: event.target.value }, false)}
+              onBlur={() => void persist(fields)}
             />
           </SettingsRow>
           <SettingsRow
@@ -126,19 +153,6 @@ export function InputSection({ app }: { app: App }) {
           </SettingsRow>
         </div>
       ))}
-      <SaveRow
-        dirty={dirty}
-        pending={update.isPending}
-        onSave={() =>
-          update.mutate({
-            input_fields: fields.map((field) => ({
-              type: field.type,
-              description: field.description || null
-            }))
-          })
-        }
-        onRevert={() => setFields(saved)}
-      />
     </SettingsGroup>
   );
 }

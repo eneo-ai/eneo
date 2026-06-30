@@ -4,8 +4,8 @@ import { Bot, Users } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { iconUrl } from "@/components/composites/icon-field";
+import { ResourceTileActions, ResourceTileCard } from "@/components/composites/resource-tile";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { entityAccent } from "@/lib/entity-accent";
 import { cn } from "@/lib/utils";
 import { useSpace } from "@/features/spaces/use-space";
@@ -23,7 +23,7 @@ export function ChatAppTile({ item, showStatus }: { item: ChatAppItem; showStatu
   const icon = iconUrl(item.icon_id);
 
   return (
-    <Card className="group hover:border-primary/40 focus-within:border-ring focus-within:ring-ring/50 relative gap-0 p-4 transition-colors focus-within:ring-[3px]">
+    <ResourceTileCard>
       <Link
         href={chatPartnerHref(routeId, item)}
         className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0 focus-visible:outline-none"
@@ -54,9 +54,9 @@ export function ChatAppTile({ item, showStatus }: { item: ChatAppItem; showStatu
           </Badge>
         </div>
       )}
-      <div className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+      <ResourceTileActions>
         <ChatAppActions item={item} />
-      </div>
-    </Card>
+      </ResourceTileActions>
+    </ResourceTileCard>
   );
 }

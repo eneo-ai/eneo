@@ -1,10 +1,22 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftRight, Check, MoreHorizontal, Pencil, Star } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Brain,
+  Check,
+  Clock,
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Star,
+  TriangleAlert,
+  Wrench
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,31 +26,28 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
+import { TableCell, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
+import {
+  formatCostPerMillionTokens,
+  formatCostPerMinute,
+  getDeprecationStatus
+} from "@/features/ai-models/format-model-stats";
+import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
-import {
-  groupByProvider,
-  MODELS_KEY,
-  modelLabel,
-  type AdminModel,
-  type CompletionModelAdmin,
-  type ModelKind
-} from "./models";
+import { cn } from "@/lib/utils";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";
 import { ModelDetailDialog } from "./model-detail-dialog";
+import {
+  type AdminModel,
+  type CompletionModelAdmin,
+  MODELS_KEY,
+  modelLabel,
+  type ModelKind
+} from "./models";
 
 type ModelFlags = {
   is_org_enabled?: boolean | null;
@@ -75,16 +84,155 @@ function hasClassification(model: AdminModel): boolean {
   return "security_classification" in model;
 }
 
-function ModelRow({
+/**
+ * Indicative price chip — per 1M tokens (completion / embedding) or per audio
+ * minute (transcription). Shows "–" with a tooltip when unpriced so admins spot
+ * models without a cost on record. Mirrors the Svelte `ModelCostBadge`.
+ */
+function ModelCostChip({ model, kind }: { model: AdminModel; kind: ModelKind }) {
+  const t = useTranslations();
+
+  let text: string;
+  let hasData: boolean;
+  let tooltip: string;
+
+  if (kind === "transcription") {
+    const value = formatCostPerMinute(
+      (model as { cost_per_minute?: string | null }).cost_per_minute
+    );
+    hasData = value !== null;
+    text = value ? t("model_cost_per_minute", { cost: value }) : "–";
+    tooltip = hasData ? t("model_cost_tooltip_per_minute") : t("model_cost_unknown");
+  } else {
+    const m = model as {
+      input_cost_per_token?: string | null;
+      output_cost_per_token?: string | null;
+    };
+    const input = formatCostPerMillionTokens(m.input_cost_per_token);
+    const output = formatCostPerMillionTokens(m.output_cost_per_token);
+    hasData = input !== null || output !== null;
+    // Embeddings usually have no output price; collapse to one value unless they differ.
+    if (!input && !output) text = "–";
+    else if (input && output && input !== output) text = `${input} / ${output}`;
+    else text = input ?? output ?? "–";
+    tooltip = hasData ? t("model_cost_tooltip_per_million") : t("model_cost_unknown");
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="bg-muted text-muted-foreground inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] tabular-nums"
+          aria-label={`${tooltip}: ${text}`}
+        >
+          {text}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Compact capability + lifecycle icons (vision / reasoning / tools, plus a
+ * deprecation or retirement warning) with tooltips, followed by an indicative
+ * cost chip — the dense badge text is replaced by glyphs so the table scans at
+ * a glance, matching the Svelte admin.
+ */
+function ModelStatusIcons({ model, kind }: { model: AdminModel; kind: ModelKind }) {
+  const t = useTranslations();
+  const dep = getDeprecationStatus(model);
+
+  const icons: {
+    key: string;
+    Icon: typeof Eye;
+    className: string;
+    label: string;
+    tooltip: string;
+  }[] = [];
+
+  if (dep.kind === "deprecated") {
+    icons.push({
+      key: "deprecated",
+      Icon: TriangleAlert,
+      className: "text-destructive",
+      label: t("model_label_deprecated"),
+      tooltip: t("model_tooltip_deprecated", { date: dep.date ?? "" })
+    });
+  } else if (dep.kind === "retiring") {
+    icons.push({
+      key: "retiring",
+      Icon: Clock,
+      className: "text-warning",
+      label: t("model_label_retiring", { date: dep.date ?? "" }),
+      tooltip: t("model_tooltip_retiring", { date: dep.date ?? "" })
+    });
+  }
+  if ("reasoning" in model && model.reasoning) {
+    icons.push({
+      key: "reasoning",
+      Icon: Brain,
+      className: "text-muted-foreground",
+      label: t("model_label_reasoning"),
+      tooltip: t("model_tooltip_reasoning")
+    });
+  }
+  if ("vision" in model && model.vision) {
+    icons.push({
+      key: "vision",
+      Icon: Eye,
+      className: "text-muted-foreground",
+      label: t("model_label_vision"),
+      tooltip: t("model_tooltip_vision")
+    });
+  }
+  if ("supports_tool_calling" in model && model.supports_tool_calling) {
+    icons.push({
+      key: "tools",
+      Icon: Wrench,
+      className: "text-muted-foreground",
+      label: t("model_label_tool_calling"),
+      tooltip: t("model_tooltip_tool_calling")
+    });
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      {icons.length > 0 && (
+        <span
+          role="list"
+          aria-label={t("model_capabilities_label")}
+          className="flex items-center gap-2"
+        >
+          {icons.map(({ key, Icon, className, label, tooltip }) => (
+            <Tooltip key={key}>
+              <TooltipTrigger asChild>
+                <span role="listitem" aria-label={label} className={cn("inline-flex", className)}>
+                  <Icon className="size-4" aria-hidden="true" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{tooltip}</TooltipContent>
+            </Tooltip>
+          ))}
+        </span>
+      )}
+      <ModelCostChip model={model} kind={kind} />
+    </span>
+  );
+}
+
+export function ModelRow({
   model,
   kind,
   classifications,
-  securityEnabled
+  securityEnabled,
+  showKind = false
 }: {
   model: AdminModel;
   kind: ModelKind;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  showKind?: boolean;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -107,15 +255,19 @@ function ModelRow({
     : null;
   const supportsDefault = kind !== "embedding";
   const supportsClassification = securityEnabled && kind !== "embedding";
-  // Only tenant (custom) completion models carry an editable metadata contract.
   const canEdit = kind === "completion" && !("readonly" in model && model.readonly);
-  // Migration moves a completion model's usage onto a replacement.
   const canMigrate =
     kind === "completion" && !("migrated_to_model_id" in model && model.migrated_to_model_id);
   const showActions = supportsDefault || supportsClassification || canEdit || canMigrate;
+  const dep = getDeprecationStatus(model);
 
   return (
-    <TableRow>
+    <TableRow
+      className={cn(
+        dep.kind === "deprecated" && "bg-destructive/5",
+        dep.kind === "retiring" && "bg-warning/5"
+      )}
+    >
       <TableCell>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -150,26 +302,20 @@ function ModelRow({
           ) : (
             modelLabel(model)
           )}
+          {showKind && (
+            <Badge variant="outline" className="capitalize">
+              {t(`${kind}_models_singular`)}
+            </Badge>
+          )}
           {isDefault && (
             <Badge variant="secondary" className="gap-1">
               <Star className="size-3" /> {t("default_model")}
             </Badge>
           )}
         </span>
-        {model.description && (
-          <span className="text-muted-foreground line-clamp-1 text-xs">{model.description}</span>
-        )}
       </TableCell>
       <TableCell>
-        <div className="flex flex-wrap gap-1">
-          {"vision" in model && model.vision && (
-            <Badge variant="outline">{t("capability_vision")}</Badge>
-          )}
-          {"reasoning" in model && model.reasoning && (
-            <Badge variant="outline">{t("reasoning")}</Badge>
-          )}
-          {model.hosting && <Badge variant="outline">{model.hosting}</Badge>}
-        </div>
+        <ModelStatusIcons model={model} kind={kind} />
       </TableCell>
       {securityEnabled && (
         <TableCell className="text-muted-foreground text-sm">
@@ -264,54 +410,5 @@ function ModelRow({
         )}
       </TableCell>
     </TableRow>
-  );
-}
-
-export function ModelTable({
-  models,
-  kind,
-  classifications,
-  securityEnabled
-}: {
-  models: AdminModel[];
-  kind: ModelKind;
-  classifications: SecurityClassification[];
-  securityEnabled: boolean;
-}) {
-  const t = useTranslations();
-  const groups = groupByProvider(models);
-
-  return (
-    <div className="flex flex-col gap-6">
-      {groups.map((group) => (
-        <div key={group.provider} className="flex flex-col gap-2">
-          <h3 className="text-muted-foreground text-sm font-semibold capitalize">
-            {group.provider}
-          </h3>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">{t("status")}</TableHead>
-                <TableHead>{t("name")}</TableHead>
-                <TableHead>{t("capabilities")}</TableHead>
-                {securityEnabled && <TableHead>{t("security_classification")}</TableHead>}
-                <TableHead className="w-12" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {group.models.map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  kind={kind}
-                  classifications={classifications}
-                  securityEnabled={securityEnabled}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ))}
-    </div>
   );
 }

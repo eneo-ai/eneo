@@ -2,7 +2,7 @@
 
 import { Wrench } from "lucide-react";
 import Link from "next/link";
-import { Card } from "@/components/ui/card";
+import { ResourceTileActions, ResourceTileCard } from "@/components/composites/resource-tile";
 import { useSpace } from "@/features/spaces/use-space";
 import { ServiceActions } from "./actions";
 import type { ServiceSparse } from "./services";
@@ -12,10 +12,10 @@ export function ServiceTile({ service }: { service: ServiceSparse }) {
   const { routeId } = useSpace();
 
   return (
-    <Card className="group hover:border-primary/40 relative gap-0 p-4 transition-colors">
+    <ResourceTileCard>
       <Link
         href={`/spaces/${routeId}/services/${service.id}?tab=playground`}
-        className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0"
+        className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0 focus-visible:outline-none"
         aria-label={service.name}
       >
         <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center rounded-xl">
@@ -23,9 +23,9 @@ export function ServiceTile({ service }: { service: ServiceSparse }) {
         </span>
         <span className="line-clamp-2 text-sm font-medium">{service.name}</span>
       </Link>
-      <div className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+      <ResourceTileActions>
         <ServiceActions service={service} />
-      </div>
-    </Card>
+      </ResourceTileActions>
+    </ResourceTileCard>
   );
 }

@@ -1,27 +1,40 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { SaveRow } from "@/features/assistants/editor/general-section";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
 
 export function GeneralSection({ app }: { app: App }) {
   const t = useTranslations();
   const update = useUpdateApp(app.id);
-  const [name, setName] = useState(app.name);
-  const [description, setDescription] = useState(app.description ?? "");
 
-  const dirty = name !== app.name || description !== (app.description ?? "");
+  const name = useAutosaveField({
+    key: "general",
+    value: app.name,
+    save: (value) => update.mutateAsync({ name: value }),
+    normalize: (value) => value.trim()
+  });
+  const description = useAutosaveField({
+    key: "general",
+    value: app.description ?? "",
+    save: (value) => update.mutateAsync({ description: value })
+  });
 
   return (
     <SettingsGroup title={t("general")}>
       <SettingsRow title={t("name")} description={t("app_name_description")} htmlFor="app-name">
-        <Input id="app-name" value={name} onChange={(event) => setName(event.target.value)} />
+        <Input
+          id="app-name"
+          value={name.value}
+          onChange={(event) => name.setValue(event.target.value)}
+          // An app must keep a name — revert an emptied field on blur.
+          onBlur={() => (name.value.trim() ? name.commit() : name.reset())}
+        />
       </SettingsRow>
       <SettingsRow
         title={t("description")}
@@ -30,18 +43,10 @@ export function GeneralSection({ app }: { app: App }) {
       >
         <Textarea
           id="app-description"
-          value={description}
+          value={description.value}
           rows={4}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-        <SaveRow
-          dirty={dirty}
-          pending={update.isPending}
-          onSave={() => update.mutate({ name: name.trim(), description })}
-          onRevert={() => {
-            setName(app.name);
-            setDescription(app.description ?? "");
-          }}
+          onChange={(event) => description.setValue(event.target.value)}
+          onBlur={() => description.commit()}
         />
       </SettingsRow>
       <SettingsRow title={t("avatar")} description={t("avatar_description")}>

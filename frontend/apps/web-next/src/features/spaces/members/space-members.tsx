@@ -1,9 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Users } from "lucide-react";
+import { Trash2, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
@@ -42,13 +43,11 @@ function RoleSelect({
   value,
   roles,
   onChange,
-  onRemove,
   disabled
 }: {
   value: SpaceRoleValue;
   roles: Schema<"SpaceRole">[];
   onChange: (role: SpaceRoleValue) => void;
-  onRemove: () => void;
   disabled?: boolean;
 }) {
   const t = useTranslations();
@@ -56,10 +55,7 @@ function RoleSelect({
     <Select
       value={value}
       disabled={disabled}
-      onValueChange={(next) => {
-        if (next === "__remove__") onRemove();
-        else onChange(next as SpaceRoleValue);
-      }}
+      onValueChange={(next) => onChange(next as SpaceRoleValue)}
     >
       <SelectTrigger size="sm" className="w-32" aria-label={t("role")}>
         <SelectValue />
@@ -70,9 +66,6 @@ function RoleSelect({
             {role.label}
           </SelectItem>
         ))}
-        <SelectItem value="__remove__" className="text-destructive">
-          {t("remove")}
-        </SelectItem>
       </SelectContent>
     </Select>
   );
@@ -117,13 +110,26 @@ function MemberRow({ member }: { member: SpaceMember }) {
         {isSelf ? ` (${t("you")})` : ""}
       </span>
       {can("edit", "member") && !isSelf ? (
-        <RoleSelect
-          value={member.role}
-          roles={space.available_roles}
-          onChange={(role) => updateRole.mutate(role)}
-          onRemove={() => removeMember.mutate()}
-          disabled={updateRole.isPending || removeMember.isPending}
-        />
+        <div className="flex items-center gap-1">
+          <RoleSelect
+            value={member.role}
+            roles={space.available_roles}
+            onChange={(role) => updateRole.mutate(role)}
+            disabled={updateRole.isPending || removeMember.isPending}
+          />
+          <ConfirmDialog
+            trigger={
+              <Button variant="ghost" size="icon" aria-label={t("remove")}>
+                <Trash2 className="text-destructive size-4" />
+              </Button>
+            }
+            title={t("remove")}
+            description={member.email}
+            confirmLabel={t("confirm_deletion")}
+            pending={removeMember.isPending}
+            onConfirm={() => removeMember.mutateAsync().then(() => undefined)}
+          />
+        </div>
       ) : (
         <span className="text-muted-foreground text-sm capitalize">{member.role}</span>
       )}
@@ -284,13 +290,26 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
         </span>
       </span>
       {can("edit", "group_member") ? (
-        <RoleSelect
-          value={group.role}
-          roles={space.available_roles}
-          onChange={(role) => updateRole.mutate(role)}
-          onRemove={() => removeGroup.mutate()}
-          disabled={updateRole.isPending || removeGroup.isPending}
-        />
+        <div className="flex items-center gap-1">
+          <RoleSelect
+            value={group.role}
+            roles={space.available_roles}
+            onChange={(role) => updateRole.mutate(role)}
+            disabled={updateRole.isPending || removeGroup.isPending}
+          />
+          <ConfirmDialog
+            trigger={
+              <Button variant="ghost" size="icon" aria-label={t("remove")}>
+                <Trash2 className="text-destructive size-4" />
+              </Button>
+            }
+            title={t("remove")}
+            description={group.name}
+            confirmLabel={t("confirm_deletion")}
+            pending={removeGroup.isPending}
+            onConfirm={() => removeGroup.mutateAsync().then(() => undefined)}
+          />
+        </div>
       ) : (
         <span className="text-muted-foreground text-sm capitalize">{group.role}</span>
       )}

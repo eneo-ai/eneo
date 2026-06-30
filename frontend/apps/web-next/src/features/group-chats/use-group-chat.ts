@@ -1,9 +1,7 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
 import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { toastApiError } from "@/lib/api/toast";
 import { useSpace } from "@/features/spaces/use-space";
 
 export type GroupChat = Schema<"GroupChatPublic">;
@@ -20,10 +18,11 @@ export function groupChatQueryOptions(api: EneoClient, groupChatId: string) {
 }
 
 export function useUpdateGroupChat(groupChatId: string) {
-  const t = useTranslations();
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
 
+  // Feedback is owned by the caller's autosave wrapper (useAutosave); this
+  // mutation only refreshes the cache.
   return useMutation({
     mutationFn: (body: GroupChatUpdate) =>
       unwrap(
@@ -35,7 +34,6 @@ export function useUpdateGroupChat(groupChatId: string) {
     onSuccess: (groupChat) => {
       queryClient.setQueryData(groupChatQueryOptions(browserApi, groupChatId).queryKey, groupChat);
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-    },
-    onError: (error) => toastApiError(error, t)
+    }
   });
 }

@@ -4,13 +4,6 @@ import { useMutation } from "@tanstack/react-query";
 import { Globe } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput
-} from "@/components/ai-elements/tool";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,23 +77,6 @@ export function WebSources({
         </a>
       ))}
     </div>
-  );
-}
-
-export function MessageTool({ part }: { part: Extract<Part, { type: "dynamic-tool" }> }) {
-  return (
-    <Tool>
-      <ToolHeader title={part.toolName} type={`tool-${part.toolName}`} state={part.state} />
-      <ToolContent>
-        <ToolInput input={part.input} />
-        <ToolOutput
-          errorText={part.state === "output-error" ? part.errorText : undefined}
-          output={
-            part.state === "output-available" ? JSON.stringify(part.output, null, 2) : undefined
-          }
-        />
-      </ToolContent>
-    </Tool>
   );
 }
 

@@ -4,10 +4,12 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { PageHeader } from "@/components/composites/page-header";
+import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +20,6 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { chatPartnerHref } from "@/features/assistants/assistants";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
-import { SaveRow } from "@/features/assistants/editor/general-section";
 import { useSpace } from "@/features/spaces/use-space";
 import { GroupChatAssistantList } from "./assistant-list";
 import {
@@ -31,7 +32,13 @@ import {
 function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
   const t = useTranslations();
   const update = useUpdateGroupChat(groupChat.id);
-  const [name, setName] = useState(groupChat.name);
+
+  const name = useAutosaveField({
+    key: "general",
+    value: groupChat.name,
+    save: (value) => update.mutateAsync({ name: value }),
+    normalize: (value) => value.trim()
+  });
 
   return (
     <SettingsGroup title={t("general")}>
@@ -42,14 +49,10 @@ function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
       >
         <Input
           id="group-chat-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-        />
-        <SaveRow
-          dirty={name !== groupChat.name}
-          pending={update.isPending}
-          onSave={() => update.mutate({ name: name.trim() })}
-          onRevert={() => setName(groupChat.name)}
+          value={name.value}
+          onChange={(event) => name.setValue(event.target.value)}
+          // A group chat must keep a name — revert an emptied field on blur.
+          onBlur={() => (name.value.trim() ? name.commit() : name.reset())}
         />
       </SettingsRow>
       <SettingsRow title={t("avatar")} description={t("avatar_description")}>
@@ -65,10 +68,33 @@ function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
 function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
   const t = useTranslations();
   const update = useUpdateGroupChat(groupChat.id);
-  const saved = groupChat.tools.assistants;
+  const autosave = useAutosave("assistants");
+  const saved = useMemo(() => groupChat.tools.assistants, [groupChat.tools.assistants]);
   const [selected, setSelected] = useState<GroupChatAssistant[]>(saved);
 
-  const dirty = JSON.stringify(selected) !== JSON.stringify(saved);
+  // Adopt server changes (our own save landing) unless the user diverged.
+  const savedKey = JSON.stringify(saved);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    setSelected((current) => (JSON.stringify(current) === previous ? saved : current));
+  }, [savedKey, saved]);
+
+  function handleChange(next: GroupChatAssistant[]) {
+    setSelected(next);
+    void autosave(() =>
+      update.mutateAsync({
+        tools: {
+          assistants: next.map((assistant) => ({
+            id: assistant.id,
+            user_description: assistant.user_description
+          }))
+        }
+      })
+    );
+  }
 
   return (
     <SettingsGroup title={t("group_settings")}>
@@ -76,22 +102,7 @@ function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
         title={t("assistants")}
         description={t("assistants_will_be_able_to_answer_questions")}
       >
-        <GroupChatAssistantList selected={selected} onChange={setSelected} />
-        <SaveRow
-          dirty={dirty}
-          pending={update.isPending}
-          onSave={() =>
-            update.mutate({
-              tools: {
-                assistants: selected.map((assistant) => ({
-                  id: assistant.id,
-                  user_description: assistant.user_description
-                }))
-              }
-            })
-          }
-          onRevert={() => setSelected(saved)}
-        />
+        <GroupChatAssistantList selected={selected} onChange={handleChange} />
       </SettingsRow>
     </SettingsGroup>
   );
@@ -100,6 +111,7 @@ function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
 function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
   const t = useTranslations();
   const update = useUpdateGroupChat(groupChat.id);
+  const autosave = useAutosave("advanced");
 
   return (
     <SettingsGroup title={t("advanced_settings")}>
@@ -112,7 +124,9 @@ function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
           <Switch
             checked={groupChat.allow_mentions}
             disabled={update.isPending}
-            onCheckedChange={(checked) => update.mutate({ allow_mentions: checked })}
+            onCheckedChange={(checked) =>
+              autosave(() => update.mutateAsync({ allow_mentions: checked }))
+            }
           />
         </Label>
       </SettingsRow>
@@ -125,7 +139,9 @@ function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
           <Switch
             checked={groupChat.show_response_label}
             disabled={update.isPending}
-            onCheckedChange={(checked) => update.mutate({ show_response_label: checked })}
+            onCheckedChange={(checked) =>
+              autosave(() => update.mutateAsync({ show_response_label: checked }))
+            }
           />
         </Label>
       </SettingsRow>
@@ -138,6 +154,7 @@ function PublishingSection({ groupChat }: { groupChat: GroupChat }) {
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
   const update = useUpdateGroupChat(groupChat.id);
+  const autosave = useAutosave("publishing");
   const [showDialog, setShowDialog] = useState(false);
 
   const permissions = groupChat.permissions ?? [];
@@ -197,7 +214,9 @@ function PublishingSection({ groupChat }: { groupChat: GroupChat }) {
             <Switch
               checked={groupChat.insight_enabled}
               disabled={update.isPending}
-              onCheckedChange={(checked) => update.mutate({ insight_enabled: checked })}
+              onCheckedChange={(checked) =>
+                autosave(() => update.mutateAsync({ insight_enabled: checked }))
+              }
             />
           </Label>
         </SettingsRow>
@@ -212,28 +231,31 @@ export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
   const { data: groupChat } = useSuspenseQuery(groupChatQueryOptions(browserApi, groupChatId));
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <Link
-          href={`/spaces/${routeId}/assistants`}
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
-          {t("assistants")}
-        </Link>
-        <PageHeader title={groupChat.name}>
-          <Button asChild variant="outline">
-            <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
-              {t("done")}
-            </Link>
-          </Button>
-        </PageHeader>
+    <SaveStatusProvider>
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+        <div className="flex flex-col gap-1">
+          <Link
+            href={`/spaces/${routeId}/assistants`}
+            className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
+          >
+            <ChevronLeft className="size-4" />
+            {t("assistants")}
+          </Link>
+          <PageHeader title={groupChat.name}>
+            <SaveStatusIndicator />
+            <Button asChild variant="outline">
+              <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
+                {t("done")}
+              </Link>
+            </Button>
+          </PageHeader>
+        </div>
+        <GeneralSection groupChat={groupChat} />
+        <AssistantsSection groupChat={groupChat} />
+        <AdvancedSection groupChat={groupChat} />
+        <PublishingSection groupChat={groupChat} />
+        <div className="min-h-12" />
       </div>
-      <GeneralSection groupChat={groupChat} />
-      <AssistantsSection groupChat={groupChat} />
-      <AdvancedSection groupChat={groupChat} />
-      <PublishingSection groupChat={groupChat} />
-      <div className="min-h-12" />
-    </div>
+    </SaveStatusProvider>
   );
 }
