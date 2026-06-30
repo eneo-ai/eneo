@@ -2076,6 +2076,54 @@
   - Risk is documentation-only. The main remaining release risk is unresolved product/privacy policy for abandoned active Builder sessions.
   - Rollback is low risk: restore the previous Gate 0 artifact text and delete this C9.0 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, or persisted-data rollback is needed.
 
+## C9.1
+
+- Slice id: C9.1 Flow AI Builder release-governance Gate 1 decision packet refresh
+- Findings addressed: refreshed the canonical Gate 1 packet after the C9.0 Gate 0 inventory so the next implementation lane is explicit, evidence-based, and no longer points back to already-tightened lifecycle work.
+- Evidence reviewed:
+  - `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md` is the current source-index for Builder lifecycle, retention, audit, JSONB ownership, migration, and file-reference evidence.
+  - C8.6 already made `DataRetentionService` the terminal Builder session count/delete owner; C9.0 records that it deletes old `applied` and `cancelled` sessions while current tests prove old `chatting` / `awaiting_approval` sessions are kept.
+  - C8.7 already deleted fake Builder audit actions and left only session created, session cancelled, plan approved, and flow applied as live audit vocabulary.
+  - C8.8 already tightened no-lease lifecycle transitions against active send locks, so Gate 1 does not send the next slice back into a generic lifecycle rewrite.
+  - C8.14 already records repair/fallback pruning as blocked until branch-level evidence proves a branch is dead or harmful.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer and reported a low-risk docs-only change set; final claims were verified from the C9.0 Gate 0 evidence and direct source anchors already recorded there.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded docs-only slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-1-gate1-plan-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `STOP_OR_PROCEED: proceed`; valid guidance applied: choose active abandoned-session expiration through the existing `DataRetentionService`, keep global Builder-only file-row cleanup unproven/deferred, and avoid new retention/lifecycle/file frameworks.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-1-gate1-final-20260630.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`, and `COMMIT_READY: no`; valid feedback applied: keep the commit scoped to the two docs, replace draft ledger lines, clarify the single selected next implementation lane, and remove ambiguous Gate 0 SHA wording.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-1-gate1-final-2-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes`; required fixes: none. Optional wording cleanups were applied locally.
+- Files changed:
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No backend source, tests, migrations, frontend, generated clients, API contracts, runtime behavior, MCP/capability code, provider behavior, prompts, repair logic, or retention code changed.
+- Complexity deleted or owner clarified:
+  - No source complexity was added. The refreshed packet removes stale governance direction and names `DataRetentionService` as the next owner to reuse for active abandoned-session retention.
+  - It explicitly rejects a Builder retention service, generic lifecycle manager, command bus, legal-hold framework, generic file cleaner, MCP/capability implementation, and repair pruning without evidence.
+- Architecture delta:
+  - Canonical owner before: the existing Gate 1 packet still accepted active session retention as current behavior and ranked lifecycle/question cleanup ahead of the unresolved release-governance risk.
+  - Canonical owner after: the packet chooses `DataRetentionService` as the next implementation owner for old abandoned active Builder sessions, reusing existing tenant/space retention policy and `BuilderSessions.updated_at`.
+  - Duplicate paths remaining: Builder-only global file-row cleanup remains unproven and deferred; repair/fallback pruning remains blocked by branch-level evidence.
+  - 9/10 follow-up candidate: implement active abandoned-session retention in `DataRetentionService`; optionally revisit Builder-only global file-row cleanup only if first-release acceptance changes.
+  - Decision or measurement needed: no additional product/privacy decision is needed for the selected next lane under the delegated governance context; branch-level repair data is still needed before any repair pruning.
+  - What not to preserve: indefinite active-session retention as a hidden default, stale next-lane guidance, generic Builder retention services, generic file sweepers, and optimistic release-readiness claims without source evidence.
+- Gate 1 decisions:
+  - Old abandoned `chatting` and `awaiting_approval` sessions should expire through the existing hierarchical tenant/space retention policy in a later implementation slice.
+  - `BuilderSessions.updated_at` is the first-release active-session age anchor; sessions with a fresh active send lease must not be deleted.
+  - Applied conversations, planning state, plans, and proposals remain session-level data and are deleted with the Builder session; there is no immediate post-apply trim lane.
+  - Session-file links are removed by cancel/session deletion, but Builder-only global `Files` row cleanup remains unproven and accepted as deferred for first release.
+  - Audit retention remains separate from Builder session retention; after C8.7, only the four live Builder audit actions remain.
+  - Cleanup scope and configuration reuse the existing tenant/space retention policy; no Builder-specific retention configuration is added for first release.
+  - Repair/fallback pruning remains blocked until branch-level telemetry/eval evidence proves a branch is dead or harmful.
+- Validation commands and results:
+  - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `4dd0f193`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
+  - `rg -n "TODO|TBD|PLACEHOLDER|<date>|\\| \\| \\|" review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> only matched historical/self-referential validation-command records in the ledger; no live unresolved placeholder remains in the packet or C9.1 entry.
+  - `git diff --check -- review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - Backend pytest, ruff, and pyright were not run because this slice changed only review-artifact markdown and made no source/test changes.
+- Remaining risk / rollback:
+  - Risk is documentation-only. The next implementation risk is active-session deletion correctness around fresh leases and count/delete predicate drift.
+  - Rollback is low risk: restore the previous packet text and delete this C9.1 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
