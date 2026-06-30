@@ -139,61 +139,65 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto -mt-6 w-full max-w-4xl px-4">
-        <header className="bg-background/95 sticky top-0 z-30 -mx-4 flex flex-col border-b px-4 backdrop-blur">
-          <div className="flex items-center justify-between gap-3 py-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <Link
-                href={`/spaces/${routeId}/assistants`}
-                aria-label={t("assistants")}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <ChevronLeft className="size-5" />
-              </Link>
-              <span className="text-muted-foreground hidden text-sm sm:inline">
-                {t("assistants")}
-              </span>
-              <span className="text-muted-foreground hidden sm:inline">/</span>
-              <h1 className="truncate text-base font-semibold">{assistant.name}</h1>
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <span className="hidden md:inline">
-                <SaveStatusIndicator />
-              </span>
-              <Button asChild size="sm">
-                <Link href={chatHref}>
-                  <Play className="size-4" />
-                  {t("test")}
+      {/* Cancel the space layout's p-6 so the header can sit flush at the scroll
+          top and span full width; content re-pads itself and stays centered. */}
+      <div className="-m-6 flex min-h-[calc(100%+3rem)] flex-col">
+        <header className="bg-background sticky -top-6 z-30 border-b">
+          <div className="mx-auto w-full max-w-4xl px-6">
+            <div className="flex items-center justify-between gap-3 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <Link
+                  href={`/spaces/${routeId}/assistants`}
+                  aria-label={t("assistants")}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronLeft className="size-5" />
                 </Link>
-              </Button>
+                <span className="text-muted-foreground hidden text-sm sm:inline">
+                  {t("assistants")}
+                </span>
+                <span className="text-muted-foreground hidden sm:inline">/</span>
+                <h1 className="truncate text-base font-semibold">{assistant.name}</h1>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="hidden md:inline">
+                  <SaveStatusIndicator />
+                </span>
+                <Button asChild size="sm">
+                  <Link href={chatHref}>
+                    <Play className="size-4" />
+                    {t("test")}
+                  </Link>
+                </Button>
+              </div>
             </div>
+            <nav
+              aria-label={t("settings")}
+              className="flex snap-x gap-1 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {sections.map((section) => (
+                <a
+                  key={section.id}
+                  href={`#${section.id}`}
+                  aria-current={activeId === section.id ? "true" : undefined}
+                  className={cn(
+                    "inline-flex snap-start items-center gap-1.5 rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors",
+                    activeId === section.id
+                      ? "bg-muted text-foreground font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                  )}
+                >
+                  <section.icon aria-hidden="true" className="size-4 shrink-0" />
+                  {section.label}
+                </a>
+              ))}
+            </nav>
           </div>
-          <nav
-            aria-label={t("settings")}
-            className="flex snap-x gap-1 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {sections.map((section) => (
-              <a
-                key={section.id}
-                href={`#${section.id}`}
-                aria-current={activeId === section.id ? "true" : undefined}
-                className={cn(
-                  "inline-flex snap-start items-center gap-1.5 rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors",
-                  activeId === section.id
-                    ? "bg-muted text-foreground font-medium"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                )}
-              >
-                <section.icon aria-hidden="true" className="size-4 shrink-0" />
-                {section.label}
-              </a>
-            ))}
-          </nav>
         </header>
 
-        <div className="flex flex-col gap-8 py-8">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
           {sections.map((section) => (
-            <div key={section.id} id={section.id} className="scroll-mt-32">
+            <div key={section.id} id={section.id} className="scroll-mt-28">
               {section.node}
             </div>
           ))}
