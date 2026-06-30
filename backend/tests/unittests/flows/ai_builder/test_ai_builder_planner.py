@@ -512,6 +512,37 @@ async def test_resolve_user_question_metadata_rejects_uningestable_structured_an
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question_id",
+    ["flow_input_architecture", "final_pdf_type"],
+)
+async def test_resolve_user_question_metadata_keeps_supported_non_slot_questions(
+    question_id: str,
+) -> None:
+    planner = _make_planner()
+
+    result = await resolve_user_question_metadata(
+        litellm_client=planner.litellm_client,
+        conversation=[],
+        message="banana",
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": question_id,
+            "selected_values": ["banana"],
+        },
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+    )
+
+    assert result.metadata == {
+        "question_answer": {
+            "question_id": question_id,
+            "selected_values": ["banana"],
+        }
+    }
+
+
+@pytest.mark.asyncio
 async def test_resolve_user_question_metadata_does_not_adjudicate_without_pending_question() -> (
     None
 ):

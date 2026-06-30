@@ -33,23 +33,10 @@ from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
 )
 from intric.flows.ai_builder.question_catalog import (
     legal_slot_values,
+    slot_backed_legacy_question_ids,
     slot_name_for_legacy_question_id,
 )
 from intric.flows.domain.flow import FlowPersistedJsonObject
-
-_DIRECT_SLOT_VALUE_QUESTION_IDS = frozenset(
-    {
-        "docx_output_mode",
-        "document_material_scope",
-        "final_output_mode",
-        "input_material_mode",
-        "pdf_generation_mode",
-        "post_processing_goal",
-        "runtime_metadata_fields",
-        "structured_analysis_need",
-        "structured_io_contract",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +131,7 @@ def _has_unsupported_slot_value(
     question_id: str,
 ) -> bool:
     canonical_id = canonical_question_id(question_id)
-    if canonical_id not in _DIRECT_SLOT_VALUE_QUESTION_IDS:
+    if canonical_id not in slot_backed_legacy_question_ids():
         return False
 
     slot_name = slot_name_for_legacy_question_id(canonical_id)

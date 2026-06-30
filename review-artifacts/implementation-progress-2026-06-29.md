@@ -1709,6 +1709,54 @@
   - The direct structured-answer value-validation allowlist remains as an explicit follow-up because merging it into the catalog without proof could change ingestion semantics.
   - Rollback is low risk: restore the deleted dispatch map/resolver, revert the call site to the local resolver, remove the focused dispatch behavior test, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, or generated-client rollback is needed.
 
+## C8.10
+
+- Slice id: C8.10 Flow AI Builder direct structured-answer question allowlist proof/consolidation
+- Findings addressed: `_DIRECT_SLOT_VALUE_QUESTION_IDS` duplicated the catalog's slot-backed legacy/discovery question-id facts inside structured-answer ingestion.
+- Evidence reviewed:
+  - C8.9 deliberately left `_DIRECT_SLOT_VALUE_QUESTION_IDS` in `ai_builder_user_question_metadata.py` as a validation-policy follow-up because equivalence had not yet been proven.
+  - `backend/src/intric/flows/ai_builder/question_catalog.py:23-30` states that `question_catalog` owns the bridge between canonical slot-name keys and legacy discovery question ids, including `input_material_mode` and `final_output_mode`.
+  - `backend/src/intric/flows/ai_builder/question_catalog.py:790-830` owns the slot-name-to-legacy-id map, the extra non-slot legacy ids that resolve to slots, and the new `slot_backed_legacy_question_ids()` catalog read API.
+  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:129-139` keeps the validation policy in ingestion: only catalog slot-backed legacy ids receive direct legal-slot value validation before metadata is persisted.
+  - Current-code equivalence measurement with `.venv/bin/python` showed the catalog-derived set is exactly `['document_material_scope', 'docx_output_mode', 'final_output_mode', 'input_material_mode', 'pdf_generation_mode', 'post_processing_goal', 'runtime_metadata_fields', 'structured_analysis_need', 'structured_io_contract']`; `catalog_minus_derived=[]`, `derived_minus_catalog=[]`, and supported non-direct ids remain `['comparison_scope', 'detail_level', 'document_kind', 'final_output_scope', 'final_pdf_type', 'flow_input_architecture', 'output_reader', 'output_style', 'output_tone', 'processing_scope']`.
+- Verification agents used, with verdicts:
+  - CRG was attempted as a first-pass reducer, but returned stale/noisy results for this small Builder slice; direct source reads, exact `rg`, and current-code measurement supplied the concrete evidence.
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-10-direct-structured-answer-allowlist-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; valid guidance applied by naming the catalog view `slot_backed_legacy_question_ids()` so catalog owns the vocabulary fact while ingestion still owns validation policy.
+  - Read-only Codex final gate artifact `.codex/artifacts/c8-10-direct-structured-answer-allowlist-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no required fixes.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/question_catalog.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py`
+  - `backend/tests/unittests/flows/ai_builder/test_question_catalog.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No supported/unsupported structured-question behavior changes are intended.
+  - Direct slot-value validation now consumes the catalog-derived slot-backed legacy question ids instead of a hard-coded ingestion-local duplicate set.
+  - Supported non-direct structured question ids such as `flow_input_architecture` and `final_pdf_type` remain accepted without direct legal-slot value validation; unknown question ids and unsupported selected values for direct slot-backed questions still fail with the existing typed invalid-payload reasons.
+  - No user-facing copy, discovery strategy, planner prompts, question ordering, API/OpenAPI/generated client, frontend, runtime, retention, audit, proposal repair/fallback, MCP, or capability surfaces changed.
+- Complexity deleted or owner clarified:
+  - Deleted `_DIRECT_SLOT_VALUE_QUESTION_IDS` from `ai_builder_user_question_metadata.py`.
+  - `question_catalog` is now the single owner for slot-backed legacy/discovery question-id vocabulary; `ai_builder_user_question_metadata.py` remains the validation-policy owner.
+  - No new registry, service, framework, prompt rewrite, compatibility layer, or public contract was added.
+- Architecture delta:
+  - Canonical owner before: `question_catalog` owned the slot/legacy-id bridge, while metadata ingestion duplicated the slot-backed direct-answer subset as a hard-coded frozenset.
+  - Canonical owner after: `question_catalog.slot_backed_legacy_question_ids()` owns the slot-backed legacy-id view; metadata ingestion consumes it for direct legal-value validation.
+  - Duplicate paths remaining: `SUPPORTED_STRUCTURED_QUESTION_IDS` in `ai_builder_canonicalization.py` remains the broader supported structured-question policy, including supported non-direct ids; it is intentionally not collapsed into the catalog in this slice.
+  - 9/10 follow-up candidate: audit whether broader supported structured-question id ownership should stay in canonicalization or be split into catalog-backed direct ids plus explicit non-slot supported ids.
+  - Decision or measurement needed: before changing `SUPPORTED_STRUCTURED_QUESTION_IDS`, prove whether its non-slot ids are ingestion policy, discovery compatibility, or legacy product surface.
+  - What not to preserve: ingestion-local duplicate slot-backed question-id sets, generic question registries, private consumer bridge helpers, or tests that only assert helper wiring.
+- Validation commands and results:
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q` -> pass, 108 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && rg -n "_DIRECT_SLOT_VALUE_QUESTION_IDS" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder || true` -> no matches; deleted duplicate symbol is gone.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/question_catalog.py backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_question_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
+- Remaining risk / rollback:
+  - `slot_backed_legacy_question_ids()` currently computes from the immutable catalog on call; this keeps the view obviously derived. If this ever becomes hot, it can be changed to a private derived constant without changing callers.
+  - Rollback is low risk: restore `_DIRECT_SLOT_VALUE_QUESTION_IDS`, remove `slot_backed_legacy_question_ids()`, remove the two focused tests, and delete this ledger entry. No schema, migration, API, frontend, runtime, retention, audit, or generated-client rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
