@@ -2036,6 +2036,46 @@
   - Risk is low: deletion is limited to zero-caller backend code and its self-preserving tests.
   - Rollback is straightforward: restore the deleted module and test if a future prompt design explicitly needs this payload. No schema, migration, API, generated-client, frontend, runtime, retention, audit, MCP, or capability rollback is needed.
 
+## C9.0
+
+- Slice id: C9.0 Flow AI Builder release-governance Gate 0 inventory
+- Findings addressed: refreshed the release-governance Gate 0 inventory so current Builder lifecycle, retention, audit vocabulary, JSONB ownership, and migration evidence are recorded before any further source implementation.
+- Evidence reviewed:
+  - `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md` now supersedes the older compact Gate 0 note with a current-source inventory against HEAD `d84ff07d`.
+  - CRG was used as a first-pass reducer and reported a low-risk docs-only change set; all concrete claims in the artifact were verified with direct source reads and exact `rg`.
+  - Lifecycle/status evidence now cites the current domain enums, DB constraints, repository writers, plan lifecycle owner, send-lease owner, and existing C8.8 tests instead of stale pre-C8.8 line anchors.
+  - Retention evidence now distinguishes terminal Builder session deletion from global file/blob deletion: `DataRetentionService` owns expired terminal Builder session count/delete; `FlowRunHistoryPurgeRepository` treats `BuilderSessionFiles` as one reference guard for its own Flow run/template purge candidates; Builder-only global file-row cleanup remains unproven and outside this docs slice.
+  - Audit vocabulary evidence records the post-C8.7 state: four live Builder audit actions remain, while plan-proposed and plan-rejected audit vocabulary stays deleted.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded docs-only slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-0-gate0-plan-20260630.md` returned `GREEN_LIGHT: yes`; valid guidance applied: treat this as a refresh of the existing governance note, include JSONB ownership registry evidence, acknowledge C8.8 lifecycle proof, and avoid overclaiming retention/file deletion.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-0-gate0-final-20260630.md` initially returned `GREEN_LIGHT: no`; valid feedback applied by narrowing file-reclamation claims and tightening audit action line anchors before commit.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-0-gate0-final-2-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes` for a pathspec-limited commit of the two scoped docs.
+- Files changed:
+  - `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No backend source, tests, migrations, frontend, generated clients, API contracts, runtime behavior, MCP/capability code, provider behavior, prompts, or repair logic changed.
+- Complexity deleted or owner clarified:
+  - No source complexity was added. The governance artifact clarifies that existing owners are sufficient for current release decisions: `AIBuilderRepository`, `AIBuilderPlanLifecycle`, send lease, DB constraints, `DataRetentionService`, audit enum/category mapping, and JSONB ownership registry. It also explicitly avoids treating `FlowRunHistoryPurgeRepository` as a proven Builder-only global file cleanup owner.
+  - It prevents accidental new Builder governance/retention/lifecycle abstractions by naming the owners to reuse.
+- Architecture delta:
+  - Canonical owner before: the prior Gate 0 note lagged current C8.8-C8.15 evidence and could send the next slice back into already-tightened lifecycle work.
+  - Canonical owner after: current lifecycle, retention, audit, file, and JSONB owners are mapped in one Gate 0 artifact.
+  - Duplicate paths remaining: active abandoned-session retention policy remains undecided; Builder-only global file-row cleanup after session-pin removal remains unproven; repair/fallback pruning remains blocked by real branch data; audit retention remains separate from Builder session retention.
+  - 9/10 follow-up candidate: run a bounded Gate 1 decision slice to accept or change active abandoned-session retention, applied conversation retention, audit retention separation, tenant-policy scope, and no repair pruning.
+  - Decision or measurement needed: product/privacy must decide whether old `chatting` / `awaiting_approval` sessions should expire; no source change should guess this.
+  - What not to preserve: stale Gate 0 citations, fake lifecycle/retention managers, MCP/capability implementation before governance, or optimistic 9/10 claims without source evidence.
+- Validation commands and results:
+  - `git status --short --branch` -> branch/head matched before editing; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files were left untouched.
+  - `.codex/artifacts/codex-exec-c9-0-gate0-final-20260630.md` -> `GREEN_LIGHT: no`; docs-only feedback was applied locally and rechecked with source evidence before validation.
+  - `.codex/artifacts/codex-exec-c9-0-gate0-final-2-20260630.md` -> `GREEN_LIGHT: yes`, `COMMIT_READY: yes` for the two scoped docs.
+  - `git diff --check -- review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> passed.
+  - `git diff --cached --check` -> passed with only the two scoped docs staged.
+- Remaining risk / rollback:
+  - Risk is documentation-only. The main remaining release risk is unresolved product/privacy policy for abandoned active Builder sessions.
+  - Rollback is low risk: restore the previous Gate 0 artifact text and delete this C9.0 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
