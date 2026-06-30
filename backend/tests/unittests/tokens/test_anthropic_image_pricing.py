@@ -6,7 +6,7 @@ is ever dropped.
 
 import math
 
-from intric.tokens.anthropic_image_pricing import (
+from eneo.tokens.anthropic_image_pricing import (
     anthropic_image_tokens,
     is_anthropic_model,
 )

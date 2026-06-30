@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
   import { AlertCircle } from "lucide-svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
@@ -11,7 +11,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import ExpirationPicker from "$lib/features/api-keys/ExpirationPicker.svelte";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let {
     apiKey,
@@ -46,7 +46,7 @@
 
   async function loadConstraints() {
     try {
-      const constraints = await intric.apiKeys.getPolicyConstraints();
+      const constraints = await eneo.apiKeys.getPolicyConstraints();
       rotationGraceHours = constraints.rotation_grace_hours ?? 24;
       maxDays = constraints.max_expiration_days ?? null;
       requireExpiration = constraints.require_expiration ?? false;
@@ -84,8 +84,8 @@
         params.disable_grace_period = true;
       }
       const response = isAdmin
-        ? await intric.apiKeys.admin.rotate(params)
-        : await intric.apiKeys.rotate(params);
+        ? await eneo.apiKeys.admin.rotate(params)
+        : await eneo.apiKeys.rotate(params);
       if (!response?.secret) {
         throw new Error("rotate_missing_secret");
       }

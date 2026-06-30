@@ -5,12 +5,12 @@
 */
 
 export const load = async (event) => {
-  const { intric, currentSpace } = await event.parent();
+  const { eneo, currentSpace } = await event.parent();
 
   const [models, security, mcpServers] = await Promise.all([
-    intric.models.list({ space: currentSpace }),
-    intric.securityClassifications.list(),
-    intric.mcpServers.listSettings()
+    eneo.models.list({ space: currentSpace }),
+    eneo.securityClassifications.list(),
+    eneo.mcpServers.listSettings()
   ]);
 
   // Filter to only tenant-enabled servers

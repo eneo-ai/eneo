@@ -1,5 +1,5 @@
-from intric.settings.setting_service import SettingService
-from intric.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
+from eneo.settings.setting_service import SettingService
+from eneo.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_SETTINGS = SettingsPublic()
@@ -46,7 +46,7 @@ class MockTenantRepo:
 
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
-        from intric.tenants.tenant import TenantInDB, TenantState
+        from eneo.tenants.tenant import TenantInDB, TenantState
 
         return TenantInDB(
             id=tenant_id,

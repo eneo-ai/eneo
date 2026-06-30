@@ -16,7 +16,7 @@ Useful variants:
 
 ```bash
 ./scripts/run_pyright_in_devcontainer.sh --stats
-./scripts/run_pyright_in_devcontainer.sh src/intric/files/file_router.py
+./scripts/run_pyright_in_devcontainer.sh src/eneo/files/file_router.py
 ```
 
 ## Per-branch database snapshots

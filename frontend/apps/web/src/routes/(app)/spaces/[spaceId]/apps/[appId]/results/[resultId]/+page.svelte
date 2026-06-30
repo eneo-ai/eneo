@@ -1,23 +1,23 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconPrint } from "@intric/icons/print";
-  import { Button, Markdown, Tooltip } from "@intric/ui";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconPrint } from "@eneo/icons/print";
+  import { Button, Markdown, Tooltip } from "@eneo/ui";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
   import { getResultTitle } from "$lib/features/apps/getResultTitle.js";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import { onMount } from "svelte";
-  import { getIntricSocket } from "$lib/core/IntricSocket.js";
+  import { getEneoSocket } from "$lib/core/EneoSocket.js";
   import Tabbar from "$lib/components/layout/Page/Tabbar.svelte";
   import TabTrigger from "$lib/components/layout/Page/TabTrigger.svelte";
   import Tab from "$lib/components/layout/Page/Tab.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
-  import type { UploadedFile } from "@intric/intric-js";
+  import type { UploadedFile } from "@eneo/eneo-js";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
-  import { getIntric } from "$lib/core/Intric.js";
+  import { getEneo } from "$lib/core/Eneo.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -31,8 +31,8 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const { subscribe } = getIntricSocket();
-  const intric = getIntric();
+  const { subscribe } = getEneoSocket();
+  const eneo = getEneo();
 
   const attachmentUrlService = getAttachmentUrlService();
 
@@ -101,7 +101,7 @@
 
     const unsubscriber = subscribe("app_run_updates", async (update) => {
       if (update.id === data.result.id) {
-        result = await data.intric.apps.runs.get(result);
+        result = await data.eneo.apps.runs.get(result);
       }
     });
 
@@ -109,7 +109,7 @@
     // and switches to "in progress" just before the websocket handler is registered. This makes us
     // miss a crucial update; as a work around we always poll once more in case we missed sth.
     if (result.status === "queued") {
-      data.intric.apps.runs.get(result).then((updatedResult) => {
+      data.eneo.apps.runs.get(result).then((updatedResult) => {
         result = updatedResult;
       });
     }
@@ -242,7 +242,7 @@
                 </span>
 
                 {#each result.input.files as file (file.id)}
-                  {#await intric.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
+                  {#await eneo.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
                     <Button href={url} class="outlined no-underline"
                       ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
                     >
@@ -303,7 +303,7 @@
 </Page.Root>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   /* Audio wave loading animation */
   .audio-wave {

@@ -38,7 +38,7 @@ class CommitHookTests(unittest.TestCase):
         subprocess.run(["git", "init", "-b", branch], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "config", "user.name", "Test User"], cwd=root, check=True, capture_output=True, text=True)
-        (root / "backend" / "src" / "intric").mkdir(parents=True)
+        (root / "backend" / "src" / "eneo").mkdir(parents=True)
         (root / "frontend" / "apps" / "web" / "src").mkdir(parents=True)
         return root
 
@@ -100,7 +100,7 @@ class CommitHookTests(unittest.TestCase):
     def test_commit_preflight_flags_high_confidence_secret_pattern(self) -> None:
         root = self.make_repo()
         (root / ".gitignore").write_text("", encoding="utf-8")
-        target = root / "backend" / "src" / "intric" / "pattern_demo.py"
+        target = root / "backend" / "src" / "eneo" / "pattern_demo.py"
         # Keep the scanner test fixture out of CodeQL/secret-scanning literals.
         candidate = "".join(["gh", "p_", "a" * 30])
         target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
@@ -113,7 +113,7 @@ class CommitHookTests(unittest.TestCase):
     def test_commit_preflight_flags_anthropic_key_pattern(self) -> None:
         root = self.make_repo()
         (root / ".gitignore").write_text("", encoding="utf-8")
-        target = root / "backend" / "src" / "intric" / "anthropic_pattern_demo.py"
+        target = root / "backend" / "src" / "eneo" / "anthropic_pattern_demo.py"
         # Keep the scanner test fixture out of CodeQL/secret-scanning literals.
         candidate = "".join(["sk", "-ant-api03-", "a" * 40])
         target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
@@ -139,7 +139,7 @@ class CommitHookTests(unittest.TestCase):
         bin_dir = root / "bin"
         marker = root / "type-check-ran"
         bin_dir.mkdir()
-        for executable in ("bash", "bun"):
+        for executable in ("bun",):
             candidate = bin_dir / executable
             candidate.write_text(
                 f"#!/usr/bin/env sh\nprintf '%s\\n' {executable} > {marker}\nexit 99\n",
@@ -179,7 +179,7 @@ class CommitHookTests(unittest.TestCase):
     def test_pre_push_check_runs_schema_drift_for_backend_source_changes(self) -> None:
         root = self.make_repo()
         bin_dir = root / "bin"
-        schema = root / "frontend" / "packages" / "intric-js" / "src" / "types" / "schema.d.ts"
+        schema = root / "frontend" / "packages" / "eneo-js" / "src" / "types" / "schema.d.ts"
         bin_dir.mkdir()
         schema.parent.mkdir(parents=True, exist_ok=True)
         schema.write_text("export type Schema = 'current';\n", encoding="utf-8")
@@ -212,7 +212,7 @@ class CommitHookTests(unittest.TestCase):
         )
         subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
 
-        backend_source = root / "backend" / "src" / "intric" / "service.py"
+        backend_source = root / "backend" / "src" / "eneo" / "service.py"
         backend_source.write_text("VALUE = 1\n", encoding="utf-8")
         subprocess.run(["git", "add", str(backend_source.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "feat: add backend source"], cwd=root, check=True, capture_output=True, text=True)
@@ -225,7 +225,7 @@ class CommitHookTests(unittest.TestCase):
     def test_pre_push_check_blocks_schema_drift(self) -> None:
         root = self.make_repo()
         bin_dir = root / "bin"
-        schema = root / "frontend" / "packages" / "intric-js" / "src" / "types" / "schema.d.ts"
+        schema = root / "frontend" / "packages" / "eneo-js" / "src" / "types" / "schema.d.ts"
         bin_dir.mkdir()
         schema.parent.mkdir(parents=True, exist_ok=True)
         schema.write_text("export type Schema = 'current';\n", encoding="utf-8")
@@ -258,7 +258,7 @@ class CommitHookTests(unittest.TestCase):
         )
         subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
 
-        backend_source = root / "backend" / "src" / "intric" / "service.py"
+        backend_source = root / "backend" / "src" / "eneo" / "service.py"
         backend_source.write_text("VALUE = 1\n", encoding="utf-8")
         subprocess.run(["git", "add", str(backend_source.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "feat: add backend source"], cwd=root, check=True, capture_output=True, text=True)
@@ -270,13 +270,8 @@ class CommitHookTests(unittest.TestCase):
 
     def test_pre_push_check_runs_route_metadata_for_endpoint_changes(self) -> None:
         root = self.make_repo()
-        bin_dir = root / "bin"
         scripts_dir = root / "scripts"
-        bin_dir.mkdir()
         scripts_dir.mkdir()
-        bash = bin_dir / "bash"
-        bash.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
-        bash.chmod(0o755)
         (scripts_dir / "check_route_metadata.py").write_text(
             ROUTE_METADATA_CHECK.read_text(encoding="utf-8"),
             encoding="utf-8",
@@ -287,7 +282,7 @@ class CommitHookTests(unittest.TestCase):
         subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
 
-        router = root / "backend" / "src" / "intric" / "resources" / "users.py"
+        router = root / "backend" / "src" / "eneo" / "resources" / "users.py"
         router.parent.mkdir(parents=True)
         router.write_text(
             "@router.post(\n"
@@ -307,8 +302,7 @@ class CommitHookTests(unittest.TestCase):
         )
         subprocess.run(["git", "commit", "-m", "feat: add demo route"], cwd=root, check=True, capture_output=True, text=True)
 
-        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
-        result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
+        result = run_script(PRE_PUSH_CHECK, cwd=root)
         self.assertEqual(result.returncode, 2)
         self.assertIn("route decorator missing description, responses", result.stderr)
 
@@ -316,7 +310,7 @@ class CommitHookTests(unittest.TestCase):
         self,
     ) -> None:
         root = self.make_repo()
-        endpoint = root / "backend" / "src" / "intric" / "resources" / "users.py"
+        endpoint = root / "backend" / "src" / "eneo" / "resources" / "users.py"
         endpoint.parent.mkdir(parents=True)
         endpoint.write_text(
             "@router.post(\n"
@@ -341,7 +335,7 @@ class CommitHookTests(unittest.TestCase):
 
     def test_route_metadata_check_flags_missing_fields_on_mutation_routes(self) -> None:
         root = self.make_repo()
-        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
         router.write_text(
             "@router.post(\n"
             '    "/demo",\n'
@@ -358,7 +352,7 @@ class CommitHookTests(unittest.TestCase):
 
     def test_route_metadata_check_handles_named_router_variables(self) -> None:
         root = self.make_repo()
-        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
         router.write_text(
             "@users_admin_router.post(\n"
             '    "/demo",\n'
@@ -375,7 +369,7 @@ class CommitHookTests(unittest.TestCase):
 
     def test_route_metadata_check_allows_204_without_response_model(self) -> None:
         root = self.make_repo()
-        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
         router.write_text(
             "@router.post(\n"
             '    "/transfer",\n'
@@ -393,7 +387,7 @@ class CommitHookTests(unittest.TestCase):
 
     def test_route_metadata_check_can_scope_to_changed_blocks_only(self) -> None:
         root = self.make_repo()
-        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
         router.write_text(
             "@router.post(\n"
             '    "/legacy",\n'

@@ -11,8 +11,8 @@ Tests cover:
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.spaces_table import Spaces
-from intric.spaces.space import Space
+from eneo.database.tables.spaces_table import Spaces
+from eneo.spaces.space import Space
 
 
 def _space_from_db(db_space: Spaces) -> Space:

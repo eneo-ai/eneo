@@ -5,12 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_service import AuditService
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
-from intric.jobs.job_models import Task
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.jobs.job_models import Task
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def test_log_async_enqueues_to_arq():
     service = AuditService(mock_repository)
 
     # Patch job_manager
-    with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
+    with patch("eneo.audit.application.audit_service.job_manager", mock_job_manager):
         tenant_id = uuid4()
         actor_id = uuid4()
         entity_id = uuid4()
@@ -87,7 +87,7 @@ async def test_log_async_with_optional_params():
 
     service = AuditService(mock_repository)
 
-    with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
+    with patch("eneo.audit.application.audit_service.job_manager", mock_job_manager):
         request_id = uuid4()
 
         await service.log_async(

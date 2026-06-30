@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Input, Select } from "@intric/ui";
+  import { Button, Input, Select } from "@eneo/ui";
   import * as m from "$lib/paraglide/messages";
   import { Shield, ArrowRight } from "lucide-svelte";
   import { slide, fade, fly } from "svelte/transition";

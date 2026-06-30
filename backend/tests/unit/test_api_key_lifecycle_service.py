@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_models import (
     ApiKeyExtendRequest,
     ApiKeyPermission,
     ApiKeyRotateRequest,

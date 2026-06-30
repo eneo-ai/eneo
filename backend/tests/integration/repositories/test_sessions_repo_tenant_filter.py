@@ -20,9 +20,9 @@ import pytest
 import sqlalchemy as sa
 
 from init_db import add_tenant_user
-from intric.database.tables.api_keys_v2_table import ApiKeysV2
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.sessions_table import Sessions
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.sessions_table import Sessions
 
 
 @pytest.fixture

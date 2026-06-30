@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { pushState } from "$app/navigation";
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import { fade, fly, slide } from "svelte/transition";

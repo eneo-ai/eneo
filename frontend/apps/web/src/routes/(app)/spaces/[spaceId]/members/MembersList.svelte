@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { derived } from "svelte/store";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
   import { m } from "$lib/paraglide/messages";

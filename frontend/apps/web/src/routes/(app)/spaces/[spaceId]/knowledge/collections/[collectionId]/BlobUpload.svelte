@@ -2,11 +2,11 @@
   import { onMount } from "svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { getJobManager } from "$lib/features/jobs/JobManager";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
-  import { type Group, type InfoBlob } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { type Group, type InfoBlob } from "@eneo/eneo-js";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
@@ -38,11 +38,11 @@
   let tenantQuotaUsed = 0;
   let isUploading = false;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   onMount(async () => {
     try {
-      const summary = await intric.usage.storage.getSummary();
+      const summary = await eneo.usage.storage.getSummary();
       tenantQuotaLimit = summary.limit ?? null;
       tenantQuotaUsed = summary.total_used ?? 0;
     } catch (error) {

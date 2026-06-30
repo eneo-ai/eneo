@@ -15,7 +15,7 @@ interface ValidationDetail {
 export class EneoApiError extends Error {
   /** HTTP status of the failing response. */
   readonly status: number;
-  /** Backend error code (`intric_error_code`, see backend ErrorCodes enum). */
+  /** Backend error code (`eneo_error_code`, see backend ErrorCodes enum). */
   readonly code?: number;
   /** Trace id of the failing request, for correlation with backend logs. */
   readonly traceId?: string;
@@ -46,7 +46,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Extracts a message and error code from the three error body shapes the
  * backend produces:
- *  1. GeneralError: `{ message, intric_error_code, details?, ... }`
+ *  1. GeneralError: `{ message, eneo_error_code, details?, ... }`
  *  2. HTTPException: `{ detail: string }` or `{ detail: { message?, code? } }`
  *  3. FastAPI validation (422): `{ detail: [{ loc, msg, type }, ...] }`
  */
@@ -56,7 +56,7 @@ function parseErrorBody(body: unknown): { message?: string; code?: number; detai
   if (typeof body.message === "string") {
     return {
       message: body.message,
-      code: typeof body.intric_error_code === "number" ? body.intric_error_code : undefined,
+      code: typeof body.eneo_error_code === "number" ? body.eneo_error_code : undefined,
       details: body.details ?? undefined
     };
   }

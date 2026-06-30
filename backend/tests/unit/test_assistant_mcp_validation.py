@@ -6,9 +6,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.assistants.assistant_repo import AssistantRepository
-from intric.assistants.assistant_service import AssistantService
-from intric.main.exceptions import BadRequestException
+from eneo.assistants.assistant_repo import AssistantRepository
+from eneo.assistants.assistant_service import AssistantService
+from eneo.main.exceptions import BadRequestException
 
 
 def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=False):

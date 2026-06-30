@@ -45,7 +45,7 @@ class TestPersistBatchReturnType:
 
         This is the base case - no pages, no URLs.
         """
-        from intric.worker.crawl_context import CrawlContext
+        from eneo.worker.crawl_context import CrawlContext
 
         # Create minimal CrawlContext
         ctx = CrawlContext(
@@ -63,7 +63,7 @@ class TestPersistBatchReturnType:
         )
 
         # Import persist_batch
-        from intric.worker.crawl_tasks import persist_batch
+        from eneo.worker.crawl_tasks import persist_batch
 
         # Call with empty buffer
         result = await persist_batch(
@@ -83,7 +83,7 @@ class TestPersistBatchReturnType:
         """
         When embedding_model is None, all pages should fail with empty successful_urls.
         """
-        from intric.worker.crawl_context import CrawlContext
+        from eneo.worker.crawl_context import CrawlContext
 
         ctx = CrawlContext(
             website_id=uuid4(),
@@ -99,7 +99,7 @@ class TestPersistBatchReturnType:
             http_auth_pass=None,
         )
 
-        from intric.worker.crawl_tasks import persist_batch
+        from eneo.worker.crawl_tasks import persist_batch
 
         page_buffer = [
             {"url": "https://example.com/page1", "content": "Content 1"},
@@ -207,7 +207,7 @@ class TestSessionLifecycle:
         to return the connection to the pool before the long-running crawl begins.
         """
         import inspect
-        from intric.worker import crawl_tasks
+        from eneo.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)
 
@@ -309,7 +309,7 @@ class TestRedisTTLManagement:
         Note: Heartbeat logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
-        from intric.worker.crawl.heartbeat import HeartbeatMonitor
+        from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._refresh_redis_ttl)
 
@@ -330,7 +330,7 @@ class TestZombieJobPrevention:
         Note: Preemption logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
-        from intric.worker.crawl.heartbeat import HeartbeatMonitor
+        from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._check_preemption)
 
@@ -344,7 +344,7 @@ class TestZombieJobPrevention:
         and return preempted_during_crawl status.
         """
         import inspect
-        from intric.worker import crawl_tasks
+        from eneo.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)
 
@@ -363,7 +363,7 @@ class TestCrawlContextSecurity:
         This prevents accidental password exposure in logs, tracebacks,
         and debugging output. The field uses repr=False in the dataclass.
         """
-        from intric.worker.crawl_context import CrawlContext
+        from eneo.worker.crawl_context import CrawlContext
 
         secret_password = "super_secret_password_123"
 
@@ -418,7 +418,7 @@ def mock_embedding_model():
 @pytest.fixture
 def mock_sessionmanager():
     """Create a mock session manager for testing."""
-    with patch("intric.worker.crawl_tasks.sessionmanager") as mock:
+    with patch("eneo.worker.crawl_tasks.sessionmanager") as mock:
         mock_session = AsyncMock()
         mock_session.begin = MagicMock(return_value=AsyncMock())
         mock_session.begin_nested = MagicMock(return_value=AsyncMock())

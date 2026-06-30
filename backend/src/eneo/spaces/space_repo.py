@@ -1,0 +1,1700 @@
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Optional, Protocol
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
+
+from eneo.database.database import AsyncSession
+from eneo.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+    TranscriptionModels,
+)
+from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts
+from eneo.database.tables.app_template_table import AppTemplates
+from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
+from eneo.database.tables.assistant_template_table import AssistantTemplates
+from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.group_chats_table import (
+    GroupChatsAssistantsMapping,
+    GroupChatsTable,
+)
+from eneo.database.tables.groups_spaces_table import GroupsSpaces
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
+from eneo.database.tables.integration_knowledge_spaces_table import (
+    IntegrationKnowledgesSpaces,
+)
+from eneo.database.tables.integration_table import IntegrationKnowledge
+from eneo.database.tables.integration_table import (
+    TenantIntegration as TenantIntegrationDBModel,
+)
+from eneo.database.tables.integration_table import (
+    UserIntegration as UserIntegrationDBModel,
+)
+from eneo.database.tables.mcp_server_table import (
+    MCPServers as MCPServersTable,
+)
+from eneo.database.tables.mcp_server_table import (
+    MCPServerTools as MCPServerToolsTable,
+)
+from eneo.database.tables.mcp_server_table import (
+    MCPServerToolSettings as MCPServerToolSettingsTable,
+)
+from eneo.database.tables.mcp_server_table import (
+    SpacesMCPServers,
+    SpacesMCPServerTools,
+)
+from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
+from eneo.database.tables.security_classifications_table import (
+    SecurityClassification as SecurityClassificationDBModel,
+)
+from eneo.database.tables.service_table import Services
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import (
+    Spaces,
+    SpacesCompletionModels,
+    SpacesEmbeddingModels,
+    SpacesTranscriptionModels,
+    SpacesUserGroups,
+    SpacesUsers,
+)
+from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.websites_spaces_table import WebsitesSpaces
+from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+from eneo.database.tables.websites_table import Websites as WebsitesTable
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UniqueException,
+)
+from eneo.main.logging import get_logger
+from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
+from eneo.spaces.space import Space
+from eneo.spaces.space_factory import SpaceFactory
+
+logger = get_logger(__name__)
+
+
+class _HasId(Protocol):
+    """Minimal protocol for objects that carry an `.id` UUID (used by _set_*_models helpers)."""
+
+    id: UUID
+
+
+if TYPE_CHECKING:
+    from eneo.apps import AppRepository
+    from eneo.assistants.assistant import Assistant
+    from eneo.assistants.assistant_repo import AssistantRepository
+    from eneo.collections.domain.collection import Collection
+    from eneo.completion_models.domain.completion_model_repo import (
+        CompletionModelRepository,
+    )
+    from eneo.embedding_models.domain.embedding_model_repo import (
+        EmbeddingModelRepository,
+    )
+    from eneo.group_chat.domain.entities.group_chat import GroupChat
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
+    from eneo.transcription_models.domain.transcription_model_repo import (
+        TranscriptionModelRepository,
+    )
+    from eneo.users.user import UserInDB
+    from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
+    from eneo.websites.domain.website import Website
+    from eneo.websites.infrastructure.http_auth_encryption import (
+        HttpAuthEncryptionService,
+    )
+
+
+class SpaceRepository:
+    def __init__(
+        self,
+        session: AsyncSession,
+        user: "UserInDB",
+        factory: SpaceFactory,
+        app_repo: Optional["AppRepository"],
+        assistant_repo: "AssistantRepository",
+        completion_model_repo: "CompletionModelRepository",
+        transcription_model_repo: "TranscriptionModelRepository",
+        embedding_model_repo: "EmbeddingModelRepository",
+        http_auth_encryption: "HttpAuthEncryptionService",
+    ):
+        super().__init__()
+        self.session = session
+        self.user = user
+        self.factory = factory
+        self.app_repo = app_repo
+        self.completion_model_repo = completion_model_repo
+        self.transcription_model_repo = transcription_model_repo
+        self.embedding_model_repo = embedding_model_repo
+        self.assistant_repo = assistant_repo
+        self.http_auth_encryption = http_auth_encryption
+
+    def _options(self) -> list[Any]:
+        return [
+            selectinload(Spaces.members).selectinload(SpacesUsers.user),
+            selectinload(Spaces.group_members)
+            .selectinload(SpacesUserGroups.user_group)
+            .selectinload(UserGroups.users),
+            selectinload(Spaces.services).selectinload(Services.user),
+            selectinload(Spaces.integration_knowledge_list).selectinload(
+                IntegrationKnowledge.embedding_model
+            ),
+            selectinload(Spaces.integration_knowledge_list)
+            .selectinload(IntegrationKnowledge.user_integration)
+            .selectinload(UserIntegrationDBModel.tenant_integration)
+            .selectinload(TenantIntegrationDBModel.integration),
+            selectinload(Spaces.integration_knowledge_list).selectinload(
+                IntegrationKnowledge.sharepoint_subscription
+            ),
+            selectinload(Spaces.completion_models_mapping),
+            selectinload(Spaces.embedding_models_mapping),
+            selectinload(Spaces.transcription_models_mapping),
+            selectinload(Spaces.mcp_servers_mapping),
+            selectinload(Spaces.security_classification),
+            selectinload(Spaces.security_classification).selectinload(
+                SecurityClassificationDBModel.tenant
+            ),
+        ]
+
+    async def is_member(self, space_id: UUID, user_id: UUID) -> bool:
+        """Check if user is a member of space (index-only lookup)."""
+        query = (
+            sa.select(sa.literal(1))
+            .select_from(SpacesUsers)
+            .where(
+                SpacesUsers.space_id == space_id,
+                SpacesUsers.user_id == user_id,
+            )
+            .limit(1)
+        )
+        return await self.session.scalar(query) is not None
+
+    async def get_space_id_for_resource(
+        self, scope_type: str, resource_id: UUID
+    ) -> UUID | None:
+        """Single indexed lookup: assistant/app -> space_id."""
+        from eneo.authentication.auth_models import ApiKeyScopeType
+
+        if scope_type in (ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.ASSISTANT.value):
+            query = sa.select(Assistants.space_id).where(Assistants.id == resource_id)
+        elif scope_type in (ApiKeyScopeType.APP, ApiKeyScopeType.APP.value):
+            query = sa.select(Apps.space_id).where(Apps.id == resource_id)
+        else:
+            return None
+        return await self.session.scalar(query)
+
+    async def get_space_id_for_scope(
+        self, scope_type: str, scope_id: UUID
+    ) -> UUID | None:
+        """Resolve a key's scope to its parent space_id.
+
+        Returns scope_id directly for space-scoped keys,
+        looks up the parent space for assistant/app-scoped keys.
+        """
+        from eneo.authentication.auth_models import ApiKeyScopeType
+
+        if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.SPACE.value):
+            return scope_id
+        return await self.get_space_id_for_resource(
+            scope_type=scope_type, resource_id=scope_id
+        )
+
+    async def _get_collections(
+        self, space_ids: list[UUID]
+    ) -> Sequence[tuple[CollectionsTable, int]]:
+        c = CollectionsTable
+        ib = InfoBlobs
+        gs = GroupsSpaces
+
+        ib_count_sq = (
+            sa.select(sa.func.count(sa.distinct(ib.id)))
+            .where(ib.group_id == c.id)
+            .correlate(c)
+            .scalar_subquery()
+        )
+
+        stmt = (
+            sa.select(
+                c,
+                sa.func.coalesce(ib_count_sq, 0).label("infoblob_count"),
+            )
+            .where(
+                sa.or_(
+                    c.space_id.in_(space_ids),
+                    sa.exists(
+                        sa.select(sa.literal(1))
+                        .select_from(gs)
+                        .where(gs.collection_id == c.id)
+                        .where(gs.space_id.in_(space_ids))
+                    ),
+                )
+            )
+            .order_by(c.created_at)
+            .options(selectinload(c.embedding_model))
+        )
+
+        res = await self.session.execute(stmt)
+        rows = res.all()
+        # Row[Tuple[CollectionsTable, int]] is structurally a tuple but not a subtype;
+        # unpack explicitly so pyright sees tuple[CollectionsTable, int].
+        return [(row[0], row[1]) for row in rows]
+
+    async def _get_completion_models(
+        self, space_in_db: Spaces
+    ) -> Sequence[CompletionModels]:
+        space_id = space_in_db.id
+
+        cm = aliased(CompletionModels)
+        scm = aliased(SpacesCompletionModels)
+
+        # Settings are now directly on the model table
+        stmt = (
+            sa.select(cm)
+            .join(scm, scm.completion_model_id == cm.id)
+            .filter(scm.space_id == space_id)
+            .order_by(cm.org, cm.created_at, cm.nickname)
+        )
+
+        res = await self.session.execute(stmt)
+        return res.scalars().all()
+
+    async def _get_embedding_models(
+        self, space_in_db: Spaces
+    ) -> Sequence[EmbeddingModels]:
+        space_id = space_in_db.id
+
+        em = aliased(EmbeddingModels)
+        sem = aliased(SpacesEmbeddingModels)
+
+        # Settings are now directly on the model table
+        stmt = (
+            sa.select(em)
+            .join(sem, sem.embedding_model_id == em.id)
+            .filter(sem.space_id == space_id)
+        )
+
+        res = await self.session.execute(stmt)
+        return res.scalars().all()
+
+    async def _get_transcription_models(
+        self, space_in_db: Spaces
+    ) -> Sequence[TranscriptionModels]:
+        space_id = space_in_db.id
+
+        tm = aliased(TranscriptionModels)
+        stm = aliased(SpacesTranscriptionModels)
+
+        # Settings are now directly on the model table
+        stmt = (
+            sa.select(tm)
+            .join(stm, stm.transcription_model_id == tm.id)
+            .filter(stm.space_id == space_id)
+        )
+
+        res = await self.session.execute(stmt)
+        return res.scalars().all()
+
+    async def _set_embedding_models(
+        self, space_in_db: Spaces, embedding_models: Sequence[_HasId]
+    ):
+        # Delete all
+        stmt = sa.delete(SpacesEmbeddingModels).where(
+            SpacesEmbeddingModels.space_id == space_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if embedding_models:
+            stmt = sa.insert(SpacesEmbeddingModels).values(
+                [
+                    dict(embedding_model_id=embedding_model.id, space_id=space_in_db.id)
+                    for embedding_model in embedding_models
+                ]
+            )
+            await self.session.execute(stmt)
+
+    async def _set_completion_models(
+        self, space_in_db: Spaces, completion_models: Sequence[_HasId]
+    ):
+        # Delete all
+        stmt = sa.delete(SpacesCompletionModels).where(
+            SpacesCompletionModels.space_id == space_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if completion_models:
+            stmt = sa.insert(SpacesCompletionModels).values(
+                [
+                    dict(
+                        completion_model_id=completion_model.id, space_id=space_in_db.id
+                    )
+                    for completion_model in completion_models
+                ]
+            )
+            await self.session.execute(stmt)
+
+    async def _set_transcription_models(
+        self,
+        space_in_db: Spaces,
+        transcription_models: "Sequence[TranscriptionModel]",
+    ):
+        # Delete all
+        stmt = sa.delete(SpacesTranscriptionModels).where(
+            SpacesTranscriptionModels.space_id == space_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if transcription_models:
+            stmt = sa.insert(SpacesTranscriptionModels).values(
+                [
+                    dict(transcription_model_id=model.id, space_id=space_in_db.id)
+                    for model in transcription_models
+                ]
+            )
+            await self.session.execute(stmt)
+
+    async def _set_mcp_servers(
+        self, space_in_db: Spaces, mcp_servers: list["MCPServer"]
+    ):
+        # Delete all
+        stmt = sa.delete(SpacesMCPServers).where(
+            SpacesMCPServers.space_id == space_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if mcp_servers:
+            stmt = sa.insert(SpacesMCPServers).values(
+                [
+                    dict(mcp_server_id=server.id, space_id=space_in_db.id)
+                    for server in mcp_servers
+                ]
+            )
+            await self.session.execute(stmt)
+
+    async def _set_mcp_tools(
+        self,
+        space_in_db: Spaces,
+        tool_settings: list[tuple[UUID, bool]],
+        valid_server_ids: list[UUID],
+    ):
+        """Set space-level tool enablement settings.
+
+        Args:
+            space_in_db: The space database object
+            tool_settings: List of (tool_id, is_enabled) tuples
+            valid_server_ids: List of MCP server IDs that are selected for this space
+
+        Raises:
+            BadRequestException: If any tool_id doesn't belong to the selected servers
+        """
+        # Delete all existing settings
+        stmt = sa.delete(SpacesMCPServerTools).where(
+            SpacesMCPServerTools.space_id == space_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if tool_settings:
+            tool_ids = [t[0] for t in tool_settings]
+
+            # Validate all tools belong to selected servers
+            valid_query = (
+                sa.select(MCPServerToolsTable.id)
+                .where(MCPServerToolsTable.id.in_(tool_ids))
+                .where(MCPServerToolsTable.mcp_server_id.in_(valid_server_ids))
+            )
+            result = await self.session.execute(valid_query)
+            valid_tool_ids = set(row[0] for row in result.fetchall())
+
+            invalid_ids = set(tool_ids) - valid_tool_ids
+            if invalid_ids:
+                raise BadRequestException(f"Invalid tool IDs: {invalid_ids}")
+
+            stmt = sa.insert(SpacesMCPServerTools).values(
+                [
+                    dict(
+                        space_id=space_in_db.id,
+                        mcp_server_tool_id=tool_id,
+                        is_enabled=is_enabled,
+                    )
+                    for tool_id, is_enabled in tool_settings
+                ]
+            )
+            await self.session.execute(stmt)
+
+    async def _set_members(self, space_in_db: Spaces, members: dict[UUID, SpaceMember]):
+        # Delete all
+        stmt = sa.delete(SpacesUsers).where(SpacesUsers.space_id == space_in_db.id)
+        await self.session.execute(stmt)
+
+        # Add members
+        if members:
+            spaces_users = [
+                dict(
+                    space_id=space_in_db.id,
+                    user_id=member.id,
+                    role=member.role.value,
+                )
+                for member in members.values()
+            ]
+
+            stmt = sa.insert(SpacesUsers).values(spaces_users)
+            await self.session.execute(stmt)
+
+        # This allows the newly added members to be reflected in the space
+        await self.session.refresh(space_in_db)
+
+    async def _set_group_members(
+        self, space_in_db: Spaces, group_members: dict[UUID, SpaceGroupMember]
+    ):
+        """Persist group members for a space."""
+        # Delete all existing group members
+        stmt = sa.delete(SpacesUserGroups).where(
+            SpacesUserGroups.space_id == space_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        # Add group members
+        if group_members:
+            spaces_user_groups = [
+                dict(
+                    space_id=space_in_db.id,
+                    user_group_id=group_member.id,
+                    role=group_member.role.value,
+                )
+                for group_member in group_members.values()
+            ]
+
+            stmt = sa.insert(SpacesUserGroups).values(spaces_user_groups)
+            await self.session.execute(stmt)
+
+        # Refresh to reflect changes
+        await self.session.refresh(space_in_db)
+
+    async def _set_assistants(self, space_in_db: Spaces, assistants: list["Assistant"]):
+        new_assistants = [assistant for assistant in assistants if assistant.is_new]
+        existing_assistants = [
+            assistant for assistant in assistants if not assistant.is_new
+        ]
+
+        for assistant in new_assistants:
+            assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
+            await self.assistant_repo.add(assistant)
+
+        for assistant in existing_assistants:
+            assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
+            await self.assistant_repo.update(assistant)
+
+        # Delete all assistants that are not in the list
+        # Don't delete the default assistant
+        stmt = (
+            sa.delete(Assistants)
+            .where(Assistants.space_id == space_in_db.id)
+            .where(Assistants.id.notin_([assistant.id for assistant in assistants]))
+            .where(Assistants.is_default == False)  # noqa
+        )
+        await self.session.execute(stmt)
+
+    async def _set_default_assistant(
+        self, space_in_db: Spaces, assistant: Optional["Assistant"]
+    ):
+        if assistant is None:
+            return
+
+        # Unset all others
+        stmt = (
+            sa.update(Assistants)
+            .values(is_default=False)
+            .where(Assistants.space_id == space_in_db.id)
+            .where(Assistants.id != assistant.id)
+        )
+        await self.session.execute(stmt)
+
+        # Set the default to default
+        stmt = (
+            sa.update(Assistants)
+            .values(is_default=True)
+            .where(Assistants.id == assistant.id)
+        )
+        await self.session.execute(stmt)
+
+    async def _set_group_chats(
+        self, space_in_db: Spaces, group_chats: list["GroupChat"]
+    ):
+        new_group_chats = [
+            group_chat for group_chat in group_chats if group_chat.is_new
+        ]
+        existing_group_chats = [
+            group_chat for group_chat in group_chats if not group_chat.is_new
+        ]
+
+        if new_group_chats:
+            stmt = sa.insert(GroupChatsTable).values(
+                [
+                    dict(
+                        id=group_chat.id,
+                        name=group_chat.name,
+                        space_id=space_in_db.id,
+                        user_id=group_chat.user_id,
+                        type="group-chat",
+                        allow_mentions=group_chat.allow_mentions,
+                        show_response_label=group_chat.show_response_label,
+                        published=group_chat.published,
+                        insight_enabled=group_chat.insight_enabled,
+                        icon_id=group_chat.icon_id,
+                    )
+                    for group_chat in new_group_chats
+                ]
+            )
+            await self.session.execute(stmt)
+
+        for group_chat in existing_group_chats:
+            stmt = (
+                sa.update(GroupChatsTable)
+                .values(
+                    name=group_chat.name,
+                    space_id=space_in_db.id,
+                    allow_mentions=group_chat.allow_mentions,
+                    show_response_label=group_chat.show_response_label,
+                    published=group_chat.published,
+                    insight_enabled=group_chat.insight_enabled,
+                    metadata_json=group_chat.metadata_json,
+                    icon_id=group_chat.icon_id,
+                )
+                .where(GroupChatsTable.id == group_chat.id)
+            )
+
+            await self.session.execute(stmt)
+
+            # Delete all group chat assistants
+            stmt = sa.delete(GroupChatsAssistantsMapping).where(
+                GroupChatsAssistantsMapping.group_chat_id == group_chat.id
+            )
+            await self.session.execute(stmt)
+
+            # Add new group chat assistants
+            if group_chat.assistants:
+                stmt = sa.insert(GroupChatsAssistantsMapping).values(
+                    [
+                        dict(
+                            group_chat_id=group_chat.id,
+                            assistant_id=group_chat_assistant.assistant.id,
+                            user_description=group_chat_assistant.user_description,
+                        )
+                        for group_chat_assistant in group_chat.assistants
+                    ]
+                )
+                await self.session.execute(stmt)
+
+        # Delete all group chats that are not in the list
+        stmt = (
+            sa.delete(GroupChatsTable)
+            .where(GroupChatsTable.space_id == space_in_db.id)
+            .where(
+                GroupChatsTable.id.notin_([group_chat.id for group_chat in group_chats])
+            )
+        )
+        await self.session.execute(stmt)
+
+    async def _set_collections(
+        self, space_in_db: Spaces, collections: list["Collection"]
+    ):
+        def _set_size_subquery(collection: "Collection"):
+            return (
+                sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
+                .where(InfoBlobsTable.group_id == collection.id)
+                .scalar_subquery()
+            )
+
+        # Skapa nya collections (owner_space sätts EN gång vid skapande)
+        new_collections = [c for c in collections if c.is_new]
+        if new_collections:
+            stmt = sa.insert(CollectionsTable).values(
+                [
+                    dict(
+                        id=c.id,
+                        name=c.name,
+                        size=_set_size_subquery(c),
+                        tenant_id=c.tenant_id,
+                        user_id=c.user_id,
+                        embedding_model_id=c.embedding_model.id,
+                        space_id=c.space_id,  # Space_id blir som owner_space_id
+                    )
+                    for c in new_collections
+                ]
+            )
+            await self.session.execute(stmt)
+
+        # Uppdatera metadata på befintliga förutom space_id (Ägarbyte görs via annan metod)
+        existing = [c for c in collections if not c.is_new]
+        for c in existing:
+            stmt = (
+                sa.update(CollectionsTable)
+                .values(
+                    name=c.name,
+                    size=_set_size_subquery(c),
+                    embedding_model_id=c.embedding_model.id,
+                )
+                .where(CollectionsTable.id == c.id)
+            )
+            await self.session.execute(stmt)
+
+        res = await self.session.execute(
+            sa.select(GroupsSpaces.collection_id).where(
+                GroupsSpaces.space_id == space_in_db.id
+            )
+        )
+        current_ids = {row[0] for row in res.all()}
+
+        desired_ids = {c.id for c in collections}
+
+        to_add = desired_ids - current_ids
+        to_remove = current_ids - desired_ids
+
+        if to_add:
+            ins = pg_insert(GroupsSpaces).values(
+                [dict(collection_id=cid, space_id=space_in_db.id) for cid in to_add]
+            )
+            ins = ins.on_conflict_do_nothing(
+                index_elements=[GroupsSpaces.collection_id, GroupsSpaces.space_id]
+            )
+            await self.session.execute(ins)
+
+        if to_remove:
+            await self.session.execute(
+                sa.delete(GroupsSpaces).where(
+                    sa.and_(
+                        GroupsSpaces.space_id == space_in_db.id,
+                        GroupsSpaces.collection_id.in_(to_remove),
+                    )
+                )
+            )
+
+    async def _set_websites(self, space_in_db: Spaces, websites: list["Website"]):
+        """Persist websites with encrypted auth credentials.
+
+        Why: Repository is the encryption boundary. Domain entities have plaintext
+        credentials, but database gets encrypted values.
+        """
+
+        def _set_size_subquery(website: "Website"):
+            return (
+                sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
+                .where(InfoBlobsTable.website_id == website.id)
+                .scalar_subquery()
+            )
+
+        def _prepare_auth_fields(website: "Website") -> dict[str, str | None]:
+            """Encrypt HTTP auth credentials if present."""
+            if website.http_auth:
+                username, encrypted_password, auth_domain = (
+                    self.http_auth_encryption.encrypt_credentials(website.http_auth)
+                )
+                return {
+                    "http_auth_username": username,
+                    "encrypted_auth_password": encrypted_password,
+                    "http_auth_domain": auth_domain,
+                }
+            else:
+                return {
+                    "http_auth_username": None,
+                    "encrypted_auth_password": None,
+                    "http_auth_domain": None,
+                }
+
+        new_websites = [website for website in websites if website.is_new]
+        existing_websites = [website for website in websites if not website.is_new]
+
+        if new_websites:
+            values: list[dict[str, object]] = []
+            for website in new_websites:
+                auth_fields = _prepare_auth_fields(website)
+                values.append(
+                    dict(
+                        id=website.id,
+                        name=website.name,
+                        url=website.url,
+                        download_files=website.download_files,
+                        crawl_type=website.crawl_type,
+                        update_interval=website.update_interval,
+                        size=_set_size_subquery(website),
+                        tenant_id=website.tenant_id,
+                        user_id=website.user_id,
+                        embedding_model_id=website.embedding_model.id,
+                        space_id=space_in_db.id,
+                        **auth_fields,
+                    )
+                )
+            stmt = sa.insert(WebsitesTable).values(values)
+            await self.session.execute(stmt)
+
+        for website in existing_websites:
+            auth_fields = _prepare_auth_fields(website)
+            stmt = (
+                sa.update(WebsitesTable)
+                .values(
+                    name=website.name,
+                    url=website.url,
+                    download_files=website.download_files,
+                    crawl_type=website.crawl_type,
+                    update_interval=website.update_interval,
+                    size=_set_size_subquery(website),
+                    embedding_model_id=website.embedding_model.id,
+                    **auth_fields,
+                )
+                .where(WebsitesTable.id == website.id)
+            )
+            await self.session.execute(stmt)
+
+        res = await self.session.execute(
+            sa.select(WebsitesSpaces.website_id).where(
+                WebsitesSpaces.space_id == space_in_db.id
+            )
+        )
+        current_ids = {row[0] for row in res.all()}
+        desired_ids = {w.id for w in websites}
+
+        to_add = desired_ids - current_ids
+        to_remove = current_ids - desired_ids
+
+        if to_add:
+            ins = (
+                pg_insert(WebsitesSpaces)
+                .values(
+                    [dict(website_id=wid, space_id=space_in_db.id) for wid in to_add]
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[WebsitesSpaces.website_id, WebsitesSpaces.space_id]
+                )
+            )
+            await self.session.execute(ins)
+
+        if to_remove:
+            await self.session.execute(
+                sa.delete(WebsitesSpaces).where(
+                    sa.and_(
+                        WebsitesSpaces.space_id == space_in_db.id,
+                        WebsitesSpaces.website_id.in_(to_remove),
+                    )
+                )
+            )
+
+    async def _load_assistant_mcp_server_tools_with_overrides(
+        self,
+        space_id: UUID,
+        assistant_id: UUID,
+        mcp_servers: list["MCPServer"],
+    ) -> list["MCPServer"]:
+        """Load tools for assistant's MCP servers and apply space + assistant-level overrides.
+
+        Hierarchy:
+        1. Tool default (is_enabled_by_default)
+        2. Tenant override (mcp_server_tool_settings.is_enabled) - if exists
+        3. Space override (spaces_mcp_server_tools.is_enabled) - if exists
+        4. Assistant override (assistant_mcp_server_tools.is_enabled) - if exists
+
+        Rules:
+        - If tenant disables a tool, it won't appear at all (filtered out)
+        - If space disables a tool, it won't appear in assistant (filtered out)
+        - Assistant can only override tools that are space-enabled
+        """
+        from eneo.database.tables.assistant_table import AssistantMCPServerTools
+
+        if not mcp_servers:
+            return mcp_servers
+
+        mcp_server_ids = [server.id for server in mcp_servers]
+
+        # Load all tools for these servers
+        tools_query = (
+            sa.select(MCPServerToolsTable)
+            .where(MCPServerToolsTable.mcp_server_id.in_(mcp_server_ids))
+            .order_by(MCPServerToolsTable.name)
+        )
+        tools_result = await self.session.execute(tools_query)
+        tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
+
+        # Load tenant-level tool settings
+        tenant_tool_settings_query = sa.select(MCPServerToolSettingsTable).where(
+            MCPServerToolSettingsTable.tenant_id == self.user.tenant_id
+        )
+        tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
+        tenant_settings_db: list[MCPServerToolSettingsTable] = list(
+            tenant_settings_result.scalars().all()
+        )
+
+        # Create map: tool_id -> is_enabled (tenant level)
+        tenant_tool_settings: dict[UUID, bool] = {
+            setting.mcp_server_tool_id: setting.is_enabled
+            for setting in tenant_settings_db
+        }
+
+        # Load space-level tool overrides
+        space_overrides_query = sa.select(SpacesMCPServerTools).where(
+            SpacesMCPServerTools.space_id == space_id
+        )
+        space_overrides_result = await self.session.execute(space_overrides_query)
+        space_overrides_db = space_overrides_result.scalars().all()
+
+        # Create map: tool_id -> is_enabled (space level)
+        space_tool_overrides = {
+            override.mcp_server_tool_id: override.is_enabled
+            for override in space_overrides_db
+        }
+
+        # Load assistant-level tool overrides
+        assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
+            AssistantMCPServerTools.assistant_id == assistant_id
+        )
+        assistant_overrides_result = await self.session.execute(
+            assistant_overrides_query
+        )
+        assistant_overrides_db = assistant_overrides_result.scalars().all()
+
+        # Create map: tool_id -> is_enabled (assistant level)
+        assistant_tool_overrides = {
+            override.mcp_server_tool_id: override.is_enabled
+            for override in assistant_overrides_db
+        }
+
+        # Group tools by server
+        from collections import defaultdict
+
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
+
+        tools_by_server: defaultdict[UUID, list[MCPServerTool]] = defaultdict(list)
+        for tool_db in tools_db:
+            # Determine effective is_enabled status
+            # Priority: assistant override > space override > tenant override > tool default
+            tenant_enabled = tenant_tool_settings.get(
+                tool_db.id, tool_db.is_enabled_by_default
+            )
+
+            # If tenant disabled this tool, skip it entirely (don't show in space/assistant)
+            if (
+                tool_db.id in tenant_tool_settings
+                and not tenant_tool_settings[tool_db.id]
+            ):
+                continue
+
+            # Apply space override if exists, otherwise use tenant/default
+            if tool_db.id in space_tool_overrides:
+                space_enabled = space_tool_overrides[tool_db.id]
+            else:
+                space_enabled = tenant_enabled
+
+            # If space disabled this tool, skip it (don't show in assistant)
+            if not space_enabled:
+                continue
+
+            # Apply assistant override if exists, otherwise default to OFF for assistants
+            # (tools must be explicitly enabled at assistant level)
+            if tool_db.id in assistant_tool_overrides:
+                is_enabled = assistant_tool_overrides[tool_db.id]
+            else:
+                is_enabled = False  # Tools OFF by default for assistants
+
+            tool = MCPServerTool(
+                id=tool_db.id,
+                mcp_server_id=tool_db.mcp_server_id,
+                name=tool_db.name,
+                title=tool_db.title,
+                description=tool_db.description,
+                input_schema=tool_db.input_schema,
+                is_enabled_by_default=is_enabled,  # Effective status after all overrides
+                created_at=tool_db.created_at,
+                updated_at=tool_db.updated_at,
+            )
+            tools_by_server[tool_db.mcp_server_id].append(tool)
+
+        # Attach tools to servers
+        for server in mcp_servers:
+            server.tools = tools_by_server.get(server.id, [])
+
+        return mcp_servers
+
+    async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
+        stmt = (
+            sa.select(Assistants)
+            .where(Assistants.space_id == space_id)
+            .options(
+                selectinload(Assistants.assistant_websites),
+                selectinload(Assistants.assistant_groups),
+                selectinload(Assistants.assistant_integration_knowledge),
+                selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
+                selectinload(Assistants.template).selectinload(
+                    AssistantTemplates.completion_model
+                ),
+                selectinload(Assistants.mcp_servers),
+            )
+            .order_by(Assistants.created_at)
+        )
+        assistant_records = await self.session.execute(stmt)
+        assistants = assistant_records.scalars().all()
+
+        assistant_ids = [assistant.id for assistant in assistants]
+        stmt = (
+            sa.select(Prompts, PromptsAssistants.assistant_id)
+            .join(PromptsAssistants)
+            .where(PromptsAssistants.prompt_id == Prompts.id)
+            .where(PromptsAssistants.assistant_id.in_(assistant_ids))
+            .where(PromptsAssistants.is_selected)
+            .options(selectinload(Prompts.user))
+        )
+        prompt_records = await self.session.execute(stmt)
+        prompts = prompt_records.all()
+
+        for assistant in assistants:
+            assistant.prompt = next(  # type: ignore[attr-defined]
+                (
+                    prompt
+                    for prompt, assistant_id in prompts
+                    if assistant_id == assistant.id
+                ),
+                None,
+            )
+
+        # For each assistant, load MCP servers with tools and apply space+assistant overrides
+        for assistant in assistants:
+            if assistant.mcp_servers:
+                from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
+                    MCPServerMapper,
+                )
+
+                # Map to domain entities first
+                mcp_servers = MCPServerMapper.to_entities(assistant.mcp_servers)
+
+                # Apply space + assistant level overrides using same logic as space MCP loading
+                mcp_servers = (
+                    await self._load_assistant_mcp_server_tools_with_overrides(
+                        space_id=space_id,
+                        assistant_id=assistant.id,
+                        mcp_servers=mcp_servers,
+                    )
+                )
+
+                # Store the filtered entities back on the assistant for the factory
+                setattr(assistant, "_mcp_server_entities", mcp_servers)
+
+        return assistants
+
+    async def _get_services(self, space_id: UUID) -> Sequence[Services]:
+        # Fetch all services for the space
+        stmt = (
+            sa.select(Services)
+            .where(Services.space_id == space_id)
+            .options(
+                selectinload(Services.service_groups),
+                selectinload(Services.user),
+                selectinload(Services.completion_model),
+            )
+        )
+
+        service_records = await self.session.execute(stmt)
+        services_db = service_records.scalars().all()
+
+        return services_db
+
+    async def _get_group_chats(self, space_id: UUID) -> Sequence[GroupChatsTable]:
+        # Fetch all group chats for the space
+        stmt = (
+            sa.select(GroupChatsTable)
+            .where(GroupChatsTable.space_id == space_id)
+            .options(selectinload(GroupChatsTable.group_chat_assistants))
+        )
+
+        group_chat_records = await self.session.execute(stmt)
+        group_chats_db = group_chat_records.scalars().all()
+
+        return group_chats_db
+
+    def _decrypt_website_auth(
+        self, website_record: WebsitesTable
+    ) -> "Optional[HttpAuthCredentials]":
+        """Decrypt HTTP auth credentials from database record.
+
+        Why: Repository is the encryption boundary - domain gets clean objects.
+
+        Returns:
+            HttpAuthCredentials if auth present and decryption succeeds, None otherwise.
+        """
+
+        if not (
+            website_record.http_auth_username
+            and website_record.encrypted_auth_password
+            and website_record.http_auth_domain
+        ):
+            return None
+
+        try:
+            return self.http_auth_encryption.decrypt_credentials(
+                username=website_record.http_auth_username,
+                encrypted_password=website_record.encrypted_auth_password,
+                auth_domain=website_record.http_auth_domain,
+            )
+        except ValueError as e:
+            # Log decryption failure but don't fail entire website load
+            logger.error(
+                f"Failed to decrypt auth for website {website_record.id}: {str(e)}. "
+                "Website will be loaded without auth.",
+                extra={
+                    "website_id": str(website_record.id),
+                    "tenant_id": str(website_record.tenant_id),
+                },
+            )
+            # Set transient flag for crawl task to detect
+            # Why: Enables fail-fast behavior in crawler with clear error message
+            website_record._auth_decrypt_failed = True  # type: ignore[attr-defined]
+            return None
+
+    async def _get_websites(self, space_ids: list[UUID] | UUID) -> list[WebsitesTable]:
+        """Fetch websites and decrypt their auth credentials.
+
+        Why: Repository is the encryption boundary. We decrypt here and attach
+        the plaintext credentials as a transient attribute on the record object.
+        The factory then extracts this and passes it to Website.to_domain().
+        """
+        # Handle both single UUID and list of UUIDs for backwards compatibility
+        if isinstance(space_ids, UUID):
+            space_ids = [space_ids]
+
+        ws = WebsitesTable
+        wss = WebsitesSpaces
+
+        stmt = (
+            sa.select(ws)
+            .where(
+                sa.or_(
+                    ws.space_id.in_(space_ids),
+                    sa.exists(
+                        sa.select(sa.literal(1))
+                        .select_from(wss)
+                        .where(wss.website_id == ws.id)
+                        .where(wss.space_id.in_(space_ids))
+                    ),
+                )
+            )
+            .options(
+                selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),  # type: ignore[attr-defined]
+            )
+            .order_by(ws.created_at)
+        )
+
+        website_records = await self.session.execute(stmt)
+        websites_db = list(website_records.scalars())
+
+        # Decrypt auth credentials and attach as transient attribute
+        for website_record in websites_db:
+            website_record._decrypted_http_auth = self._decrypt_website_auth(  # type: ignore[attr-defined]
+                website_record
+            )
+
+        return websites_db
+
+    async def _load_mcp_server_tools_with_overrides(
+        self, space_id: UUID, mcp_servers: list["MCPServer"]
+    ) -> list["MCPServer"]:
+        """Load tools for MCP servers and apply tenant + space-level enablement overrides.
+
+        Hierarchy:
+        1. Tool default (is_enabled_by_default)
+        2. Tenant override (mcp_server_tool_settings.is_enabled) - if exists
+        3. Space override (spaces_mcp_server_tools.is_enabled) - if exists
+
+        Rules:
+        - If tenant disables a tool, it won't appear in space (filtered out)
+        - Space can only override tools that are tenant-enabled
+        """
+        if not mcp_servers:
+            return mcp_servers
+
+        mcp_server_ids = [server.id for server in mcp_servers]
+
+        # Load all tools for these servers
+        tools_query = (
+            sa.select(MCPServerToolsTable)
+            .where(MCPServerToolsTable.mcp_server_id.in_(mcp_server_ids))
+            .order_by(MCPServerToolsTable.name)
+        )
+        tools_result = await self.session.execute(tools_query)
+        tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
+
+        # Load tenant-level tool settings
+        tenant_tool_settings_query = sa.select(MCPServerToolSettingsTable).where(
+            MCPServerToolSettingsTable.tenant_id == self.user.tenant_id
+        )
+        tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
+        tenant_settings_db: list[MCPServerToolSettingsTable] = list(
+            tenant_settings_result.scalars().all()
+        )
+
+        # Create map: tool_id -> is_enabled (tenant level)
+        tenant_tool_settings: dict[UUID, bool] = {
+            setting.mcp_server_tool_id: setting.is_enabled
+            for setting in tenant_settings_db
+        }
+
+        # Load space-level tool overrides
+        space_overrides_query = sa.select(SpacesMCPServerTools).where(
+            SpacesMCPServerTools.space_id == space_id
+        )
+        space_overrides_result = await self.session.execute(space_overrides_query)
+        space_overrides_db = space_overrides_result.scalars().all()
+
+        # Create map: tool_id -> is_enabled (space level)
+        space_tool_overrides = {
+            override.mcp_server_tool_id: override.is_enabled
+            for override in space_overrides_db
+        }
+
+        # Group tools by server
+        from collections import defaultdict
+
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
+
+        tools_by_server: defaultdict[UUID, list[MCPServerTool]] = defaultdict(list)
+        for tool_db in tools_db:
+            # Determine effective is_enabled status
+            # Priority: space override > tenant override > tool default
+            tenant_enabled = tenant_tool_settings.get(
+                tool_db.id, tool_db.is_enabled_by_default
+            )
+
+            # If tenant disabled this tool, skip it entirely (don't show in space)
+            if (
+                tool_db.id in tenant_tool_settings
+                and not tenant_tool_settings[tool_db.id]
+            ):
+                continue
+
+            # Apply space override if exists, otherwise use tenant/default
+            if tool_db.id in space_tool_overrides:
+                is_enabled = space_tool_overrides[tool_db.id]
+            else:
+                is_enabled = tenant_enabled
+
+            tool = MCPServerTool(
+                id=tool_db.id,
+                mcp_server_id=tool_db.mcp_server_id,
+                name=tool_db.name,
+                title=tool_db.title,
+                description=tool_db.description,
+                input_schema=tool_db.input_schema,
+                is_enabled_by_default=is_enabled,  # Effective status after overrides
+                created_at=tool_db.created_at,
+                updated_at=tool_db.updated_at,
+            )
+            tools_by_server[tool_db.mcp_server_id].append(tool)
+
+        # Attach tools to servers
+        for server in mcp_servers:
+            server.tools = tools_by_server.get(server.id, [])
+
+        return mcp_servers
+
+    async def _get_apps(self, space_id: UUID) -> Sequence[Apps]:
+        stmt = (
+            sa.select(Apps)
+            .where(Apps.space_id == space_id)
+            .options(
+                selectinload(Apps.input_fields),
+                selectinload(Apps.attachments).selectinload(AppsFiles.file),
+                selectinload(Apps.template).selectinload(AppTemplates.completion_model),
+            )
+            .order_by(Apps.created_at)
+        )
+        app_records = await self.session.execute(stmt)
+        apps_db = app_records.scalars().all()
+
+        if not apps_db:
+            return []
+
+        app_ids = [app.id for app in apps_db]
+
+        # prompt
+        stmt = (
+            sa.select(Prompts, AppsPrompts.app_id)
+            .join(AppsPrompts)
+            .where(AppsPrompts.app_id.in_(app_ids))
+            .where(AppsPrompts.is_selected)
+            .options(selectinload(Prompts.user))
+        )
+        prompt_records = await self.session.execute(stmt)
+        prompts = prompt_records.all()
+
+        for app in apps_db:
+            app.prompt = next(  # type: ignore[attr-defined]
+                (prompt for prompt, app_id in prompts if app_id == app.id), None
+            )
+
+        return apps_db
+
+    async def _get_from_query(self, query: sa.Select[tuple[Spaces]]) -> Space | None:
+        entry_in_db = await self._get_record_with_options(query)
+        if not entry_in_db:
+            return
+
+        # Build effective_space_ids inline to avoid passing Spaces (DB type) where
+        # Space (domain type) is expected — cross-file change would be needed otherwise.
+        space_ids: list[UUID] = (
+            [entry_in_db.id, entry_in_db.tenant_space_id]
+            if entry_in_db.tenant_space_id
+            else [entry_in_db.id]
+        )
+
+        collections = await self._get_collections(space_ids)
+        websites = await self._get_websites(space_ids)
+        integration_knowledge_union = await self._get_integration_knowledge_union(
+            space_ids
+        )
+
+        completion_models = await self.completion_model_repo.all(with_deprecated=True)
+        embedding_models = await self.embedding_model_repo.all(with_deprecated=True)
+        transcription_models = await self.transcription_model_repo.all(
+            with_deprecated=True
+        )
+
+        # Get tenant-enabled MCP servers directly
+        from sqlalchemy.orm import selectinload as _selectinload
+
+        from eneo.database.tables.security_classifications_table import (
+            SecurityClassification as SecurityClassificationDBModel,
+        )
+
+        mcp_servers_query = (
+            sa.select(MCPServersTable)
+            .where(MCPServersTable.tenant_id == self.user.tenant_id)
+            .where(MCPServersTable.is_enabled == True)  # noqa: E712
+            .options(
+                _selectinload(MCPServersTable.security_classification).selectinload(
+                    SecurityClassificationDBModel.tenant
+                ),
+            )
+        )
+        mcp_servers_result = await self.session.execute(mcp_servers_query)
+        mcp_servers_db = mcp_servers_result.scalars().all()
+
+        # Convert to domain entities
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+        from eneo.security_classifications.domain.entities.security_classification import (
+            SecurityClassification,
+        )
+
+        mcp_servers = [
+            MCPServer(
+                id=server.id,
+                tenant_id=server.tenant_id,
+                name=server.name,
+                description=server.description,
+                http_url=server.http_url,
+                http_auth_type=server.http_auth_type,
+                http_auth_config_schema=server.http_auth_config_schema,
+                is_enabled=server.is_enabled,
+                env_vars=server.env_vars,
+                tags=server.tags,
+                icon_url=server.icon_url,
+                documentation_url=server.documentation_url,
+                security_classification=SecurityClassification.to_domain(
+                    server.security_classification
+                ),
+                created_at=server.created_at,
+                updated_at=server.updated_at,
+            )
+            for server in mcp_servers_db
+        ]
+
+        # Load tools for MCP servers with space-level overrides
+        if mcp_servers:
+            mcp_servers = await self._load_mcp_server_tools_with_overrides(
+                entry_in_db.id, mcp_servers
+            )
+
+        assistants = await self._get_assistants(space_id=entry_in_db.id)
+        apps = await self._get_apps(space_id=entry_in_db.id)
+        group_chats = await self._get_group_chats(space_id=entry_in_db.id)
+        services = await self._get_services(space_id=entry_in_db.id)
+
+        return self.factory.create_space_from_db(
+            entry_in_db,
+            user=self.user,
+            collections_in_db=collections,
+            websites_in_db=websites,
+            completion_models=completion_models,
+            embedding_models=embedding_models,
+            transcription_models=transcription_models,
+            mcp_servers=mcp_servers,
+            assistants_in_db=assistants,
+            group_chats_in_db=group_chats,
+            apps_in_db=apps,
+            services_in_db=services,
+            integration_knowledge_in_db=integration_knowledge_union,
+            security_classification=entry_in_db.security_classification,
+        )
+
+    async def _get_record_with_options(
+        self,
+        query: sa.Select[tuple[Spaces]]
+        | ReturningInsert[tuple[Spaces]]
+        | ReturningUpdate[tuple[Spaces]],
+    ) -> Spaces | None:
+        for option in self._options():
+            query = query.options(option)
+
+        return await self.session.scalar(query)
+
+    async def _get_records_with_options(
+        self, query: sa.Select[tuple[Spaces]]
+    ) -> Sequence[Spaces]:
+        for option in self._options():
+            query = query.options(option)
+
+        result = await self.session.scalars(query)
+        return result.all()
+
+    async def add(self, space: Space) -> Space:
+        query = (
+            sa.insert(Spaces)
+            .values(
+                name=space.name,
+                description=space.description,
+                tenant_id=space.tenant_id,
+                user_id=space.user_id,
+                tenant_space_id=space.tenant_space_id,
+            )
+            .returning(Spaces)
+        )
+
+        try:
+            entry_in_db = await self._get_record_with_options(query)
+        except IntegrityError as e:
+            raise UniqueException("Users can only have one personal space") from e
+
+        assert entry_in_db is not None
+        await self._set_completion_models(entry_in_db, space.completion_models)
+        await self._set_embedding_models(entry_in_db, space.embedding_models)
+        await self._set_transcription_models(entry_in_db, space.transcription_models)
+        await self._set_mcp_servers(entry_in_db, space.mcp_servers)
+        await self._set_members(entry_in_db, space.members)
+        await self._set_group_members(entry_in_db, space.group_members)
+        await self._set_default_assistant(entry_in_db, space.default_assistant)
+        await self._set_collections(entry_in_db, space.collections)
+        await self._set_websites(entry_in_db, space.websites)
+        await self._set_group_chats(entry_in_db, space.group_chats)
+        return await self.one(id=entry_in_db.id)
+
+    async def one_or_none(self, id: UUID) -> Optional[Space]:
+        query = sa.select(Spaces).where(Spaces.id == id)
+
+        return await self._get_from_query(query)
+
+    async def one(self, id: UUID) -> Space:
+        space = await self.one_or_none(id=id)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def update(
+        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] | None = None
+    ) -> Space:
+        query = (
+            sa.update(Spaces)
+            .values(
+                name=space.name,
+                description=space.description,
+                security_classification_id=(
+                    space.security_classification.id
+                    if space.security_classification is not None
+                    else None
+                ),
+                data_retention_days=space.data_retention_days,
+                icon_id=space.icon_id,
+            )
+            .where(Spaces.id == space.id)
+            .returning(Spaces)
+        )
+        entry_in_db = await self._get_record_with_options(query)
+        assert entry_in_db is not None
+
+        await self._set_completion_models(entry_in_db, space.completion_models)
+        await self._set_embedding_models(entry_in_db, space.embedding_models)
+        await self._set_transcription_models(entry_in_db, space.transcription_models)
+        await self._set_mcp_servers(entry_in_db, space.mcp_servers)
+        if mcp_tool_settings is not None:
+            await self._set_mcp_tools(
+                entry_in_db,
+                mcp_tool_settings,
+                valid_server_ids=[s.id for s in space.mcp_servers],
+            )
+        await self._set_members(entry_in_db, space.members)
+        await self._set_group_members(entry_in_db, space.group_members)
+        await self._set_default_assistant(entry_in_db, space.default_assistant)
+        await self._set_collections(entry_in_db, space.collections)
+        await self._set_websites(entry_in_db, space.websites)
+        await self._set_assistants(
+            entry_in_db,
+            space.assistants
+            + ([space.default_assistant] if space.default_assistant else []),
+        )
+        await self._set_group_chats(entry_in_db, space.group_chats)
+
+        return await self.one(id=entry_in_db.id)
+
+    async def delete(self, id: UUID):
+        query = sa.delete(Spaces).where(Spaces.id == id)
+        await self.session.execute(query)
+
+    async def query(self, **filters: object) -> None:
+        raise NotImplementedError()
+
+    async def get_spaces_for_member(
+        self, include_applications: bool = False
+    ) -> list[Space]:
+        user_id = self.user.id
+        user_group_ids = (
+            list(self.user.user_groups_ids) if self.user.user_groups_ids else []
+        )
+
+        direct_member_query = (
+            sa.select(Spaces.id)
+            .join(SpacesUsers, Spaces.members)
+            .where(SpacesUsers.user_id == user_id)
+        )
+
+        # Query for group membership (if user belongs to any groups)
+        if user_group_ids:
+            group_member_query = (
+                sa.select(Spaces.id)
+                .join(SpacesUserGroups, Spaces.group_members)
+                .where(SpacesUserGroups.user_group_id.in_(user_group_ids))
+            )
+            # Union of both membership types
+            combined_query = sa.union(
+                direct_member_query, group_member_query
+            ).subquery()
+        else:
+            combined_query = direct_member_query.subquery()
+
+        query = (
+            sa.select(Spaces)
+            .where(Spaces.id.in_(sa.select(combined_query.c.id)))
+            .distinct()
+            .order_by(Spaces.created_at)
+        )
+
+        records = await self._get_records_with_options(query)
+
+        spaces: list[Space] = []
+        for record in records:
+            if include_applications:
+                assistants = await self._get_assistants(space_id=record.id)
+                apps = await self._get_apps(space_id=record.id)
+                group_chats = await self._get_group_chats(space_id=record.id)
+            else:
+                assistants: Sequence[Assistants] = []
+                apps: Sequence[Apps] = []
+                group_chats: Sequence[GroupChatsTable] = []
+
+            spaces.append(
+                self.factory.create_space_from_db(
+                    record,
+                    user=self.user,
+                    assistants_in_db=assistants,
+                    apps_in_db=apps,
+                    group_chats_in_db=group_chats,
+                )
+            )
+
+        return spaces
+
+    async def get_personal_space(self, user_id: UUID) -> Space | None:
+        query = sa.select(Spaces).where(Spaces.user_id == user_id)
+
+        return await self._get_from_query(query)
+
+    async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
+        query = sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
+
+        space = await self._get_from_query(query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_app(self, app_id: UUID) -> Space:
+        query = sa.select(Spaces).join(Apps).where(Apps.id == app_id)
+
+        space = await self._get_from_query(query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_service(self, service_id: UUID) -> Space:
+        query = sa.select(Spaces).join(Services).where(Services.id == service_id)
+
+        space = await self._get_from_query(query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_group_chat(self, group_chat_id: UUID) -> Space:
+        query = (
+            sa.select(Spaces)
+            .join(GroupChatsTable)
+            .where(GroupChatsTable.id == group_chat_id)
+        )
+        space = await self._get_from_query(query=query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_collection(self, collection_id: UUID) -> Space:
+        query = (
+            sa.select(Spaces)
+            .join(CollectionsTable)
+            .where(CollectionsTable.id == collection_id)
+        )
+
+        space = await self._get_from_query(query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_website(self, website_id: UUID) -> Space:
+        query = (
+            sa.select(Spaces).join(WebsitesTable).where(WebsitesTable.id == website_id)
+        )
+
+        space = await self._get_from_query(query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_integration_knowledge(
+        self, integration_knowledge_id: UUID
+    ) -> Space:
+        query = (
+            sa.select(Spaces)
+            .join(IntegrationKnowledge)
+            .where(IntegrationKnowledge.id == integration_knowledge_id)
+        )
+
+        space = await self._get_from_query(query)
+
+        if space is None:
+            raise NotFoundException()
+
+        return space
+
+    async def get_space_by_session(self, session_id: UUID) -> Space | None:
+        session_stmt = sa.select(Sessions).where(Sessions.id == session_id)
+        session = await self.session.scalar(session_stmt)
+
+        if session is None:
+            raise NotFoundException(f"Session with ID {session_id} not found")
+
+        # find space through assistant
+        if session.assistant_id is not None:
+            return await self.get_space_by_assistant(assistant_id=session.assistant_id)
+
+        # find space through group chat
+        if session.group_chat_id is not None:
+            return await self.get_space_by_group_chat(
+                group_chat_id=session.group_chat_id
+            )
+
+    async def _get_integration_knowledge_union(
+        self, space_ids: list[UUID]
+    ) -> list[IntegrationKnowledge]:
+        """Fetch integration knowledge both directly owned and distributed via org space.
+
+        A space can access integration knowledge in two ways:
+        1. Direct ownership: integration_knowledge.space_id = space.id
+        2. Distribution: integration_knowledge is in org space and shared via junction table
+        """
+        ik = IntegrationKnowledge
+        iks = IntegrationKnowledgesSpaces
+
+        stmt = (
+            sa.select(ik)
+            .where(
+                sa.or_(
+                    ik.space_id.in_(space_ids),  # Direct ownership
+                    sa.exists(
+                        sa.select(sa.literal(1))
+                        .select_from(iks)
+                        .where(iks.integration_knowledge_id == ik.id)
+                        .where(iks.space_id.in_(space_ids))  # Distributed to this space
+                    ),
+                )
+            )
+            .options(
+                selectinload(ik.embedding_model),
+                selectinload(ik.user_integration)
+                .selectinload(UserIntegrationDBModel.tenant_integration)
+                .selectinload(TenantIntegrationDBModel.integration),
+                selectinload(ik.sharepoint_subscription),
+            )
+            .order_by(ik.created_at)
+        )
+        rows = await self.session.execute(stmt)
+        return list(rows.scalars().all())
+
+    async def get_space_by_name_and_tenant(
+        self, name: str, tenant_id: UUID
+    ) -> Space | None:
+        q = sa.select(Spaces).where(
+            Spaces.name == name,
+            Spaces.tenant_id == tenant_id,
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
+        )
+        return await self._get_from_query(q)
+
+    async def create_org_space_for_tenant(
+        self, name: str, description: str, tenant_id: UUID
+    ) -> Space:
+        """Create organization space for a tenant. Called when tenant is created."""
+        space = self.factory.create_space(
+            name=name,
+            tenant_id=tenant_id,
+            user_id=None,
+            tenant_space_id=None,
+            description=description,
+        )
+        # Use repo.add to ensure all relationships are properly set up
+        return await self.add(space)
+
+    async def hard_delete_website(self, website_id: UUID, owner_space_id: UUID):
+        ws = WebsitesTable
+        wss = WebsitesSpaces
+
+        owned = await self.session.scalar(
+            sa.select(ws.id).where(
+                sa.and_(ws.id == website_id, ws.space_id == owner_space_id)
+            )
+        )
+        if not owned:
+            return
+
+        await self.session.execute(sa.delete(wss).where(wss.website_id == website_id))
+
+        await self.session.execute(sa.delete(ws).where(ws.id == website_id))

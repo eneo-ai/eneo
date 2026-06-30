@@ -15,7 +15,7 @@ These tests validate:
 
 import pytest
 
-from intric.users.user import (
+from eneo.users.user import (
     PaginationParams,
     PaginatedResult,
     SearchFilters,

@@ -24,7 +24,7 @@ class TestCapacityManagerInit:
 
     def test_initializes_with_redis_client(self):
         """Should initialize with provided Redis client."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         manager = CapacityManager(redis_mock)
@@ -34,7 +34,7 @@ class TestCapacityManagerInit:
 
     def test_accepts_custom_settings(self):
         """Should accept custom settings object."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -51,7 +51,7 @@ class TestGetTenantSettings:
     @pytest.mark.asyncio
     async def test_returns_settings_from_database(self):
         """Should fetch and return tenant settings from DB."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
@@ -78,7 +78,7 @@ class TestGetTenantSettings:
         mock_sessionmanager.session.return_value = mock_session_cm
 
         # Patch at the actual import location (database module), not capacity module
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
@@ -87,7 +87,7 @@ class TestGetTenantSettings:
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_no_settings(self):
         """Should return empty dict when tenant has no settings."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
@@ -112,7 +112,7 @@ class TestGetTenantSettings:
         mock_sessionmanager.session.return_value = mock_session_cm
 
         # Patch at the actual import location (database module), not capacity module
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
@@ -121,7 +121,7 @@ class TestGetTenantSettings:
     @pytest.mark.asyncio
     async def test_returns_none_on_database_error(self):
         """Should return None and log warning on DB error."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
@@ -136,7 +136,7 @@ class TestGetTenantSettings:
         mock_sessionmanager.session.return_value = mock_session_cm
 
         # Patch at the actual import location (database module), not capacity module
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
@@ -148,13 +148,13 @@ class TestGetMaxConcurrent:
 
     def test_returns_default_when_no_tenant_settings(self, mock_settings):
         """Should return global default when no tenant settings."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
 
         # Patch get_crawler_setting to use our mock settings value
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             return_value=10,
         ) as mock_get:
             manager = CapacityManager(redis_mock, settings=mock_settings)
@@ -169,14 +169,14 @@ class TestGetMaxConcurrent:
 
     def test_returns_tenant_override_when_present(self, mock_settings):
         """Should return tenant-specific limit when set."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_settings = {"tenant_worker_concurrency_limit": 5}
 
         # Patch get_crawler_setting to return tenant override
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             return_value=5,
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
@@ -190,13 +190,13 @@ class TestGetSlotTtl:
 
     def test_returns_default_when_no_tenant_settings(self, mock_settings):
         """Should return global default when no tenant settings."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
 
         # Patch get_crawler_setting to use our mock settings value
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             return_value=300,
         ) as mock_get:
             manager = CapacityManager(redis_mock, settings=mock_settings)
@@ -216,19 +216,19 @@ class TestTryAcquireSlot:
     @pytest.mark.asyncio
     async def test_returns_true_when_slot_acquired(self, mock_settings):
         """Should return True when Lua script acquires slot."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
         with (
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
+                "eneo.worker.feeder.capacity.LuaScripts.acquire_slot",
                 new_callable=AsyncMock,
                 return_value=1,
             ) as mock_acquire,
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 side_effect=[10, 300],  # max_concurrent, then ttl
             ),
         ):
@@ -241,19 +241,19 @@ class TestTryAcquireSlot:
     @pytest.mark.asyncio
     async def test_returns_false_when_at_capacity(self, mock_settings):
         """Should return False when Lua script returns 0."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
         with (
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
+                "eneo.worker.feeder.capacity.LuaScripts.acquire_slot",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 side_effect=[10, 300],
             ),
         ):
@@ -265,19 +265,19 @@ class TestTryAcquireSlot:
     @pytest.mark.asyncio
     async def test_returns_false_on_redis_error(self, mock_settings):
         """Should return False on Redis error."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
         with (
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
+                "eneo.worker.feeder.capacity.LuaScripts.acquire_slot",
                 new_callable=AsyncMock,
                 side_effect=Exception("Redis error"),
             ),
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 side_effect=[10, 300],
             ),
         ):
@@ -293,18 +293,18 @@ class TestReleaseSlot:
     @pytest.mark.asyncio
     async def test_calls_lua_script(self, mock_settings):
         """Should call Lua script to release slot."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
         with (
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.release_slot",
+                "eneo.worker.feeder.capacity.LuaScripts.release_slot",
                 new_callable=AsyncMock,
             ) as mock_release,
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 return_value=300,
             ),
         ):
@@ -316,19 +316,19 @@ class TestReleaseSlot:
     @pytest.mark.asyncio
     async def test_swallows_redis_error(self, mock_settings):
         """Should not raise on Redis error (best effort)."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
         with (
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.release_slot",
+                "eneo.worker.feeder.capacity.LuaScripts.release_slot",
                 new_callable=AsyncMock,
                 side_effect=Exception("Redis error"),
             ),
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 return_value=300,
             ),
         ):
@@ -343,7 +343,7 @@ class TestGetAvailableCapacity:
     @pytest.mark.asyncio
     async def test_returns_max_when_no_active_jobs(self, mock_settings):
         """Should return max concurrent when key doesn't exist."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.get = AsyncMock(return_value=None)
@@ -351,11 +351,11 @@ class TestGetAvailableCapacity:
 
         with (
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 return_value=10,
             ),
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                "eneo.worker.feeder.capacity.LuaScripts.slot_key",
                 return_value=f"tenant:{tenant_id}:active_jobs",
             ),
         ):
@@ -367,7 +367,7 @@ class TestGetAvailableCapacity:
     @pytest.mark.asyncio
     async def test_returns_remaining_capacity(self, mock_settings):
         """Should return remaining slots when some are in use."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.get = AsyncMock(return_value=b"3")
@@ -375,11 +375,11 @@ class TestGetAvailableCapacity:
 
         with (
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 return_value=10,
             ),
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                "eneo.worker.feeder.capacity.LuaScripts.slot_key",
                 return_value=f"tenant:{tenant_id}:active_jobs",
             ),
         ):
@@ -391,7 +391,7 @@ class TestGetAvailableCapacity:
     @pytest.mark.asyncio
     async def test_returns_zero_when_at_capacity(self, mock_settings):
         """Should return 0 when at max capacity."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.get = AsyncMock(return_value=b"10")
@@ -399,11 +399,11 @@ class TestGetAvailableCapacity:
 
         with (
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 return_value=10,
             ),
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                "eneo.worker.feeder.capacity.LuaScripts.slot_key",
                 return_value=f"tenant:{tenant_id}:active_jobs",
             ),
         ):
@@ -415,7 +415,7 @@ class TestGetAvailableCapacity:
     @pytest.mark.asyncio
     async def test_returns_zero_on_redis_error(self, mock_settings):
         """Should return 0 (conservative) on Redis error."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.get = AsyncMock(side_effect=Exception("Redis error"))
@@ -423,11 +423,11 @@ class TestGetAvailableCapacity:
 
         with (
             patch(
-                "intric.worker.feeder.capacity.get_crawler_setting",
+                "eneo.worker.feeder.capacity.get_crawler_setting",
                 return_value=10,
             ),
             patch(
-                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                "eneo.worker.feeder.capacity.LuaScripts.slot_key",
                 return_value=f"tenant:{tenant_id}:active_jobs",
             ),
         ):
@@ -443,7 +443,7 @@ class TestMarkSlotPreacquired:
     @pytest.mark.asyncio
     async def test_sets_flag_with_ttl(self, mock_settings):
         """Should set flag with tenant_id as value."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.set = AsyncMock()
@@ -451,7 +451,7 @@ class TestMarkSlotPreacquired:
         tenant_id = uuid4()
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             return_value=300,
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
@@ -466,7 +466,7 @@ class TestMarkSlotPreacquired:
     @pytest.mark.asyncio
     async def test_raises_on_redis_error(self, mock_settings):
         """Should raise on Redis error (caller must handle)."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.set = AsyncMock(side_effect=Exception("Redis error"))
@@ -474,7 +474,7 @@ class TestMarkSlotPreacquired:
         tenant_id = uuid4()
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             return_value=300,
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
@@ -489,7 +489,7 @@ class TestClearPreacquiredFlag:
     @pytest.mark.asyncio
     async def test_deletes_flag(self):
         """Should delete the flag key."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.delete = AsyncMock()
@@ -503,7 +503,7 @@ class TestClearPreacquiredFlag:
     @pytest.mark.asyncio
     async def test_swallows_redis_error(self):
         """Should not raise on Redis error (best effort)."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.delete = AsyncMock(side_effect=Exception("Redis error"))
@@ -520,7 +520,7 @@ class TestGetPreacquiredTenant:
     @pytest.mark.asyncio
     async def test_returns_tenant_id_from_flag(self):
         """Should return tenant UUID when flag exists."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
@@ -535,7 +535,7 @@ class TestGetPreacquiredTenant:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_flag(self):
         """Should return None when flag doesn't exist."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.get = AsyncMock(return_value=None)
@@ -549,7 +549,7 @@ class TestGetPreacquiredTenant:
     @pytest.mark.asyncio
     async def test_returns_none_on_error(self):
         """Should return None on Redis error."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.get = AsyncMock(side_effect=Exception("Redis error"))
@@ -587,7 +587,7 @@ class TestGetMinimumFeederInterval:
     @pytest.mark.asyncio
     async def test_returns_default_when_no_pending_queues(self, mock_settings):
         """Should return global default when no tenant queues found."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.scan = AsyncMock(return_value=(0, []))
@@ -602,7 +602,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should return shortest interval among active tenants."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant1 = uuid4()
         tenant2 = uuid4()
@@ -629,7 +629,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -641,7 +641,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Tenant with interval less than global default is respected."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_id = uuid4()
 
@@ -658,7 +658,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -670,7 +670,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Tenants without custom interval use global default in calculation."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_with_override = uuid4()
         tenant_without_override = uuid4()
@@ -696,7 +696,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -709,7 +709,7 @@ class TestGetMinimumFeederInterval:
     @pytest.mark.asyncio
     async def test_returns_default_on_scan_error(self, mock_settings):
         """Should return global default on Redis scan error."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         redis_mock.scan = AsyncMock(side_effect=Exception("Redis error"))
@@ -724,7 +724,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should skip tenant on settings fetch error and continue with others."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_ok = uuid4()
         tenant_fail = uuid4()
@@ -750,7 +750,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -763,7 +763,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should return global default when all tenant settings fetches fail."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_ids = [uuid4() for _ in range(3)]
 
@@ -783,7 +783,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -797,7 +797,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should correctly process multiple SCAN pages."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_a = uuid4()
         tenant_b = uuid4()
@@ -820,7 +820,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -835,7 +835,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should gracefully skip keys with invalid tenant IDs."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         valid_tenant = uuid4()
 
@@ -859,7 +859,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -871,7 +871,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should work with both bytes and string keys from Redis."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_id = uuid4()
 
@@ -888,7 +888,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()
@@ -900,7 +900,7 @@ class TestGetMinimumFeederInterval:
         self, mock_settings, mock_crawler_setting_passthrough
     ):
         """Should use default when get_tenant_settings returns None."""
-        from intric.worker.feeder.capacity import CapacityManager
+        from eneo.worker.feeder.capacity import CapacityManager
 
         tenant_id = uuid4()
 
@@ -917,7 +917,7 @@ class TestGetMinimumFeederInterval:
         manager.get_tenant_settings = mock_get_settings
 
         with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
+            "eneo.worker.feeder.capacity.get_crawler_setting",
             side_effect=mock_crawler_setting_passthrough,
         ):
             result = await manager.get_minimum_feeder_interval()

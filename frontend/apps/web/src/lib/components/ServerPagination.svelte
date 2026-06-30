@@ -16,7 +16,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let page: number;

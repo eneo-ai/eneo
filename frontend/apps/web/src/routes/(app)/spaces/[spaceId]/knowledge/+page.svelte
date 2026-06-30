@@ -6,26 +6,26 @@
   import WebsiteTable from "./websites/WebsiteTable.svelte";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getIntric } from "$lib/core/Intric";
-  import { Button, Tooltip } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Button, Tooltip } from "@eneo/ui";
   import { resolve } from "$app/paths";
-  import { IconInfo } from "@intric/icons/info";
-  import { IconLinkExternal } from "@intric/icons/link-external";
-  import { IconRefresh } from "@intric/icons/refresh";
+  import { IconInfo } from "@eneo/icons/info";
+  import { IconLinkExternal } from "@eneo/icons/link-external";
+  import { IconRefresh } from "@eneo/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
-  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { untrack } from "svelte";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- page data type inferred from layout chain
   let { data } = $props<{ data: any }>();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -74,7 +74,7 @@
     try {
       const websiteIds = Array.from($selectedWebsiteIds);
 
-      const response = await intric.websites.bulkRun({
+      const response = await eneo.websites.bulkRun({
         website_ids: websiteIds
       });
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
@@ -21,7 +21,7 @@
 
   let { data } = $props();
 
-  const intric = $derived(data.intric);
+  const eneo = $derived(data.eneo);
 
   // Initialize from template data
   let name = $state(untrack(() => data.template.name || ""));
@@ -121,7 +121,7 @@
         icon_name: iconName || undefined // Include icon if selected
       };
 
-      await intric.templates.admin.updateAssistant(data.template.id, templateData);
+      await eneo.templates.admin.updateAssistant(data.template.id, templateData);
       goto(resolve("/admin/templates?success=template_updated"));
     } catch (error) {
       console.error("Failed to update template:", error);

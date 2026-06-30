@@ -1,6 +1,6 @@
 <script lang="ts">
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
-  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
 
   interface Props {
     knowledge: IntegrationKnowledge;

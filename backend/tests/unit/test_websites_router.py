@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from intric.websites.presentation.website_router import create_website, get_websites
+from eneo.websites.presentation.website_router import create_website, get_websites
 
 
 @pytest.mark.asyncio

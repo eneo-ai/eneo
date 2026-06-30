@@ -12,7 +12,7 @@
   import { onMount } from "svelte";
   import { Loader2, ChevronDown, AlertTriangle, Search } from "lucide-svelte";
 
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
   import * as Table from "$lib/components/ui/table/index.js";
@@ -47,7 +47,7 @@
 
   type StatusVariant = "default" | "secondary" | "destructive" | "outline";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let history = $state<MigrationRecord[]>([]);
   let loading = $state(true);
@@ -101,8 +101,8 @@
     error = null;
     try {
       const [completion, transcription] = await Promise.all([
-        intric.models.getAllMigrationHistory(),
-        intric.models.getAllTranscriptionMigrationHistory()
+        eneo.models.getAllMigrationHistory(),
+        eneo.models.getAllTranscriptionMigrationHistory()
       ]);
       const tag = (
         records: unknown,

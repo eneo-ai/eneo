@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.users_table import Users
+from eneo.database.tables.users_table import Users
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ class TestUser2:
 @pytest.fixture
 async def test_tenant_2(db_container):
     """Create a second tenant for multi-tenant isolation tests."""
-    from intric.tenants.tenant import TenantBase
+    from eneo.tenants.tenant import TenantBase
 
     async with db_container() as container:
         tenant_service = container.tenant_service()
@@ -238,12 +238,12 @@ async def sample_audit_logs(db_session, test_tenant, test_user):
     Creates 55 logs with varied actions, timestamps, and metadata
     to test pagination, filtering, and export functionality.
     """
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.actor_types import ActorType
-    from intric.audit.domain.audit_log import AuditLog
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.domain.outcome import Outcome
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.audit.domain.action_types import ActionType
+    from eneo.audit.domain.actor_types import ActorType
+    from eneo.audit.domain.audit_log import AuditLog
+    from eneo.audit.domain.entity_types import EntityType
+    from eneo.audit.domain.outcome import Outcome
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     logs = []
     actions = [
@@ -292,12 +292,12 @@ async def searchable_audit_logs(db_session, test_tenant, test_user):
 
     Total: 25 logs for comprehensive search testing.
     """
-    from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.actor_types import ActorType
-    from intric.audit.domain.audit_log import AuditLog
-    from intric.audit.domain.entity_types import EntityType
-    from intric.audit.domain.outcome import Outcome
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.audit.domain.action_types import ActionType
+    from eneo.audit.domain.actor_types import ActorType
+    from eneo.audit.domain.audit_log import AuditLog
+    from eneo.audit.domain.entity_types import EntityType
+    from eneo.audit.domain.outcome import Outcome
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     logs = []
 

@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from intric.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.domain.entities.sync_log import SyncLog
 
 
 class TestSyncLog(unittest.TestCase):

@@ -7,7 +7,7 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { createContext } from "$lib/core/context";
-import type { Intric, ResourcePermission, Space, SpaceSparse } from "@intric/intric-js";
+import type { Eneo, ResourcePermission, Space, SpaceSparse } from "@eneo/eneo-js";
 import { derived, get, writable, type Readable } from "svelte/store";
 import { toastError } from "$lib/core/errors";
 
@@ -30,12 +30,12 @@ type SpacesManagerParams = {
   spaces: SpaceSparse[];
   /** Provide the initial starting space – personal space if user hasn't requested a different one */
   currentSpace: Space;
-  intric: Intric;
+  eneo: Eneo;
 };
 
 function SpacesManager(data: SpacesManagerParams) {
   // Setup variables --------------------------------------------------------
-  const { intric } = data;
+  const { eneo } = data;
 
   const userSpaces = writable(data.spaces);
   const currentSpace = writable(data.currentSpace);
@@ -60,7 +60,7 @@ function SpacesManager(data: SpacesManagerParams) {
   /** Updates the internal state of accessible spaces and returns the updated list */
   async function refreshSpaces() {
     try {
-      const updated = await intric.spaces.list();
+      const updated = await eneo.spaces.list();
       userSpaces.set(updated);
       return updated;
     } catch (e) {
@@ -74,18 +74,18 @@ function SpacesManager(data: SpacesManagerParams) {
       if (type) {
         switch (type) {
           case "applications": {
-            const applications = await intric.spaces.listApplications($currentSpace);
+            const applications = await eneo.spaces.listApplications($currentSpace);
             $currentSpace = { ...$currentSpace, applications };
             break;
           }
           case "knowledge": {
-            const knowledge = await intric.spaces.listKnowledge($currentSpace);
+            const knowledge = await eneo.spaces.listKnowledge($currentSpace);
             $currentSpace = { ...$currentSpace, knowledge };
             break;
           }
         }
       } else {
-        $currentSpace = await intric.spaces.get($currentSpace);
+        $currentSpace = await eneo.spaces.get($currentSpace);
       }
       currentSpace.set($currentSpace);
     } catch (e) {
@@ -96,7 +96,7 @@ function SpacesManager(data: SpacesManagerParams) {
   /** Will create a new space and return it on success. Will return null on failure and show an alert */
   async function createSpace(space: { name: string }) {
     try {
-      const newSpace = await intric.spaces.create({ name: space.name });
+      const newSpace = await eneo.spaces.create({ name: space.name });
       refreshSpaces();
       return newSpace;
     } catch (e) {
@@ -108,12 +108,12 @@ function SpacesManager(data: SpacesManagerParams) {
 
   /** Will update a given space. If no space is specified will update the current space. */
   async function updateSpace(
-    update: Parameters<typeof intric.spaces.update>[0]["update"],
+    update: Parameters<typeof eneo.spaces.update>[0]["update"],
     space?: { id: string } | undefined
   ) {
     const { id } = space ?? get(currentSpace);
     try {
-      const updatedSpace = await intric.spaces.update({ space: { id }, update });
+      const updatedSpace = await eneo.spaces.update({ space: { id }, update });
       userSpaces.update((spaces) => {
         const idx = spaces.findIndex((space) => space.id === updatedSpace.id);
         if (idx > -1) {
@@ -135,7 +135,7 @@ function SpacesManager(data: SpacesManagerParams) {
   /** Will delete a given space. Will alert on error. */
   async function deleteSpace(space: { id: string }) {
     try {
-      await intric.spaces.delete({ id: space.id });
+      await eneo.spaces.delete({ id: space.id });
       await refreshSpaces();
       if (space.id === get(currentSpace).id) {
         goto(resolve("/spaces/list"));
@@ -151,7 +151,7 @@ function SpacesManager(data: SpacesManagerParams) {
     if (!defaultAssistant) return;
     const id = defaultAssistant.id;
     try {
-      const updatedAssistant = await intric.assistants.update({
+      const updatedAssistant = await eneo.assistants.update({
         assistant: { id },
         update: { completion_model: completionModel }
       });
@@ -214,7 +214,7 @@ function derivedCurrentSpace(space: Readable<Space>) {
         ].sort((a, b) => a.name.localeCompare(b.name)),
         apps: $space.applications?.apps.items ?? [],
         services: ($space.applications?.services.items ?? []).filter((service) => {
-          return !service.name.startsWith("_intric");
+          return !service.name.startsWith("_eneo");
         })
       },
       knowledge: {

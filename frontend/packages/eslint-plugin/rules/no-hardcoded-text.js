@@ -12,7 +12,7 @@
  *  - `{m.foo()}` and any other mustache expression (those are not text nodes)
  *  - Anything matching an `ignore` regex from the rule options
  *
- * Escape hatch: `<!-- eslint-disable-next-line intric/no-hardcoded-text -->`
+ * Escape hatch: `<!-- eslint-disable-next-line eneo/no-hardcoded-text -->`
  * for the rare genuinely-untranslatable literal (brand names, symbols).
  *
  * @type {import('eslint').Rule.RuleModule}

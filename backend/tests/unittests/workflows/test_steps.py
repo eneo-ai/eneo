@@ -1,8 +1,8 @@
 from unittest.mock import AsyncMock
 
-from intric.services.service import DatastoreResult, RunnerResult
-from intric.workflows.filters import ContinuationFilter
-from intric.workflows.steps import Step
+from eneo.services.service import DatastoreResult, RunnerResult
+from eneo.workflows.filters import ContinuationFilter
+from eneo.workflows.steps import Step
 
 
 async def test_steps_when_not_continuation():

@@ -14,7 +14,7 @@
 
   const { data } = $props();
 
-  untrack(() => initSecurityClassificationService(data.intric, data.securityClassifications));
+  untrack(() => initSecurityClassificationService(data.eneo, data.securityClassifications));
 </script>
 
 <svelte:head>

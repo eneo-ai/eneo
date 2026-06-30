@@ -6,13 +6,13 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from httpx import ASGITransport, AsyncClient
 
-from intric.database.database import get_session_with_transaction
-from intric.scim.app import scim_app
-from intric.scim.auth import require_scim_auth
-from intric.scim.deps import get_scim_group_service, get_scim_user_service
-from intric.scim.services.group_service import ScimGroupService
-from intric.scim.services.user_service import ScimUserService
-from intric.server.main import app
+from eneo.database.database import get_session_with_transaction
+from eneo.scim.app import scim_app
+from eneo.scim.auth import require_scim_auth
+from eneo.scim.deps import get_scim_group_service, get_scim_user_service
+from eneo.scim.services.group_service import ScimGroupService
+from eneo.scim.services.user_service import ScimUserService
+from eneo.server.main import app
 
 TEST_BEARER_TOKEN = "test-scim-token"
 TEST_TENANT_ID = uuid4()

@@ -5,12 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.api_key_notification_auto_follow import (
+from eneo.authentication.api_key_notification_auto_follow import (
     _normalize_preferences,
     _normalize_subscriptions,
     _should_auto_follow,
 )
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyNotificationPolicyResponse,
     ApiKeyNotificationTargetType,
 )

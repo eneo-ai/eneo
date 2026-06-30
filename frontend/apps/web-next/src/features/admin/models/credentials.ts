@@ -4,9 +4,9 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type CredentialInfo =
-  Schema<"intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo">;
+  Schema<"eneo__tenants__presentation__tenant_self_credentials_router__CredentialInfo">;
 export type SetCredentialRequest =
-  Schema<"intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest">;
+  Schema<"eneo__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest">;
 
 /** Providers that accept a tenant-managed API credential (matches the PUT enum). */
 export const CREDENTIAL_PROVIDERS = [

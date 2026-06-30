@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { IconFeedback } from "@intric/icons/feedback";
+  import { IconFeedback } from "@eneo/icons/feedback";
   import { m } from "$lib/paraglide/messages";
   import NavigationVersionInfo from "./NavigationVersionInfo.svelte";
 

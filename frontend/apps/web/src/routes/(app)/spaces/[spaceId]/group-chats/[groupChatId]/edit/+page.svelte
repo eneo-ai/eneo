@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
   import { fade } from "svelte/transition";
   import { page } from "$app/state";
@@ -25,7 +25,7 @@
     discardChanges
   } = initGroupChatEditor({
     groupChat: data.groupChat,
-    intric: data.intric,
+    eneo: data.eneo,
     onUpdateDone() {
       refreshCurrentSpace("applications");
     }
@@ -37,7 +37,7 @@
   let iconError: string | null = null;
 
   function getIconUrl(id: string | null) {
-    return id ? data.intric.icons.url({ id }) : null;
+    return id ? data.eneo.icons.url({ id }) : null;
   }
 
   $: iconUrl = getIconUrl(currentIconId);
@@ -47,8 +47,8 @@
     iconUploading = true;
     iconError = null;
     try {
-      const newIcon = await data.intric.icons.upload({ file });
-      await data.intric.groupChats.update({
+      const newIcon = await data.eneo.icons.upload({ file });
+      await data.eneo.groupChats.update({
         groupChat: { id: $resource.id },
         update: { icon_id: newIcon.id }
       });
@@ -66,9 +66,9 @@
     iconError = null;
     try {
       if (currentIconId) {
-        await data.intric.icons.delete({ id: currentIconId });
+        await data.eneo.icons.delete({ id: currentIconId });
       }
-      await data.intric.groupChats.update({
+      await data.eneo.groupChats.update({
         groupChat: { id: $resource.id },
         update: { icon_id: null }
       });
@@ -231,7 +231,7 @@
           {#if data.groupChat.permissions?.includes("publish")}
             <Settings.Row title={m.status()} description={m.publishing_group_chat_description()}>
               <PublishingSetting
-                endpoints={data.intric.groupChats}
+                endpoints={data.eneo.groupChats}
                 resource={data.groupChat}
                 hasUnsavedChanges={$currentChanges.hasUnsavedChanges}
               />

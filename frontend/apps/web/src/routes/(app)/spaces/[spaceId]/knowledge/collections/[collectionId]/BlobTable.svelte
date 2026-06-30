@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { InfoBlob } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { InfoBlob } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import BlobActions from "./BlobActions.svelte";

@@ -4,14 +4,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import MessageToolCall
-from intric.completion_models.infrastructure.message_payload import (
+from eneo.ai_models.completion_models.completion_model import MessageToolCall
+from eneo.completion_models.infrastructure.message_payload import (
     build_content,
     build_image_block,
     build_turn_messages,
     countable_messages,
 )
-from intric.files.file_models import File, FileType
+from eneo.files.file_models import File, FileType
 
 _PNG_1PX = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"

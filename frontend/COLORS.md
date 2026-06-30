@@ -15,7 +15,7 @@ utilities backed by semantic tokens). Never write raw colors into `class`.
                          text       --text-primary | -secondary | -muted | -on-fill
                          border     --border-dimmer | -default | -stronger | -strongest
                          status     --negative-* (error) | --warning-* | --positive-*
-                         brand      --accent-* | --brand-intric | --chart-*
+                         brand      --accent-* | --brand-eneo | --chart-*
 
 3. Tailwind utilities apps/web/src/app.css (@theme inline) maps layer 2 to classes:
    (what you write)    bg-negative-dimmer, text-warning-stronger, bg-secondary,
@@ -48,11 +48,11 @@ utilities backed by semantic tokens). Never write raw colors into `class`.
 
 ### Enforcement
 
-`intric/no-raw-color` (ESLint) runs as an error in the web app and shared UI
+`eneo/no-raw-color` (ESLint) runs as an error in the web app and shared UI
 package. It inspects Svelte, JavaScript, and TypeScript strings, including
 generated markup and component `<style>` blocks. The existing backlog is tracked
 in each package's `eslint-suppressions.json`; adding another violation exceeds
 the baseline and fails CI.
 
 Escape hatch for a genuinely themeless surface:
-`<!-- eslint-disable-next-line intric/no-raw-color -->`.
+`<!-- eslint-disable-next-line eneo/no-raw-color -->`.

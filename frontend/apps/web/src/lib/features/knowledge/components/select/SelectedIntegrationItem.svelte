@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconFolder } from "@intric/icons/folder";
-  import { IconFile } from "@intric/icons/file";
-  import { IconTrash } from "@intric/icons/trash";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconFolder } from "@eneo/icons/folder";
+  import { IconFile } from "@eneo/icons/file";
+  import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { m } from "$lib/paraglide/messages";

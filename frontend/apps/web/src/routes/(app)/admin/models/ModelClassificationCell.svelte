@@ -8,7 +8,7 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;

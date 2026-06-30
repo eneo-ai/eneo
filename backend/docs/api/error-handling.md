@@ -7,7 +7,7 @@ Most API errors return:
 ```json
 {
   "message": "Human-readable reason",
-  "intric_error_code": 9001,
+  "eneo_error_code": 9001,
   "code": "forbidden_action",
   "context": {
     "auth_layer": "domain_policy",
@@ -20,7 +20,7 @@ Most API errors return:
 
 Fields:
 - `message`: human-readable explanation.
-- `intric_error_code`: legacy numeric code used by existing SDKs.
+- `eneo_error_code`: legacy numeric code used by existing SDKs.
 - `code` (optional): stable string code for programmatic handling.
 - `context` (optional): safe, non-sensitive metadata.
 - `request_id` (optional): request correlation ID for support/debugging.

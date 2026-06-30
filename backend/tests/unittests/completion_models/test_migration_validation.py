@@ -16,11 +16,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.completion_models.application.completion_model_migration_service import (
+from eneo.completion_models.application.completion_model_migration_service import (
     CompletionModelMigrationService,
 )
-from intric.completion_models.domain.completion_model import CompletionModel
-from intric.security_classifications.domain.entities.security_classification import (
+from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
 
@@ -116,10 +116,10 @@ def _build_service(
     # Patch heavy side-effect constructors that run in __init__
     with (
         patch(
-            "intric.completion_models.application.completion_model_migration_service.CompletionModelMigrationHistoryRepo"
+            "eneo.completion_models.application.completion_model_migration_service.CompletionModelMigrationHistoryRepo"
         ),
-        patch("intric.ai_models.migration.base_migration_service.get_event_publisher"),
-        patch("intric.ai_models.migration.base_migration_service.get_settings"),
+        patch("eneo.ai_models.migration.base_migration_service.get_event_publisher"),
+        patch("eneo.ai_models.migration.base_migration_service.get_settings"),
     ):
         service = CompletionModelMigrationService(
             session=session,

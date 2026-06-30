@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import AppTile from "./AppTile.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { AppSparse } from "@intric/intric-js";
-  import { IconApp } from "@intric/icons/app";
+  import type { AppSparse } from "@eneo/eneo-js";
+  import { IconApp } from "@eneo/icons/app";
   import PublishingStatusChip from "$lib/features/publishing/components/PublishingStatusChip.svelte";
   import AppActions from "./AppActions.svelte";
   import { m } from "$lib/paraglide/messages";

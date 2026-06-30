@@ -1,12 +1,12 @@
 {
-  "include": ["src/intric"],
+  "include": ["src/eneo"],
   "exclude": [
     ".venv",
     "**/__pycache__",
     "**/node_modules",
     "tests",
     "alembic/**",
-    "src/intric/server/test_mcp_server.py"
+    "src/eneo/server/test_mcp_server.py"
   ],
   "stubPath": "typings",
   "pythonVersion": "3.11",

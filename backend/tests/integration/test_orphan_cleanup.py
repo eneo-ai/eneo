@@ -21,8 +21,8 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
-from intric.jobs.job_models import Task
-from intric.main.models import Status
+from eneo.jobs.job_models import Task
+from eneo.main.models import Status
 
 
 async def create_test_website(session, tenant_id, user_id, embedding_model_id) -> UUID:
@@ -31,8 +31,8 @@ async def create_test_website(session, tenant_id, user_id, embedding_model_id) -
     CrawlRuns.website_id is a foreign key to websites table,
     so we need a valid Website record before creating CrawlRuns.
     """
-    from intric.database.tables.websites_table import Websites
-    from intric.websites.domain.crawl_run import CrawlType
+    from eneo.database.tables.websites_table import Websites
+    from eneo.websites.domain.crawl_run import CrawlType
 
     website = Websites(
         tenant_id=tenant_id,
@@ -57,7 +57,7 @@ async def test_embedding_model_id(db_container):
     The seed_default_models fixture creates 'fixture-text-embedding'.
     """
     from sqlalchemy import select
-    from intric.database.tables.ai_models_table import EmbeddingModels
+    from eneo.database.tables.ai_models_table import EmbeddingModels
 
     async with db_container() as container:
         session = container.session()
@@ -98,7 +98,7 @@ class TestOrphanJobDetection:
         self, db_container, test_tenant, admin_user
     ):
         """Recently created QUEUED jobs should not be considered orphaned."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Create a job that's only 30 minutes old (recent)
@@ -124,7 +124,7 @@ class TestOrphanJobDetection:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Jobs stuck in QUEUED beyond timeout should be eligible for cleanup."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Create a job older than the orphan timeout
@@ -157,7 +157,7 @@ class TestOrphanJobDetection:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Jobs stuck in IN_PROGRESS beyond timeout should be eligible for cleanup."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Create a job stuck in IN_PROGRESS
@@ -193,7 +193,7 @@ class TestOrphanCleanupPreservesActiveJobs:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Completed jobs should never be touched by orphan cleanup."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Create old completed job
@@ -221,7 +221,7 @@ class TestOrphanCleanupPreservesActiveJobs:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Failed jobs should not be touched by orphan cleanup."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
@@ -252,7 +252,7 @@ class TestOrphanCleanupMultiTenant:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Orphan cleanup should only affect crawl jobs, not other job types."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             timeout_hours = test_settings.orphan_crawl_run_timeout_hours
@@ -280,8 +280,8 @@ class TestOrphanCleanupMultiTenant:
     ):
         """Orphan cleanup should not leak between tenants."""
         from uuid import uuid4
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.users_table import Users
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.users_table import Users
 
         # Create two tenants
         tenant_1_response = await client.post(
@@ -365,7 +365,7 @@ class TestOrphanCleanupTimingBoundaries:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Job exactly at timeout boundary should be handled correctly."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Create job exactly at the timeout boundary
@@ -395,7 +395,7 @@ class TestOrphanCleanupTimingBoundaries:
         self, db_container, test_tenant, test_settings, admin_user
     ):
         """Job just before timeout should not be cleaned up."""
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Create job 1 minute before timeout
@@ -439,7 +439,7 @@ class TestOrphanCleanupPreventsBlocking:
         - New crawl attempt sees "crawl in progress" signal
         - Cleanup marks old Job as FAILED to unblock
         """
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             # Simulate orphaned scenario: old stuck Job
@@ -494,7 +494,7 @@ class TestOrphanCrawlRunCleanup:
         test_embedding_model_id,
     ):
         """Recently created CrawlRuns with NULL job_id should NOT be cleaned up."""
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.websites_table import CrawlRuns
 
         async with db_container() as container:
             session = container.session()
@@ -540,7 +540,7 @@ class TestOrphanCrawlRunCleanup:
         test_embedding_model_id,
     ):
         """Old CrawlRuns with NULL job_id should be eligible for cleanup."""
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.websites_table import CrawlRuns
 
         async with db_container() as container:
             session = container.session()
@@ -587,8 +587,8 @@ class TestOrphanCrawlRunCleanup:
         test_embedding_model_id,
     ):
         """CrawlRuns WITH valid job_id should NOT be cleaned up, even if old."""
-        from intric.database.tables.websites_table import CrawlRuns
-        from intric.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
 
         async with db_container() as container:
             session = container.session()
@@ -650,8 +650,8 @@ class TestOrphanCrawlRunCleanupExecution:
     ):
         """Cleanup should delete old CrawlRuns with NULL job_id."""
         from sqlalchemy import select
-        from intric.database.tables.websites_table import CrawlRuns
-        from intric.worker.crawl_feeder import CrawlFeeder
+        from eneo.database.tables.websites_table import CrawlRuns
+        from eneo.worker.crawl_feeder import CrawlFeeder
 
         async with db_container() as container:
             session = container.session()
@@ -734,9 +734,9 @@ class TestOrphanCrawlRunCleanupExecution:
     ):
         """Cleanup should NOT delete CrawlRuns with valid job_id, even if old."""
         from sqlalchemy import select
-        from intric.database.tables.websites_table import CrawlRuns
-        from intric.database.tables.job_table import Jobs
-        from intric.worker.crawl_feeder import CrawlFeeder
+        from eneo.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.worker.crawl_feeder import CrawlFeeder
 
         async with db_container() as container:
             session = container.session()

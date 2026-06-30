@@ -3,7 +3,7 @@
  * (/integrations/callback/token) and the opener running useIntegrationAuth.
  */
 
-export const INTEGRATION_CALLBACK_MESSAGE_TYPE = "intric/integration-callback";
+export const INTEGRATION_CALLBACK_MESSAGE_TYPE = "eneo/integration-callback";
 
 export type IntegrationCallbackMessage = {
   type: typeof INTEGRATION_CALLBACK_MESSAGE_TYPE;

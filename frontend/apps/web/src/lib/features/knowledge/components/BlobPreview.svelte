@@ -1,16 +1,16 @@
 <script lang="ts">
   import { browser } from "$app/environment";
-  import type { InfoBlob } from "@intric/intric-js";
-  import { IconDocument } from "@intric/icons/document";
-  import { Button, Dialog, Markdown } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { InfoBlob } from "@eneo/eneo-js";
+  import { IconDocument } from "@eneo/icons/document";
+  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Use a separate state variable for the loaded text to avoid prop mutation
   let loadedBlobText: string | undefined = blob.text;
@@ -22,7 +22,7 @@
       loadingBlob = true;
       loadError = false;
       try {
-        const loadedBlob = await intric.infoBlobs.get(blob);
+        const loadedBlob = await eneo.infoBlobs.get(blob);
         loadedBlobText = loadedBlob.text;
       } catch (e) {
         loadError = true;

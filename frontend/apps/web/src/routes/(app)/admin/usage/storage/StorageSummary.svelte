@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
-  import type { StorageSpaceList, StorageUsageSummary } from "@intric/intric-js";
+  import type { StorageSpaceList, StorageUsageSummary } from "@eneo/eneo-js";
   import StorageOverviewBar from "./StorageOverviewBar.svelte";
   import StorageTable from "./StorageTable.svelte";
   import { m } from "$lib/paraglide/messages";

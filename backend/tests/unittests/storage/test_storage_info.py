@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 from datetime import datetime
-from intric.spaces.api.space_models import SpaceMember
-from intric.storage.domain.storage import StorageInfo, StorageSpaceInfo
+from eneo.spaces.api.space_models import SpaceMember
+from eneo.storage.domain.storage import StorageInfo, StorageSpaceInfo
 
 
 # === Fixture: Create a mock SpaceMember using MagicMock ===

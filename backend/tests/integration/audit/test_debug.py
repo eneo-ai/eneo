@@ -129,8 +129,8 @@ async def test_debug_full_trace(client, admin_user_api_key, admin_user, db_conta
 @pytest.mark.asyncio
 async def test_debug_api_key_header_extraction(client, admin_user_api_key):
     """Test API key header extraction at different endpoints."""
-    from intric.main.config import get_settings
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
+    from eneo.main.config import get_settings
+    from eneo.server.dependencies.auth_definitions import API_KEY_HEADER
 
     print("\n=== API KEY HEADER CONFIGURATION ===")
     print(f"API_KEY_HEADER.model.name: {API_KEY_HEADER.model.name}")
@@ -174,7 +174,7 @@ async def test_debug_user_permissions(admin_user, db_container):
     print(f"User is_superuser: {getattr(admin_user, 'is_superuser', 'N/A')}")
 
     # Check if Permission.ADMIN is in user's permissions
-    from intric.roles.permissions import Permission
+    from eneo.roles.permissions import Permission
 
     has_admin = Permission.ADMIN in getattr(admin_user, "permissions", set())
     print(f"Has ADMIN permission: {has_admin}")
@@ -197,7 +197,7 @@ async def test_debug_authentication_path(client, admin_user_api_key):
     """Trace what happens in authentication."""
     import logging
 
-    logging.getLogger("intric").setLevel(logging.DEBUG)
+    logging.getLogger("eneo").setLevel(logging.DEBUG)
 
     print("\n=== TRACING AUTHENTICATION ===")
     print(f"API Key: {admin_user_api_key.key[:30]}...")
@@ -233,8 +233,8 @@ async def test_debug_direct_service_call(admin_user_api_key, db_container):
 @pytest.mark.asyncio
 async def test_debug_container_dependencies(client, admin_user_api_key):
     """Check how API key is extracted in different dependencies."""
-    from intric.authentication.auth_dependencies import _get_api_key_from_header
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
+    from eneo.authentication.auth_dependencies import _get_api_key_from_header
+    from eneo.server.dependencies.auth_definitions import API_KEY_HEADER
 
     print("\n=== DEPENDENCY ANALYSIS ===")
     print(f"API_KEY_HEADER type: {type(API_KEY_HEADER)}")
@@ -278,8 +278,8 @@ async def test_debug_full_container_flow(client, admin_user_api_key):
     """Check full container flow with API key."""
     from fastapi import Depends, FastAPI
 
-    from intric.main.container.container import Container
-    from intric.server.dependencies.container import get_container
+    from eneo.main.container.container import Container
+    from eneo.server.dependencies.container import get_container
 
     print("\n=== FULL CONTAINER FLOW TEST ===")
 
@@ -346,7 +346,7 @@ async def test_debug_http_database_connection(
     client, admin_user_api_key, test_settings
 ):
     """Check which database the HTTP handler is using."""
-    from intric.database.database import sessionmanager
+    from eneo.database.database import sessionmanager
 
     print("\n=== HTTP DATABASE CONNECTION ===")
     print(f"Test settings postgres_host: {test_settings.postgres_host}")
@@ -371,7 +371,7 @@ async def test_debug_http_database_connection(
 @pytest.mark.asyncio
 async def test_debug_trace_authenticate(client, admin_user_api_key, monkeypatch):
     """Add tracing to authenticate function."""
-    import intric.users.user_service as user_service_module
+    import eneo.users.user_service as user_service_module
 
     original_authenticate = user_service_module.UserService.authenticate
     call_count = {"count": 0}
@@ -422,8 +422,8 @@ async def test_debug_trace_authenticate(client, admin_user_api_key, monkeypatch)
 @pytest.mark.asyncio
 async def test_debug_api_key_header_actual(client, admin_user_api_key):
     """Check what header API_KEY_HEADER actually looks for."""
-    from intric.main.config import get_settings
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
+    from eneo.main.config import get_settings
+    from eneo.server.dependencies.auth_definitions import API_KEY_HEADER
 
     print("\n=== API_KEY_HEADER DETAILS ===")
     print(f"API_KEY_HEADER: {API_KEY_HEADER}")
@@ -495,10 +495,10 @@ async def test_debug_request_headers(client, admin_user_api_key, app):
 @pytest.mark.asyncio
 async def test_debug_api_key_header_instances():
     """Check if there are multiple API_KEY_HEADER instances."""
-    from intric.server.dependencies.auth_definitions import (
+    from eneo.server.dependencies.auth_definitions import (
         API_KEY_HEADER as auth_def_header,
     )
-    from intric.server.dependencies.container import API_KEY_HEADER as container_header
+    from eneo.server.dependencies.container import API_KEY_HEADER as container_header
 
     print("\n=== API_KEY_HEADER INSTANCES ===")
     print(

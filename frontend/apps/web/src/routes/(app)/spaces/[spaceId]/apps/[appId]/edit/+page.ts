@@ -1,5 +1,5 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
-  const app = await intric.apps.get({ id: event.params.appId });
+  const { eneo } = await event.parent();
+  const app = await eneo.apps.get({ id: event.params.appId });
   return { app };
 };

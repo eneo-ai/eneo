@@ -1,6 +1,6 @@
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Intric, App } from "@intric/intric-js";
+import type { Eneo, App } from "@eneo/eneo-js";
 
 const [getAppEditor, setAppEditor] = createContext<ReturnType<typeof initAppEditor>>("Edit an App");
 
@@ -8,9 +8,9 @@ const [getAppEditor, setAppEditor] = createContext<ReturnType<typeof initAppEdit
  * Initialise the ResourceEditor in its context.
  * Retrieve it via `getAppEditor()`
  */
-function initAppEditor(data: { app: App; intric: Intric; onUpdateDone?: (app: App) => void }) {
+function initAppEditor(data: { app: App; eneo: Eneo; onUpdateDone?: (app: App) => void }) {
   const editor = createResourceEditor({
-    intric: data.intric,
+    eneo: data.eneo,
     resource: data.app,
     defaults: {
       prompt: { description: "", text: "" }
@@ -28,7 +28,7 @@ function initAppEditor(data: { app: App; intric: Intric; onUpdateDone?: (app: Ap
     },
     manageAttachements: "attachments",
     updateResource: async (resource, changes) => {
-      const updated = await data.intric.apps.update({ app: resource, update: changes });
+      const updated = await data.eneo.apps.update({ app: resource, update: changes });
       data.onUpdateDone?.(updated);
       return updated;
     }

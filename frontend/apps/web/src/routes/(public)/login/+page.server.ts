@@ -1,7 +1,7 @@
 import { env } from "$env/dynamic/private";
 import { getBackendUrl } from "$lib/core/environment.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
-import { loginWithIntric } from "$lib/features/auth/intric.server";
+import { loginWithEneo } from "$lib/features/auth/eneo.server";
 import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
@@ -15,7 +15,7 @@ export const actions: Actions = {
     const redirectUrl = next ? decodeURIComponent(next) : DEFAULT_LANDING_PAGE;
 
     if (username && password) {
-      const { success, correlationId } = await loginWithIntric(username, password);
+      const { success, correlationId } = await loginWithEneo(username, password);
 
       if (success) {
         redirect(302, `/${redirectUrl.slice(1)}`);

@@ -9,7 +9,7 @@ to send `security_classification` directly at create time, plus the
 `model_fields_set`-based update logic that lets clients clear nullable fields
 by sending an explicit `null`. The cross-tenant guard is the highest-risk
 piece — the helper in
-`intric.security_classifications.tenant_validation` is the single point of
+`eneo.security_classifications.tenant_validation` is the single point of
 enforcement for all three routers, so we verify it from each.
 """
 
@@ -21,13 +21,13 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.ai_models_table import (
+from eneo.database.tables.ai_models_table import (
     CompletionModels,
     EmbeddingModels,
     TranscriptionModels,
 )
-from intric.database.tables.security_classifications_table import SecurityClassification
-from intric.database.tables.tenant_table import Tenants
+from eneo.database.tables.security_classifications_table import SecurityClassification
+from eneo.database.tables.tenant_table import Tenants
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -54,7 +54,7 @@ async def tenant_provider_id(db_container, default_user):
 
     `seed_default_models` (autouse) creates exactly one provider per tenant.
     """
-    from intric.database.tables.model_providers_table import ModelProviders
+    from eneo.database.tables.model_providers_table import ModelProviders
 
     async with db_container() as container:
         session = container.session()
@@ -676,7 +676,7 @@ async def test_update_completion_in_other_tenant_404(
 ):
     """A model belonging to another tenant must not be reachable through this
     tenant's update endpoint, even with a valid admin token."""
-    from intric.database.tables.model_providers_table import ModelProviders
+    from eneo.database.tables.model_providers_table import ModelProviders
 
     async with db_container() as container:
         session = container.session()

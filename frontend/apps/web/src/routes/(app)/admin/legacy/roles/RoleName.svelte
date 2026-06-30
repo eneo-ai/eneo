@@ -2,7 +2,7 @@
     Displays a role name with optional Default badge and Template icon.
 -->
 <script lang="ts">
-  import { Label } from "@intric/ui";
+  import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let name: string;

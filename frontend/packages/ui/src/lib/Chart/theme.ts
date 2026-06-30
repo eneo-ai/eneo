@@ -1,4 +1,4 @@
-export const intricTheme = {
+export const eneoTheme = {
   color: ["#3662e3", "#164385", "#2fc9d4", "#246dfd", "#a632eb", "#a5e7f0", "#cbb0e3"],
   backgroundColor: "rgba(0,0,0,0)",
   textStyle: {},

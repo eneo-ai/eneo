@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { Button, Dropdown } from "@intric/ui";
+  import { Button, Dropdown } from "@eneo/ui";
   import SwedishFlag from "./SwedishFlag.svelte";
-  import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
+  import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 

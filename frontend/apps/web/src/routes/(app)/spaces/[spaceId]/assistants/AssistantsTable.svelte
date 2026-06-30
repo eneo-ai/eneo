@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import AssistantTile from "./AssistantTile.svelte";
   import AssistantActions from "./AssistantActions.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { IconAssistant } from "@intric/icons/assistant";
+  import { IconAssistant } from "@eneo/icons/assistant";
   import PublishingStatusChip from "$lib/features/publishing/components/PublishingStatusChip.svelte";
   import GroupChatActions from "./GroupChatActions.svelte";
-  import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
+  import type { AssistantSparse, GroupChatSparse } from "@eneo/eneo-js";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams";
   import { m } from "$lib/paraglide/messages";
 

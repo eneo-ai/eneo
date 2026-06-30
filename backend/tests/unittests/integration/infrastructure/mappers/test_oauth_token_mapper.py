@@ -4,12 +4,12 @@ from uuid import uuid4
 
 from cryptography.fernet import Fernet
 
-from intric.integration.domain.entities.oauth_token import ConfluenceToken
-from intric.integration.infrastructure.mappers.oauth_token_mapper import (
+from eneo.integration.domain.entities.oauth_token import ConfluenceToken
+from eneo.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
 )
-from intric.integration.presentation.models import IntegrationType
-from intric.settings.encryption_service import EncryptionService
+from eneo.integration.presentation.models import IntegrationType
+from eneo.settings.encryption_service import EncryptionService
 
 
 class TestOauthTokenMapper(unittest.TestCase):
@@ -128,7 +128,7 @@ class TestOauthTokenMapper(unittest.TestCase):
         self.assertEqual(entity.refresh_token, self.refresh_token)
 
     @patch(
-        "intric.integration.domain.factories.oauth_token_factory.OauthTokenFactory.create_entity"
+        "eneo.integration.domain.factories.oauth_token_factory.OauthTokenFactory.create_entity"
     )
     def test_to_entity_passes_decrypted_tokens_to_factory(self, mock_create_entity):
         """The mapper hands decrypted credentials to the factory."""

@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import type { SpaceSparse } from "@intric/intric-js";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dropdown } from "@intric/ui";
+  import type { SpaceSparse } from "@eneo/eneo-js";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { Button, Dropdown } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 

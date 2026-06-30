@@ -1,7 +1,7 @@
 import { hasPermission } from "$lib/core/hasPermission";
 import { writable } from "svelte/store";
 import { createContext } from "./context";
-import type { CurrentUser, Limits, Tenant, Settings } from "@intric/intric-js";
+import type { CurrentUser, Limits, Tenant, Settings } from "@eneo/eneo-js";
 import type { createZitadelClient } from "$lib/core/Zitadel";
 
 const [getAppContext, setAppContext] = createContext<ReturnType<typeof AppContext>>(

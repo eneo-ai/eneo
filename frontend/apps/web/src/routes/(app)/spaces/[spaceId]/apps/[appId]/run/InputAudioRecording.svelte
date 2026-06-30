@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconInfo } from "@intric/icons/info";
-  import { IconCheck } from "@intric/icons/check";
-  import { Button } from "@intric/ui";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconInfo } from "@eneo/icons/info";
+  import { IconCheck } from "@eneo/icons/check";
+  import { Button } from "@eneo/ui";
   import { onDestroy, onMount } from "svelte";
   import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
@@ -189,7 +189,7 @@
 {/if}
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   /* Warning alert with icon and left border accent */
   .alert-warning {

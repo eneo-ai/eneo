@@ -19,13 +19,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
-from intric.authentication import oidc_resource_server
-from intric.authentication.auth_service import AuthService
-from intric.main.exceptions import AuthenticationException, UniqueException
-from intric.tenants.tenant import TenantInDB, TenantState
-from intric.users import user_service as user_service_module
-from intric.users.user import UserInDB
-from intric.users.user_service import UserService
+from eneo.authentication import oidc_resource_server
+from eneo.authentication.auth_service import AuthService
+from eneo.main.exceptions import AuthenticationException, UniqueException
+from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users import user_service as user_service_module
+from eneo.users.user import UserInDB
+from eneo.users.user_service import UserService
 
 ISSUER = "https://idp.example.com"
 AUDIENCE = "eneo-backend"

@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Label } from "@intric/ui";
+  import { Label } from "@eneo/ui";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
 

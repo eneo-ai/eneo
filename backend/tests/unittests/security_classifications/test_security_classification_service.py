@@ -7,19 +7,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.roles.permissions import Permission
-from intric.security_classifications.application.security_classification_service import (
+from eneo.roles.permissions import Permission
+from eneo.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
 )
-from intric.security_classifications.domain.entities.security_classification import (
+from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from intric.tenants.tenant import TenantInDB
+from eneo.tenants.tenant import TenantInDB
 
 
 @pytest.fixture

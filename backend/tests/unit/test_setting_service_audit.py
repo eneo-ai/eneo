@@ -15,9 +15,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.settings.setting_service import SettingService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.settings.setting_service import SettingService
 
 # ---------------------------------------------------------------------------
 # Fixtures

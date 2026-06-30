@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconFolder } from "@intric/icons/folder";
-  import { IconFile } from "@intric/icons/file";
-  import { IconFileText } from "@intric/icons/file-text";
-  import { IconFileImage } from "@intric/icons/file-image";
-  import { IconFileAudio } from "@intric/icons/file-audio";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconFolder } from "@eneo/icons/folder";
+  import { IconFile } from "@eneo/icons/file";
+  import { IconFileText } from "@eneo/icons/file-text";
+  import { IconFileImage } from "@eneo/icons/file-image";
+  import { IconFileAudio } from "@eneo/icons/file-audio";
   import { m } from "$lib/paraglide/messages";
 
   type TreeNode = {

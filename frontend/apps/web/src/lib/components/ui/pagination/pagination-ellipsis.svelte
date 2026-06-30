@@ -10,7 +10,7 @@
   }: WithoutChildren<WithElementRef<HTMLAttributes<HTMLSpanElement>>> = $props();
 </script>
 
-<!-- eslint-disable intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
+<!-- eslint-disable eneo/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
 
 <span
   bind:this={ref}

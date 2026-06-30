@@ -5,12 +5,12 @@ from uuid import uuid4
 import pytest
 from fastapi import UploadFile
 
-from intric.icons.icon_service import (
+from eneo.icons.icon_service import (
     ICON_ALLOWED_MIMETYPES,
     ICON_MAX_SIZE,
     IconService,
 )
-from intric.main.exceptions import BadRequestException, FileTooLargeException
+from eneo.main.exceptions import BadRequestException, FileTooLargeException
 
 
 @pytest.fixture

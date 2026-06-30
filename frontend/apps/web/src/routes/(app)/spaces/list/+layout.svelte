@@ -8,7 +8,7 @@
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
   import SpaceSelector from "$lib/features/spaces/components/SpaceSelector.svelte";
-  import { IconSquares } from "@intric/icons/squares";
+  import { IconSquares } from "@eneo/icons/squares";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from intric.tokens.token_utils import (
+from eneo.tokens.token_utils import (
     count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,
@@ -104,7 +104,7 @@ def test_count_message_tokens_fallback_when_litellm_fails():
         },
     ]
     with patch(
-        "intric.tokens.token_utils.litellm.token_counter",
+        "eneo.tokens.token_utils.litellm.token_counter",
         side_effect=RuntimeError("boom"),
     ):
         tokens = count_message_tokens(messages)
@@ -115,7 +115,7 @@ def test_count_message_tokens_fallback_when_litellm_fails():
 
 def test_count_tool_tokens_fallback_when_litellm_fails():
     with patch(
-        "intric.tokens.token_utils.litellm.token_counter",
+        "eneo.tokens.token_utils.litellm.token_counter",
         side_effect=RuntimeError("boom"),
     ):
         assert count_tool_tokens(_TOOLS) > 0
@@ -146,7 +146,7 @@ def test_count_image_tokens_from_blob_falls_back_on_unreadable_data():
 def test_drift_logging_warns_above_threshold(caplog):
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="intric.tokens.token_utils"):
+    with caplog.at_level(logging.WARNING, logger="eneo.tokens.token_utils"):
         log_token_count_drift("openai/gpt-4o", predicted=1000, actual=1500)
 
     assert any("Token count drift" in r.message for r in caplog.records)
@@ -155,7 +155,7 @@ def test_drift_logging_warns_above_threshold(caplog):
 def test_drift_logging_silent_within_threshold(caplog):
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="intric.tokens.token_utils"):
+    with caplog.at_level(logging.WARNING, logger="eneo.tokens.token_utils"):
         log_token_count_drift("openai/gpt-4o", predicted=1000, actual=1100)
         log_token_count_drift("openai/gpt-4o", predicted=None, actual=1100)
         log_token_count_drift("openai/gpt-4o", predicted=1000, actual=None)

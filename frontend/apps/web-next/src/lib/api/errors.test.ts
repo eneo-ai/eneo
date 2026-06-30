@@ -12,10 +12,10 @@ function errorResponse(status: number, headers: Record<string, string> = {}) {
 }
 
 describe("apiErrorFromResponse", () => {
-  it("parses the GeneralError shape (message + intric_error_code + details)", () => {
+  it("parses the GeneralError shape (message + eneo_error_code + details)", () => {
     const error = apiErrorFromResponse(errorResponse(403, { "x-trace-id": "abc123" }), {
       message: "Quota exceeded",
-      intric_error_code: 9008,
+      eneo_error_code: 9008,
       details: { quota: 100 }
     });
 
@@ -93,7 +93,7 @@ describe("unwrap", () => {
   it("throws an EneoApiError carrying the parsed body on failure", async () => {
     const result = Promise.resolve({
       data: undefined,
-      error: { message: "Not found", intric_error_code: 9000 },
+      error: { message: "Not found", eneo_error_code: 9000 },
       response: errorResponse(404, { "x-trace-id": "abc" })
     });
 

@@ -204,7 +204,7 @@ class TestCrawlerSettingsIntegrationWithHelper:
 
     async def test_tenant_settings_used_by_helper(self, db_container, test_tenant):
         """get_crawler_setting() correctly uses tenant overrides from DB."""
-        from intric.tenants.crawler_settings_helper import get_crawler_setting
+        from eneo.tenants.crawler_settings_helper import get_crawler_setting
 
         async with db_container() as container:
             tenant_repo = container.tenant_repo()
@@ -226,7 +226,7 @@ class TestCrawlerSettingsIntegrationWithHelper:
 
     async def test_feeder_batch_size_from_db(self, db_container, test_tenant):
         """Feeder batch size correctly retrieved from tenant settings."""
-        from intric.tenants.crawler_settings_helper import get_crawler_setting
+        from eneo.tenants.crawler_settings_helper import get_crawler_setting
 
         async with db_container() as container:
             tenant_repo = container.tenant_repo()
@@ -246,7 +246,7 @@ class TestCrawlerSettingsIntegrationWithHelper:
 
     async def test_get_all_settings_merges_correctly(self, db_container, test_tenant):
         """get_all_crawler_settings() merges tenant overrides with defaults."""
-        from intric.tenants.crawler_settings_helper import get_all_crawler_settings
+        from eneo.tenants.crawler_settings_helper import get_all_crawler_settings
 
         async with db_container() as container:
             tenant_repo = container.tenant_repo()

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
-  import { sanitizeImageSrc } from "@intric/ui/components/markdown";
+  import { sanitizeImageSrc } from "@eneo/ui/components/markdown";
 
   const { current } = getMessageContext();
 

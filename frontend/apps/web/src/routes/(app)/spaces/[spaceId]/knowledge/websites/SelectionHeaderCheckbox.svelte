@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   import type { Writable } from "svelte/store";
 
   export let selectedWebsiteIds: Writable<Set<string>>;

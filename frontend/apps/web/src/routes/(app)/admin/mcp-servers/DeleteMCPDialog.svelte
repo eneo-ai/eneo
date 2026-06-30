@@ -5,11 +5,11 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { AlertTriangle } from "lucide-svelte";
   import type { Writable } from "svelte/store";
-  import type { components } from "@intric/intric-js";
+  import type { components } from "@eneo/eneo-js";
 
   type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
 

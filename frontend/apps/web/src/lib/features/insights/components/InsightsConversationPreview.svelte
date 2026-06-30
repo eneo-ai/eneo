@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import Message from "$lib/features/chat/components/conversation/Message.svelte";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getInsightsService } from "../InsightsService.svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -49,7 +49,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   section {
     @apply border-stronger bg-primary overflow-auto rounded-md border border-b shadow-md;
   }

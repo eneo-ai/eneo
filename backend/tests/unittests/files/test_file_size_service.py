@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from intric.files import file_size_service
-from intric.files.file_size_service import FileSizeService
+from eneo.files import file_size_service
+from eneo.files.file_size_service import FileSizeService
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def mock_settings(monkeypatch, tmp_path):
 
 async def test_save_file_to_disk_uses_default_tmp_dir():
     """When UPLOAD_TMP_DIR is not set, the default /tmp is used."""
-    from intric.main.config import Settings
+    from eneo.main.config import Settings
 
     settings = Settings(_env_file=None)
     assert settings.upload_tmp_dir == Path("/tmp")
@@ -61,7 +61,7 @@ async def test_save_file_to_disk_cleans_up_on_write_failure(mock_settings, tmp_p
     file.seek(0)
 
     with patch(
-        "intric.files.file_size_service.shutil.copyfileobj",
+        "eneo.files.file_size_service.shutil.copyfileobj",
         side_effect=IOError("disk full"),
     ):
         with pytest.raises(IOError, match="disk full"):

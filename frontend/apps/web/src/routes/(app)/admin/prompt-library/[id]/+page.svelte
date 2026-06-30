@@ -14,12 +14,12 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { Eye, RotateCcw } from "lucide-svelte";
 
   const { data } = $props();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   type Version = (typeof data.versions.items)[number];
 
@@ -31,7 +31,7 @@
   async function save(payload: { name: string; description: string | null; text: string }) {
     const id = $page.params.id;
     if (!id) return;
-    await intric.promptLibrary.update({
+    await eneo.promptLibrary.update({
       id,
       name: payload.name,
       description: payload.description,
@@ -47,7 +47,7 @@
     isRestoring = true;
     restoreError = null;
     try {
-      await intric.promptLibrary.update({
+      await eneo.promptLibrary.update({
         id,
         name: restoreTarget.name,
         description: restoreTarget.description,

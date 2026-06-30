@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
     ApiKeyPermission,
     ApiKeyScopeType,
@@ -138,7 +138,7 @@ def walk_routes() -> list[RouteInfo]:
     """
     from fastapi.routing import APIRoute
 
-    from intric.server.routers import router
+    from eneo.server.routers import router
 
     infos: list[RouteInfo] = []
 

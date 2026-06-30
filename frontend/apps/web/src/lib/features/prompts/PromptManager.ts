@@ -6,7 +6,7 @@
 
 import { createContext } from "$lib/core/context";
 import { writable, get } from "svelte/store";
-import type { Intric, Prompt, PromptSparse } from "@intric/intric-js";
+import type { Eneo, Prompt, PromptSparse } from "@eneo/eneo-js";
 import { browser } from "$app/environment";
 import { toastError } from "$lib/core/errors";
 
@@ -14,7 +14,7 @@ const [getPromptManager, setPromptManager] =
   createContext<ReturnType<typeof createPromptManager>>("Prompt version history");
 
 type PromptManagerParams = {
-  intric: Intric;
+  eneo: Eneo;
   /**
    * Pass in
    * */
@@ -33,7 +33,7 @@ function initPromptManager(data: PromptManagerParams) {
 }
 
 function createPromptManager(params: PromptManagerParams) {
-  const { intric, loadPromptVersionHistory, onPromptSelected } = params;
+  const { eneo, loadPromptVersionHistory, onPromptSelected } = params;
   const allPrompts = writable<PromptSparse[]>([]);
   const previewedPrompt = writable<Prompt | null>(null);
   const showPromptVersionDialog = writable(false);
@@ -53,7 +53,7 @@ function createPromptManager(params: PromptManagerParams) {
 
   async function deletePrompt({ id }: { id: string }) {
     try {
-      await intric.prompts.delete({ id });
+      await eneo.prompts.delete({ id });
       allPrompts.update(($allPrompts) => $allPrompts.filter((prompt) => prompt.id !== id));
       if (id === get(previewedPrompt)?.id) {
         previewedPrompt.set(null);
@@ -81,7 +81,7 @@ function createPromptManager(params: PromptManagerParams) {
     description?: string;
   }) {
     try {
-      const update = await intric.prompts.update({ prompt: { id }, update: { description } });
+      const update = await eneo.prompts.update({ prompt: { id }, update: { description } });
       // If we updated the prompt of the current preview, update the preview
       previewedPrompt.update(($previewedPrompt) => {
         return update.id === $previewedPrompt?.id ? update : $previewedPrompt;
@@ -101,7 +101,7 @@ function createPromptManager(params: PromptManagerParams) {
 
   async function loadPreview({ id }: { id: string }) {
     try {
-      const preview = await intric.prompts.get({ id });
+      const preview = await eneo.prompts.get({ id });
       previewedPrompt.set(preview);
       return previewedPrompt;
     } catch (e) {

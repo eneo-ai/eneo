@@ -7,7 +7,7 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "lucide-svelte";
@@ -300,9 +300,9 @@
         rel="noopener noreferrer"
         class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"
       >
-        <!-- eslint-disable intric/no-hardcoded-text -- HuggingFace is a brand name -->
+        <!-- eslint-disable eneo/no-hardcoded-text -- HuggingFace is a brand name -->
         HuggingFace
-        <!-- eslint-enable intric/no-hardcoded-text -->
+        <!-- eslint-enable eneo/no-hardcoded-text -->
         <ExternalLink size={13} aria-hidden="true" />
       </a>
       <!-- eslint-enable svelte/no-navigation-without-resolve -->

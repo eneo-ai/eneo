@@ -5,7 +5,7 @@
  * Lives outside the Svelte component so step children can type their props
  * against the same source of truth without triggering a Svelte recompile.
  */
-import type { SecurityClassification } from "@intric/intric-js";
+import type { SecurityClassification } from "@eneo/eneo-js";
 
 export type WizardStepId = "provider" | "credentials" | "models";
 

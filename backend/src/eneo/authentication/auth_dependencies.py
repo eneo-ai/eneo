@@ -1,0 +1,415 @@
+from dataclasses import dataclass
+from typing import Annotated, Awaitable, Callable, NoReturn
+from uuid import UUID
+
+from fastapi import Depends, HTTPException, Request, Security, status
+
+from eneo.authentication.api_key_resolver import (
+    ApiKeyValidationError,
+    check_resource_permission,
+)
+from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
+from eneo.authentication.auth_factory import get_auth_service
+from eneo.authentication.auth_models import ApiKeyInDB, ApiKeyPermission
+from eneo.authentication.auth_service import AuthService
+from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.main.exceptions import UnauthorizedException
+from eneo.main.logging import get_logger
+from eneo.roles.permissions import Permission, validate_permission
+from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
+from eneo.server.dependencies.container import get_container
+from eneo.users.user import UserInDB
+
+logger = get_logger(__name__)
+
+
+def _raise_api_key_http_error(
+    exc: ApiKeyValidationError,
+    *,
+    request: Request | None = None,
+) -> NoReturn:
+    raise_api_key_http_error(exc, request=request)
+
+
+async def _get_api_key_from_header(
+    request: Request,
+) -> str | None:
+    """
+    Dynamically get API key from the header specified in settings.
+    """
+    header_name = get_settings().api_key_header_name
+
+    # Get the API key from the dynamically determined header
+    api_key = request.headers.get(header_name)
+
+    return api_key
+
+
+async def get_current_active_user(
+    request: Request,
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
+) -> UserInDB:
+    user_service = container.user_service()
+    try:
+        return await user_service.authenticate(token, api_key, request=request)
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc, request=request)
+
+
+async def get_current_active_user_with_quota(
+    request: Request,
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
+) -> UserInDB:
+    user_service = container.user_service()
+    try:
+        return await user_service.authenticate(
+            token, api_key, with_quota_used=True, request=request
+        )
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc, request=request)
+
+
+async def get_user_from_token_or_assistant_api_key(
+    id: UUID,
+    request: Request,
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
+) -> UserInDB:
+    user_service = container.user_service()
+    try:
+        return await user_service.authenticate_with_assistant_api_key(
+            api_key, token, assistant_id=id, request=request
+        )
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc, request=request)
+
+
+async def get_user_from_token_or_assistant_api_key_without_assistant_id(
+    request: Request,
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
+) -> UserInDB:
+    user_service = container.user_service()
+    try:
+        return await user_service.authenticate_with_assistant_api_key(
+            api_key, token, request=request
+        )
+    except ApiKeyValidationError as exc:
+        _raise_api_key_http_error(exc, request=request)
+
+
+def get_api_key(hashed: bool = True) -> Callable[..., Awaitable[ApiKeyInDB | None]]:
+    async def _get_api_key(
+        api_key: Annotated[str, Security(_get_api_key_from_header)],
+        auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    ) -> ApiKeyInDB | None:
+        return await auth_service.get_api_key(api_key, hash_key=hashed)
+
+    return _get_api_key
+
+
+def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]:
+    async def _dep(
+        user: Annotated[UserInDB, Depends(get_current_active_user)],
+    ) -> None:
+        try:
+            validate_permission(user, permission)
+        except UnauthorizedException as e:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+    return _dep
+
+
+def get_api_key_context(request: Request) -> ApiKeyInDB | None:
+    api_key = getattr(request.state, "api_key", None)
+    if isinstance(api_key, ApiKeyInDB):
+        return api_key
+    return None
+
+
+def require_api_key_permission(
+    required: ApiKeyPermission,
+) -> Callable[..., Awaitable[None]]:
+    """Endpoint-level guard: stash required API key permission for post-auth check.
+
+    Like ``require_resource_permission_for_method``, this dependency runs
+    BEFORE authentication sets ``request.state.api_key``.  It stores the
+    required permission level on ``request.state``, and the actual enforcement
+    happens inside ``_resolve_api_key`` (user_service) after authentication.
+
+    Bearer-token requests are unaffected — no API key state means no check.
+    NOT gated by the feature flag — management guards always enforce.
+    """
+
+    async def _api_key_permission_dep(request: Request) -> None:
+        request.state._required_api_key_permission = required.value
+
+    return _api_key_permission_dep
+
+
+async def require_session_auth(
+    _: Annotated[UserInDB, Depends(get_current_active_user)],
+    request: Request,
+) -> None:
+    """Reject API-key-authenticated callers; require a session token.
+
+    Depends on ``get_current_active_user`` so authentication has run and
+    populated ``request.state.api_key`` (when applicable) by the time we
+    inspect it.
+    """
+    if getattr(request.state, "api_key", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint requires a session token.",
+        )
+
+
+async def require_user_identity(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Reject service-key callers; require a real user identity.
+
+    Service keys resolve to a synthetic ``UserInDB`` with no row in the
+    ``users`` table. Endpoints that operate on the caller's personal data
+    (``/me``, "my keys", endpoints that write ``user_id`` columns) cannot
+    serve them meaningfully — the synthetic uuid would either match nothing
+    or violate FK constraints.
+
+    Bearer-token users and user-owned API keys both pass.
+    """
+    from eneo.authentication.auth_models import is_service_api_key
+
+    if is_service_api_key(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "user_identity_required",
+                "message": (
+                    "This endpoint requires a user identity. "
+                    "Service API keys cannot access endpoints scoped to a "
+                    "specific user."
+                ),
+            },
+        )
+
+
+async def require_user_for_creation(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Reject service-key callers on resource-creation endpoints.
+
+    Service keys are automation principals: they read, update, and delete
+    existing resources via their scope, but they do not author new ones.
+    Concretely, most resource tables carry a NOT NULL ``user_id`` FK to
+    ``users.id`` — service keys resolve to a synthetic UserInDB whose id
+    has no matching row, so the INSERT would FK-violate. Beyond the FK
+    mechanics, "service account owns this resource" has no product meaning
+    today; ownership of authored resources belongs to humans.
+
+    Apply this guard to every POST endpoint that creates a new resource
+    whose ownership column is ``user_id``. Bearer-token users and
+    user-owned API keys pass.
+    """
+    from eneo.authentication.auth_models import is_service_api_key
+
+    if is_service_api_key(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "service_key_cannot_create_resources",
+                "message": (
+                    "Service API keys cannot create new resources. "
+                    "Create the resource with a user account; the service "
+                    "key can then operate on supported endpoints via its scope."
+                ),
+            },
+        )
+
+
+ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "ask_assistant",
+        "ask_followup",
+        "leave_feedback",
+    }
+)
+KNOWLEDGE_READ_OVERRIDES: frozenset[str] = frozenset({"run_semantic_search"})
+
+CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "chat",
+        "leave_feedback",
+    }
+)
+
+APPS_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "run_service",
+        "run_app",
+    }
+)
+
+FILES_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "generate_signed_url",
+    }
+)
+
+
+def require_resource_permission_for_method(
+    resource_type: str, read_override_endpoints: frozenset[str] | None = None
+) -> Callable[..., Awaitable[None]]:
+    """Dependency: stores method→permission config for post-auth check.
+
+    The actual permission check runs in ``_resolve_api_key`` (user_service)
+    after authentication has set ``request.state.api_key``.  Multiple guards may
+    be attached to one route, e.g. a conversation endpoint can require both the
+    assistant read capability and the conversation history capability.
+    """
+
+    async def _resource_permission_dep(request: Request) -> None:
+        config = {
+            "resource_type": resource_type,
+            "read_override_endpoints": read_override_endpoints,
+        }
+        configs = list(getattr(request.state, "_resource_perm_configs", []))
+        configs.append(config)
+        request.state._resource_perm_configs = configs
+        if not hasattr(request.state, "_resource_perm_config"):
+            request.state._resource_perm_config = config
+
+    return _resource_permission_dep
+
+
+def require_api_key_scope_check(
+    resource_type: str,
+    path_param: str | None = "id",
+    self_filtering: bool = False,
+) -> Callable[..., Awaitable[None]]:
+    """Router-level dependency: stores scope check config for post-auth enforcement.
+
+    The actual scope check runs in ``_resolve_api_key`` (user_service) after
+    authentication has set ``request.state.api_key``.
+
+    Args:
+        resource_type: The type of resource this route manages (e.g. "space",
+            "assistant", "app", "admin"). Used to determine scope compatibility.
+        path_param: URL path parameter holding the resource ID (e.g. "id",
+            "session_id"). None means no path-level check (list endpoints or
+            resources without extractable IDs).
+        self_filtering: When True, the endpoint performs deterministic scope
+            filtering (e.g. requires assistant_id param). Exempts from
+            strict-mode blanket denial of list endpoints.
+    """
+
+    async def _scope_check_dep(request: Request) -> None:
+        request.state._scope_check_config = {
+            "resource_type": resource_type,
+            "path_param": path_param,
+            "self_filtering": self_filtering,
+        }
+
+    return _scope_check_dep
+
+
+def require_resource_permission(
+    resource_type: str, required: str
+) -> Callable[..., Awaitable[None]]:
+    """Dependency factory for fine-grained per-resource permission checks.
+
+    Fail-closed: if an API key header is present but request.state.api_key
+    was not set by the auth dependency, raise 500 to surface a dependency
+    ordering misconfiguration rather than silently allowing the request.
+    """
+
+    async def _resource_check_dep(request: Request) -> None:
+        key = getattr(request.state, "api_key", None)
+        if key is None:
+            # Check if an API key header was provided but auth didn't run
+            header_name = get_settings().api_key_header_name
+            if request.headers.get(header_name):
+                logger.error(
+                    "API key header present but request.state.api_key missing — "
+                    "auth dependency may not have run before resource permission guard",
+                    extra={"resource_type": resource_type, "required": required},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": "server_configuration_error",
+                        "message": "Authentication state missing.",
+                    },
+                )
+            return
+        try:
+            check_resource_permission(key, resource_type, required)
+        except ApiKeyValidationError as exc:
+            _raise_api_key_http_error(exc, request=request)
+
+    return _resource_check_dep
+
+
+def require_file_delete_scope_guard() -> Callable[..., Awaitable[None]]:
+    """Mark file DELETE requests for post-auth scope/ownership handling.
+
+    Files are user-scoped (no space_id column). User-owned scoped keys may
+    delete through the FileService owner-bound SQL predicate, but service keys
+    do not have a real ``users.id`` owner and cannot delete user-owned files.
+
+    Uses the deferred-enforcement pattern: stashes a marker on ``request.state``
+    so the actual check runs inside ``_resolve_api_key`` (after auth has populated
+    ``api_key_scope_type``).  Router-level dependencies execute *before* endpoint
+    dependencies, so we cannot inspect auth state here.
+    """
+
+    async def _stash(request: Request) -> None:
+        if request.method == "DELETE":
+            request.state._require_file_delete_scope_guard = True
+
+    return _stash
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeFilter:
+    """Immutable scope filter extracted from API key state at the router boundary.
+
+    Passed to service/repo layers as an optional parameter for query-time filtering.
+    None fields mean "no constraint from this scope dimension".
+    """
+
+    scope_type: str | None = None
+    space_id: UUID | None = None
+    assistant_id: UUID | None = None
+
+
+def get_scope_filter(request: Request) -> ScopeFilter:
+    """Extract scope filter from request state for scoped API keys.
+
+    Returns an empty ScopeFilter for tenant-scoped keys or bearer auth.
+    Called at the router boundary; the result is passed to service methods.
+    """
+    scope_type = getattr(request.state, "api_key_scope_type", None)
+    scope_id = getattr(request.state, "api_key_scope_id", None)
+
+    if scope_type is None or scope_id is None:
+        return ScopeFilter()
+
+    scope_type_str = (
+        scope_type.value if hasattr(scope_type, "value") else str(scope_type)
+    )
+
+    if scope_type_str == "tenant":
+        return ScopeFilter(scope_type=scope_type_str)
+    elif scope_type_str == "space":
+        return ScopeFilter(scope_type=scope_type_str, space_id=scope_id)
+    elif scope_type_str == "assistant":
+        return ScopeFilter(scope_type=scope_type_str, assistant_id=scope_id)
+    else:
+        return ScopeFilter(scope_type=scope_type_str)

@@ -6,9 +6,9 @@
 
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { Button, Dialog, Input, Tooltip } from "@intric/ui";
+  import { Button, Dialog, Input, Tooltip } from "@eneo/ui";
   import { getPromptManager } from "../PromptManager";
-  import type { Prompt } from "@intric/intric-js";
+  import type { Prompt } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   export let prompt: Prompt;

@@ -1,0 +1,1675 @@
+from datetime import datetime, timedelta
+from typing import Annotated, cast
+from uuid import UUID
+
+import sqlalchemy as sa
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from pydantic import BaseModel, Field
+
+from eneo.ai_models.completion_models.completion_model import (
+    CompletionModelCreate,
+    CompletionModelPublic,
+    CompletionModelSparse,
+    CompletionModelUpdate,
+    CompletionModelUpdateFlags,
+)
+from eneo.ai_models.completion_models.completion_models_repo import (
+    CompletionModelsRepository,
+)
+from eneo.ai_models.display_name_validation import validate_unique_display_name
+from eneo.ai_models.embedding_models.embedding_model import (
+    EmbeddingModelCreate,
+    EmbeddingModelLegacy,
+    EmbeddingModelPublicLegacy,
+    EmbeddingModelSparse,
+    EmbeddingModelUpdateFlags,
+)
+from eneo.ai_models.embedding_models.embedding_model import (
+    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
+)
+from eneo.ai_models.embedding_models.embedding_models_repo import (
+    AdminEmbeddingModelsService,
+)
+from eneo.allowed_origins.allowed_origin_models import (
+    AllowedOriginCreate,
+    AllowedOriginInDB,
+)
+
+# Audit logging - module level imports for sysadmin operations
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication import auth
+from eneo.completion_models.presentation.completion_model_models import (
+    MigrationResult,
+    ModelMigrationRequest,
+)
+from eneo.database.database import AsyncSession
+from eneo.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+)
+from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.integration_table import IntegrationKnowledge
+from eneo.database.tables.spaces_table import SpacesEmbeddingModels
+from eneo.database.tables.websites_table import Websites
+from eneo.main.container.container import Container
+from eneo.main.container.container_overrides import override_user
+from eneo.main.exceptions import (
+    BadRequestException,
+    ModelInUseException,
+    ValidationException,
+)
+from eneo.main.logging import get_logger
+from eneo.main.models import DeleteResponse, PaginatedResponse
+from eneo.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
+from eneo.scim.schemas.token import ScimTokenCreatedResponse, ScimTokenStatusResponse
+from eneo.server import protocol
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_sysadmin,
+)
+from eneo.server.dependencies.get_repository import get_repository
+from eneo.server.protocol import responses
+from eneo.sysadmin.sysadmin_service import SysAdminService
+from eneo.tenants.tenant import (
+    TenantBase,
+    TenantUpdatePublic,
+    TenantWithMaskedCredentials,
+)
+from eneo.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
+from eneo.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
+
+logger = get_logger(__name__)
+
+router = APIRouter(
+    dependencies=[Security(auth.authenticate_super_api_key)],
+    # Router-level 401: every route requires the super API key, so all of them
+    # can return 401. Declared once here instead of per-route get_responses.
+    responses=responses.get_responses([401]),
+)
+
+
+class OIDCDebugToggleRequest(BaseModel):
+    enabled: bool = Field(..., description="Enable or disable OIDC debug logging")
+    duration_minutes: int | None = Field(
+        30,
+        ge=1,
+        le=120,
+        description="Duration in minutes before the toggle auto-expires (max 120)",
+    )
+    reason: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional note for audit trail",
+    )
+
+
+class OIDCDebugToggleResponse(BaseModel):
+    enabled: bool
+    enabled_at: datetime | None
+    enabled_by: str | None
+    expires_at: datetime | None
+    reason: str | None
+    backend: str
+
+    @classmethod
+    def from_flag(cls, flag: DebugFlag, *, backend: str) -> "OIDCDebugToggleResponse":
+        return cls(
+            enabled=flag.enabled,
+            enabled_at=flag.enabled_at,
+            enabled_by=flag.enabled_by,
+            expires_at=flag.expires_at,
+            reason=flag.reason,
+            backend=backend,
+        )
+
+
+@router.post(
+    "/users/",
+    response_model=UserCreated,
+    description="Register a new user as sysadmin and return the created user with an access token.",
+    responses=responses.get_responses([400, 401]),
+)
+async def register_new_user(
+    new_user: UserAddSuperAdmin,
+    container: Annotated[Container, Depends(get_container())],
+):
+    user_service = container.user_service()
+
+    # Create user
+    created_user, access_token = await user_service.register(new_user)
+
+    # Audit logging (system action since no authenticated user for sysadmin)
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=created_user.tenant_id,
+        actor_id=None,  # System actor (no user)
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_CREATED,
+        entity_type=EntityType.USER,
+        entity_id=created_user.id,
+        description=f"Sysadmin created user {created_user.email}",
+        metadata={
+            "actor": {"type": "sysadmin", "action": "register"},
+            "target": {
+                "id": str(created_user.id),
+                "email": created_user.email,
+                "username": created_user.username,
+                "tenant_id": str(created_user.tenant_id),
+            },
+        },
+    )
+
+    return UserCreated(
+        **created_user.model_dump(exclude={"api_key"}),
+        access_token=access_token,
+    )
+
+
+@router.get(
+    "/users/",
+    response_model=PaginatedResponse[UserInDB],
+    description="List all users across all tenants.",
+    responses=responses.get_responses([]),
+)
+async def get_all_users(
+    container: Annotated[Container, Depends(get_container())],
+):
+    user_service = container.user_service()
+    users_in_db = await user_service.get_all_users()
+
+    return protocol.to_paginated_response(users_in_db)
+
+
+@router.get(
+    "/users/{user_id}/",
+    response_model=UserInDB,
+    description="Get a single user by id.",
+    responses=responses.get_responses([404]),
+)
+async def get_user(
+    user_id: UUID,
+    container: Annotated[Container, Depends(get_container())],
+):
+    user_service = container.user_service()
+    return await user_service.get_user(user_id)
+
+
+@router.delete(
+    "/users/{user_id}/",
+    response_model=DeleteResponse,
+    description="Delete a user by id.",
+    responses=responses.get_responses([400, 404]),
+)
+async def delete_user(
+    user_id: UUID,
+    container: Annotated[Container, Depends(get_container())],
+):
+    user_service = container.user_service()
+
+    # Get user details BEFORE deletion
+    user_to_delete = await user_service.get_user(user_id)
+
+    # Delete user
+    success = await user_service.delete_user(user_id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=user_to_delete.tenant_id,
+        actor_id=None,  # System actor (no user)
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_DELETED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=f"Sysadmin deleted user {user_to_delete.email}",
+        metadata={
+            "actor": {"type": "sysadmin"},
+            "target": {
+                "id": str(user_to_delete.id),
+                "email": user_to_delete.email,
+                "username": user_to_delete.username,
+                "tenant_id": str(user_to_delete.tenant_id),
+            },
+        },
+    )
+
+    return DeleteResponse(success=success)
+
+
+@router.post(
+    "/users/{user_id}/",
+    response_model=UserInDB,
+    description="Update a user by id; omitted fields are left unchanged.",
+    responses=responses.get_responses([400, 404]),
+)
+async def update_user(
+    user_id: UUID,
+    user_update: UserUpdatePublic,
+    container: Annotated[Container, Depends(get_container())],
+):
+    """Omitted fields are not updated."""
+    user_service = container.user_service()
+
+    # Get old state
+    old_user = await user_service.get_user(user_id)
+
+    # Update user
+    updated_user = await user_service.update_user(user_id, user_update)
+
+    # Track changes
+    changes: dict[str, dict[str, object]] = {}
+    if user_update.email and user_update.email != old_user.email:
+        changes["email"] = {"old": old_user.email, "new": user_update.email}
+    if user_update.username and user_update.username != old_user.username:
+        changes["username"] = {"old": old_user.username, "new": user_update.username}
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=updated_user.tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_UPDATED,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        description=f"Sysadmin updated user {updated_user.email}",
+        metadata={
+            "actor": {"type": "sysadmin"},
+            "target": {
+                "id": str(updated_user.id),
+                "email": updated_user.email,
+                "username": updated_user.username,
+            },
+            "changes": changes,
+        },
+    )
+
+    return updated_user
+
+
+@router.post(
+    "/users/{user_id}/access-token/",
+    include_in_schema=False,
+    response_model=None,
+    description="Issue an access token for the given user.",
+    responses=responses.get_responses([404]),
+)
+async def get_access_token(
+    user_id: UUID,
+    container: Annotated[Container, Depends(get_container())],
+):
+    user_service = container.user_service()
+    auth_service = container.auth_service()
+
+    user = await user_service.get_user(user_id)
+
+    return auth_service.create_access_token_for_user(user)
+
+
+@router.get(
+    "/tenants/",
+    response_model=PaginatedResponse[TenantWithMaskedCredentials],
+    description="List all tenants with API credentials masked, optionally filtered by domain.",
+    responses=responses.get_responses([]),
+)
+async def get_tenants(
+    container: Annotated[Container, Depends(get_container())],
+    domain: Annotated[str | None, Query()] = None,
+):
+    """Get all tenants with masked API credentials.
+
+    Returns tenant information with API keys masked to show only last 4 characters.
+    This prevents exposing full API keys through the API endpoint.
+
+    Args:
+        domain: Optional domain filter
+        container: Dependency injection container
+
+    Returns:
+        Paginated list of tenants with masked credentials
+    """
+    tenant_service = container.tenant_service()
+
+    tenants = await tenant_service.get_all_tenants(domain)
+
+    # Mask API credentials before returning
+    masked_tenants: list[TenantWithMaskedCredentials] = [
+        TenantWithMaskedCredentials.from_tenant(t) for t in tenants
+    ]
+
+    return protocol.to_paginated_response(masked_tenants)
+
+
+@router.post(
+    "/tenants/",
+    response_model=TenantWithMaskedCredentials,
+    description="Create a new tenant and return it with masked credentials.",
+    responses=responses.get_responses([400]),
+)
+async def create_tenant(
+    tenant: TenantBase,
+    container: Annotated[Container, Depends(get_container())],
+):
+    tenant_service = container.tenant_service()
+
+    # Create tenant
+    created_tenant = await tenant_service.create_tenant(tenant)
+    assert created_tenant is not None
+
+    # Audit logging (sysadmin - system actor)
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=created_tenant.id,
+        actor_id=None,  # System actor (no user)
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,  # Tenant creation is a settings operation
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=created_tenant.id,
+        description=f"Sysadmin created tenant '{created_tenant.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(created_tenant.id),
+                "name": created_tenant.name,
+                "display_name": created_tenant.display_name,
+                "state": created_tenant.state,
+            },
+        },
+    )
+
+    return TenantWithMaskedCredentials.from_tenant(created_tenant)
+
+
+@router.post(
+    "/tenants/{id}/",
+    response_model=TenantWithMaskedCredentials,
+    description="Update a tenant by id and return it with masked credentials.",
+    responses=responses.get_responses([400, 404]),
+)
+async def update_tenant(
+    id: UUID,
+    tenant: TenantUpdatePublic,
+    container: Annotated[Container, Depends(get_container())],
+):
+    tenant_service = container.tenant_service()
+
+    # Get old state
+    old_tenant = await tenant_service.get_tenant_by_id(id)
+    assert old_tenant is not None
+
+    # Update tenant
+    updated_tenant = await tenant_service.update_tenant(tenant, id)
+    assert updated_tenant is not None
+
+    # Track changes
+    changes: dict[str, dict[str, object]] = {}
+
+    if tenant.display_name and tenant.display_name != old_tenant.display_name:
+        changes["display_name"] = {
+            "old": old_tenant.display_name,
+            "new": tenant.display_name,
+        }
+    if tenant.state and tenant.state != old_tenant.state:
+        changes["state"] = {"old": old_tenant.state, "new": tenant.state}
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=updated_tenant.id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=updated_tenant.id,
+        description=f"Sysadmin updated tenant '{updated_tenant.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(updated_tenant.id),
+                "name": updated_tenant.name,
+            },
+            "changes": changes,
+        },
+    )
+
+    return TenantWithMaskedCredentials.from_tenant(updated_tenant)
+
+
+@router.delete(
+    "/tenants/{id}/",
+    response_model=TenantWithMaskedCredentials,
+    description="Delete a tenant by id and return it with masked credentials.",
+    responses=responses.get_responses([404]),
+)
+async def delete_tenant_by_id(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container())],
+):
+    tenant_service = container.tenant_service()
+
+    # Get tenant BEFORE deletion
+    tenant_to_delete = await tenant_service.get_tenant_by_id(id)
+    assert tenant_to_delete is not None
+
+    # Delete tenant
+    deleted_tenant = await tenant_service.delete_tenant(id)
+    assert deleted_tenant is not None
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=deleted_tenant.id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,  # Deletion is a settings operation
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=deleted_tenant.id,
+        description=f"Sysadmin deleted tenant '{tenant_to_delete.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(deleted_tenant.id),
+                "name": tenant_to_delete.name,
+                "display_name": tenant_to_delete.display_name,
+            },
+        },
+    )
+
+    return TenantWithMaskedCredentials.from_tenant(deleted_tenant)
+
+
+@router.get(
+    "/predefined-roles/",
+    response_model=None,
+    description="List the predefined roles loaded from configuration.",
+    responses=responses.get_responses([]),
+)
+async def get_predefined_roles():
+    from eneo.server.dependencies.predefined_roles import (
+        load_predefined_roles_from_config,
+    )
+
+    return load_predefined_roles_from_config()
+
+
+@router.post(
+    "/crawl-all-weekly-websites/",
+    response_model=None,
+    description="Trigger crawls for all websites scheduled to run weekly.",
+    responses=responses.get_responses([]),
+)
+async def crawl_all_weekly_websites(
+    container: Annotated[Container, Depends(get_container())],
+):
+    sysadmin_service = SysAdminService()
+
+    return await sysadmin_service.run_crawl_on_weekly_websites()
+
+
+def _mask_actor_label() -> str:
+    return "super_api_key"
+
+
+def _get_storage_backend(redis_client: object | None) -> str:
+    return "redis" if redis_client is not None else "file"
+
+
+@router.post(
+    "/observability/oidc-debug/",
+    response_model=OIDCDebugToggleResponse,
+    summary="Enable or disable OIDC debug logging",
+    description=(
+        "Turns verbose OIDC diagnostics on or off for a limited window. "
+        "Requires super API key."
+    ),
+    responses={
+        200: {"description": "Debug flag state updated."},
+        401: {"description": "Missing or invalid super API key."},
+    },
+)
+async def toggle_oidc_debug(
+    payload: OIDCDebugToggleRequest,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+):
+    try:
+        redis_client = container.redis_client()
+    except Exception:  # pragma: no cover - defensive fallback
+        redis_client = None
+
+    duration = timedelta(minutes=payload.duration_minutes or 30)
+    flag = await set_debug_flag(
+        redis_client,
+        enabled=payload.enabled,
+        enabled_by=_mask_actor_label(),
+        duration=duration,
+        reason=payload.reason,
+    )
+
+    logger.warning(
+        "OIDC debug flag updated",
+        extra={
+            "enabled": flag.enabled,
+            "expires_at": flag.expires_at.isoformat() if flag.expires_at else None,
+            "backend": _get_storage_backend(redis_client),
+            "reason": flag.reason,
+        },
+    )
+
+    return OIDCDebugToggleResponse.from_flag(
+        flag,
+        backend=_get_storage_backend(redis_client),
+    )
+
+
+@router.get(
+    "/observability/oidc-debug/",
+    response_model=OIDCDebugToggleResponse,
+    summary="Get current OIDC debug toggle status",
+    description="Returns whether OIDC debug logging is currently enabled and when it expires.",
+    responses={
+        200: {"description": "Current state of the OIDC debug toggle."},
+        401: {"description": "Missing or invalid super API key."},
+    },
+)
+async def get_oidc_debug_status(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+):
+    try:
+        redis_client = container.redis_client()
+    except Exception:  # pragma: no cover - defensive fallback
+        redis_client = None
+
+    flag = await get_debug_flag(redis_client)
+    return OIDCDebugToggleResponse.from_flag(
+        flag,
+        backend=_get_storage_backend(redis_client),
+    )
+
+
+@router.get(
+    "/embedding-models/",
+    response_model=PaginatedResponse[EmbeddingModelLegacy],
+    responses=responses.get_responses([404]),
+)
+async def get_embedding_models(
+    embedding_model_repo: Annotated[
+        AdminEmbeddingModelsService,
+        Depends(get_repository(AdminEmbeddingModelsService)),
+    ],
+):
+    models = await embedding_model_repo.get_models(with_deprecated=False)
+    return protocol.to_paginated_response(models)
+
+
+@router.get(
+    "/completion-models/",
+    response_model=PaginatedResponse[CompletionModelPublic],
+    responses=responses.get_responses([404]),
+)
+async def get_completion_models(
+    completion_model_repo: Annotated[
+        CompletionModelsRepository,
+        Depends(get_repository(CompletionModelsRepository)),
+    ],
+):
+    models = [
+        CompletionModelPublic.model_validate(model)
+        for model in await completion_model_repo.get_models(is_deprecated=False)
+    ]
+    return protocol.to_paginated_response(models)
+
+
+@router.post(
+    "/tenants/{id}/completion-models/{completion_model_id}/",
+    response_model=CompletionModelPublic,
+    description="Enable or disable a completion model for a specific tenant.",
+    responses=responses.get_responses([400, 404]),
+)
+async def enable_completion_model(
+    id: UUID,
+    completion_model_id: UUID,
+    data: CompletionModelUpdateFlags,
+    completion_model_repo: Annotated[
+        CompletionModelsRepository,
+        Depends(get_repository(CompletionModelsRepository)),
+    ],
+    container: Annotated[Container, Depends(get_container())],
+):
+    # Enable model
+    if data.is_org_enabled is None:
+        raise BadRequestException("is_org_enabled is required")
+
+    await completion_model_repo.enable_completion_model(
+        is_org_enabled=data.is_org_enabled,
+        completion_model_id=completion_model_id,
+        tenant_id=id,
+    )
+
+    model = await completion_model_repo.get_model(completion_model_id, tenant_id=id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=id,
+        actor_id=None,  # System actor (no user)
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=id,
+        description=f"Sysadmin enabled completion model '{model.name}' for tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(id),
+                "model_id": str(completion_model_id),
+                "model_name": model.name,
+                "is_org_enabled": data.is_org_enabled,
+            },
+        },
+    )
+
+    return CompletionModelSparse.model_validate(model)
+
+
+@router.post(
+    "/tenants/{id}/embedding-models/{embedding_model_id}/",
+    response_model=EmbeddingModelPublicLegacy,
+    description="Enable or disable an embedding model for a specific tenant.",
+    responses=responses.get_responses([400, 404]),
+)
+async def enable_embedding_model(
+    id: UUID,
+    embedding_model_id: UUID,
+    data: EmbeddingModelUpdateFlags,
+    embedding_model_repo: Annotated[
+        AdminEmbeddingModelsService,
+        Depends(get_repository(AdminEmbeddingModelsService)),
+    ],
+    container: Annotated[Container, Depends(get_container())],
+):
+    # Enable model
+    if data.is_org_enabled is None:
+        raise BadRequestException("is_org_enabled is required")
+
+    await embedding_model_repo.enable_embedding_model(
+        is_org_enabled=data.is_org_enabled,
+        embedding_model_id=embedding_model_id,
+        tenant_id=id,
+    )
+
+    model = await embedding_model_repo.get_model(embedding_model_id, tenant_id=id)
+
+    # Audit logging
+    audit_service = container.audit_service()
+
+    await audit_service.log_async(
+        tenant_id=id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=id,
+        description=f"Sysadmin enabled embedding model '{model.name}' for tenant",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(id),
+                "model_id": str(embedding_model_id),
+                "model_name": model.name,
+                "is_org_enabled": data.is_org_enabled,
+            },
+        },
+    )
+
+    return CompletionModelSparse.model_validate(model)
+
+
+@router.post(
+    "/allowed-origins/",
+    response_model=AllowedOriginInDB,
+    description="Add an allowed CORS origin for a tenant.",
+    responses=responses.get_responses([]),
+)
+async def add_origin(
+    origin: AllowedOriginCreate,
+    container: Annotated[Container, Depends(get_container())],
+):
+    allowed_origin_repo = container.allowed_origin_repo()
+    created = await allowed_origin_repo.add_origin(
+        origin=origin.url, tenant_id=origin.tenant_id
+    )
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=origin.tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=origin.tenant_id,
+        description="Updated tenant API key policy (allowed origin added)",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {"tenant_id": str(origin.tenant_id)},
+            "changes": {"allowed_origins": {"added": [origin.url]}},
+        },
+    )
+    return created
+
+
+@router.get(
+    "/allowed-origins/",
+    response_model=PaginatedResponse[AllowedOriginInDB],
+    description="List allowed CORS origins, optionally filtered by tenant.",
+    responses=responses.get_responses([]),
+)
+async def get_origins(
+    container: Annotated[Container, Depends(get_container())],
+    tenant_id: Annotated[UUID | None, Query()] = None,
+):
+    allowed_origin_repo = container.allowed_origin_repo()
+
+    if tenant_id is not None:
+        allowed_origins = await allowed_origin_repo.get_by_tenant(tenant_id)
+    else:
+        allowed_origins = await allowed_origin_repo.get_all()
+
+    return protocol.to_paginated_response(allowed_origins)
+
+
+@router.delete(
+    "/allowed-origins/{id}/",
+    status_code=204,
+    description="Delete an allowed CORS origin by id (idempotent).",
+    responses=responses.get_responses([]),
+)
+async def delete_origin(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container())],
+):
+    allowed_origin_repo = container.allowed_origin_repo()
+    origin = await allowed_origin_repo.get_by_id(id)
+    await allowed_origin_repo.delete(id)
+    if origin is None:
+        return
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=origin.tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=origin.tenant_id,
+        description="Updated tenant API key policy (allowed origin removed)",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {"tenant_id": str(origin.tenant_id)},
+            "changes": {"allowed_origins": {"removed": [origin.url]}},
+        },
+    )
+
+
+@router.post(
+    "/tenants/{tenant_id}/usage-stats/recalculate",
+    response_model=dict[str, str | bool],
+    description="Recalculate usage statistics for a specific tenant.",
+    responses=responses.get_responses([404, 500]),
+)
+async def recalculate_tenant_usage_statistics(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> dict[str, str | bool]:
+    """
+    Recalculate usage statistics for a specific tenant.
+
+    This endpoint is intended for tenant-specific administrative operations,
+    such as fixing usage statistics for a particular tenant.
+    """
+    logger.info(f"Recalculating usage statistics for tenant {tenant_id}")
+
+    try:
+        # Use the worker task function which handles the complexity
+        success = await recalculate_tenant_usage_stats_direct(container, tenant_id)
+
+        if success:
+            return {
+                "message": f"Usage statistics recalculation completed successfully for tenant {tenant_id}",
+                "tenant_id": str(tenant_id),
+                "success": True,
+            }
+        else:
+            raise HTTPException(
+                status_code=404, detail=f"Tenant {tenant_id} not found or not active"
+            )
+
+    except HTTPException:
+        # Preserve the explicit 404 above; only unexpected errors become 500.
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
+        )
+
+
+@router.post(
+    "/system/usage-stats/recalculate-all",
+    response_model=dict[str, str | bool],
+    description="Recalculate usage statistics for all active tenants.",
+    responses=responses.get_responses([500]),
+)
+async def recalculate_all_tenants_usage_statistics(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> dict[str, str | bool]:
+    """
+    Recalculate usage statistics for all active tenants.
+
+    This endpoint is intended for system-wide administrative operations,
+    such as bulk recalculation of usage statistics across all tenants.
+    """
+    logger.info("Recalculating usage statistics for all tenants")
+
+    try:
+        # Use the worker task function which handles the complexity
+        from eneo.worker.usage_stats_tasks import recalculate_all_tenants_usage_stats
+
+        success = await recalculate_all_tenants_usage_stats(container)
+
+        if success:
+            return {
+                "message": "Usage statistics recalculation completed successfully for all tenants",
+                "success": True,
+            }
+        else:
+            return {
+                "message": "Usage statistics recalculation completed with some errors",
+                "success": False,
+            }
+
+    except Exception as e:
+        logger.error(
+            f"Error in recalculate_all_tenants_usage_statistics endpoint: {str(e)}",
+            exc_info=True,
+        )
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=500, detail=f"Error recalculating usage statistics: {str(e)}"
+        )
+
+
+@router.post(
+    "/tenants/{tenant_id}/completion-models/{model_id}/migrate",
+    response_model=MigrationResult,
+    description="Migrate completion model usage from one model to another for a specific tenant.",
+    responses=responses.get_responses([400, 403, 404, 500]),
+)
+async def migrate_completion_model_for_tenant(
+    tenant_id: UUID,
+    model_id: UUID,
+    migration_request: ModelMigrationRequest,
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
+):
+    """
+    Migrate completion model usage for a specific tenant.
+
+    This endpoint allows system administrators to migrate all usage from one
+    completion model to another for a specific tenant. This is useful for:
+    - Migrating tenants away from deprecated models
+    - Consolidating model usage
+    - Fixing model configurations for specific tenants
+
+    Args:
+        tenant_id: UUID of the tenant to migrate
+        model_id: UUID of the source model to migrate from
+        migration_request: Details of the migration (target model, entity types, etc.)
+    """
+    logger.info(
+        f"Starting completion model migration for tenant {tenant_id}: {model_id} -> {migration_request.to_model_id}",
+        extra={
+            "tenant_id": str(tenant_id),
+            "from_model_id": str(model_id),
+            "to_model_id": str(migration_request.to_model_id),
+            "entity_types": migration_request.entity_types,
+        },
+    )
+
+    try:
+        # Get required services
+        tenant_repo = container.tenant_repo()
+        user_repo = container.user_repo()
+
+        session = cast(AsyncSession, container.session())
+        migration_error: ValidationException | None = None
+        result: MigrationResult | None = None
+
+        async with session.begin():
+            tenant = await tenant_repo.get(tenant_id)
+            if not tenant:
+                raise HTTPException(
+                    status_code=404, detail=f"Tenant {tenant_id} not found"
+                )
+
+            from eneo.tenants.tenant import TenantState
+
+            if tenant.state != TenantState.ACTIVE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Tenant {tenant_id} is not active (state: {tenant.state})"
+                    ),
+                )
+
+            # Get a user from this tenant to set the context (needed for domain repo)
+            from sqlalchemy import select
+
+            from eneo.database.tables.users_table import Users
+
+            stmt = select(Users.id).where(Users.tenant_id == tenant_id).limit(1)
+            user_result = await session.execute(stmt)
+            user_id = user_result.scalar_one_or_none()
+
+            if user_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"No users found for tenant {tenant_id}, "
+                        "cannot perform migration"
+                    ),
+                )
+
+            # Get the user object
+            user = await user_repo.get_user_by_id(user_id)
+            if user is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"User {user_id} not found for tenant {tenant_id}",
+                )
+
+            # Override container context with this user and tenant
+            override_user(container, user)
+
+            # Get the migration service with proper context
+            migration_service = container.completion_model_migration_service()
+
+            try:
+                result = await migration_service.migrate_model_usage(
+                    from_model_id=model_id,
+                    to_model_id=migration_request.to_model_id,
+                    entity_types=migration_request.entity_types,
+                    user=user,
+                    confirm_migration=migration_request.confirm_migration,
+                )
+            except ValidationException as exc:
+                migration_error = exc
+
+        if migration_error is not None:
+            raise migration_error
+
+        assert result is not None
+
+        logger.info(
+            f"Completed completion model migration for tenant {tenant_id}",
+            extra={
+                "tenant_id": str(tenant_id),
+                "migration_id": str(result.migration_id),
+                "migrated_count": result.migrated_count,
+                "duration": result.duration,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error migrating completion model for tenant {tenant_id}",
+            extra={
+                "tenant_id": str(tenant_id),
+                "from_model_id": str(model_id),
+                "to_model_id": str(migration_request.to_model_id),
+                "error": str(e),
+                "error_type": type(e).__name__,
+            },
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error migrating completion model for tenant {tenant_id}: {str(e)}",
+        )
+
+
+@router.post(
+    "/system/completion-models/{model_id}/migrate-all-tenants",
+    response_model=dict,
+    description="Migrate completion model usage from one model to another across all active tenants.",
+    responses=responses.get_responses([400, 403, 404, 500]),
+)
+async def migrate_completion_model_for_all_tenants(
+    model_id: UUID,
+    migration_request: ModelMigrationRequest,
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
+) -> dict[str, object]:
+    """
+    Migrate completion model usage for all active tenants.
+
+    This endpoint allows system administrators to migrate all usage from one
+    completion model to another across all active tenants. This is useful for:
+    - Deprecating models system-wide
+    - Migrating to newer model versions
+    - Consolidating model usage across the entire system
+
+    Args:
+        model_id: UUID of the source model to migrate from
+        migration_request: Details of the migration (target model, entity types, etc.)
+    """
+    logger.info(
+        f"Starting completion model migration for all tenants: {model_id} -> {migration_request.to_model_id}",
+        extra={
+            "from_model_id": str(model_id),
+            "to_model_id": str(migration_request.to_model_id),
+            "entity_types": migration_request.entity_types,
+        },
+    )
+
+    try:
+        # Get required services
+        tenant_repo = container.tenant_repo()
+        user_repo = container.user_repo()
+        session = cast(AsyncSession, container.session())
+
+        # Get all active tenants (using a separate session scope)
+        async with session.begin():
+            tenants = await tenant_repo.get_all_tenants()
+
+        from eneo.tenants.tenant import TenantState
+
+        active_tenants = [t for t in tenants if t.state == TenantState.ACTIVE]
+
+        logger.info(
+            f"Found {len(active_tenants)} active tenants for migration",
+            extra={
+                "total_tenants": len(tenants),
+                "active_tenants": len(active_tenants),
+                "active_tenant_ids": [str(t.id) for t in active_tenants],
+            },
+        )
+
+        if not active_tenants:
+            return {
+                "message": "No active tenants found",
+                "total_tenants": 0,
+                "successful_migrations": 0,
+                "failed_migrations": 0,
+                "results": [],
+            }
+
+        # Process each tenant
+        successful_migrations = 0
+        failed_migrations = 0
+        migration_results: list[dict[str, object]] = []
+
+        for tenant in active_tenants:
+            try:
+                logger.info(
+                    f"Processing migration for tenant {tenant.id} ({tenant.name})"
+                )
+
+                # Process each tenant in its own transaction
+                migration_error: ValidationException | None = None
+                migration_result: MigrationResult | None = None
+                async with session.begin():
+                    # Get a user from this tenant to set the context
+                    from sqlalchemy import select
+
+                    from eneo.database.tables.users_table import Users
+
+                    stmt = select(Users.id).where(Users.tenant_id == tenant.id).limit(1)
+                    user_result = await session.execute(stmt)
+                    user_id = user_result.scalar_one_or_none()
+
+                    if user_id is None:
+                        logger.warning(
+                            f"No users found for tenant {tenant.id}, skipping migration",
+                            extra={
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                            },
+                        )
+                        migration_results.append(
+                            {
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                                "success": False,
+                                "error": "No users found for tenant",
+                                "migrated_count": 0,
+                            }
+                        )
+                        failed_migrations += 1
+                        continue
+
+                    # Get the user object
+                    user = await user_repo.get_user_by_id(user_id)
+                    if user is None:
+                        logger.warning(
+                            f"User {user_id} not found for tenant {tenant.id}, skipping migration",
+                            extra={
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                            },
+                        )
+                        migration_results.append(
+                            {
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                                "success": False,
+                                "error": "User not found for tenant",
+                                "migrated_count": 0,
+                            }
+                        )
+                        failed_migrations += 1
+                        continue
+
+                    # Override container context with this user and tenant
+                    override_user(container, user)
+
+                    # Get the migration service with proper context
+                    migration_service = container.completion_model_migration_service()
+
+                    try:
+                        migration_result = await migration_service.migrate_model_usage(
+                            from_model_id=model_id,
+                            to_model_id=migration_request.to_model_id,
+                            entity_types=migration_request.entity_types,
+                            user=user,
+                            confirm_migration=migration_request.confirm_migration,
+                        )
+                    except ValidationException as exc:
+                        migration_error = exc
+
+                if migration_error is not None:
+                    raise migration_error
+
+                assert migration_result is not None
+
+                successful_migrations += 1
+                migration_results.append(
+                    {
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": tenant.name,
+                        "success": True,
+                        "migration_id": str(migration_result.migration_id),
+                        "migrated_count": migration_result.migrated_count,
+                        "duration": migration_result.duration,
+                        "warnings": migration_result.warnings,
+                    }
+                )
+
+                logger.info(
+                    f"Successfully completed migration for tenant {tenant.id}",
+                    extra={
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": tenant.name,
+                        "migration_id": str(migration_result.migration_id),
+                        "migrated_count": migration_result.migrated_count,
+                    },
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Error migrating completion model for tenant {tenant.id}",
+                    extra={
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": getattr(tenant, "name", "unknown"),
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
+                    exc_info=True,
+                )
+                failed_migrations += 1
+                migration_results.append(
+                    {
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": getattr(tenant, "name", "unknown"),
+                        "success": False,
+                        "error": str(e),
+                        "migrated_count": 0,
+                    }
+                )
+                continue
+
+        logger.info(
+            "Completed completion model migration for all tenants",
+            extra={
+                "total_tenants": len(active_tenants),
+                "successful_migrations": successful_migrations,
+                "failed_migrations": failed_migrations,
+                "from_model_id": str(model_id),
+                "to_model_id": str(migration_request.to_model_id),
+            },
+        )
+
+        return {
+            "message": f"Migration completed for {successful_migrations} out of {len(active_tenants)} tenants",
+            "total_tenants": len(active_tenants),
+            "successful_migrations": successful_migrations,
+            "failed_migrations": failed_migrations,
+            "results": migration_results,
+        }
+
+    except Exception as e:
+        logger.error(
+            "Error in migrate_completion_model_for_all_tenants endpoint",
+            extra={
+                "from_model_id": str(model_id),
+                "to_model_id": str(migration_request.to_model_id),
+                "error": str(e),
+                "error_type": type(e).__name__,
+            },
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error migrating completion model for all tenants: {str(e)}",
+        )
+
+
+# ============================================================================
+# AI Models CRUD Operations (System-Wide)
+# ============================================================================
+# These endpoints allow system administrators to create, update, and delete
+# AI model metadata. They require ENEO_SUPER_API_KEY authentication.
+# Note: These endpoints manage global model metadata only, not tenant-specific
+# settings. To enable/disable models for specific tenants, use the tenant-scoped
+# endpoints in the completion_models and embedding_models routers.
+# ============================================================================
+
+
+# Completion Models CRUD
+
+
+@router.post(
+    "/completion-models/create",
+    response_model=CompletionModelSparse,
+    description="Create global completion model metadata (system-wide operation).",
+    responses=responses.get_responses([400, 401, 409]),
+)
+async def create_completion_model(
+    model_data: CompletionModelCreate,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> CompletionModelSparse:
+    """
+    Create a new completion model (system-wide operation).
+
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
+
+    This creates the model metadata only. To enable it for a tenant,
+    use POST /api/v1/completion-models/{id}/ with tenant credentials.
+    """
+    # AUDIT GAP: sysadmin model lifecycle does not emit audit_log rows.
+    # audit_logs.tenant_id is NOT NULL but a global model has no owning
+    # tenant at create time. The tenant-scoped /tenant-models/ routes
+    # already audit COMPLETION_MODEL_CREATED via tenant_model_service;
+    # this path is reachable only by ENEO_SUPER_API_KEY (cross-tenant
+    # operator), and observability lives in app logs for now. A clean
+    # fix needs either a system-tenant convention or a separate
+    # sysadmin_audit store; tracked as follow-up.
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
+        repo = CompletionModelsRepository(session=session)
+        model = await repo.create_model(model_data)
+
+    return CompletionModelSparse.model_validate(model)
+
+
+@router.put(
+    "/completion-models/{id}/metadata",
+    response_model=CompletionModelSparse,
+    description="Update global completion model metadata (system-wide operation).",
+    responses=responses.get_responses([401, 404, 409]),
+)
+async def update_completion_model_metadata(
+    id: UUID,
+    model_data: CompletionModelUpdate,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> CompletionModelSparse:
+    """
+    Update completion model metadata (system-wide operation).
+
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
+
+    Updates global model metadata. Does not affect tenant-specific settings.
+    """
+    from eneo.main.exceptions import NotFoundException
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
+
+        # Ensure model_data has the id
+        update_with_id = CompletionModelUpdate(
+            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
+        )
+        model = await repo.update_model(update_with_id)
+
+        if model is None:
+            raise NotFoundException(f"Completion model with id {id} not found")
+
+    return CompletionModelSparse.model_validate(model)
+
+
+@router.delete(
+    "/completion-models/{id}",
+    response_model=None,
+    description="Soft-delete global completion model metadata (system-wide operation).",
+    responses=responses.get_responses([404, 400, 401]),
+)
+async def delete_completion_model(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    force: Annotated[bool, Query(description="Force delete even if in use")] = False,
+):
+    """
+    Soft-delete a completion model (system-wide operation).
+
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
+
+    WARNING: Affects all tenants. Use with caution.
+    Set force=true to hard-delete (may break references).
+    """
+    # AUDIT GAP: same constraint as create_completion_model — no tenant
+    # to attach the audit row to. App logs are the only trace today.
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = CompletionModelsRepository(session=session)
+        if force:
+            # Hard-delete: 20260402_lifecycle changed questions.completion_model_id
+            # from SET NULL → RESTRICT so historical attribution can't be silently
+            # erased. If any question references this model the DELETE will fail
+            # with IntegrityError; surface it as MODEL_IN_USE (400) so operators
+            # see a useful error instead of a 500.
+            import sqlalchemy as sa
+            from sqlalchemy.exc import IntegrityError
+
+            from eneo.database.tables.ai_models_table import CompletionModels
+
+            stmt = sa.delete(CompletionModels).where(CompletionModels.id == id)
+            try:
+                await session.execute(stmt)
+            except IntegrityError as exc:
+                raise ModelInUseException() from exc
+        else:
+            if await repo.has_active_references(id):
+                raise ModelInUseException()
+            await repo.delete_model(id)
+
+    return {"success": True, "message": f"Model {id} deleted successfully"}
+
+
+# Embedding Models CRUD
+
+
+@router.post(
+    "/embedding-models/create",
+    response_model=EmbeddingModelSparse,
+    description="Create global embedding model metadata (system-wide operation).",
+    responses=responses.get_responses([400, 401, 409]),
+)
+async def create_embedding_model(
+    model_data: EmbeddingModelCreate,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> EmbeddingModelSparse:
+    """
+    Create a new embedding model (system-wide operation).
+
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
+
+    This creates the model metadata only. To enable it for a tenant,
+    use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+    """
+    # AUDIT GAP: see create_completion_model — no owning tenant for a
+    # global model row, so no audit_log entry is emitted today.
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
+        repo = AdminEmbeddingModelsService(session=session)
+        model = await repo.create_model(model_data)
+
+    return EmbeddingModelSparse.model_validate(model)
+
+
+@router.put(
+    "/embedding-models/{id}/metadata",
+    response_model=EmbeddingModelSparse,
+    description="Update global embedding model metadata (system-wide operation).",
+    responses=responses.get_responses([401, 404, 409]),
+)
+async def update_embedding_model_metadata(
+    id: UUID,
+    model_data: EmbeddingModelMetadataUpdate,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> EmbeddingModelSparse:
+    """
+    Update embedding model metadata (system-wide operation).
+
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
+
+    Updates global model metadata. Does not affect tenant-specific settings.
+    """
+    from eneo.main.exceptions import NotFoundException
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = AdminEmbeddingModelsService(session=session)
+
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
+
+        # Ensure model_data has the id
+        update_with_id = EmbeddingModelMetadataUpdate(
+            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
+        )
+        model = await repo.update_model(update_with_id)
+
+        if model is None:
+            raise NotFoundException(f"Embedding model with id {id} not found")
+
+    return EmbeddingModelSparse.model_validate(model)
+
+
+@router.delete(
+    "/embedding-models/{id}",
+    response_model=None,
+    description="Soft-delete global embedding model metadata (system-wide operation).",
+    responses=responses.get_responses([404, 400, 401]),
+)
+async def delete_embedding_model(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    force: Annotated[bool, Query(description="Force delete even if in use")] = False,
+):
+    """
+    Delete an embedding model (system-wide operation).
+
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
+
+    WARNING: Deletion affects all tenants. Use with caution.
+    Set force=true to hard-delete (may erase historical info_blob attribution).
+    """
+    # AUDIT GAP: see create_embedding_model — no owning tenant to attach
+    # the audit row to. App logs are the only trace today.
+    session = cast(AsyncSession, container.session())
+
+    async with session.begin():
+        if force:
+            # Hard-delete remains an explicit operator escape hatch. Historical
+            # info_blobs use ON DELETE SET NULL, so this can erase attribution;
+            # the normal path below soft-deletes instead.
+            from sqlalchemy.exc import IntegrityError
+
+            repo = AdminEmbeddingModelsService(session=session)
+            try:
+                await repo.delete_model(id)
+            except IntegrityError as exc:
+                raise ModelInUseException() from exc
+        else:
+            model = await session.scalar(
+                sa.select(EmbeddingModels).where(
+                    EmbeddingModels.id == id,
+                    EmbeddingModels.deleted_at.is_(None),
+                )
+            )
+            if model is None:
+                # Idempotent, matching delete_completion_model: a missing or
+                # already-soft-deleted model is a no-op success, not a 404.
+                return {
+                    "success": True,
+                    "message": f"Model {id} deleted successfully",
+                }
+
+            # Three separate counts — combining them in one SELECT pulls all three
+            # tables into the FROM clause, producing a cartesian product.
+            collections_count = await session.scalar(
+                sa.select(sa.func.count()).where(
+                    CollectionsTable.embedding_model_id == id
+                )
+            )
+            websites_count = await session.scalar(
+                sa.select(sa.func.count()).where(Websites.embedding_model_id == id)
+            )
+            integrations_count = await session.scalar(
+                sa.select(sa.func.count()).where(
+                    IntegrationKnowledge.embedding_model_id == id
+                )
+            )
+            if collections_count or websites_count or integrations_count:
+                raise ModelInUseException()
+
+            info_blobs_count = await session.scalar(
+                sa.select(sa.func.count()).where(InfoBlobs.embedding_model_id == id)
+            )
+            if info_blobs_count:
+                logger.info(
+                    "sysadmin.embedding_model.soft_deleted_with_info_blobs",
+                    extra={
+                        "embedding_model_id": str(id),
+                        "info_blobs_count": info_blobs_count,
+                    },
+                )
+
+            await session.execute(
+                sa.delete(SpacesEmbeddingModels).where(
+                    SpacesEmbeddingModels.embedding_model_id == id
+                )
+            )
+            model.deleted_at = sa.func.now()
+            await session.flush()
+
+    return {"success": True, "message": f"Model {id} deleted successfully"}
+
+
+@router.post(
+    "/tenants/{tenant_id}/scim-token",
+    response_model=ScimTokenCreatedResponse,
+    status_code=201,
+    summary="Generate SCIM bearer token for tenant",
+    description=(
+        "Generates a new SCIM bearer token for the given tenant. "
+        "The token is returned in plaintext exactly once and is never stored — only its SHA-256 hash is persisted. "
+        "Calling this endpoint again replaces any existing token."
+    ),
+    responses={
+        201: {
+            "description": "Token created. Copy it now — it will not be shown again."
+        },
+        404: {"description": "Tenant not found"},
+    },
+)
+async def create_scim_token(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> ScimTokenCreatedResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        token = await container.scim_token_service().create_token(tenant_id)
+    logger.info("scim.token.created", extra={"tenant_id": str(tenant_id)})
+    return ScimTokenCreatedResponse(tenant_id=tenant_id, token=token)
+
+
+@router.get(
+    "/tenants/{tenant_id}/scim-token",
+    response_model=ScimTokenStatusResponse,
+    summary="Get SCIM token status for tenant",
+    description="Returns whether SCIM provisioning is active (i.e. a token hash is configured) for the given tenant. Never returns the token itself.",
+    responses={
+        200: {"description": "SCIM token status"},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def get_scim_token_status(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> ScimTokenStatusResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        is_active = await container.scim_token_service().get_status(tenant_id)
+    return ScimTokenStatusResponse(tenant_id=tenant_id, is_active=is_active)
+
+
+@router.delete(
+    "/tenants/{tenant_id}/scim-token",
+    status_code=204,
+    summary="Revoke SCIM token for tenant",
+    description="Removes the SCIM token hash, disabling SCIM provisioning for the tenant. Any subsequent SCIM requests from the IdP will receive 401.",
+    responses={
+        204: {"description": "Token revoked — SCIM disabled for this tenant"},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def delete_scim_token(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await container.scim_token_service().revoke_token(tenant_id)
+    logger.info("scim.token.revoked", extra={"tenant_id": str(tenant_id)})

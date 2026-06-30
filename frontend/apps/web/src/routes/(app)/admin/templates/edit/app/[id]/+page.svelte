@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
@@ -19,17 +19,17 @@
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import HelpTooltip from "../../../../models/components/HelpTooltip.svelte";
   import { createSelect } from "@melt-ui/svelte";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconFileAudio } from "@intric/icons/file-audio";
-  import { IconFileImage } from "@intric/icons/file-image";
-  import { IconFileText } from "@intric/icons/file-text";
-  import { IconMicrophone } from "@intric/icons/microphone";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconFileAudio } from "@eneo/icons/file-audio";
+  import { IconFileImage } from "@eneo/icons/file-image";
+  import { IconFileText } from "@eneo/icons/file-text";
+  import { IconMicrophone } from "@eneo/icons/microphone";
 
   let { data } = $props();
 
-  const intric = $derived(data.intric);
+  const eneo = $derived(data.eneo);
 
   // Initialize from template data
   let name = $state(untrack(() => data.template.name || ""));
@@ -162,7 +162,7 @@
         icon_name: iconName || undefined // Include icon if selected
       };
 
-      await intric.templates.admin.updateApp(data.template.id, templateData);
+      await eneo.templates.admin.updateApp(data.template.id, templateData);
       goto(resolve("/admin/templates?success=template_updated"));
     } catch (error) {
       console.error("Failed to update template:", error);
@@ -426,7 +426,7 @@
 </Page.Root>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   div[data-highlighted] {
     @apply bg-hover-default;
   }

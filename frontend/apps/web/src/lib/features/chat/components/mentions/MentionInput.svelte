@@ -45,7 +45,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   :global(.mention) {
     @apply bg-dynamic-dimmer text-dynamic-stronger rounded-full px-2.5 py-1.5 text-base font-medium;
   }

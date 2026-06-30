@@ -1,4 +1,4 @@
-import { IntricError } from "@intric/intric-js";
+import { EneoError } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
@@ -30,7 +30,7 @@ describe("isConversationSubmitDisabled", () => {
 
 describe("getContextErrorInfo", () => {
   it("reads structured backend token details", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Input is too long",
       "RESPONSE",
       400,

@@ -8,7 +8,7 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel, ModelProviderPublic } from "@intric/intric-js";
+  import type { CompletionModel, ModelProviderPublic } from "@eneo/eneo-js";
   import ProviderGroupedModelTable from "./components/ProviderGroupedModelTable.svelte";
 
   export let completionModels: CompletionModel[];

@@ -7,7 +7,7 @@
  *  - Every override documents WHAT the spec gets wrong and is an RB-5
  *    candidate: the real fix is the backend response model, not this file.
  *  - Keep overrides minimal and per-type; never fork whole endpoint trees
- *    (the old intric-js resources.d.ts is the cautionary tale).
+ *    (the old eneo-js resources.d.ts is the cautionary tale).
  *
  * No overrides yet.
  */

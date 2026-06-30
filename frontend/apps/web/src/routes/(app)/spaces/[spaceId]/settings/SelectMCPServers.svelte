@@ -6,12 +6,12 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input, Tooltip } from "@intric/ui";
+  import { Input, Tooltip } from "@eneo/ui";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
-  import type { components } from "@intric/intric-js";
+  import type { components } from "@eneo/eneo-js";
   import { SvelteSet } from "svelte/reactivity";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];

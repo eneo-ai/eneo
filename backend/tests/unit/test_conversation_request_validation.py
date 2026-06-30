@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.conversations.conversation_models import ConversationRequest
+from eneo.conversations.conversation_models import ConversationRequest
 
 
 def test_conversation_request_requires_exactly_one_target_id():

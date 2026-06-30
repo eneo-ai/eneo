@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IconCheck } from "@intric/icons/check";
-  import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
-  import { IconPeople } from "@intric/icons/people";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
+  import { IconPeople } from "@eneo/icons/people";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { createSelect } from "@melt-ui/svelte";
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
@@ -10,7 +10,7 @@
   import { quadInOut } from "svelte/easing";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
-  import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
+  import type { AssistantSparse, GroupChatSparse } from "@eneo/eneo-js";
   import { getChatQueryParams } from "../../getChatQueryParams";
   import { m } from "$lib/paraglide/messages";
   import { getAppContext } from "$lib/core/AppContext";
@@ -109,7 +109,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   div[data-highlighted] {
     @apply bg-hover-default;
   }

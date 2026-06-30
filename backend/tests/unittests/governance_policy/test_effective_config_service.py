@@ -2,10 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from intric.governance_policy.application.effective_config_service import (
+from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
-from intric.governance_policy.domain.governance_policy import (
+from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyMcpServer,
     PolicyScope,

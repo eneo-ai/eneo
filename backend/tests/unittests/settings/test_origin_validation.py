@@ -1,7 +1,7 @@
 """Tests for validate_public_origin() helper."""
 
 import pytest
-from intric.main.config import (
+from eneo.main.config import (
     validate_public_origin,
     validate_redirect_path,
     validate_redirect_uri,

@@ -6,10 +6,10 @@ from uuid import uuid4
 import pytest
 import redis.exceptions
 
-from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import ApiKeyScopeType
-from intric.main.config import get_settings, set_settings
+from eneo.authentication.api_key_rate_limiter import ApiKeyRateLimiter
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_models import ApiKeyScopeType
+from eneo.main.config import get_settings, set_settings
 
 
 class FakeRedis:

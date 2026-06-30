@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.integration.domain.entities.integration_preview import IntegrationPreview
-from intric.integration.infrastructure.preview_service.sharepoint_preview_service import (
+from eneo.integration.domain.entities.integration_preview import IntegrationPreview
+from eneo.integration.infrastructure.preview_service.sharepoint_preview_service import (
     SharePointPreviewService,
 )
 

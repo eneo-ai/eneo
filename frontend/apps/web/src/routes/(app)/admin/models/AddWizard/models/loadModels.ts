@@ -10,7 +10,7 @@
  *      catalog shipped via the capabilities endpoint.
  *   3. Some providers (Azure) cannot list models at all; we skip both.
  */
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import {
   NO_SUGGESTIONS_PROVIDERS,
   type ModelProviderCapabilities
@@ -29,12 +29,12 @@ export interface LoadResult {
 }
 
 export async function loadLiveModels(
-  intric: Intric,
+  eneo: Eneo,
   providerId: string,
   modelType: ModelType
 ): Promise<LoadResult> {
   try {
-    const result = (await intric.modelProviders.listModels({
+    const result = (await eneo.modelProviders.listModels({
       id: providerId,
       mode: MODE_MAP[modelType] as "completion" | "embedding" | "transcription"
     })) as unknown as Record<string, unknown>[];

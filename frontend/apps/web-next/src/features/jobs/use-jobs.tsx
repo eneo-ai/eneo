@@ -101,7 +101,7 @@ function uploadInfoBlob(
       reject(
         new EneoApiError(message, {
           status: xhr.status,
-          code: typeof body?.intric_error_code === "number" ? body.intric_error_code : undefined,
+          code: typeof body?.eneo_error_code === "number" ? body.eneo_error_code : undefined,
           details: body?.details
         })
       );

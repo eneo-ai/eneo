@@ -28,20 +28,20 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelResponse,
     ResponseType,
 )
-from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.spaces_table import Spaces
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.main.models import ModelId
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleCreate
-from intric.users.user import UserAdd, UserState
+from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.spaces_table import Spaces
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
+from eneo.users.user import UserAdd, UserState
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 

@@ -47,12 +47,12 @@
       style="--sidebar-width: {SIDEBAR_WIDTH_MOBILE};"
       {side}
     >
-      <!-- eslint-disable intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
+      <!-- eslint-disable eneo/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
       <Sheet.Header class="sr-only">
         <Sheet.Title>Sidebar</Sheet.Title>
         <Sheet.Description>Displays the mobile sidebar.</Sheet.Description>
       </Sheet.Header>
-      <!-- eslint-enable intric/no-hardcoded-text -->
+      <!-- eslint-enable eneo/no-hardcoded-text -->
       <div class="flex h-full w-full flex-col">
         {@render children?.()}
       </div>

@@ -19,12 +19,12 @@ import pytest
 import sqlalchemy as sa
 
 from init_db import add_tenant_user
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
-from intric.database.tables.sessions_table import Sessions
-from intric.database.tables.spaces_table import Spaces
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.help_assistants.domain.helper_run_status import HelperRunStatus
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.help_assistants.domain.helper_run_status import HelperRunStatus
 
 
 @pytest.fixture

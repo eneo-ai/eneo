@@ -13,10 +13,10 @@
 
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { Loader2, AlertTriangle, ShieldAlert, Info } from "lucide-svelte";
@@ -49,7 +49,7 @@
     modelType?: "completionModel" | "transcriptionModel";
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Open-state bridge -------------------------------------------------
   let dialogOpen = $state(false);
@@ -167,8 +167,8 @@
     validationError = false;
     try {
       const result = (await (modelType === "transcriptionModel"
-        ? intric.models.validateTranscriptionMigration({ fromId: sourceModel.id, toId })
-        : intric.models.validateMigration({ fromId: sourceModel.id, toId }))) as {
+        ? eneo.models.validateTranscriptionMigration({ fromId: sourceModel.id, toId })
+        : eneo.models.validateMigration({ fromId: sourceModel.id, toId }))) as {
         compatible: boolean;
         warnings: string[];
         warning_codes: string[];
@@ -237,8 +237,8 @@
     const isTranscription = modelType === "transcriptionModel";
     try {
       const details = (await (isTranscription
-        ? intric.models.getTranscriptionUsageDetails({ modelId: sourceModel.id, limit: 100 })
-        : intric.models.getUsageDetails({ modelId: sourceModel.id, limit: 100 }))) as {
+        ? eneo.models.getTranscriptionUsageDetails({ modelId: sourceModel.id, limit: 100 })
+        : eneo.models.getUsageDetails({ modelId: sourceModel.id, limit: 100 }))) as {
         items?: UsageDetail[];
         total?: number;
       };
@@ -246,8 +246,8 @@
       // Use backend total (handles pagination), not just items.length
       impactTotal = details?.total ?? impactDetails.length;
       const stats = (await (isTranscription
-        ? intric.models.getTranscriptionUsageStats({ modelId: sourceModel.id })
-        : intric.models.getUsageStats({ modelId: sourceModel.id }))) as {
+        ? eneo.models.getTranscriptionUsageStats({ modelId: sourceModel.id })
+        : eneo.models.getUsageStats({ modelId: sourceModel.id }))) as {
         spaces_count?: number;
       };
       spacesCount = stats.spaces_count ?? 0;
@@ -270,14 +270,14 @@
       // Security blockers only clear when the admin actively acknowledges
       // (force_override); both model types support the same escape hatch.
       if (modelType === "transcriptionModel") {
-        await intric.models.migrateTranscription({
+        await eneo.models.migrateTranscription({
           fromId: sourceModel.id,
           toId: targetModelId,
           confirmMigration: !needsAck || acknowledged,
           forceOverride: hasSecurityBlocker && acknowledged
         });
       } else {
-        await intric.models.migrateCompletion({
+        await eneo.models.migrateCompletion({
           fromId: sourceModel.id,
           toId: targetModelId,
           confirmMigration: !needsAck || acknowledged,

@@ -28,8 +28,10 @@ export PATH="$HOME/.local/bin:$PATH"
 # The backend .venv, frontend node_modules, and web-next .next cache are on
 # named Docker volumes (see docker-compose.yml). Docker creates named volume
 # mount points as root:root, but post-create.sh runs as vscode — without these
-# chowns, uv/bun/next fail to write into them.
-sudo chown vscode:vscode /workspace/backend/.venv \
+# chowns, uv/bun/next fail to write into them. The volumes also persist across
+# rebuilds, so fix ownership recursively in case a previous container left
+# root-owned installed files.
+sudo chown -R -h vscode:vscode /workspace/backend/.venv \
     /workspace/frontend/node_modules \
     /workspace/frontend/apps/web-next/.next
 
@@ -37,7 +39,7 @@ sudo chown vscode:vscode /workspace/backend/.venv \
 # Use --reinstall-package to ensure the project entry points are up-to-date
 # even when the .venv volume persists across container rebuilds
 cd /workspace/backend
-uv sync --reinstall-package intric
+uv sync --reinstall-package eneo
 
 # Install pre-commit globally and setup hooks
 cd /workspace

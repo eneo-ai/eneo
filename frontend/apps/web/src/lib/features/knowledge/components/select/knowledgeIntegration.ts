@@ -1,4 +1,4 @@
-import type { IntegrationKnowledge } from "@intric/intric-js";
+import type { IntegrationKnowledge } from "@eneo/eneo-js";
 
 /** A group of integration-knowledge items that share a wrapper (e.g. a SharePoint site). */
 export type IntegrationWrapperOption = {

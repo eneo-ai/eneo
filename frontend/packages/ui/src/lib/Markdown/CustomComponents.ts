@@ -4,48 +4,48 @@
 import type { Component } from "svelte";
 
 /**
- * 1. IntricInfoBlob
+ * 1. EneoInfoBlob
  */
 
-export type IntricInrefToken = {
-  type: "intricInref";
+export type EneoInrefToken = {
+  type: "eneoInref";
   level: "block" | "inline";
   raw: string;
   id: string;
 };
 
-export type IntricInrefCustomComponentProps = {
+export type EneoInrefCustomComponentProps = {
   /**
    * The generated token with the inref id and information about the tokens level (block or inline)
    */
-  token: IntricInrefToken;
+  token: EneoInrefToken;
 };
 
 /**
  * Component that can be passed in to be rendered instead of the default component
  */
-export type CustomInfoBlobComponent = Component<IntricInrefCustomComponentProps>;
+export type CustomInfoBlobComponent = Component<EneoInrefCustomComponentProps>;
 
 /**
- * 2. IntricMention
+ * 2. EneoMention
  */
-export type IntricMentionToken = {
-  type: "intricMention";
+export type EneoMentionToken = {
+  type: "eneoMention";
   level: "inline";
   raw: string;
   handle: string;
 };
 
-export type IntricMentionCustomComponentProps = {
+export type EneoMentionCustomComponentProps = {
   /**
    * The generated token with the mention content
    */
-  token: IntricMentionToken;
+  token: EneoMentionToken;
 };
 
-export type CustomMentionComponent = Component<IntricMentionCustomComponentProps>;
+export type CustomMentionComponent = Component<EneoMentionCustomComponentProps>;
 
-export type IntricToken = IntricInrefToken | IntricMentionToken;
+export type EneoToken = EneoInrefToken | EneoMentionToken;
 export type CustomRenderers = {
   inref?: CustomInfoBlobComponent;
   mention?: CustomMentionComponent;

@@ -1,7 +1,7 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
 import { createContext } from "$lib/core/context";
-import { type Intric, type Job } from "@intric/intric-js";
+import { type Eneo, type Job } from "@eneo/eneo-js";
 import { derived, writable } from "svelte/store";
 import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 
@@ -15,12 +15,12 @@ const jobCompletionEvents = writable<{ timestamp: number; jobId: string } | null
 const [getJobManager, setJobManager] =
   createContext<ReturnType<typeof createJobManager>>("Handles jobs");
 
-function initJobManager(data: { intric: Intric }) {
+function initJobManager(data: { eneo: Eneo }) {
   setJobManager(createJobManager(data));
 }
 
-function createJobManager(data: { intric: Intric }) {
-  const { intric } = data;
+function createJobManager(data: { eneo: Eneo }) {
+  const { eneo } = data;
 
   // Panel -------------------------------------------------------------------  //
   const showJobManagerPanel = writable(false);
@@ -42,7 +42,7 @@ function createJobManager(data: { intric: Intric }) {
   async function updateJobs(): Promise<Job[]> {
     let jobs: Job[] = [];
     try {
-      jobs = await intric.jobs.list();
+      jobs = await eneo.jobs.list();
       // Reset errors on success
       jobUpdateErrors = 0;
     } catch (error) {
@@ -220,7 +220,7 @@ function createJobManager(data: { intric: Intric }) {
       if (upload) {
         runningUploads.add(uploadId);
         upload.status = "uploading";
-        intric.infoBlobs
+        eneo.infoBlobs
           .upload({
             group_id: upload.groupId,
             file: upload.file,

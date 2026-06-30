@@ -7,14 +7,14 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { makeEditable } from "$lib/core/editable";
-  import { getIntric } from "$lib/core/Intric";
-  import type { Permission, Role } from "@intric/intric-js";
-  import { Dialog, Button, Input } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { Permission, Role } from "@eneo/eneo-js";
+  import { Dialog, Button, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { getPermissionCopy } from "./permission-labels";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const emptyRole: Role = {
     id: "",
@@ -71,7 +71,7 @@
     isProcessing = true;
     try {
       const role = { id: editableRole.id };
-      await intric.roles.update({
+      await eneo.roles.update({
         role,
         update: {
           ...editableRole.getEdits()
@@ -89,7 +89,7 @@
   async function create() {
     isProcessing = true;
     try {
-      await intric.roles.create(editableRole);
+      await eneo.roles.create(editableRole);
       invalidate("admin:roles:load");
       $showDialog = false;
       editableRole.updateWithValue(emptyRole);
@@ -103,7 +103,7 @@
   async function resetToTemplate() {
     isProcessing = true;
     try {
-      await intric.roles.resetToDefault(role);
+      await eneo.roles.resetToDefault(role);
       invalidate("admin:roles:load");
     } catch (error) {
       toastError(error);
@@ -114,7 +114,7 @@
   async function setAsDefault() {
     isProcessing = true;
     try {
-      await intric.roles.setAsDefault(role);
+      await eneo.roles.setAsDefault(role);
       invalidate("admin:roles:load");
       window.location.reload();
     } catch (error) {

@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { ServiceSparse } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { ServiceSparse } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import ServiceTile from "./ServiceTile.svelte";
   import ServiceActions from "./ServiceActions.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { IconService } from "@intric/icons/service";
+  import { IconService } from "@eneo/icons/service";
 
   export let services: ServiceSparse[];
   const table = Table.createWithResource(services);

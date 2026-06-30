@@ -124,8 +124,8 @@ OIDC_CLOCK_LEEWAY_SECONDS=120
 #   - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
 #
 # Generate key:
-#   Development: uv run python -m intric.cli.generate_encryption_key
-#   Production:  docker compose run --rm backend python -m intric.cli.generate_encryption_key
+#   Development: uv run python -m eneo.cli.generate_encryption_key
+#   Production:  docker compose run --rm backend python -m eneo.cli.generate_encryption_key
 #   Alternative: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 #
 # Format: 44-character base64-encoded Fernet key
@@ -195,7 +195,6 @@ VLLM_API_KEY=
 # Super API keys (system administration)
 ENEO_SUPER_API_KEY=
 ENEO_SUPER_DUPER_API_KEY=
-# NOTE: INTRIC_SUPER_API_KEY / INTRIC_SUPER_DUPER_API_KEY are still accepted but deprecated (removed in v3.0)
 
 # ----------------------------------------------------------------------------
 # Database Connection Pool Configuration

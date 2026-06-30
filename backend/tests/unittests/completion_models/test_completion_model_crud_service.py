@@ -2,10 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from intric.completion_models.application.completion_model_crud_service import (
+from eneo.completion_models.application.completion_model_crud_service import (
     CompletionModelCRUDService,
 )
-from intric.main.config import get_settings
+from eneo.main.config import get_settings
 
 
 def _build_service(repo: AsyncMock) -> CompletionModelCRUDService:

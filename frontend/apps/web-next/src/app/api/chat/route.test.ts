@@ -60,7 +60,7 @@ describe("/api/chat", () => {
 
   it("passes upstream error statuses through", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ message: "Not found", intric_error_code: 9000 }), {
+      new Response(JSON.stringify({ message: "Not found", eneo_error_code: 9000 }), {
         status: 404,
         headers: { "content-type": "application/json" }
       })

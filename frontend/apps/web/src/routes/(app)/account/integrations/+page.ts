@@ -1,7 +1,7 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
-  const myIntegrations = await intric.integrations.user.list();
+  const myIntegrations = await eneo.integrations.user.list();
 
   return { myIntegrations };
 };

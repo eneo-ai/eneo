@@ -6,7 +6,7 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Intric, GroupChat } from "@intric/intric-js";
+import type { Eneo, GroupChat } from "@eneo/eneo-js";
 
 const [getGroupChatEditor, setGroupChatEditor] =
   createContext<ReturnType<typeof initGroupChatEditor>>("Edit a group chat");
@@ -25,17 +25,17 @@ const [getGroupChatEditor, setGroupChatEditor] =
  */
 function initGroupChatEditor(data: {
   groupChat: GroupChat;
-  intric: Intric;
+  eneo: Eneo;
   onUpdateDone?: (groupChat: GroupChat) => void;
 }) {
   const editor = createResourceEditor({
-    intric: data.intric,
+    eneo: data.eneo,
     resource: data.groupChat,
     defaults: {
       insight_enabled: false
     },
     updateResource: async (resource, changes) => {
-      const updated = await data.intric.groupChats.update({ groupChat: resource, update: changes });
+      const updated = await data.eneo.groupChats.update({ groupChat: resource, update: changes });
       data.onUpdateDone?.(updated);
       return updated;
     },

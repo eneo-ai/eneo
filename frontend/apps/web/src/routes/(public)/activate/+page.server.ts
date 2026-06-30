@@ -25,6 +25,6 @@ export const load = async (event) => {
     redirect(302, DEFAULT_LANDING_PAGE);
   }
 
-  // User is logged in to zitadel, but no intric account -> show the activate page
+  // User is logged in to zitadel, but no eneo account -> show the activate page
   return {};
 };

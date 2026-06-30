@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
+from eneo.main.exceptions import BadRequestException
+from eneo.prompt_library.domain.prompt_library import PromptLibraryEntry
 
 
 def _entry() -> PromptLibraryEntry:

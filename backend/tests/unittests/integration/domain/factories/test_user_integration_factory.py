@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.integration.domain.entities.user_integration import UserIntegration
-from intric.integration.domain.factories.user_integration_factory import (
+from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.domain.factories.user_integration_factory import (
     UserIntegrationFactory,
 )
 

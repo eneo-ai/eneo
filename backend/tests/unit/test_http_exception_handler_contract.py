@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from intric.server.main import get_application
+from eneo.server.main import get_application
 
 
 def _build_client_for_exception(detail):

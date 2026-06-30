@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { getPromptManager } from "../PromptManager";
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";
@@ -75,7 +75,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   section {
     @apply border-stronger bg-primary overflow-auto rounded-md border border-b shadow-md;
   }

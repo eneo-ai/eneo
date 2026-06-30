@@ -1,11 +1,11 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   const selectedAppId = event.params.appId;
   const selectedRun = event.params.resultId;
 
   const [app, result] = await Promise.all([
-    intric.apps.get({ id: selectedAppId }),
-    intric.apps.runs.get({ id: selectedRun })
+    eneo.apps.get({ id: selectedAppId }),
+    eneo.apps.runs.get({ id: selectedRun })
   ]);
 
   return {

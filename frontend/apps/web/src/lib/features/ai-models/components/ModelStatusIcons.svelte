@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script context="module" lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   export type StatusIcon = {
@@ -67,7 +67,7 @@
 </script>
 
 <script lang="ts">
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { TriangleAlert, Brain, Eye, Wrench, Clock } from "lucide-svelte";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 

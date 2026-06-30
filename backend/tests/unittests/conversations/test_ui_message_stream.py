@@ -11,23 +11,23 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
     ResponseType,
     TokenUsage,
     ToolCallMetadata,
 )
-from intric.assistants.api.assistant_models import AssistantResponse
-from intric.conversations.ui_message_stream import (
+from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.conversations.ui_message_stream import (
     UI_MESSAGE_STREAM_HEADERS,
     _ui_message_chunks,
     to_ui_message_stream_response,
 )
-from intric.files.file_models import File, FileType
-from intric.info_blobs.info_blob import InfoBlobInDBWithScore
-from intric.questions.question import UseTools
-from intric.sessions.session import SessionInDB
+from eneo.files.file_models import File, FileType
+from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
+from eneo.questions.question import UseTools
+from eneo.sessions.session import SessionInDB
 
 SESSION_ID = UUID("11111111-1111-1111-1111-111111111111")
 QUESTION_ID = UUID("22222222-2222-2222-2222-222222222222")
@@ -324,7 +324,7 @@ async def test_failed_tool_maps_to_output_error():
 @pytest.mark.asyncio
 async def test_generated_image_and_status_event():
     completions = [
-        Completion(response_type=ResponseType.INTRIC_EVENT),
+        Completion(response_type=ResponseType.ENEO_EVENT),
         Completion(response_type=ResponseType.FILES, generated_file=_generated_file()),
     ]
 

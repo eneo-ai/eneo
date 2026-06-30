@@ -30,7 +30,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   div {
     --dynamic-transparent: oklch(from var(--dynamic-default) l c h / 8%);
   }

@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.application.sharepoint_tree_service import (
+from eneo.integration.application.sharepoint_tree_service import (
     SharePointTreeService,
 )
-from intric.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 
 
 @pytest.fixture

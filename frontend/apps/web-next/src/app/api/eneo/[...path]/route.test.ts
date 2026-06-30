@@ -93,7 +93,7 @@ describe("/api/eneo proxy", () => {
 
   it("passes through status, body and trace headers, filtering the rest", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ message: "Not found", intric_error_code: 9000 }), {
+      new Response(JSON.stringify({ message: "Not found", eneo_error_code: 9000 }), {
         status: 404,
         headers: {
           "content-type": "application/json",
@@ -116,7 +116,7 @@ describe("/api/eneo proxy", () => {
     expect(response.headers.get("content-encoding")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       message: "Not found",
-      intric_error_code: 9000
+      eneo_error_code: 9000
     });
   });
 });

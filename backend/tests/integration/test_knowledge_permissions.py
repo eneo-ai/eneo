@@ -10,10 +10,10 @@ Tests cover:
 import pytest
 from sqlalchemy import select
 
-from intric.spaces.space import Space
-from intric.actors.actors.space_actor import SpaceActor
-from intric.database.tables.spaces_table import Spaces, SpacesUsers
-from intric.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.space import Space
+from eneo.actors.actors.space_actor import SpaceActor
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.spaces.api.space_models import SpaceRoleValue
 
 
 def _space_from_db(db_space: Spaces) -> Space:

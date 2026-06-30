@@ -4,15 +4,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
-from intric.scim.domain.errors import (
+from eneo.scim.constants import SCIM_FILTER_MAX_RESULTS
+from eneo.scim.domain.errors import (
     ScimUserConflictError,
     ScimUserNotFoundError,
     ScimValidationError,
 )
-from intric.scim.schemas.common import ScimFilter
-from intric.scim.schemas.user import PatchOperation, ScimUserRequest, ScimUserState
-from intric.scim.services.user_service import ScimUserService
+from eneo.scim.schemas.common import ScimFilter
+from eneo.scim.schemas.user import PatchOperation, ScimUserRequest, ScimUserState
+from eneo.scim.services.user_service import ScimUserService
 
 
 def _make_db_user(user_name: str = "jane@example.com", active: bool = True):
@@ -29,7 +29,7 @@ def _make_db_user(user_name: str = "jane@example.com", active: bool = True):
 
 
 def _make_service(repo=None) -> ScimUserService:
-    from intric.scim.repositories.user_repository import ScimUserRepository
+    from eneo.scim.repositories.user_repository import ScimUserRepository
 
     repo = repo or AsyncMock(spec=ScimUserRepository)
     if isinstance(repo.get_by_username.return_value, AsyncMock):
@@ -98,7 +98,7 @@ class TestCreateUser:
         no explanation of why."""
         import logging
 
-        from intric.scim.services.user_service import logger as svc_logger
+        from eneo.scim.services.user_service import logger as svc_logger
 
         repo = AsyncMock()
         repo.get_by_username.return_value = None
@@ -242,7 +242,7 @@ class TestCreateUser:
         enough context to reason about what was claimed."""
         import logging
 
-        from intric.scim.services.user_service import logger as svc_logger
+        from eneo.scim.services.user_service import logger as svc_logger
 
         repo = AsyncMock()
         existing = _make_db_user(user_name="jane_local")
@@ -530,7 +530,7 @@ class TestListUsers:
         )
 
     async def test_sort_by_username_ascending(self):
-        from intric.scim.schemas.common import ScimSort
+        from eneo.scim.schemas.common import ScimSort
 
         repo = self._make_repo()
         service = _make_service(repo)
@@ -544,7 +544,7 @@ class TestListUsers:
         )
 
     async def test_sort_by_username_descending(self):
-        from intric.scim.schemas.common import ScimSort
+        from eneo.scim.schemas.common import ScimSort
 
         repo = self._make_repo()
         service = _make_service(repo)

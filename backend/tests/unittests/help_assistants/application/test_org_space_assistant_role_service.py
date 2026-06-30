@@ -20,22 +20,22 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.help_assistants.application.org_space_assistant_role_service import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.help_assistants.application.org_space_assistant_role_service import (
     OrgSpaceAssistantRoleService,
 )
-from intric.help_assistants.domain.assignment_history_reason import (
+from eneo.help_assistants.domain.assignment_history_reason import (
     AssignmentHistoryReason,
 )
-from intric.help_assistants.domain.factory import HelperAssistantsFactory
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.help_assistants.domain.role_assignment import RoleAssignment
-from intric.help_assistants.templates import get_template
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB
+from eneo.help_assistants.domain.factory import HelperAssistantsFactory
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.help_assistants.domain.role_assignment import RoleAssignment
+from eneo.help_assistants.templates import get_template
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 _TENANT = TenantInDB(id=uuid4(), name="acme", quota_limit=1024**3)
 

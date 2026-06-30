@@ -5,18 +5,18 @@
   import { writable } from "svelte/store";
   import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
-  import { Button, Input, Dropdown, ProgressBar } from "@intric/ui";
+  import { Button, Input, Dropdown, ProgressBar } from "@eneo/ui";
   import * as m from "$lib/paraglide/messages";
-  import type { components, UserSparse } from "@intric/intric-js";
+  import type { components, UserSparse } from "@eneo/eneo-js";
   import type { CalendarDate } from "@internationalized/date";
   import { parseDate, today, getLocalTimeZone } from "@internationalized/date";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconCalendar } from "@intric/icons/calendar";
-  import { IconXMark } from "@intric/icons/x-mark";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconInfo } from "@intric/icons/info";
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconCheck } from "@intric/icons/check";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconCalendar } from "@eneo/icons/calendar";
+  import { IconXMark } from "@eneo/icons/x-mark";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconInfo } from "@eneo/icons/info";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconCheck } from "@eneo/icons/check";
   import {
     CircleCheck,
     CircleX,
@@ -28,7 +28,7 @@
   } from "lucide-svelte";
   import { fade, slide, scale } from "svelte/transition";
   import { onDestroy, untrack } from "svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
@@ -39,7 +39,7 @@
 
   let { data } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Local state for audit logs (shadows data from load function to allow client-side updates)
   let logs = $state<AuditLogResponse[]>(untrack(() => data.logs || []));
@@ -106,7 +106,7 @@
   }) {
     try {
       // Create audit access session (sets HTTP-only cookie with session ID)
-      await intric.audit.createAccessSession({
+      await eneo.audit.createAccessSession({
         category: justification.category,
         description: justification.description
       });
@@ -463,7 +463,7 @@
     // Fetch data directly without triggering load function
     try {
       isFiltering = true;
-      const response = await intric.audit.list(filterParams);
+      const response = await eneo.audit.list(filterParams);
       logs = response.logs || [];
       totalCount = response.total_count || 0;
       currentPage = response.page || 1;
@@ -526,7 +526,7 @@
       userSearchTimer = setTimeout(async () => {
         try {
           isSearchingUsers = true;
-          const response = await intric.users.list({
+          const response = await eneo.users.list({
             includeDetails: true,
             search_email: query,
             page: 1,
@@ -809,7 +809,7 @@
         return;
       }
 
-      const updated = await intric.audit.updateRetentionPolicy({
+      const updated = await eneo.audit.updateRetentionPolicy({
         retention_days: retentionDaysNum
       });
 

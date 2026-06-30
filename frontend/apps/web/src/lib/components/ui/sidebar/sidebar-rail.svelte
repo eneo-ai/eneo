@@ -13,7 +13,7 @@
   const sidebar = useSidebar();
 </script>
 
-<!-- eslint-disable intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
+<!-- eslint-disable eneo/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
 <button
   bind:this={ref}
   data-sidebar="rail"
@@ -35,4 +35,4 @@
 >
   {@render children?.()}
 </button>
-<!-- eslint-enable intric/no-hardcoded-text -->
+<!-- eslint-enable eneo/no-hardcoded-text -->

@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.users.user import UserAdd, UserState
+from eneo.users.user import UserAdd, UserState
 
 
 @pytest.fixture

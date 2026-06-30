@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
 import { createContext } from "$lib/core/context";
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import { derived, writable } from "svelte/store";
 import { summaryToDisplayItems, type ExpiringKeyDisplayItem } from "./expirationUtils";
 import {
@@ -33,17 +33,17 @@ const [getExpiringKeysStore, setExpiringKeysStore] = createContext<
 >("Expiring API keys notifications");
 
 function initExpiringKeysStore(data: {
-  intric: Intric;
+  eneo: Eneo;
   settings?: { api_key_expiry_notifications?: boolean };
 }) {
   setExpiringKeysStore(createExpiringKeysStore(data));
 }
 
 function createExpiringKeysStore(data: {
-  intric: Intric;
+  eneo: Eneo;
   settings?: { api_key_expiry_notifications?: boolean };
 }) {
-  const { intric } = data;
+  const { eneo } = data;
   const featureEnabled = data.settings?.api_key_expiry_notifications !== false;
 
   const summary = writable<ExpiringKeysSummaryResponse | null>(null);
@@ -79,8 +79,8 @@ function createExpiringKeysStore(data: {
     if (!force && Date.now() - contextLoadedAt < CONTEXT_TTL_MS) return;
 
     const [preferences, subscriptions] = await Promise.all([
-      getNotificationPreferences(intric),
-      listNotificationSubscriptions(intric)
+      getNotificationPreferences(eneo),
+      listNotificationSubscriptions(eneo)
     ]);
     preferencesEnabled = preferences.enabled;
     daysWindow = Math.max(...preferences.days_before_expiry, 1);
@@ -106,7 +106,7 @@ function createExpiringKeysStore(data: {
           return;
         }
 
-        const result = await intric.apiKeys.expiringSoon({
+        const result = await eneo.apiKeys.expiringSoon({
           days: daysWindow,
           mode: "subscribed"
         });

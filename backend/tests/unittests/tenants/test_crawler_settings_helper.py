@@ -7,7 +7,7 @@ for tenant-specific crawler settings with hierarchical override support.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from intric.tenants.crawler_settings_helper import (
+from eneo.tenants.crawler_settings_helper import (
     CRAWLER_SETTING_SPECS,
     get_crawler_setting,
     get_all_crawler_settings,
@@ -101,7 +101,7 @@ class TestGetCrawlerSetting:
 
     def test_all_known_settings_have_defaults(self):
         """Every known setting returns a value without explicit default."""
-        with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
+        with patch("eneo.tenants.crawler_settings_helper.get_settings") as mock:
             # Mock settings with all env attrs
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
@@ -124,7 +124,7 @@ class TestGetCrawlerSetting:
 
     def test_tenant_override_takes_precedence_over_env(self):
         """Tenant override beats environment default."""
-        with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
+        with patch("eneo.tenants.crawler_settings_helper.get_settings") as mock:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400  # Env default
             mock.return_value = mock_settings
@@ -139,7 +139,7 @@ class TestGetAllCrawlerSettings:
 
     def test_returns_all_settings_with_defaults(self):
         """Returns complete settings dict with env defaults."""
-        with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
+        with patch("eneo.tenants.crawler_settings_helper.get_settings") as mock:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
@@ -164,7 +164,7 @@ class TestGetAllCrawlerSettings:
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
-        with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
+        with patch("eneo.tenants.crawler_settings_helper.get_settings") as mock:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
@@ -189,7 +189,7 @@ class TestGetAllCrawlerSettings:
 
     def test_handles_none_input(self):
         """Works correctly with None input."""
-        with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
+        with patch("eneo.tenants.crawler_settings_helper.get_settings") as mock:
             mock_settings = MagicMock()
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000

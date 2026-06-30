@@ -7,10 +7,10 @@
     type ModelKwArgs
   } from "../ModelBehaviours";
   import { createSelect } from "@melt-ui/svelte";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconQuestionMark } from "@intric/icons/question-mark";
-  import { Input, Tooltip } from "@intric/ui";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
+  import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import {
     shouldShowModelSpecificParametersInfo,
@@ -201,7 +201,7 @@
 {/if}
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   div[data-highlighted] {
     @apply bg-hover-default;
   }

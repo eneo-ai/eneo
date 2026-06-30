@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
-  import { IconSelectedItem } from "@intric/icons/selected-item";
-  import { IconSquare } from "@intric/icons/square";
-  import { Button, Dialog } from "@intric/ui";
+  import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
+  import { IconSelectedItem } from "@eneo/icons/selected-item";
+  import { IconSquare } from "@eneo/icons/square";
+  import { Button, Dialog } from "@eneo/ui";
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { getSpacesManager } from "../SpacesManager";
   import { fade, fly } from "svelte/transition";

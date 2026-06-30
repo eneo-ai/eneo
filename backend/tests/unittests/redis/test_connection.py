@@ -1,6 +1,6 @@
 """Unit tests for shared Redis connection helpers."""
 
-from intric.redis.connection import build_arq_redis_settings, build_redis_pool_kwargs
+from eneo.redis.connection import build_arq_redis_settings, build_redis_pool_kwargs
 
 
 def test_build_arq_redis_settings_uses_custom_values(test_settings):

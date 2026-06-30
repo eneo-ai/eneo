@@ -13,8 +13,8 @@ from typing import cast
 
 import pytest
 
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.help_assistants.templates import (
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.help_assistants.templates import (
     PROMPT_GUIDE_TEMPLATE,
     TEMPLATES_BY_KIND,
     HelperAssistantTemplate,

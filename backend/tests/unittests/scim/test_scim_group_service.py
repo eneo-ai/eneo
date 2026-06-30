@@ -4,15 +4,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
-from intric.scim.domain.errors import (
+from eneo.scim.constants import SCIM_FILTER_MAX_RESULTS
+from eneo.scim.domain.errors import (
     ScimGroupConflictError,
     ScimGroupNotFoundError,
     ScimValidationError,
 )
-from intric.scim.schemas.group import ScimGroupMember, ScimGroupRequest
-from intric.scim.schemas.user import PatchOperation
-from intric.scim.services.group_service import ScimGroupService
+from eneo.scim.schemas.group import ScimGroupMember, ScimGroupRequest
+from eneo.scim.schemas.user import PatchOperation
+from eneo.scim.services.group_service import ScimGroupService
 
 
 def _make_db_group(display_name: str = "Engineering"):
@@ -27,7 +27,7 @@ def _make_db_group(display_name: str = "Engineering"):
 
 
 def _make_service(repo=None) -> ScimGroupService:
-    from intric.scim.repositories.group_repository import ScimGroupRepository
+    from eneo.scim.repositories.group_repository import ScimGroupRepository
 
     repo = repo or AsyncMock(spec=ScimGroupRepository)
     if isinstance(repo.get_by_name.return_value, AsyncMock):
@@ -175,7 +175,7 @@ class TestListGroups:
         )
 
     async def test_passes_filter_to_repo(self):
-        from intric.scim.schemas.common import ScimFilter
+        from eneo.scim.schemas.common import ScimFilter
 
         repo = self._make_repo()
         service = _make_service(repo)
@@ -189,7 +189,7 @@ class TestListGroups:
         )
 
     async def test_eq_filter_on_external_id(self):
-        from intric.scim.schemas.common import ScimFilter
+        from eneo.scim.schemas.common import ScimFilter
 
         repo = self._make_repo()
         service = _make_service(repo)
@@ -203,7 +203,7 @@ class TestListGroups:
         )
 
     async def test_sort_by_displayname(self):
-        from intric.scim.schemas.common import ScimSort
+        from eneo.scim.schemas.common import ScimSort
 
         repo = self._make_repo()
         service = _make_service(repo)

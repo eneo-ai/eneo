@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from intric.analysis.analysis_router import _normalize_datetime_range
-from intric.main.exceptions import BadRequestException
+from eneo.analysis.analysis_router import _normalize_datetime_range
+from eneo.main.exceptions import BadRequestException
 
 
 def test_both_dates_none_falls_back_to_days_since():
