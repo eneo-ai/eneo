@@ -6,6 +6,9 @@ import type { Schema } from "@/lib/api/models";
 export type McpServer = Schema<"MCPServerSettingsPublic">;
 export type McpServerTool = Schema<"MCPServerToolPublic">;
 export type McpAuthType = "none" | "bearer";
+export type McpServerCreatePayload = Schema<"MCPServerCreate">;
+export type McpServerUpdatePayload = Schema<"MCPServerUpdate">;
+export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
 
 export const MCP_KEY = ["admin-mcp-servers"];
 export const mcpToolsKey = (serverId: string) => ["admin-mcp-servers", serverId, "tools"];
@@ -30,6 +33,44 @@ export function mcpServerToolsQueryOptions(api: EneoClient, serverId: string) {
         )
       ).items
   });
+}
+
+/**
+ * Create a global MCP server. The backend validates the connection and returns
+ * a 400 on failure, so the resolved response always carries a successful
+ * `connection` with the discovered tool count.
+ */
+export function createMcpServer(
+  api: EneoClient,
+  body: McpServerCreatePayload
+): Promise<McpServerCreateResponse> {
+  return unwrap(api.POST("/api/v1/mcp-servers/", { body }));
+}
+
+/** Update a global MCP server (partial). Omitted keys are left unchanged. */
+export function updateMcpServer(api: EneoClient, id: string, body: McpServerUpdatePayload) {
+  return unwrap(api.POST("/api/v1/mcp-servers/{id}/", { params: { path: { id } }, body }));
+}
+
+/** Toggle tenant-wide enablement: enable creates settings, disable removes them. */
+export function setMcpOrgEnabled(api: EneoClient, serverId: string, enabled: boolean) {
+  return enabled
+    ? unwrap(
+        api.POST("/api/v1/mcp-servers/settings/{mcp_server_id}/", {
+          params: { path: { mcp_server_id: serverId } },
+          body: {}
+        })
+      )
+    : unwrap(
+        api.DELETE("/api/v1/mcp-servers/settings/{mcp_server_id}/", {
+          params: { path: { mcp_server_id: serverId } }
+        })
+      );
+}
+
+/** Delete a global MCP server from the catalog. */
+export function deleteMcpServer(api: EneoClient, id: string) {
+  return unwrap(api.DELETE("/api/v1/mcp-servers/{id}/", { params: { path: { id } } }));
 }
 
 /** Re-fetch the server's tool catalog from the remote MCP server. */
