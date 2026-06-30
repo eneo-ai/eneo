@@ -698,7 +698,7 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
 
 
 @pytest.mark.asyncio
-async def test_propose_plan_falls_through_when_scoped_finalization_returns_feedback_only() -> (
+async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_feedback() -> (
     None
 ):
     processor = _make_processor()
@@ -712,33 +712,18 @@ async def test_propose_plan_falls_through_when_scoped_finalization_returns_feedb
     )
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
-    outline_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Fallback flow",
-            "plan_rationale": "Use the active submission path.",
-            "steps": [{"name": "Analyze", "instructions": "Analyze the input."}],
-        },
-    )
     finalize = AsyncMock(
-        side_effect=[
-            ToolProcessingResult(feedback="quality warning", failure_kind="quality"),
-            ToolProcessingResult(events=(_plan_stream_event(),)),
-        ]
+        return_value=ToolProcessingResult(
+            feedback="quality warning",
+            failure_kind="quality",
+        )
     )
-
-    async def process_outline(**kwargs) -> ToolProcessingResult:
-        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
 
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
-            new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
+            new=AsyncMock(),
         ) as call_completion,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
-            new=process_outline,
-        ),
         patch.object(
             CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
@@ -765,7 +750,7 @@ async def test_propose_plan_falls_through_when_scoped_finalization_returns_feedb
                 resource_catalog=catalog,
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
-                request_id="req-scoped-feedback-fallthrough",
+                request_id="req-scoped-feedback-terminal",
                 plan_edit_context=AIBuilderPlanEditContext(
                     scope="step",
                     plan_id=prior_plan.id,
@@ -775,9 +760,15 @@ async def test_propose_plan_falls_through_when_scoped_finalization_returns_feedb
             )
         ]
 
-    assert [event["event"] for event in events] == ["plan"]
-    call_completion.assert_awaited_once()
-    assert finalize.await_count == 2
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "bad_request"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-scoped-feedback-terminal"
+    assert "selected step change" in payload["message"]
+    assert payload["details"] == {"failure_kind": "quality"}
+    call_completion.assert_not_awaited()
+    finalize.assert_awaited_once()
     scoped_request = finalize.await_args_list[0].args[0]
     assert scoped_request.arguments["revision_kind"] == "scoped_step_direct"
 

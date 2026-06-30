@@ -1300,6 +1300,68 @@
   - Custom answer-value policy for non-slot legacy question families remains unresolved and should be handled separately with product/security evidence rather than broad static validation in this ingestion gate.
   - Rollback is low risk: remove `_validated_structured_question_answer`, revert the explicit-answer call site to `metadata_for_user_message(question_answer=question_answer)`, remove the new tests, and remove this ledger entry. No schema, migration, public API, generated-client, frontend, Flow runtime, telemetry, or persisted-data rollback is needed.
 
+## C8.4
+
+- Slice id: C8.4 Flow AI Builder edit/revise intent routing before repair
+- Findings addressed: recognized selected-step proposal revisions could still fall through to active proposal submission when scoped proposal finalization returned feedback without events, turning an edit-aware failure into generic proposal repair / missing-tool failure.
+- Verified evidence before change:
+  - `/Users/cimen/Downloads/codex_flow_builder_release_hardening_capability_prep_prompt.md:152-170` defines this slice as explicit edit/revise routing before generic repair: scoped revision, clarification/notice, or edit-aware terminal error; normal build/create requests remain unchanged.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:348-351` marks explicit edit/revise intent routing before repair as release-blocking when Builder ships.
+  - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:45` requires recognized edits to route to typed revision/clarification/notice/edit-aware terminal errors instead of undifferentiated `self_correction_quality_failure`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:147-172` is the canonical pre-submission routing point: `None` from the scoped revision owner means unrecognized intent and continues to normal active proposal submission.
+  - `backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py:86-132` owns deterministic selected-step revision attempts and finalization before any LLM proposal submission.
+  - `backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py:235-272` now maps scoped revision results to exactly one event path: text notice, plan/finalizer events, or typed proposal error.
+  - Before the fix, owner-level scoped finalizer feedback returned `ScopedPlanRevisionOutcome(events=(), fall_through_to_active_submission=True)`, and processor-level behavior then entered the generic active-submission repair path and produced `proposal_tool_missing`.
+- Intent-routing inventory:
+  - Recognized scoped revision success: selected-step model changes are finalized without LLM proposal submission; covered by `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:528-625` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py:206-248`.
+  - Recognized edit requiring clarification/notice: transcription-step model edits return a text notice without LLM proposal submission; covered by `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:628-697` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py:303-365`.
+  - Recognized unsupported/scoped-finalization failure: finalizer feedback now returns a `bad_request` / proposal-phase error with bounded `failure_kind` details and does not call proposal completion; covered by `backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py:251-300` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:700-773`.
+  - Unrecognized normal create/build request: `run_scoped_plan_revision_attempt(...) is None` remains the only continuation signal into active proposal submission; existing proposal processor create-path coverage stayed green.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer for the Builder proposal/scoped-revision files; exact symbols and final source evidence used direct reads and `rg`.
+  - `[no-peer-review]`: the user explicitly asked to skip the repo's default Claude peer loop for this bounded slice and to use read-only `codex exec` peer gates instead.
+  - Read-only Codex plan gate artifact `.codex/artifacts/c8-4-edit-revise-routing-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with no blockers. Required guidance applied: keep ownership in `ai_builder_scoped_plan_revision.py`, reuse one scoped result mapper, keep `BAD_REQUEST`, update both stale fallthrough tests, and delete `fall_through_to_active_submission`.
+  - Read-only Codex commit gate artifact `.codex/artifacts/c8-4-edit-revise-routing-commit-gate-final-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with no blockers or required fixes for the scoped slice. Its optional feedback was applied by replacing the pending ledger wording. It also noted the unrelated dirty frontend/devcontainer files must stay unstaged and that pre-existing no-op scoped requests can be a separate follow-up only if product wants an explicit "already applied" notice.
+- Red proof:
+  - Before source changes, `docker exec ... cd /workspace/backend && if command -v uv; then uv run pytest ...; else .venv/bin/pytest ...; fi` for the two scoped finalization feedback tests failed with owner-level `len(result.events) == 0` and processor-level `proposal_tool_missing`, proving recognized scoped finalization feedback fell into generic proposal repair.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Recognized scoped revisions no longer carry a special fallthrough flag. `None` from the scoped revision owner remains the only signal for unrecognized intent to continue into active proposal submission.
+  - Scoped revision finalizer feedback now returns a typed Builder error event with `code="bad_request"`, `phase="proposal"`, and bounded `failure_kind` details instead of entering LLM proposal repair.
+  - Successful scoped revisions, scoped text notices, unrecognized normal create/build requests, provider truncation behavior, failed-turn telemetry, and structured-answer ingestion remain unchanged.
+  - Public API schema, OpenAPI output, generated clients, frontend code, Flow runtime/API, materialization evals, retention policy, audit vocabulary, capability descriptors, MCP adapter, PR #480 behavior, and durable docs are unchanged.
+- Complexity deleted or owner clarified:
+  - `run_scoped_plan_revision_attempt` is the single owner for selected-step revision routing before active proposal submission.
+  - `fall_through_to_active_submission` was deleted; unrecognized intent uses `None`, and recognized scoped intent always returns explicit events.
+  - No new router, intent framework, command bus, service, interface, helper module, frontend fallback, or public schema surface was added.
+- Architecture delta:
+  - Canonical owner before: scoped revision owner could return a second continuation flag, so a recognized edit could leak into the generic proposal-submission owner.
+  - Canonical owner after: scoped revision owner owns all recognized scoped-edit outcomes; proposal submission owns only unrecognized/normal active proposal requests.
+  - Duplicate paths remaining: whole-plan revisions still rely on the active LLM proposal path and existing scoped-validation feedback; this slice only removes the selected-step fallthrough bug.
+  - 9/10 follow-up candidate: C8.5 should add deterministic materialization evals before pruning broader Builder repair/fallback branches.
+  - Decision or measurement needed: use C8.2 failed-turn telemetry plus C8.5 evals to decide whether non-scoped proposal repair/self-correction branches are useful or deletable.
+  - What not to preserve: recognized edit intent falling through to generic proposal repair, empty scoped-revision outcome flags, router-level edit guards, frontend-only routing, or MCP/capability work as a substitute for explicit Builder control-plane behavior.
+- Validation commands and results:
+  - `docker exec ... cd /workspace/backend && if command -v uv; then uv run pytest ...; else .venv/bin/pytest ...; fi` for the two scoped finalization feedback tests -> red before implementation with 2 failed; pass after implementation with 2 passed.
+  - `docker exec -u vscode ... cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q` -> pass, 82 passed.
+  - `docker exec ... cd /workspace/backend && ruff check ... && ruff format --check ...` on touched backend source/tests -> initial format check requested formatting for two touched files; after `ruff format`, pass.
+  - `backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff -U0 -- backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|slice|Claude|Antigravity|materialization|retention|audit|frontend|OpenAPI|generated-client" || true` -> pass, no accidental scope vocabulary in source/test hunks.
+  - `git diff --name-only -- backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web backend/src/intric/flows/runtime` -> pass, no API/generated-client/frontend/runtime diff.
+  - `rg -n "fall_through_to_active_submission|falls_through_when_scoped|scoped-feedback-fallthrough" backend/src backend/tests/unittests/flows/ai_builder` -> pass, no results.
+- Privacy / safety notes:
+  - The new error event includes only `failure_kind`, request id, phase, and an action-oriented message. It does not include prompts, user text, model output, resource names, secrets, or tool arguments.
+- Remaining risk / rollback:
+  - Whole-plan edit/revise behavior still uses the active proposal route; this slice intentionally covers the verified selected-step fallthrough only.
+  - Pre-existing no-op scoped requests still return `None` when the selected step already has the requested model/output type; leave that as a separate product/DX follow-up if an explicit "already applied" notice is desired.
+  - Rollback is low risk: restore the old scoped outcome flag/processor condition, revert the two stale test expectations, and remove this ledger entry. No schema, migration, public API, generated-client, frontend, Flow runtime, telemetry, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

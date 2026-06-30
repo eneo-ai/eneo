@@ -249,11 +249,13 @@ async def test_scoped_revision_finalizes_terminal_pdf_revision(message: str) -> 
 
 
 @pytest.mark.asyncio
-async def test_scoped_revision_falls_through_for_finalization_feedback_only() -> None:
+async def test_scoped_revision_returns_error_for_finalization_feedback_only() -> None:
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(feedback="quality warning", failure_kind="quality")
+        return_value=ToolProcessingResult(
+            feedback="quality warning", failure_kind="quality"
+        )
     )
     catalog = build_ai_builder_resource_catalog(
         available_models=[
@@ -283,13 +285,19 @@ async def test_scoped_revision_falls_through_for_finalization_feedback_only() ->
                 ),
                 resource_catalog=catalog,
                 available_model_refs=catalog.model_refs,
+                request_id="req-scoped-finalization-feedback",
             ),
             finalizer=_make_finalizer(),
         )
 
     assert result is not None
-    assert result.events == ()
-    assert result.fall_through_to_active_submission is True
+    assert len(result.events) == 1
+    payload = json.loads(encode_ai_builder_stream_event(result.events[0])["data"])
+    assert payload["code"] == "bad_request"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-scoped-finalization-feedback"
+    assert "selected step change" in payload["message"]
+    assert payload["details"] == {"failure_kind": "quality"}
 
 
 @pytest.mark.asyncio

@@ -81,7 +81,6 @@ class ScopedPlanRevisionRequest:
 @dataclass(frozen=True)
 class ScopedPlanRevisionOutcome:
     events: tuple[AIBuilderStreamEvent, ...] = ()
-    fall_through_to_active_submission: bool = False
 
 
 async def run_scoped_plan_revision_attempt(
@@ -103,24 +102,7 @@ async def run_scoped_plan_revision_attempt(
     if result is None:
         return None
     if result.compiled_proposal is None:
-        if result.feedback is not None:
-            return ScopedPlanRevisionOutcome(
-                events=(
-                    build_ai_builder_error_event(
-                        message=(
-                            "The selected step change could not be applied to "
-                            "the current plan. Refresh the plan and try again."
-                        ),
-                        code=AIBuilderErrorCode.BAD_REQUEST,
-                        phase=AIBuilderErrorPhase.PROPOSAL,
-                        request_id=request.request_id,
-                        details={
-                            "failure_kind": result.failure_kind or "unknown",
-                        },
-                    ),
-                )
-            )
-        return _outcome_from_processing_result(result)
+        return _outcome_from_processing_result(result, request_id=request.request_id)
 
     finalized = await finalizer.finalize_compiled_proposal(
         CompiledProposalFinalizationRequest(
@@ -147,7 +129,7 @@ async def run_scoped_plan_revision_attempt(
             usage_tracker=request.usage_tracker,
         )
     )
-    return _outcome_from_processing_result(finalized)
+    return _outcome_from_processing_result(finalized, request_id=request.request_id)
 
 
 def process_scoped_step_revision_if_requested(
@@ -168,7 +150,9 @@ def process_scoped_step_revision_if_requested(
     scoped_revision = resolve_scoped_step_revision_if_requested(
         context=plan_edit_context,
         prior_spec=(
-            prior_plan_for_revision.spec if prior_plan_for_revision is not None else None
+            prior_plan_for_revision.spec
+            if prior_plan_for_revision is not None
+            else None
         ),
         latest_user_text=_latest_user_text(conversation),
         resource_catalog=resource_catalog,
@@ -206,7 +190,9 @@ def process_scoped_step_revision_if_requested(
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,
         prior_spec=(
-            prior_plan_for_revision.spec if prior_plan_for_revision is not None else None
+            prior_plan_for_revision.spec
+            if prior_plan_for_revision is not None
+            else None
         ),
         proposed_spec=prepared.spec,
     )
@@ -228,7 +214,9 @@ def process_scoped_step_revision_if_requested(
             ),
             validation=prepared.validation,
             resource_bindings=(
-                collect_flow_spec_resource_bindings(prepared.spec, catalog=resource_catalog)
+                collect_flow_spec_resource_bindings(
+                    prepared.spec, catalog=resource_catalog
+                )
                 if resource_catalog is not None
                 else tuple()
             ),
@@ -246,12 +234,42 @@ def scoped_step_revision_assistant_text(
 
 def _outcome_from_processing_result(
     result: ToolProcessingResult,
+    *,
+    request_id: str,
 ) -> ScopedPlanRevisionOutcome:
     if result.user_message is not None:
-        return ScopedPlanRevisionOutcome(events=(build_text_event(result.user_message),))
+        return ScopedPlanRevisionOutcome(
+            events=(build_text_event(result.user_message),)
+        )
     if result.events:
         return ScopedPlanRevisionOutcome(events=result.events)
-    return ScopedPlanRevisionOutcome(fall_through_to_active_submission=True)
+    return _scoped_revision_error_outcome(
+        failure_kind=result.failure_kind,
+        request_id=request_id,
+    )
+
+
+def _scoped_revision_error_outcome(
+    *,
+    failure_kind: str | None,
+    request_id: str,
+) -> ScopedPlanRevisionOutcome:
+    return ScopedPlanRevisionOutcome(
+        events=(
+            build_ai_builder_error_event(
+                message=(
+                    "The selected step change could not be applied to "
+                    "the current plan. Refresh the plan and try again."
+                ),
+                code=AIBuilderErrorCode.BAD_REQUEST,
+                phase=AIBuilderErrorPhase.PROPOSAL,
+                request_id=request_id,
+                details={
+                    "failure_kind": failure_kind or "unknown",
+                },
+            ),
+        )
+    )
 
 
 def _latest_user_text(conversation: list[ConversationMessage]) -> str | None:

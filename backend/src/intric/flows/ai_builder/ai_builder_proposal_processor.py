@@ -166,10 +166,7 @@ class AIBuilderProposalProcessor:
                 ),
                 finalizer=self._compiled_proposal_finalizer,
             )
-            if (
-                scoped_revision_result is not None
-                and not scoped_revision_result.fall_through_to_active_submission
-            ):
+            if scoped_revision_result is not None:
                 for event in scoped_revision_result.events:
                     yield event
                 return
