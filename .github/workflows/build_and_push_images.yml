@@ -19,6 +19,7 @@ on:
   push:
     branches:
       - develop
+      - refactor/web-next  # web-next test env: build images then trigger Dokploy redeploy
     tags:
       - 'v*'  # Triggered when version tags are pushed
   workflow_dispatch:  # Manually trigger builds for feature/fix branches from the Actions tab
@@ -212,6 +213,30 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
           subject-digest: ${{ steps.build-frontend.outputs.digest }}
           push-to-registry: true
+
+      # Trigger the Dokploy redeploy for the web-next test env only AFTER both
+      # images are built and pushed, so the new :refactor-web-next images are
+      # already in ghcr when Dokploy pulls. A git-push webhook would fire too
+      # early and redeploy the previous images. Skips quietly if the webhook
+      # secret isn't configured (secrets can't be referenced in `if:`).
+      - name: Trigger Dokploy redeploy (web-next test env)
+        if: github.ref == 'refs/heads/refactor/web-next'
+        env:
+          DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_WEBNEXT_DEPLOY_WEBHOOK }}
+        run: |
+          if [[ -z "$DEPLOY_WEBHOOK" ]]; then
+            echo "::warning::DOKPLOY_WEBNEXT_DEPLOY_WEBHOOK not set; skipping Dokploy redeploy."
+            exit 0
+          fi
+          echo "Triggering Dokploy redeploy for eneo-web-next…"
+          http_code=$(curl -sS -o /tmp/dokploy_resp.txt -w "%{http_code}" -X POST "$DEPLOY_WEBHOOK")
+          echo "Dokploy responded: HTTP $http_code"
+          cat /tmp/dokploy_resp.txt 2>/dev/null || true
+          echo ""
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "::error::Dokploy redeploy webhook failed (HTTP $http_code)"
+            exit 1
+          fi
 
       # Summary of what was built
       - name: Build Summary
