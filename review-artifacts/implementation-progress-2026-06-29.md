@@ -1073,6 +1073,53 @@
   - Rollback is low risk: remove the audit function, the read-only repository projection, and the tests. No schema, runtime execution, public API, generated client, frontend, or persisted data changes need rollback.
   - Adjacent follow-up: `FlowRunContractService` readiness currently derives checksum/name from the current active asset rather than proving published checksum still matches; keep that out of PG-D4.2, but address before treating readiness UI/API as checksum-drift proof.
 
+## PG-D4.3
+
+- Slice id: PG-D4 template identity step 3
+- Findings addressed: run-contract template readiness checksum drift false green.
+- Verified evidence before change:
+  - `review-artifacts/implementation-progress-2026-06-29.md:954-1007` records PG-D4.1's retained runtime `template_file_id` fallback and deletion trigger; this slice does not delete or weaken that fallback.
+  - `review-artifacts/implementation-progress-2026-06-29.md:1005-1074` records PG-D4.2's read-only fallback-deletion audit and explicitly leaves run-contract checksum readiness drift as the adjacent follow-up.
+  - Fresh source review confirmed `FlowRunContractService` read the published `template_checksum` at `backend/src/intric/flows/flow_run_contract_service.py:127-130`, then successful asset lookup overwrote the response checksum with the current asset checksum and marked the item `ready` at `backend/src/intric/flows/flow_run_contract_service.py:143-167`.
+  - Fresh source review confirmed runtime still rejects a non-empty raw published checksum that differs from the loaded template file checksum at `backend/src/intric/flows/runtime/template_fill_runtime.py:411-415`, and uses raw non-empty string semantics at `backend/src/intric/flows/runtime/template_fill_runtime.py:511-514`.
+  - Existing runtime coverage proves checksum drift rejection in `backend/tests/unittests/flows/test_template_fill_runtime.py:500-541` and `backend/tests/unittests/flows/test_template_fill_runtime.py:545-578`.
+  - Existing public contract shape already has `FlowTemplateReadinessPublic.status`, `checksum`, and `message_code` at `backend/src/intric/flows/flow_run_contract_models.py:240-252`; `FlowTemplateAssetStatus.NEEDS_ACTION` already exists at `backend/src/intric/flows/enums.py:348-352`; `FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH` already exists at `backend/src/intric/flows/flow_api_error_code.py:99`.
+  - Fresh source review confirmed upload/publish populate template asset and published checksums from the file checksum at `backend/src/intric/flows/flow_template_asset_service.py:77-85` and `backend/src/intric/flows/application/flow_service.py:911-914`.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer; it found the expected Flow area but noisy affected-flow output, so all concrete claims were verified with direct source reads and exact `rg`.
+  - Read-only verifier agents reviewed run-contract/API-consumer semantics, runtime checksum parity, and test quality. Valid findings applied: keep the fix in `FlowRunContractService`, assert consumer-visible readiness fields, reuse `needs_action` and `typed_io_template_checksum_mismatch`, include both asset-id and file-id fallback paths, preserve raw whitespace mismatch behavior, and avoid schema/client/frontend edits.
+  - Claude peer-loop session `pgd4-run-contract-checksum-readiness-20260630` iteration 1 could not run because the account hit the monthly spend limit. The project fallback wrapper `scripts/run_codex_review.sh` was not present, so a direct read-only `codex exec --sandbox read-only` fallback reviewed the plan and returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+  - Claude commit gate and a final scoped Claude retry were also blocked by the same monthly spend limit. Direct read-only `codex exec --sandbox read-only` commit-gate fallback returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; valid feedback was applied by deleting a one-call checksum helper and making the asset-id and legacy file-id test paths resolve distinct asset rows. A final read-only fallback re-review returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`, with no blockers.
+- Red proof:
+  - Before implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_contract_service.py::test_get_run_contract_marks_template_checksum_drift_needs_action -q` failed for both asset-id and legacy file-id paths with `status=ready`, proving the run contract false-greened checksum drift.
+- Files changed:
+  - `backend/src/intric/flows/flow_run_contract_service.py`
+  - `backend/tests/unittests/flows/test_flow_run_contract_service.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Run-contract template readiness now compares the non-empty raw published `template_checksum` to the resolved current template asset checksum after either `template_asset_id` lookup or legacy `template_file_id` fallback lookup.
+  - If the checksums differ, readiness returns `status=needs_action` and `message_code=typed_io_template_checksum_mismatch` instead of `status=ready` / `message_code=None`.
+  - Existing missing/not-found behavior remains `flow_template_not_accessible`; `can_edit=False`, current `can_download` semantics, response shape, runtime execution behavior, fallback compatibility, OpenAPI schema, generated clients, and frontend code are unchanged.
+  - Missing or empty published checksums do not trigger checksum drift readiness, matching runtime's raw non-empty string semantics.
+- Complexity deleted or owner clarified:
+  - `FlowRunContractService` remains the canonical owner for public run-contract template readiness.
+  - `template_fill_runtime.py` remains the hard runtime enforcement owner; no shared helper, repository wrapper, readiness service, migration, CLI, endpoint, generated-client change, frontend change, or Builder path was added.
+- Architecture delta:
+  - Canonical owner before: runtime enforced checksum drift while run-contract readiness only reflected template asset lookup success and could expose a false `ready` state.
+  - Canonical owner after: runtime still enforces at execution; `FlowRunContractService` now mirrors the checksum-drift readiness signal for API consumers before run start.
+  - Duplicate paths remaining: runtime and run-contract both check checksum drift for different boundaries; the legacy `template_file_id` fallback remains until the PG-D4 audit/backfill proves zero blockers.
+  - 9/10 follow-up candidate: if future evidence shows `FlowTemplateAssets.checksum` can drift from `Files.checksum`, extend the template asset read model or repository query to expose the resolved file checksum to run-contract readiness in a dedicated data-read-model slice.
+  - Decision or measurement needed: target database audit/backfill proof still decides when the runtime `template_file_id` fallback and legacy tests can be deleted.
+  - What not to preserve: false-green readiness, checksum normalization/trimming, frontend-only blocking logic, new public fields/statuses, a generic readiness service, or permanent dual template identity.
+- Validation commands and results:
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_contract_service.py::test_get_run_contract_marks_template_checksum_drift_needs_action -q` -> red before implementation with `status=ready`, then pass, 4 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_template_fill_runtime.py -q` -> pass, 39 passed.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py && /home/vscode/.local/bin/uv run ruff format --check src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py` -> pass, 0 errors.
+- Remaining risk / rollback:
+  - The run-contract comparison uses the current `FlowTemplateAsset.checksum` read model because PG-D4.3 is scoped to `FlowRunContractService`; upload and publish populate that checksum from the file checksum, and exact `Files.checksum` read parity is recorded above as a separate hardening candidate if future source evidence shows the asset checksum can drift.
+  - Rollback is low risk: remove the readiness checksum comparison, the new test, and this ledger entry. No schema, migration, persisted data, runtime execution, generated-client, frontend, or fallback-deletion rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

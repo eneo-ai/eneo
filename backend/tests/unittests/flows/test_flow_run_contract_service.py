@@ -267,6 +267,106 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.template_readiness[0].can_download is True
 
 
+@pytest.mark.parametrize(
+    ("published_checksum", "current_checksum"),
+    [
+        ("published-checksum", "current-checksum"),
+        (" template-checksum ", "template-checksum"),
+    ],
+)
+@pytest.mark.parametrize("use_template_asset_id", [True, False])
+@pytest.mark.asyncio
+async def test_get_run_contract_marks_template_checksum_drift_needs_action(
+    use_template_asset_id: bool,
+    published_checksum: str,
+    current_checksum: str,
+) -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    fallback_asset_id = uuid4()
+    output_config = {
+        "template_file_id": str(template_file_id),
+        "template_checksum": published_checksum,
+        "template_name": "Published template",
+        "bindings": {"Body": "{{step_1.output.text}}"},
+    }
+    if use_template_asset_id:
+        output_config["template_asset_id"] = str(template_asset_id)
+
+    template_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": output_config,
+        }
+    )
+    flow = _flow(step=template_step).model_copy(
+        update={"published_version": 4, "steps": [template_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    asset_id_asset = SimpleNamespace(
+        id=template_asset_id,
+        file_id=template_file_id,
+        name="Asset-id template",
+        checksum=current_checksum,
+    )
+    file_id_asset = SimpleNamespace(
+        id=fallback_asset_id,
+        file_id=template_file_id,
+        name="File-id template",
+        checksum=current_checksum,
+    )
+    template_asset_repo.get.return_value = asset_id_asset
+    template_asset_repo.get_by_flow_file.return_value = file_id_asset
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(template_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(template_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": template_step.output_config,
+                    "mcp_policy": "inherit",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    ).get_run_contract(flow_id=flow.id)
+
+    readiness = contract.template_readiness[0]
+    expected_asset = asset_id_asset if use_template_asset_id else file_id_asset
+    assert readiness.status == "needs_action"
+    assert (
+        readiness.message_code
+        == FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH.value
+    )
+    assert readiness.template_asset_id == expected_asset.id
+    assert readiness.template_file_id == template_file_id
+    assert readiness.template_name == expected_asset.name
+    assert readiness.checksum == current_checksum
+    assert readiness.can_edit is False
+    assert readiness.can_download is True
+
+
 @pytest.mark.asyncio
 async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> None:
     flow_service = AsyncMock()

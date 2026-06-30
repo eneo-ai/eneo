@@ -8,6 +8,7 @@ from uuid import UUID
 
 from intric.flows.domain.flow import Flow, FlowTemplateAsset
 from intric.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_input_limits import FlowInputLimitsSource
 from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_run_contract_models import (
@@ -124,8 +125,10 @@ class FlowRunContractService:
         template_name = _string_or_none(output_config.get("template_name"))
         template_file_id = _uuid_or_none(output_config.get("template_file_id"))
         checksum = _string_or_none(output_config.get("template_checksum"))
+        published_checksum = checksum if checksum else None
         asset_id: UUID | None = None
         asset_status = FlowTemplateAssetStatus.UNAVAILABLE
+        message_code: str | None = None
 
         if asset_id_raw is not None:
             asset_id = _uuid_or_none(asset_id_raw)
@@ -170,6 +173,16 @@ class FlowRunContractService:
                     },
                 )
 
+        if (
+            asset_status is FlowTemplateAssetStatus.READY
+            and published_checksum is not None
+            and checksum != published_checksum
+        ):
+            asset_status = FlowTemplateAssetStatus.NEEDS_ACTION
+            message_code = FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH.value
+        if message_code is None and asset_status is not FlowTemplateAssetStatus.READY:
+            message_code = FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value
+
         return FlowTemplateReadinessPublic(
             step_id=step.step_id,
             template_asset_id=asset_id,
@@ -180,11 +193,7 @@ class FlowRunContractService:
             status=asset_status,
             can_edit=False,
             can_download=asset_id is not None,
-            message_code=(
-                None
-                if asset_status is FlowTemplateAssetStatus.READY
-                else "flow_template_not_accessible"
-            ),
+            message_code=message_code,
         )
 
 
