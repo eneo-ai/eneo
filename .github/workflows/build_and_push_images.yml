@@ -189,22 +189,17 @@ jobs:
             type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
-      - name: Synchronize frontend with backend
-        run: |
-          # For branches, use the SHA-suffixed tag (second tag), for tags use first tag
-          if [[ "${{ github.ref_type }}" == "branch" ]]; then
-            BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | sed -n '2p' | cut -d':' -f2)
-          else
-            BACKEND_TAG=$(echo "${{ steps.meta-backend.outputs.tags }}" | head -n1 | cut -d':' -f2)
-          fi
-          ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
-
+      # web-next (Next.js/React) is the frontend on this branch. It carries its
+      # own committed openapi types (apps/web-next/src/lib/api/schema.d.ts) and
+      # does not consume packages/eneo-js, so the old SvelteKit
+      # sync-frontend-with-backend step (eneo-js regen + apps/web version bump)
+      # is intentionally gone.
       - name: Build and push frontend Docker image
         id: build-frontend
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: ./frontend
-          file: ./frontend/Dockerfile
+          file: ./frontend/apps/web-next/Dockerfile
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}

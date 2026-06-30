@@ -1,0 +1,248 @@
+# ============================================================================
+# ENEO WEB-NEXT (React) TEST DEPLOYMENT — eneo-react.sundsvall.dev
+# ============================================================================
+# Paste this into: Dokploy → Project → Compose → General → Raw tab.
+# Paste the variables into:   Dokploy → Project → Environment tab.
+#
+# How this differs from the eneoflow compose:
+#   - Frontend is the NEW Next.js (web-next / React) app, not SvelteKit.
+#   - No Celery / flows services (this branch has none).
+#   - Backend is NOT exposed publicly. web-next reaches it server-side through
+#     the Next /api/eneo proxy + /api/chat passthrough, so only the frontend
+#     gets a Traefik router. Smaller attack surface, simpler routing.
+#   - Backend runs the src.eneo package (this branch) in password-login mode.
+#
+# PREREQUISITE — build + push the branch images first (one-off):
+#   Actions → "Build and Push Docker Images" → Run workflow → refactor/web-next
+#   This produces the tags referenced below:
+#     ghcr.io/eneo-ai/eneo-backend:refactor-web-next
+#     ghcr.io/eneo-ai/eneo-frontend:refactor-web-next   (now = web-next/React)
+#   If the ghcr packages are private, add a Registry in Dokploy (Settings →
+#   Registry) with a GitHub PAT (read:packages) so the pull is authenticated.
+#
+# Co-exists with eneoflow on the shared dokploy-network via unique eneonext_
+# container names and eneonext-* Traefik router/service names.
+# ============================================================================
+
+x-backend-image: &backend-image ghcr.io/eneo-ai/eneo-backend:refactor-web-next
+
+x-backend-env: &backend-env
+  # Infrastructure
+  POSTGRES_USER: ${POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  POSTGRES_HOST: ${POSTGRES_HOST:-eneonext_db}
+  POSTGRES_DB: ${POSTGRES_DB}
+  REDIS_HOST: ${REDIS_HOST:-eneonext_redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  # Security
+  JWT_SECRET: ${JWT_SECRET}
+  URL_SIGNING_KEY: ${URL_SIGNING_KEY}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  API_PREFIX: ${API_PREFIX:-/api/v1}
+  API_KEY_LENGTH: ${API_KEY_LENGTH:-64}
+  API_KEY_HEADER_NAME: ${API_KEY_HEADER_NAME:-X-API-Key}
+  JWT_AUDIENCE: ${JWT_AUDIENCE:-*}
+  JWT_ISSUER: ${JWT_ISSUER:-eneo}
+  JWT_EXPIRY_TIME: ${JWT_EXPIRY_TIME:-86400}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  JWT_TOKEN_PREFIX: ${JWT_TOKEN_PREFIX:-}
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://eneo-react.sundsvall.dev}
+  # LLM provider keys — set at least one to do anything useful
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  AZURE_API_KEY: ${AZURE_API_KEY:-}
+  AZURE_ENDPOINT: ${AZURE_ENDPOINT:-}
+  AZURE_API_BASE: ${AZURE_API_BASE:-}
+  AZURE_MODEL_DEPLOYMENT: ${AZURE_MODEL_DEPLOYMENT:-}
+  AZURE_API_VERSION: ${AZURE_API_VERSION:-}
+  MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+  OVHCLOUD_API_KEY: ${OVHCLOUD_API_KEY:-}
+  FLUX_API_KEY: ${FLUX_API_KEY:-}
+  TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+  INFINITY_URL: ${INFINITY_URL:-}
+  VLLM_MODEL_URL: ${VLLM_MODEL_URL:-}
+  VLLM_API_KEY: ${VLLM_API_KEY:-}
+  ENEO_SUPER_API_KEY: ${ENEO_SUPER_API_KEY:-}
+  ENEO_SUPER_DUPER_API_KEY: ${ENEO_SUPER_DUPER_API_KEY:-}
+  # File limits
+  UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-10485760}
+  UPLOAD_FILE_TO_SESSION_MAX_SIZE: ${UPLOAD_FILE_TO_SESSION_MAX_SIZE:-10485760}
+  UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: ${UPLOAD_IMAGE_TO_SESSION_MAX_SIZE:-10485760}
+  TRANSCRIPTION_MAX_FILE_SIZE: ${TRANSCRIPTION_MAX_FILE_SIZE:-209715200}
+  MAX_IN_QUESTION: ${MAX_IN_QUESTION:-1}
+  # Feature flags
+  USING_ACCESS_MANAGEMENT: ${USING_ACCESS_MANAGEMENT:-true}
+  USING_AZURE_MODELS: ${USING_AZURE_MODELS:-false}
+  USING_IAM: ${USING_IAM:-false}
+  USING_IMAGE_GENERATION: ${USING_IMAGE_GENERATION:-false}
+  USING_CRAWL: ${USING_CRAWL:-true}
+  TESTING: ${TESTING:-false}
+  DEV: ${DEV:-false}
+  # Default tenant & user — these are the password-login credentials
+  DEFAULT_TENANT_NAME: ${DEFAULT_TENANT_NAME:-Eneo}
+  DEFAULT_TENANT_QUOTA_LIMIT: ${DEFAULT_TENANT_QUOTA_LIMIT:-10737418240}
+  DEFAULT_USER_NAME: ${DEFAULT_USER_NAME:-Admin}
+  DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL}
+  DEFAULT_USER_PASSWORD: ${DEFAULT_USER_PASSWORD}
+  # Logging
+  LOGLEVEL: ${LOGLEVEL:-INFO}
+  # Runtime dirs — image runs as UID 1000 and needs a writable HOME/cache
+  HOME: /tmp
+  XDG_CACHE_HOME: /tmp/.cache
+  MPLCONFIGDIR: /tmp/.cache/matplotlib
+  EXPORT_DIR: /tmp/exports
+  NUM_WORKERS: ${NUM_WORKERS:-3}
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: eneonext_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - eneonext_postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: eneonext_redis
+    restart: unless-stopped
+    volumes:
+      - eneonext_redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db-init:
+    image: *backend-image
+    container_name: eneonext_db_init
+    command: ["python", "init_db.py"]
+    environment:
+      <<: *backend-env
+    networks:
+      - internal
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    image: *backend-image
+    container_name: eneonext_backend
+    restart: unless-stopped
+    # Run migrations, then gunicorn. --timeout 900 so long LLM / AI Builder
+    # requests are not killed mid-response (the eneoflow Bad Gateway lesson).
+    command:
+      - /bin/sh
+      - -c
+      - |
+        /app/.venv/bin/alembic upgrade head
+        exec /app/.venv/bin/gunicorn src.eneo.server.main:app \
+          --workers "$${NUM_WORKERS:-3}" \
+          --worker-class uvicorn.workers.UvicornWorker \
+          --bind 0.0.0.0:8000 \
+          --timeout 900 \
+          --graceful-timeout 60 \
+          --keep-alive 75 \
+          --access-logfile - \
+          --error-logfile -
+    environment:
+      <<: *backend-env
+    volumes:
+      - eneonext_backend_data:/app/data
+      - eneonext_temp_files:/tmp
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/version', timeout=5).read()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+
+  worker:
+    # ARQ background worker (uploads, crawls, integrations). Drop this service
+    # if you don't need background processing for the test.
+    image: *backend-image
+    container_name: eneonext_worker
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      RUN_AS_WORKER: "true"
+    volumes:
+      - eneonext_backend_data:/app/data
+      - eneonext_temp_files:/tmp
+    networks:
+      - internal
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    image: ghcr.io/eneo-ai/eneo-frontend:refactor-web-next
+    container_name: eneonext_frontend
+    restart: unless-stopped
+    environment:
+      # Browser never calls the backend directly — all server-side via the proxy.
+      ENEO_BACKEND_URL: http://eneonext_backend:8000
+      SESSION_SECRET: ${SESSION_SECRET}
+      APP_ORIGIN: https://eneo-react.sundsvall.dev
+      NODE_ENV: production
+    networks:
+      - internal
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      # HTTPS router
+      - traefik.http.routers.eneonext-frontend.rule=Host(`eneo-react.sundsvall.dev`)
+      - traefik.http.routers.eneonext-frontend.entrypoints=websecure
+      - traefik.http.routers.eneonext-frontend.tls=true
+      - traefik.http.routers.eneonext-frontend.tls.certresolver=letsencrypt
+      - traefik.http.routers.eneonext-frontend.service=eneonext-frontend
+      - traefik.http.services.eneonext-frontend.loadbalancer.server.port=3000
+      # HTTP → HTTPS redirect
+      - traefik.http.routers.eneonext-frontend-http.rule=Host(`eneo-react.sundsvall.dev`)
+      - traefik.http.routers.eneonext-frontend-http.entrypoints=web
+      - traefik.http.routers.eneonext-frontend-http.middlewares=eneonext-redirect-https
+      - traefik.http.routers.eneonext-frontend-http.service=eneonext-frontend
+      - traefik.http.middlewares.eneonext-redirect-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.eneonext-redirect-https.redirectscheme.permanent=true
+    depends_on:
+      backend:
+        condition: service_healthy
+
+networks:
+  internal:
+    driver: bridge
+  dokploy-network:
+    external: true
+
+volumes:
+  eneonext_postgres_data:
+  eneonext_redis_data:
+  eneonext_backend_data:
+  eneonext_temp_files:
