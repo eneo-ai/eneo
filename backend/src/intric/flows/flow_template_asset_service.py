@@ -12,11 +12,16 @@ from intric.flows.domain.flow import FlowTemplateAsset, FlowTemplateAssetStatus
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.infrastructure.flow_repo import FlowRepository
+from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
 )
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+)
 from intric.users.user import UserInDB
 
 
@@ -29,12 +34,14 @@ class FlowTemplateAssetService:
         file_repo: FileRepository,
         file_service: FileService,
         template_asset_repo: FlowTemplateAssetRepository,
+        flow_version_repo: FlowVersionRepository,
     ):
         self.user = user
         self.flow_repo = flow_repo
         self.file_repo = file_repo
         self.file_service = file_service
         self.template_asset_repo = template_asset_repo
+        self.flow_version_repo = flow_version_repo
 
     async def list_assets(
         self,
@@ -113,6 +120,44 @@ class FlowTemplateAssetService:
             "extracted_text_preview": extract_docx_template_text_preview(file.blob),
             "status": asset.status,
         }
+
+    async def delete_asset(
+        self,
+        *,
+        flow_id: UUID,
+        asset_id: UUID,
+    ) -> FlowTemplateAsset:
+        flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        persisted_flow_id = flow.require_persisted_id()
+        asset = await self.template_asset_repo.get(
+            asset_id=asset_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if asset.flow_id != persisted_flow_id:
+            raise NotFoundException("Flow template asset not found.")
+
+        if await self.flow_version_repo.has_template_asset_reference(
+            flow_id=persisted_flow_id,
+            tenant_id=self.user.tenant_id,
+            template_asset_id=asset.id,
+            template_file_id=asset.file_id,
+        ):
+            raise ConflictException(
+                "The DOCX template is used by a published flow definition and cannot be deleted.",
+                code=FlowApiErrorCode.TEMPLATE_IN_USE.value,
+                context={
+                    "flow_id": str(persisted_flow_id),
+                    "template_asset_id": str(asset.id),
+                    "template_file_id": str(asset.file_id),
+                },
+            )
+
+        await self.template_asset_repo.soft_delete(
+            asset_id=asset.id,
+            tenant_id=self.user.tenant_id,
+            updated_by_user_id=self.user.id,
+        )
+        return asset
 
     async def get_asset_with_file(
         self,

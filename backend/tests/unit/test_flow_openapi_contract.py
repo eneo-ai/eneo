@@ -293,6 +293,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/steps/{step_id}/runtime-files/": {"post"},
     "/api/v1/flows/{id}/runtime-files/{file_id}/": {"delete"},
     "/api/v1/flows/{id}/template-files/": {"post"},
+    "/api/v1/flows/{id}/template-files/{file_id}/": {"delete"},
     "/api/v1/flows/{id}/template-inspect/": {"get"},
     "/api/v1/flows/{id}/runs/": {"get", "post"},
     "/api/v1/flows/{id}/runs/{run_id}/": {"get"},
@@ -408,6 +409,9 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "delete",
     ): "delete_flow_assistant",
     ("/api/v1/flows/{id}/template-files/", "post"): "upload_flow_template_file",
+    ("/api/v1/flows/{id}/template-files/{file_id}/", "delete"): (
+        "delete_flow_template_file"
+    ),
     ("/api/v1/flows/{id}/template-inspect/", "get"): "inspect_flow_template",
     ("/api/v1/settings/flow-input-limits", "get"): "get_flow_input_limits",
     ("/api/v1/settings/flow-input-limits", "patch"): "update_flow_input_limits",
@@ -485,6 +489,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/template-files/",
         "post",
     ): {"400", "403", "404", "413", "415", "422"},
+    (
+        "/api/v1/flows/{id}/template-files/{file_id}/",
+        "delete",
+    ): {"403", "404", "409", "422"},
     (
         "/api/v1/flows/{id}/template-inspect/",
         "get",
@@ -638,6 +646,10 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/template-files/",
         "post",
     ): {"400", "403", "404", "413", "415"},
+    (
+        "/api/v1/flows/{id}/template-files/{file_id}/",
+        "delete",
+    ): {"403", "404", "409"},
     (
         "/api/v1/flows/{id}/template-inspect/",
         "get",
@@ -2862,6 +2874,29 @@ def test_openapi_runtime_file_delete_contract_is_machine_readable(
     )
     assert conflict_example.get("intric_error_code") == int(ErrorCodes.CONFLICT)
     assert conflict_example.get("code") == "flow_runtime_file_attached"
+
+
+def test_openapi_template_file_delete_contract_is_machine_readable(
+    openapi_spec: dict,
+) -> None:
+    operation = (
+        openapi_spec.get("paths", {})
+        .get("/api/v1/flows/{id}/template-files/{file_id}/", {})
+        .get("delete", {})
+    )
+    responses = operation.get("responses", {})
+    success = responses.get("204", {})
+    assert "content" not in success
+    assert operation.get("operationId") == "delete_flow_template_file"
+
+    conflict_example = (
+        responses.get("409", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("example", {})
+    )
+    assert conflict_example.get("intric_error_code") == int(ErrorCodes.CONFLICT)
+    assert conflict_example.get("code") == FlowApiErrorCode.TEMPLATE_IN_USE.value
 
     parameters = operation.get("parameters", [])
     names = {param.get("name") for param in parameters if isinstance(param, dict)}

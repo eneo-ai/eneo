@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Mapping, TypeGuard, cast
 from uuid import UUID
 
@@ -39,6 +41,29 @@ FLOW_PUBLISHED_FORM_SCHEMA_INVALID = (
 )
 
 
+class PublishedTemplateReferenceUndeterminedReason(str, Enum):
+    UNKNOWN_SCHEMA = "unknown_schema"
+    UNREADABLE_REFERENCE = "unreadable_reference"
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedTemplateReferenceScan:
+    template_asset_ids: frozenset[UUID]
+    template_file_ids: frozenset[UUID]
+    undetermined_reason: PublishedTemplateReferenceUndeterminedReason | None = None
+
+    @property
+    def can_determine_safety(self) -> bool:
+        return self.undetermined_reason is None
+
+    def may_reference(self, *, template_asset_id: UUID, template_file_id: UUID) -> bool:
+        return (
+            not self.can_determine_safety
+            or template_asset_id in self.template_asset_ids
+            or template_file_id in self.template_file_ids
+        )
+
+
 def _step_order_sort_key(step: FlowPersistedJsonObject) -> int:
     step_order = step.get("step_order")
     if isinstance(step_order, int) and not isinstance(step_order, bool):
@@ -48,6 +73,111 @@ def _step_order_sort_key(step: FlowPersistedJsonObject) -> int:
 
 def _is_json_object(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
+
+
+def _normalized_uuid(value: object) -> UUID | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+def _template_reference_from_output_config(
+    output_config: Mapping[str, object],
+    key: str,
+) -> tuple[UUID | None, bool]:
+    value = output_config.get(key)
+    if value in (None, ""):
+        return None, False
+    normalized = _normalized_uuid(value)
+    return normalized, normalized is None
+
+
+def scan_published_template_references(
+    definition_json: Mapping[str, object],
+) -> PublishedTemplateReferenceScan:
+    """Return template ids visible in a known-schema published snapshot.
+
+    Unknown schemas and unreadable template-reference values are not safe to
+    reclaim because over-reclaiming a blob is unrecoverable while retention can
+    clean up a skipped blob after a schema-aware follow-up.
+    """
+    schema_version = definition_json.get("schema_version")
+    if schema_version != FLOW_DEFINITION_SCHEMA_VERSION:
+        return PublishedTemplateReferenceScan(
+            template_asset_ids=frozenset(),
+            template_file_ids=frozenset(),
+            undetermined_reason=(
+                PublishedTemplateReferenceUndeterminedReason.UNKNOWN_SCHEMA
+            ),
+        )
+
+    asset_ids: set[UUID] = set()
+    file_ids: set[UUID] = set()
+    raw_steps = definition_json.get("steps")
+    if not isinstance(raw_steps, list):
+        return PublishedTemplateReferenceScan(
+            template_asset_ids=frozenset(),
+            template_file_ids=frozenset(),
+        )
+
+    for raw_step in cast(list[object], raw_steps):
+        if not _is_json_object(raw_step):
+            continue
+        raw_output_config = raw_step.get("output_config")
+        if not _is_json_object(raw_output_config):
+            continue
+        template_asset_id, unreadable_asset_reference = (
+            _template_reference_from_output_config(
+                raw_output_config,
+                "template_asset_id",
+            )
+        )
+        template_file_id, unreadable_file_reference = (
+            _template_reference_from_output_config(
+                raw_output_config,
+                "template_file_id",
+            )
+        )
+        if unreadable_asset_reference or unreadable_file_reference:
+            return PublishedTemplateReferenceScan(
+                template_asset_ids=frozenset(asset_ids),
+                template_file_ids=frozenset(file_ids),
+                undetermined_reason=(
+                    PublishedTemplateReferenceUndeterminedReason.UNREADABLE_REFERENCE
+                ),
+            )
+        if template_asset_id is not None:
+            asset_ids.add(template_asset_id)
+        if template_file_id is not None:
+            file_ids.add(template_file_id)
+
+    return PublishedTemplateReferenceScan(
+        template_asset_ids=frozenset(asset_ids),
+        template_file_ids=frozenset(file_ids),
+    )
+
+
+def merge_published_template_reference_scans(
+    scans: Iterable[PublishedTemplateReferenceScan],
+) -> PublishedTemplateReferenceScan:
+    asset_ids: set[UUID] = set()
+    file_ids: set[UUID] = set()
+    for scan in scans:
+        asset_ids.update(scan.template_asset_ids)
+        file_ids.update(scan.template_file_ids)
+        if scan.undetermined_reason is not None:
+            return PublishedTemplateReferenceScan(
+                template_asset_ids=frozenset(asset_ids),
+                template_file_ids=frozenset(file_ids),
+                undetermined_reason=scan.undetermined_reason,
+            )
+    return PublishedTemplateReferenceScan(
+        template_asset_ids=frozenset(asset_ids),
+        template_file_ids=frozenset(file_ids),
+    )
 
 
 @dataclass(frozen=True)

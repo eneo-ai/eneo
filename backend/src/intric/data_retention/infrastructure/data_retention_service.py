@@ -52,6 +52,7 @@ from intric.flows.flow_retention_tombstone import (
 from intric.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
+    FlowTemplateAssetPurgeCounts,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ class FlowRuntimeCleanupCounts(TypedDict):
     flow_webhook_deliveries_deleted: int
     flow_audit_outbox_rows_deleted: int
     flow_review_checkpoints_deleted: int
+    flow_template_assets_purged: int
+    flow_template_asset_files_deleted: int
+    flow_template_assets_skipped_published_reference: int
+    flow_template_assets_skipped_undetermined_reference: int
     flow_runs_skipped_undelivered_audit: int
     flow_runs_skipped_active_rerun: int
 
@@ -86,6 +91,10 @@ def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
         "flow_webhook_deliveries_deleted": 0,
         "flow_audit_outbox_rows_deleted": 0,
         "flow_review_checkpoints_deleted": 0,
+        "flow_template_assets_purged": 0,
+        "flow_template_asset_files_deleted": 0,
+        "flow_template_assets_skipped_published_reference": 0,
+        "flow_template_assets_skipped_undetermined_reference": 0,
         "flow_runs_skipped_undelivered_audit": 0,
         "flow_runs_skipped_active_rerun": 0,
     }
@@ -138,6 +147,21 @@ class DataRetentionService:
         counts["flow_review_checkpoints_deleted"] += (
             purge_counts.flow_review_checkpoints_deleted
         )
+        template_asset_counts = await self.purge_soft_deleted_flow_template_assets(
+            limit=RETENTION_BATCH_SIZE,
+        )
+        counts["flow_template_assets_purged"] += (
+            template_asset_counts.flow_template_assets_purged
+        )
+        counts["flow_template_asset_files_deleted"] += (
+            template_asset_counts.flow_template_asset_files_deleted
+        )
+        counts["flow_template_assets_skipped_published_reference"] += (
+            template_asset_counts.flow_template_assets_skipped_published_reference
+        )
+        counts["flow_template_assets_skipped_undetermined_reference"] += (
+            template_asset_counts.flow_template_assets_skipped_undetermined_reference
+        )
         blocked_counts = await self.count_blocked_flow_run_history_purge_candidates(
             now=now
         )
@@ -155,6 +179,16 @@ class DataRetentionService:
                 "(undelivered_audit=%s, active_rerun=%s)",
                 blocked_counts.skipped_undelivered_audit,
                 blocked_counts.skipped_active_rerun,
+            )
+
+        if (
+            template_asset_counts.flow_template_assets_skipped_undetermined_reference
+            > 0
+        ):
+            logger.warning(
+                "Skipped Flow template asset purge candidates because published "
+                "definition references could not be determined (count=%s)",
+                template_asset_counts.flow_template_assets_skipped_undetermined_reference,
             )
 
         debug_counts = await self.redact_old_flow_debug_evidence(now=now)
@@ -477,6 +511,15 @@ class DataRetentionService:
                 break
 
         return total_counts
+
+    async def purge_soft_deleted_flow_template_assets(
+        self,
+        *,
+        limit: int,
+    ) -> FlowTemplateAssetPurgeCounts:
+        return await FlowRunHistoryPurgeRepository(
+            self.session
+        ).purge_soft_deleted_template_assets(limit=limit)
 
     async def purge_old_flow_run_history_batch(
         self, *, now: datetime, limit: int

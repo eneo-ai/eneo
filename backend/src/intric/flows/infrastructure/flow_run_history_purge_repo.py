@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -24,6 +25,9 @@ from intric.database.tables.flow_tables import (
     FlowTemplateAssets,
 )
 from intric.database.tables.questions_table import QuestionsFiles
+from intric.flows.infrastructure.flow_version_repo import (
+    scan_flow_version_template_references,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +59,24 @@ class FlowRunHistoryPurgeCounts:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FlowTemplateAssetPurgeCounts:
+    flow_template_assets_purged: int = 0
+    flow_template_asset_files_deleted: int = 0
+    flow_template_assets_skipped_published_reference: int = 0
+    flow_template_assets_skipped_undetermined_reference: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _SoftDeletedTemplateAssetCandidate:
+    asset_id: UUID
+    file_id: UUID
+    flow_id: UUID
+    tenant_id: UUID
+
+
 class FlowRunHistoryPurgeRepository:
-    """Deletes run-owned Flow history after retention scheduling selects run ids."""
+    """Reclaims Flow-owned files after retention selects safe tombstones."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -90,6 +110,103 @@ class FlowRunHistoryPurgeRepository:
             flow_audit_outbox_rows_deleted=audit_outbox_rows_deleted,
             flow_review_checkpoints_deleted=review_checkpoints_deleted,
         )
+
+    async def purge_soft_deleted_template_assets(
+        self,
+        *,
+        limit: int,
+    ) -> FlowTemplateAssetPurgeCounts:
+        candidates = await self._soft_deleted_template_asset_candidates()
+        if not candidates:
+            return FlowTemplateAssetPurgeCounts()
+
+        candidates_by_flow: dict[
+            tuple[UUID, UUID], list[_SoftDeletedTemplateAssetCandidate]
+        ] = defaultdict(list)
+        for candidate in candidates:
+            candidates_by_flow[(candidate.tenant_id, candidate.flow_id)].append(
+                candidate
+            )
+
+        reclaimable_candidates: list[_SoftDeletedTemplateAssetCandidate] = []
+        skipped_published_reference = 0
+        skipped_undetermined_reference = 0
+        for (tenant_id, flow_id), group in candidates_by_flow.items():
+            scan = await scan_flow_version_template_references(
+                self.session,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+            if not scan.can_determine_safety:
+                skipped_undetermined_reference += len(group)
+                continue
+            for candidate in group:
+                if scan.may_reference(
+                    template_asset_id=candidate.asset_id,
+                    template_file_id=candidate.file_id,
+                ):
+                    skipped_published_reference += 1
+                else:
+                    reclaimable_candidates.append(candidate)
+
+        reclaimable_asset_ids = {
+            candidate.asset_id for candidate in reclaimable_candidates[:limit]
+        }
+        deleted_file_id_rows = await self._delete_soft_deleted_template_assets(
+            reclaimable_asset_ids
+        )
+        template_asset_files_deleted = await self._delete_unreferenced_files(
+            set(deleted_file_id_rows)
+        )
+        return FlowTemplateAssetPurgeCounts(
+            flow_template_assets_purged=len(deleted_file_id_rows),
+            flow_template_asset_files_deleted=template_asset_files_deleted,
+            flow_template_assets_skipped_published_reference=(
+                skipped_published_reference
+            ),
+            flow_template_assets_skipped_undetermined_reference=(
+                skipped_undetermined_reference
+            ),
+        )
+
+    async def _soft_deleted_template_asset_candidates(
+        self,
+    ) -> list[_SoftDeletedTemplateAssetCandidate]:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowTemplateAssets.id,
+                    FlowTemplateAssets.file_id,
+                    FlowTemplateAssets.flow_id,
+                    FlowTemplateAssets.tenant_id,
+                )
+                .where(FlowTemplateAssets.deleted_at.isnot(None))
+                .order_by(FlowTemplateAssets.deleted_at, FlowTemplateAssets.id)
+            )
+        ).tuples()
+        return [
+            _SoftDeletedTemplateAssetCandidate(
+                asset_id=asset_id,
+                file_id=file_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+            )
+            for asset_id, file_id, flow_id, tenant_id in rows
+        ]
+
+    async def _delete_soft_deleted_template_assets(
+        self,
+        asset_ids: set[UUID],
+    ) -> list[UUID]:
+        if not asset_ids:
+            return []
+        result = await self.session.scalars(
+            sa.delete(FlowTemplateAssets)
+            .where(FlowTemplateAssets.id.in_(asset_ids))
+            .where(FlowTemplateAssets.deleted_at.isnot(None))
+            .returning(FlowTemplateAssets.file_id)
+        )
+        return list(result.all())
 
     async def _result_file_ids_for_runs(self, run_ids: set[UUID]) -> set[UUID]:
         result = await self.session.scalars(

@@ -17,7 +17,12 @@ from intric.files.file_service import FileService
 from intric.flows.domain.flow import Flow, FlowTemplateAsset
 from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
-from intric.main.exceptions import BadRequestException, FileTooLargeException
+from intric.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    FileTooLargeException,
+    NotFoundException,
+)
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -93,8 +98,29 @@ def _flow_for_user(user) -> Flow:
     )
 
 
+def _asset_for_flow(flow: Flow, user) -> FlowTemplateAsset:
+    now = datetime.now(timezone.utc)
+    assert flow.id is not None
+    return FlowTemplateAsset(
+        id=uuid4(),
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        tenant_id=user.tenant_id,
+        file_id=uuid4(),
+        name="template.docx",
+        checksum="checksum",
+        mimetype=DOCX_MIME,
+        placeholders=["Body"],
+        created_by_user_id=user.id,
+        updated_by_user_id=user.id,
+        status="ready",
+        created_at=now,
+        updated_at=now,
+    )
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["list", "upload", "get"])
+@pytest.mark.parametrize("operation", ["list", "upload", "get", "delete"])
 async def test_template_asset_operations_require_persisted_parent_flow_id(
     user,
     operation: str,
@@ -105,12 +131,14 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
     file_repo = AsyncMock()
     file_service = AsyncMock()
     template_asset_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
     service = FlowTemplateAssetService(
         user=user,
         flow_repo=flow_repo,
         file_repo=file_repo,
         file_service=file_service,
         template_asset_repo=template_asset_repo,
+        flow_version_repo=flow_version_repo,
     )
 
     with pytest.raises(FlowPersistedIdMissingError):
@@ -125,12 +153,16 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
                 flow_id=uuid4(),
                 upload_file=_upload("template.docx", _build_template_bytes()),
             )
+        elif operation == "delete":
+            await service.delete_asset(flow_id=uuid4(), asset_id=uuid4())
         else:
             await service.get_asset_with_file(flow_id=uuid4(), asset_id=uuid4())
 
     template_asset_repo.list_for_flow.assert_not_awaited()
     template_asset_repo.create.assert_not_awaited()
     template_asset_repo.get.assert_not_awaited()
+    template_asset_repo.soft_delete.assert_not_awaited()
+    flow_version_repo.has_template_asset_reference.assert_not_awaited()
     file_service.document_from_upload.assert_not_awaited()
 
 
@@ -181,6 +213,7 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
         file_repo=file_repo,
         file_service=file_service,
         template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
     )
 
     asset = await service.upload_asset(
@@ -226,6 +259,7 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
         file_repo=file_repo,
         file_service=file_service,
         template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
     )
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -262,6 +296,7 @@ async def test_upload_asset_rejects_oversized_docx_before_reading_body(
         file_repo=file_repo,
         file_service=file_service,
         template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
     )
     upload = UploadFile(
         file=_ReadGuard(b"body-must-not-be-read"),
@@ -274,3 +309,95 @@ async def test_upload_asset_rejects_oversized_docx_before_reading_body(
 
     file_repo.add.assert_not_awaited()
     template_asset_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_asset_soft_deletes_unpinned_template_asset(user) -> None:
+    flow = _flow_for_user(user)
+    asset = _asset_for_flow(flow, user)
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = asset
+    flow_version_repo = AsyncMock()
+    flow_version_repo.has_template_asset_reference.return_value = False
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=AsyncMock(),
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=flow_version_repo,
+    )
+
+    deleted = await service.delete_asset(flow_id=flow.id, asset_id=asset.id)
+
+    assert deleted == asset
+    flow_version_repo.has_template_asset_reference.assert_awaited_once_with(
+        flow_id=flow.id,
+        tenant_id=user.tenant_id,
+        template_asset_id=asset.id,
+        template_file_id=asset.file_id,
+    )
+    template_asset_repo.soft_delete.assert_awaited_once_with(
+        asset_id=asset.id,
+        tenant_id=user.tenant_id,
+        updated_by_user_id=user.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_asset_rejects_published_definition_pin(user) -> None:
+    flow = _flow_for_user(user)
+    asset = _asset_for_flow(flow, user)
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = asset
+    flow_version_repo = AsyncMock()
+    flow_version_repo.has_template_asset_reference.return_value = True
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=AsyncMock(),
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.delete_asset(flow_id=flow.id, asset_id=asset.id)
+
+    assert exc_info.value.code == "flow_template_in_use"
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "template_asset_id": str(asset.id),
+        "template_file_id": str(asset.file_id),
+    }
+    template_asset_repo.soft_delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_asset_hides_wrong_flow_asset(user) -> None:
+    flow = _flow_for_user(user)
+    other_flow = _flow_for_user(user)
+    asset = _asset_for_flow(other_flow, user)
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = asset
+    flow_version_repo = AsyncMock()
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=AsyncMock(),
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(NotFoundException):
+        await service.delete_asset(flow_id=flow.id, asset_id=asset.id)
+
+    flow_version_repo.has_template_asset_reference.assert_not_awaited()
+    template_asset_repo.soft_delete.assert_not_awaited()

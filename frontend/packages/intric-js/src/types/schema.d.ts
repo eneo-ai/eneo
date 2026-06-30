@@ -4178,6 +4178,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/template-files/{file_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete a flow template asset
+     * @description Remove a draft DOCX template asset from a flow. The underlying file blob is reclaimed by retention after no live or published-version reference can still use it.
+     */
+    delete: operations["delete_flow_template_file"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/template-files/{file_id}/signed-url/": {
     parameters: {
       query?: never;
@@ -41876,6 +41896,89 @@ export interface operations {
            *       "message": "Flow not found.",
            *       "intric_error_code": 9000,
            *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_flow_template_file: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow that owns the template asset. */
+        id: string;
+        /** @description Identifier of the stored template asset to delete. */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or template asset not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The template asset is still pinned by a published flow definition. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "The DOCX template is used by a published flow definition and cannot be deleted.",
+           *       "intric_error_code": 9041,
+           *       "code": "flow_template_in_use"
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

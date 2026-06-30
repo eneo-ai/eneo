@@ -34,11 +34,13 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
+    FlowTemplateAssets,
     FlowVersions,
 )
 from intric.database.tables.security_classifications_table import SecurityClassification
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.enums import (
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
@@ -63,6 +65,13 @@ class FlowRuntimeRetentionFixture:
     runtime_input_file: Files
     review_checkpoint: FlowRunReviewCheckpoints
     webhook_delivery: FlowRunWebhookDeliveries
+
+
+@dataclass(frozen=True)
+class FlowTemplateAssetRetentionFixture:
+    flow: Flows
+    template_file: Files
+    template_asset: FlowTemplateAssets
 
 
 @pytest.fixture
@@ -423,6 +432,96 @@ async def _create_flow_runtime_fixture(
     )
 
 
+async def _create_flow_template_asset_fixture(
+    async_session: AsyncSession,
+    *,
+    tenant,
+    user,
+    space: Spaces,
+    deleted: bool,
+) -> FlowTemplateAssetRetentionFixture:
+    now = datetime.now(timezone.utc)
+    flow = Flows(
+        name=f"Template retention flow {uuid4()}",
+        description="Template asset retention target",
+        tenant_id=tenant.id,
+        space_id=space.id,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json={},
+        data_retention_days=None,
+        draft_revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+    async_session.add(flow)
+    await async_session.flush()
+
+    template_file = Files(
+        name="template.docx",
+        text=None,
+        blob=b"docx-template-bytes",
+        checksum=f"template-{uuid4()}",
+        size=1024,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_type="document",
+        transcription=None,
+        owner_type="user",
+        owner_user_id=user.id,
+        owner_service_id=None,
+        tenant_id=tenant.id,
+        created_at=now,
+        updated_at=now,
+    )
+    async_session.add(template_file)
+    await async_session.flush()
+
+    template_asset = FlowTemplateAssets(
+        flow_id=flow.id,
+        space_id=space.id,
+        tenant_id=tenant.id,
+        file_id=template_file.id,
+        name=template_file.name,
+        checksum=template_file.checksum,
+        mimetype=template_file.mimetype,
+        placeholders=["Body"],
+        created_by_user_id=user.id,
+        updated_by_user_id=user.id,
+        status="ready",
+        deleted_at=now if deleted else None,
+        created_at=now,
+        updated_at=now,
+    )
+    async_session.add(template_asset)
+    await async_session.flush()
+    return FlowTemplateAssetRetentionFixture(
+        flow=flow,
+        template_file=template_file,
+        template_asset=template_asset,
+    )
+
+
+async def _add_flow_version_definition(
+    async_session: AsyncSession,
+    *,
+    flow: Flows,
+    tenant_id: UUID,
+    version: int,
+    definition_json: FlowPersistedJsonObject,
+) -> None:
+    async_session.add(
+        FlowVersions(
+            flow_id=flow.id,
+            version=version,
+            tenant_id=tenant_id,
+            definition_checksum=f"checksum-{uuid4()}",
+            definition_json=definition_json,
+        )
+    )
+    await async_session.flush()
+
+
 async def _add_younger_flow_runtime_result_file_reference(
     async_session: AsyncSession,
     *,
@@ -709,6 +808,153 @@ async def _flow_runtime_upload_exists(
 async def _flush_and_clear_identity_map(async_session: AsyncSession) -> None:
     await async_session.flush()
     async_session.expunge_all()
+
+
+@pytest.mark.asyncio
+async def test_purge_soft_deleted_flow_template_assets_reclaims_unpinned_blob(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_template_asset_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        deleted=True,
+    )
+
+    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
+        limit=10,
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_template_assets_purged == 1
+    assert counts.flow_template_asset_files_deleted == 1
+    assert counts.flow_template_assets_skipped_published_reference == 0
+    assert counts.flow_template_assets_skipped_undetermined_reference == 0
+    assert (
+        await async_session.get(FlowTemplateAssets, fixture.template_asset.id) is None
+    )
+    assert await async_session.get(Files, fixture.template_file.id) is None
+
+
+@pytest.mark.asyncio
+async def test_purge_soft_deleted_flow_template_assets_keeps_active_asset_blob(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_template_asset_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        deleted=False,
+    )
+
+    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
+        limit=10,
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_template_assets_purged == 0
+    assert counts.flow_template_asset_files_deleted == 0
+    assert await async_session.get(FlowTemplateAssets, fixture.template_asset.id)
+    assert await async_session.get(Files, fixture.template_file.id)
+
+
+@pytest.mark.asyncio
+async def test_purge_soft_deleted_flow_template_assets_keeps_non_current_version_pin(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_template_asset_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        deleted=True,
+    )
+    await _add_flow_version_definition(
+        async_session,
+        flow=fixture.flow,
+        tenant_id=test_tenant.id,
+        version=1,
+        definition_json={
+            "schema_version": 1,
+            "steps": [
+                {
+                    "output_config": {
+                        "template_asset_id": str(fixture.template_asset.id),
+                        "template_file_id": str(fixture.template_file.id),
+                    }
+                }
+            ],
+        },
+    )
+    await _add_flow_version_definition(
+        async_session,
+        flow=fixture.flow,
+        tenant_id=test_tenant.id,
+        version=2,
+        definition_json={"schema_version": 1, "steps": []},
+    )
+
+    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
+        limit=10,
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_template_assets_purged == 0
+    assert counts.flow_template_asset_files_deleted == 0
+    assert counts.flow_template_assets_skipped_published_reference == 1
+    assert counts.flow_template_assets_skipped_undetermined_reference == 0
+    assert await async_session.get(FlowTemplateAssets, fixture.template_asset.id)
+    assert await async_session.get(Files, fixture.template_file.id)
+
+
+@pytest.mark.asyncio
+async def test_purge_soft_deleted_flow_template_assets_counts_unknown_schema_skip(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_template_asset_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        deleted=True,
+    )
+    await _add_flow_version_definition(
+        async_session,
+        flow=fixture.flow,
+        tenant_id=test_tenant.id,
+        version=1,
+        definition_json={"schema_version": 2, "future_steps": []},
+    )
+
+    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
+        limit=10,
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_template_assets_purged == 0
+    assert counts.flow_template_asset_files_deleted == 0
+    assert counts.flow_template_assets_skipped_published_reference == 0
+    assert counts.flow_template_assets_skipped_undetermined_reference == 1
+    assert await async_session.get(FlowTemplateAssets, fixture.template_asset.id)
+    assert await async_session.get(Files, fixture.template_file.id)
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,17 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].method).toBe("get");
   });
 
+  it("deletes template assets through the flow template route", async () => {
+    const fetch = vi.fn(async () => undefined);
+    const flows = initFlows({ fetch });
+
+    await flows.templates.delete({ id: "flow-1", fileId: "template-asset-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/template-files/template-asset-1/");
+    expect(fetch.mock.calls[0][1].method).toBe("delete");
+  });
+
   it("loads run contract from canonical runtime route", async () => {
     const fetch = vi.fn(async () => ({ published_flow_version: 7, steps_requiring_input: [] }));
     const flows = initFlows({ fetch });

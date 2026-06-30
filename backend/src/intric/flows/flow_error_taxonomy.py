@@ -916,6 +916,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Ask for a new upload or restore the template file content.",
         user_action="Choose or upload the template again.",
     ),
+    FlowApiErrorCode.TEMPLATE_IN_USE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="A published flow definition still references the template asset.",
+        consumer_action="Keep the template asset available while published versions can use it.",
+        user_action="Unpublish or replace the published flow template before deleting it.",
+    ),
     FlowApiErrorCode.RUN_RERUN_REASON_REQUIRED: _entry(
         category="Rerun",
         surfaced_through="API error response",

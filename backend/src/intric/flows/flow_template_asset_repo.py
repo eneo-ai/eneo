@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -97,6 +98,28 @@ class FlowTemplateAssetRepository:
             raise NotFoundException("Flow template asset not found.")
         return self._to_domain(item)
 
+    async def soft_delete(
+        self,
+        *,
+        asset_id: UUID,
+        tenant_id: UUID,
+        updated_by_user_id: UUID | None,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        result = await self.session.execute(
+            sa.update(FlowTemplateAssets)
+            .where(FlowTemplateAssets.id == asset_id)
+            .where(FlowTemplateAssets.tenant_id == tenant_id)
+            .where(FlowTemplateAssets.deleted_at.is_(None))
+            .values(
+                deleted_at=now,
+                updated_at=now,
+                updated_by_user_id=updated_by_user_id,
+            )
+        )
+        if _affected_row_count(result) == 0:
+            raise NotFoundException("Flow template asset not found.")
+
     def _base_query(self):
         updated_by_name = sa.func.coalesce(Users.username, Users.email).label(
             "last_updated_by_name"
@@ -139,3 +162,8 @@ class FlowTemplateAssetRepository:
                 "updated_at": asset.updated_at,
             }
         )
+
+
+def _affected_row_count(result: object) -> int:
+    rowcount = getattr(result, "rowcount", 0)
+    return rowcount if isinstance(rowcount, int) else 0

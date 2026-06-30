@@ -4138,6 +4138,7 @@
   "flow_error_flow_runtime_file_empty": "Den uppladdade filen är tom. Välj en fil med innehåll och ladda upp den igen.",
   "flow_error_flow_template_corrupted_archive": "Word-mallen verkar vara skadad. Prova att öppna och spara om filen i Word.",
   "flow_error_flow_template_invalid_archive": "Den uppladdade filen är inte en giltig Word-mall (.docx). Välj en .docx-fil och försök igen.",
+  "flow_error_flow_template_in_use": "Mallen används av en publicerad flow-version och kan inte tas bort.",
   "flow_error_flow_template_macro_not_allowed": "Makroaktiverade Word-filer (.docm/.dotm) stöds inte som mallar. Spara filen som .docx och försök igen.",
   "flow_error_flow_template_missing_content": "Den valda DOCX-mallen kunde inte läsas eftersom filinnehållet saknas.",
   "flow_error_flow_template_missing_required_parts": "Filen ser inte ut att vara en giltig Word-mall. Kontrollera filen och försök igen.",

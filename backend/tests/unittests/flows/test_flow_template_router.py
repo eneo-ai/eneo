@@ -11,11 +11,14 @@ from uuid import uuid4
 import pytest
 from fastapi import UploadFile
 
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.signed_urls import verify_signed_token
 from intric.files.file_models import SignedURLRequest
 from intric.flows.api import flow_access_context as flow_access_context_module
 from intric.flows.api import flow_template_router as flow_template_router_module
 from intric.flows.api.flow_template_router import (
+    delete_flow_template_file,
     generate_flow_template_signed_url,
     inspect_flow_template,
     upload_flow_template_file,
@@ -238,6 +241,68 @@ async def test_generate_flow_template_signed_url_uses_template_file_tenant(
     )
     assert payload is not None
     assert payload["expires_at"] == response.expires_at
+
+
+@pytest.mark.asyncio
+async def test_delete_flow_template_file_enforces_scope_and_audits_asset_delete(
+    monkeypatch,
+):
+    container = MagicMock()
+    template_asset_service = AsyncMock()
+    audit_service = AsyncMock()
+    user = SimpleNamespace(
+        id=uuid4(), tenant_id=uuid4(), permissions=[Permission.FLOWS]
+    )
+    flow_id = uuid4()
+    asset = FlowTemplateAsset.model_validate(
+        {
+            "id": uuid4(),
+            "flow_id": flow_id,
+            "space_id": uuid4(),
+            "tenant_id": user.tenant_id,
+            "file_id": uuid4(),
+            "name": "template.docx",
+            "checksum": "checksum",
+            "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "placeholders": ["summary"],
+            "status": "ready",
+        }
+    )
+    container.flow_template_asset_service.return_value = template_asset_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    template_asset_service.delete_asset.return_value = asset
+
+    requested_flow_ids: list[str] = []
+
+    async def allow_edit_access(request, _container, *, flow_id):
+        requested_flow_ids.append(str(flow_id))
+        return SimpleNamespace(flow=_flow(flow_id), actor=MagicMock())
+
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "require_flow_edit_access",
+        allow_edit_access,
+    )
+
+    response = await delete_flow_template_file(
+        id=flow_id,
+        file_id=asset.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.status_code == 204
+    assert requested_flow_ids == [str(flow_id)]
+    template_asset_service.delete_asset.assert_awaited_once_with(
+        flow_id=flow_id,
+        asset_id=asset.id,
+    )
+    audit_service.log_async.assert_awaited_once()
+    audit_kwargs = audit_service.log_async.await_args.kwargs
+    assert audit_kwargs["action"] == ActionType.FILE_DELETED
+    assert audit_kwargs["entity_type"] == EntityType.FILE
+    assert audit_kwargs["entity_id"] == asset.file_id
 
 
 @pytest.mark.asyncio

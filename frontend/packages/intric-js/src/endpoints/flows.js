@@ -434,6 +434,18 @@ export function initFlows(client) {
       },
 
       /**
+       * Delete a flow-scoped DOCX template asset.
+       * @param {{id: string, fileId: string, signal?: AbortSignal}} params
+       * @throws {IntricError}
+       */
+      delete: async ({ id, fileId, signal }) => {
+        return _fetch(`/api/v1/flows/${id}/template-files/${fileId}/`, {
+          method: "delete",
+          signal
+        });
+      },
+
+      /**
        * Inspect placeholders in a flow-scoped DOCX template asset.
        * @param {{id: string, fileId: string}} params
        * @throws {IntricError}

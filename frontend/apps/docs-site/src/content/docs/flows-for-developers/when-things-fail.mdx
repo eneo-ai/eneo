@@ -241,18 +241,19 @@ flowchart LR
 ### Template asset
 
 <details>
-<summary>8 error codes</summary>
+<summary>9 error codes</summary>
 
-| Code                                   | Surface                            | Cause                                                               | Consumer action                                                        | User action                                         |
-| -------------------------------------- | ---------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------- |
-| `flow_template_invalid_archive`        | API error response                 | The uploaded file is not a valid DOCX archive.                      | Validate DOCX archives before upload when possible.                    | Choose a valid DOCX file and try again.             |
-| `flow_template_corrupted_archive`      | API error response                 | The DOCX archive appears corrupted.                                 | Ask the user to reopen and resave the file before upload.              | Open and save the file again in Word, then retry.   |
-| `flow_template_macro_not_allowed`      | API error response                 | The uploaded template is macro-enabled and not allowed.             | Accept only non-macro DOCX templates for Flow templates.               | Save the file as DOCX without macros and try again. |
-| `flow_template_missing_required_parts` | API error response                 | The DOCX file lacks required document parts.                        | Reject the file and ask for a complete Word document template.         | Choose a complete DOCX template and try again.      |
-| `flow_template_not_accessible`         | API response and run error payload | The template file is not accessible to the caller or runtime actor. | Use a template stored in the flow or space with the right permissions. | Choose a template you can access.                   |
-| `flow_template_read_only`              | API error response                 | The caller can run the flow but cannot replace its template.        | Hide template replacement for read-only callers.                       | Ask a flow editor to change the template.           |
-| `flow_template_unsupported_extension`  | API error response                 | The uploaded template file extension is not supported.              | Allow only DOCX files for template upload.                             | Choose a DOCX file and try again.                   |
-| `flow_template_missing_content`        | API response and run error payload | The selected template record has no readable binary content.        | Ask for a new upload or restore the template file content.             | Choose or upload the template again.                |
+| Code                                   | Surface                            | Cause                                                               | Consumer action                                                        | User action                                                          |
+| -------------------------------------- | ---------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `flow_template_invalid_archive`        | API error response                 | The uploaded file is not a valid DOCX archive.                      | Validate DOCX archives before upload when possible.                    | Choose a valid DOCX file and try again.                              |
+| `flow_template_corrupted_archive`      | API error response                 | The DOCX archive appears corrupted.                                 | Ask the user to reopen and resave the file before upload.              | Open and save the file again in Word, then retry.                    |
+| `flow_template_macro_not_allowed`      | API error response                 | The uploaded template is macro-enabled and not allowed.             | Accept only non-macro DOCX templates for Flow templates.               | Save the file as DOCX without macros and try again.                  |
+| `flow_template_missing_required_parts` | API error response                 | The DOCX file lacks required document parts.                        | Reject the file and ask for a complete Word document template.         | Choose a complete DOCX template and try again.                       |
+| `flow_template_not_accessible`         | API response and run error payload | The template file is not accessible to the caller or runtime actor. | Use a template stored in the flow or space with the right permissions. | Choose a template you can access.                                    |
+| `flow_template_read_only`              | API error response                 | The caller can run the flow but cannot replace its template.        | Hide template replacement for read-only callers.                       | Ask a flow editor to change the template.                            |
+| `flow_template_unsupported_extension`  | API error response                 | The uploaded template file extension is not supported.              | Allow only DOCX files for template upload.                             | Choose a DOCX file and try again.                                    |
+| `flow_template_missing_content`        | API response and run error payload | The selected template record has no readable binary content.        | Ask for a new upload or restore the template file content.             | Choose or upload the template again.                                 |
+| `flow_template_in_use`                 | API error response                 | A published flow definition still references the template asset.    | Keep the template asset available while published versions can use it. | Unpublish or replace the published flow template before deleting it. |
 
 </details>
 

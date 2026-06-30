@@ -4138,6 +4138,7 @@
   "flow_error_flow_runtime_file_empty": "The uploaded file is empty. Choose a file with content and upload it again.",
   "flow_error_flow_template_corrupted_archive": "The Word template appears to be damaged. Try opening and saving it again in Word.",
   "flow_error_flow_template_invalid_archive": "The uploaded file is not a valid Word template (.docx). Choose a .docx file and try again.",
+  "flow_error_flow_template_in_use": "This template is used by a published flow version and cannot be deleted.",
   "flow_error_flow_template_macro_not_allowed": "Macro-enabled Word files (.docm/.dotm) are not supported as templates. Save the file as .docx and try again.",
   "flow_error_flow_template_missing_content": "The selected DOCX template could not be read because the file content is missing.",
   "flow_error_flow_template_missing_required_parts": "The file does not look like a valid Word template. Check the file and try again.",

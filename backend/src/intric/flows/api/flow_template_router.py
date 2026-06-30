@@ -3,7 +3,17 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
@@ -16,6 +26,7 @@ from intric.flows.api.flow_template_asset_models import (
     FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -207,6 +218,79 @@ async def upload_flow_template_file(
         ),
     )
     return FlowTemplateAssetPublic.model_validate(asset)
+
+
+@router.delete(
+    "/{id}/template-files/{file_id}/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    operation_id="delete_flow_template_file",
+    summary="Delete a flow template asset",
+    description=(
+        "Remove a draft DOCX template asset from a flow. The underlying file "
+        "blob is reclaimed by retention after no live or published-version "
+        "reference can still use it."
+    ),
+    responses={
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or template asset not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        409: error_response(
+            description="The template asset is still pinned by a published flow definition.",
+            message="The DOCX template is used by a published flow definition and cannot be deleted.",
+            intric_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.TEMPLATE_IN_USE.value,
+        ),
+    },
+)
+async def delete_flow_template_file(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the draft flow that owns the template asset."),
+    ],
+    file_id: Annotated[
+        UUID,
+        Path(description="Identifier of the stored template asset to delete."),
+    ],
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+) -> Response:
+    await require_flow_edit_access(request, container, flow_id=id)
+    asset = await container.flow_template_asset_service().delete_asset(
+        flow_id=id,
+        asset_id=file_id,
+    )
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FILE_DELETED,
+        entity_type=EntityType.FILE,
+        entity_id=asset.file_id,
+        description=f"Removed DOCX template '{asset.name}' from flow authoring",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=asset,
+            extra={
+                "template_asset_id": str(asset.id),
+                "file_id": str(asset.file_id),
+                "mimetype": asset.mimetype,
+                "flow_id": str(id),
+                "upload_purpose": "flow_template",
+            },
+        ),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

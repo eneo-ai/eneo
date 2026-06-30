@@ -1483,6 +1483,7 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         file_service=file_service,
         template_asset_repo=flow_template_asset_repo,
+        flow_version_repo=flow_version_repo,
     )
     flow_runtime_file_service = providers.Factory(
         FlowRuntimeFileService,

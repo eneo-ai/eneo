@@ -13,6 +13,7 @@ from intric.data_retention.infrastructure.data_retention_service import (
     FlowDebugRedactionCounts,
     FlowRunHistoryPurgeBlockedCounts,
     FlowRunHistoryPurgeCounts,
+    FlowTemplateAssetPurgeCounts,
 )
 
 
@@ -71,6 +72,7 @@ class _DataRetentionService:
         ]
         self.purge_now_values: list[datetime] = []
         self.purge_limits: list[int] = []
+        self.template_asset_purge_limits: list[int] = []
         self.blocked_now_values: list[datetime] = []
         self.redaction_now_values: list[datetime] = []
 
@@ -92,6 +94,17 @@ class _DataRetentionService:
         if isinstance(next_batch, Exception):
             raise next_batch
         return next_batch
+
+    async def purge_soft_deleted_flow_template_assets(
+        self, *, limit: int
+    ) -> FlowTemplateAssetPurgeCounts:
+        self.template_asset_purge_limits.append(limit)
+        return FlowTemplateAssetPurgeCounts(
+            flow_template_assets_purged=29,
+            flow_template_asset_files_deleted=31,
+            flow_template_assets_skipped_published_reference=41,
+            flow_template_assets_skipped_undetermined_reference=43,
+        )
 
     async def count_blocked_flow_run_history_purge_candidates(
         self, *, now: datetime
@@ -146,7 +159,7 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     service = container._service
 
     result = await cleanup_old_data(container=container)
-    expected_independent_cleanup_transactions = 9
+    expected_independent_cleanup_transactions = 10
 
     assert result["success"] is True
     assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23
@@ -155,12 +168,19 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     assert result["deleted"]["flow_webhook_deliveries_deleted"] == 22
     assert result["deleted"]["flow_audit_outbox_rows_deleted"] == 26
     assert result["deleted"]["flow_review_checkpoints_deleted"] == 34
+    assert result["deleted"]["flow_template_assets_purged"] == 29
+    assert result["deleted"]["flow_template_asset_files_deleted"] == 31
+    assert result["deleted"]["flow_template_assets_skipped_published_reference"] == 41
+    assert (
+        result["deleted"]["flow_template_assets_skipped_undetermined_reference"] == 43
+    )
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 31
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 37
-    assert result["deleted"]["total"] == 152
+    assert result["deleted"]["total"] == 212
     assert session.transaction_count == expected_independent_cleanup_transactions
     assert container.session.reset_count == 1
     assert service.purge_limits == [RETENTION_BATCH_SIZE] * 3
+    assert service.template_asset_purge_limits == [RETENTION_BATCH_SIZE]
     all_flow_runtime_now_values = (
         service.purge_now_values
         + service.blocked_now_values
@@ -206,11 +226,13 @@ async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_late
     ]
     assert result["deleted"]["flow_runs_purged"] == 2
     assert result["deleted"]["flow_generated_files_deleted"] == 3
+    assert result["deleted"]["flow_template_assets_purged"] == 29
+    assert result["deleted"]["flow_template_asset_files_deleted"] == 31
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 0
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 0
     assert result["deleted"]["flow_debug_rows"] == 7
     assert result["deleted"]["flow_attempt_provenance"] == 11
     assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23
     assert service.blocked_now_values == []
-    assert session.transaction_count == 7
+    assert session.transaction_count == 8
     assert container.session.reset_count == 1

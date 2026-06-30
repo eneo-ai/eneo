@@ -737,6 +737,101 @@
   - Migration lock duration is the main runtime risk for large existing tables; this PG slice keeps normal Alembic DDL because the roadmap asks for additive hardening, but production rollout should measure table size before applying.
   - Metadata tightening remains open and should be its own slice with typed bucket ownership and a preflight query proving existing rows will not be rejected.
 
+## PG-13
+
+- Slice id: PG-13
+- Findings addressed: `missed-files-assets:01`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:32` scopes PG-13 to template asset DELETE plus storage reclamation for missed template files.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/area-reviews/missed-files-assets.md:1-88` identifies that `FlowTemplateAssets.deleted_at` was read but never written and that template blobs could remain pinned indefinitely.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:96-110` indexes the missing DELETE route/client, `FlowTemplateAssetRepository` active-read filter, `Files.blob` storage, and `FlowRunHistoryPurgeRepository` reference guard.
+  - Fresh source review confirmed `backend/src/intric/flows/flow_template_asset_repo.py:100-108` filtered active template assets with `deleted_at IS NULL` and had no writer for `deleted_at`.
+  - Fresh source review confirmed `backend/src/intric/flows/api/flow_template_router.py:26-264` had list/inspect/upload/signed-url routes but no DELETE route.
+  - Fresh source review confirmed `frontend/packages/intric-js/src/endpoints/flows.js:409-465` had template list/upload/inspect/signed-url wrappers but no delete wrapper.
+  - Fresh source review confirmed publish writes both `template_asset_id` and `template_file_id` into published step `output_config` at `backend/src/intric/flows/application/flow_service.py:911-916`; PG-13 did not delete the PG-D4 `template_file_id` fallback.
+  - Fresh source review confirmed runtime resolves published template fills through the active template asset and matching file id at `backend/src/intric/flows/runtime/template_fill_runtime.py:341-390`.
+  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:408-412` stores `FlowTemplateAssets.file_id` as a non-null `RESTRICT` FK to `Files.id`, so route-time hard deletion of the file would be wrong.
+  - Fresh source review confirmed `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:132-156` already owns guarded `Files` reclamation and checked `FlowTemplateAssets.file_id` without filtering soft-deleted rows.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but its graph output was stale/noisy for these owners; all concrete claims were verified with direct source reads and exact `rg`.
+  - Read-only verifier agents checked published pin semantics, purge ownership/FK behavior, and API/client/audit ownership. Valid findings applied: all `FlowVersions` must be considered, reclamation must be retention-owned, `_flow_template_asset_file_exists()` must stay conservative, and audit should reuse `ActionType.FILE_DELETED` / `EntityType.FILE`.
+  - Claude peer-loop session `pg13-template-asset-delete-20260630` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 3`; valid feedback applied by replacing route-time blob deletion with soft-delete plus retention tombstone reclamation.
+  - Claude iteration 2 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by replacing full runtime-step parsing with a narrow template-reference extractor and bounding retention reference scans by candidate flow.
+  - Claude iteration 3 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; valid feedback applied by failing closed on unknown published `schema_version`.
+  - Claude iteration 4 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; valid feedback applied by making the extractor return an explicit typed undetermined state instead of collapsing unsafe snapshots into empty id sets.
+  - Claude iteration 5 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; non-blocking recommendations applied during implementation by using an enum for the undetermined reason and updating the purge repo docstring.
+  - Claude iteration 6 commit gate verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; valid non-blocking feedback applied by sharing the FlowVersions template-reference scan between delete checks and retention.
+- Files changed:
+  - `backend/src/intric/flows/published_definition.py`
+  - `backend/src/intric/flows/infrastructure/flow_version_repo.py`
+  - `backend/src/intric/flows/flow_template_asset_repo.py`
+  - `backend/src/intric/flows/flow_template_asset_service.py`
+  - `backend/src/intric/flows/api/flow_template_router.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py`
+  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - `backend/src/intric/data_retention/infrastructure/data_retention_worker.py`
+  - `backend/src/intric/main/container/container.py`
+  - `backend/src/intric/flows/flow_api_error_code.py`
+  - `backend/src/intric/flows/flow_error_taxonomy.py`
+  - `backend/tests/unittests/flows/test_published_definition_template_references.py`
+  - `backend/tests/unittests/flows/test_flow_template_asset_service.py`
+  - `backend/tests/unittests/flows/test_flow_template_router.py`
+  - `backend/tests/integration/flows/test_flow_version_repository.py`
+  - `backend/tests/integration/test_flow_runtime_retention_cleanup.py`
+  - `backend/tests/unittests/data_retention/test_data_retention_worker.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `frontend/packages/intric-js/src/endpoints/flows.js`
+  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.js`
+  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.d.ts`
+  - `frontend/apps/web/messages/en.json`
+  - `frontend/apps/web/messages/sv.json`
+  - `frontend/apps/docs-site/src/content/guides/flows/reference/errors.mdx`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/when-things-fail.mdx`
+- Behavior changed:
+  - Flow editors can now call `DELETE /api/v1/flows/{id}/template-files/{file_id}/` to remove a draft template asset.
+  - DELETE is edit-authorized, tenant/flow scoped, returns 204 on success, hides unknown/cross-flow assets as 404, and returns typed 409 `flow_template_in_use` when any immutable `FlowVersions` snapshot may still reference the template asset id or file id.
+  - Deleted template assets disappear from existing list/inspect/signed-url paths because the repository active reads already filter `deleted_at IS NULL`.
+  - Template asset deletion emits a file audit event using existing `ActionType.FILE_DELETED` / `EntityType.FILE`, with template asset metadata, without claiming the blob was physically deleted in the request path.
+  - Retention now reclaims safe soft-deleted template asset blobs: it hard-deletes safe tombstone rows first, then reuses the existing guarded `Files` deletion primitive.
+  - Retention keeps soft-deleted template assets/files when published versions still reference them, or when snapshot inspection is unsafe because of unknown schema or unreadable template-reference values.
+  - `intric-js` exposes `flows.templates.delete({ id, fileId, signal })`.
+- Complexity deleted or owner clarified:
+  - `FlowTemplateAssetRepository` is now the single writer for `FlowTemplateAssets.deleted_at`.
+  - `FlowTemplateAssetService` owns delete authorization/business behavior and published-version conflict decisions; it does not call purge or hard-delete blobs.
+  - `FlowVersionRepository` owns all-version lookup for published template reference checks, exposed as a shared scan helper reused by retention.
+  - `published_definition.py` owns the typed published-snapshot template-reference extractor used by both delete and retention.
+  - `FlowRunHistoryPurgeRepository` remains the canonical file reclamation owner and now also owns authoring template tombstone reclamation that reuses `_delete_unreferenced_files`.
+- Architecture delta:
+  - Canonical owner before: template asset active reads existed in `FlowTemplateAssetRepository`, but no delete writer existed; file reclamation treated any template asset row as a permanent blob pin.
+  - Canonical owner after: template asset delete is split deliberately between `FlowTemplateAssetService` / `FlowTemplateAssetRepository` for user-visible soft-delete and `FlowRunHistoryPurgeRepository` for physical storage reclamation.
+  - Duplicate paths remaining: published definitions still carry both `template_asset_id` and `template_file_id` for PG-D4 compatibility; the new extractor checks both and does not remove the fallback.
+  - 9/10 follow-up candidate: add authoring lifecycle serialization or a flow-row lock around publish/delete/update if concurrent authoring becomes a supported product concern.
+  - Decision or measurement needed: measure soft-deleted template-asset volume before optimizing the periodic grouped Python reference scan into a JSONB `EXISTS` query.
+  - What not to preserve: hard-deleting template blobs in the DELETE route, frontend-only hiding without backend deletion, or treating soft-deleted template asset rows as permanent `Files` pins.
+- Validation commands and results:
+  - `cd backend && .venv/bin/ruff format <touched backend files/tests>` -> pass; 5 files reformatted.
+  - `cd backend && .venv/bin/ruff check <touched backend files/tests>` -> pass.
+  - `ENEO_DEVCONTAINER_NAME=eneo-flows-clean_devcontainer-eneo-1 backend/scripts/run_pyright_in_devcontainer.sh <touched backend source files>` -> pass, 0 errors. Direct root `.venv/bin/pyright` was not authoritative because it did not use the repo dependency environment and reported pre-existing missing-import noise for SQLAlchemy.
+  - `cd backend && .venv/bin/pytest tests/unittests/flows/test_published_definition_template_references.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_template_router.py tests/unittests/data_retention/test_data_retention_worker.py tests/unit/test_flow_openapi_contract.py` -> pass, 109 passed.
+  - `cd backend && .venv/bin/pytest tests/integration/flows/test_flow_version_repository.py tests/integration/test_flow_runtime_retention_cleanup.py::test_purge_soft_deleted_flow_template_assets_reclaims_unpinned_blob tests/integration/test_flow_runtime_retention_cleanup.py::test_purge_soft_deleted_flow_template_assets_keeps_active_asset_blob tests/integration/test_flow_runtime_retention_cleanup.py::test_purge_soft_deleted_flow_template_assets_keeps_non_current_version_pin tests/integration/test_flow_runtime_retention_cleanup.py::test_purge_soft_deleted_flow_template_assets_counts_unknown_schema_skip` -> pass, 6 passed.
+  - `cd backend && .venv/bin/pytest tests/unittests/flows/test_flow_api_error_codes.py tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_consumer_error_reference_is_generated_from_taxonomy tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_when_things_fail_is_generated_from_error_taxonomy` -> pass, 17 passed.
+  - `cd backend && .venv/bin/pytest tests/unittests/data_retention/test_data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py` -> pass, 29 passed after sharing the FlowVersions template-reference scan.
+  - `cd backend && .venv/bin/python scripts/generate_flow_api_error_codes_ts.py` -> pass.
+  - `cd backend && .venv/bin/python scripts/generate_flow_consumer_error_catalog_docs.py` -> pass.
+  - `cd backend && .venv/bin/python scripts/generate_flow_developer_error_taxonomy_docs.py` -> pass.
+  - `cd backend && .venv/bin/python -c "from intric.server.main import get_application; import json; print(json.dumps(get_application().openapi()))" > /tmp/eneo-openapi.json` inside the devcontainer, then `node update.js --schema-file /tmp/eneo-openapi.json` from `frontend/packages/intric-js` on the host because the devcontainer lacked Node/Bun -> pass.
+  - `cd frontend && bun x vitest packages/intric-js/src/endpoints/flows.test.js` -> pass, 30 passed.
+  - `cd frontend && bun run --filter @intric/intric-js check` -> pass.
+  - `cd frontend && bun run --filter @intric/intric-js lint` -> pass.
+  - `cd frontend/apps/web && bun run i18n:compile` -> pass.
+  - `cd frontend && bun run --filter @intric/web check` initially failed before Svelte diagnostics because Rollup's optional native package was missing from host `node_modules`; after `cd frontend && bun install --frozen-lockfile`, rerun passed with 0 errors and 1 pre-existing warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`.
+- Remaining risk / follow-up:
+  - Publish/delete concurrency is still not globally serialized. A publish that reads an active asset and commits its `FlowVersions` row after DELETE can produce a published snapshot pointing at a soft-deleted asset; retention remains blob-safe because it re-checks snapshots, but runtime can later fail with `flow_template_not_accessible`. Follow-up trigger: add authoring lifecycle locking if concurrent editing/publish becomes supported.
+  - Retention intentionally fails closed on unknown published schema versions or unreadable template-reference values. This avoids data loss but can leave safe blobs retained until a schema-aware cleanup is added; the unsafe-skip counter/log makes that stall visible.
+  - Published-then-superseded template assets remain pinned by immutable `FlowVersions` history until the owning flow/version history is removed. PG-13 mainly reclaims never-published draft template assets.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

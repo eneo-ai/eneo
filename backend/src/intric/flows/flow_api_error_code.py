@@ -137,6 +137,7 @@ class FlowApiErrorCode(str, Enum):
     TEMPLATE_READ_ONLY = "flow_template_read_only"
     TEMPLATE_UNSUPPORTED_EXTENSION = "flow_template_unsupported_extension"
     TEMPLATE_MISSING_CONTENT = "flow_template_missing_content"
+    TEMPLATE_IN_USE = "flow_template_in_use"
     RUN_RERUN_REASON_REQUIRED = "flow_run_rerun_reason_required"
     RUN_RERUN_REASON_TOO_LONG = "flow_run_rerun_reason_too_long"
     RUN_RERUN_STALE_REVISION = "flow_run_rerun_stale_revision"

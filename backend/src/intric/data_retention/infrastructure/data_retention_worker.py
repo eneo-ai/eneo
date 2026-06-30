@@ -12,6 +12,7 @@ from intric.data_retention.infrastructure.data_retention_service import (
     FlowDebugRedactionCounts,
     FlowRunHistoryPurgeBlockedCounts,
     FlowRunHistoryPurgeCounts,
+    FlowTemplateAssetPurgeCounts,
 )
 from intric.database.database import sessionmanager
 from intric.main.container.container import Container
@@ -33,6 +34,10 @@ class DeletedCounts(TypedDict):
     flow_webhook_deliveries_deleted: int
     flow_audit_outbox_rows_deleted: int
     flow_review_checkpoints_deleted: int
+    flow_template_assets_purged: int
+    flow_template_asset_files_deleted: int
+    flow_template_assets_skipped_published_reference: int
+    flow_template_assets_skipped_undetermined_reference: int
     flow_runs_skipped_undelivered_audit: int
     flow_runs_skipped_active_rerun: int
     flow_audit_outbox_delivered_rows: int
@@ -74,6 +79,21 @@ def _record_flow_run_history_purge_counts(
     deleted["flow_webhook_deliveries_deleted"] += counts.flow_webhook_deliveries_deleted
     deleted["flow_audit_outbox_rows_deleted"] += counts.flow_audit_outbox_rows_deleted
     deleted["flow_review_checkpoints_deleted"] += counts.flow_review_checkpoints_deleted
+
+
+def _record_flow_template_asset_purge_counts(
+    deleted: DeletedCounts, counts: FlowTemplateAssetPurgeCounts
+) -> None:
+    deleted["flow_template_assets_purged"] += counts.flow_template_assets_purged
+    deleted["flow_template_asset_files_deleted"] += (
+        counts.flow_template_asset_files_deleted
+    )
+    deleted["flow_template_assets_skipped_published_reference"] += (
+        counts.flow_template_assets_skipped_published_reference
+    )
+    deleted["flow_template_assets_skipped_undetermined_reference"] += (
+        counts.flow_template_assets_skipped_undetermined_reference
+    )
 
 
 def _record_flow_run_history_blocked_counts(
@@ -119,6 +139,10 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "flow_webhook_deliveries_deleted": 0,
             "flow_audit_outbox_rows_deleted": 0,
             "flow_review_checkpoints_deleted": 0,
+            "flow_template_assets_purged": 0,
+            "flow_template_asset_files_deleted": 0,
+            "flow_template_assets_skipped_published_reference": 0,
+            "flow_template_assets_skipped_undetermined_reference": 0,
             "flow_runs_skipped_undelivered_audit": 0,
             "flow_runs_skipped_active_rerun": 0,
             "flow_audit_outbox_delivered_rows": 0,
@@ -213,6 +237,30 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                         blocked_counts,
                     )
 
+            template_asset_counts = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to purge soft-deleted Flow template assets",
+                action=lambda: retention_service.purge_soft_deleted_flow_template_assets(
+                    limit=RETENTION_BATCH_SIZE,
+                ),
+            )
+            if template_asset_counts is not None:
+                _record_flow_template_asset_purge_counts(
+                    results["deleted"],
+                    template_asset_counts,
+                )
+                if (
+                    template_asset_counts.flow_template_assets_skipped_undetermined_reference
+                    > 0
+                ):
+                    logger.warning(
+                        "Skipped Flow template asset purge candidates because "
+                        "published definition references could not be determined "
+                        "(count=%s)",
+                        template_asset_counts.flow_template_assets_skipped_undetermined_reference,
+                    )
+
             redaction_counts = await _run_cleanup_step(
                 session=session,
                 results=results,
@@ -255,6 +303,8 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["flow_webhook_deliveries_deleted"]
         + results["deleted"]["flow_audit_outbox_rows_deleted"]
         + results["deleted"]["flow_review_checkpoints_deleted"]
+        + results["deleted"]["flow_template_assets_purged"]
+        + results["deleted"]["flow_template_asset_files_deleted"]
         + results["deleted"]["flow_audit_outbox_delivered_rows"]
     )
 
@@ -276,6 +326,14 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"{results['deleted']['flow_audit_outbox_rows_deleted']}, "
             f"flow_review_checkpoints_deleted: "
             f"{results['deleted']['flow_review_checkpoints_deleted']}, "
+            f"flow_template_assets_purged: "
+            f"{results['deleted']['flow_template_assets_purged']}, "
+            f"flow_template_asset_files_deleted: "
+            f"{results['deleted']['flow_template_asset_files_deleted']}, "
+            f"flow_template_assets_skipped_published_reference: "
+            f"{results['deleted']['flow_template_assets_skipped_published_reference']}, "
+            f"flow_template_assets_skipped_undetermined_reference: "
+            f"{results['deleted']['flow_template_assets_skipped_undetermined_reference']}, "
             f"flow_runs_skipped_undelivered_audit: "
             f"{results['deleted']['flow_runs_skipped_undelivered_audit']}, "
             f"flow_runs_skipped_active_rerun: "
