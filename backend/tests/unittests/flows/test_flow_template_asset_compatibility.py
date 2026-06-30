@@ -348,6 +348,8 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
 
     assert contract.template_readiness[0].status == "ready"
     assert contract.template_readiness[0].template_asset_id == template_asset_id
+    assert contract.template_readiness[0].can_edit is False
+    assert contract.template_readiness[0].can_download is True
     template_asset_repo.get_by_flow_file.assert_awaited_once_with(
         flow_id=flow.id,
         file_id=template_file_id,

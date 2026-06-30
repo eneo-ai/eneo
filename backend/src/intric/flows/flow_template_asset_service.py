@@ -8,7 +8,8 @@ from fastapi import UploadFile
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.files.file_service import FileService
-from intric.flows.domain.flow import FlowTemplateAsset, FlowTemplateAssetStatus
+from intric.flows.domain.flow import FlowTemplateAsset
+from intric.flows.enums import FlowTemplateAssetStatus
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.infrastructure.flow_repo import FlowRepository
@@ -47,23 +48,13 @@ class FlowTemplateAssetService:
         self,
         *,
         flow_id: UUID,
-        can_edit: bool,
-        can_download: bool,
     ) -> list[FlowTemplateAsset]:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         persisted_flow_id = flow.require_persisted_id()
-        assets = await self.template_asset_repo.list_for_flow(
+        return await self.template_asset_repo.list_for_flow(
             flow_id=persisted_flow_id,
             tenant_id=self.user.tenant_id,
         )
-        return [
-            self._with_capabilities(
-                asset,
-                can_edit=can_edit,
-                can_download=can_download,
-            )
-            for asset in assets
-        ]
 
     async def upload_asset(
         self,
@@ -97,7 +88,7 @@ class FlowTemplateAssetService:
             updated_by_user_id=self.user.id,
             status=FlowTemplateAssetStatus.READY.value,
         )
-        return self._with_capabilities(asset, can_edit=True, can_download=True)
+        return asset
 
     async def inspect_asset(
         self,
@@ -176,28 +167,6 @@ class FlowTemplateAssetService:
         if file.tenant_id != self.user.tenant_id:
             raise NotFoundException("Flow template asset file not found.")
         return asset, file
-
-    @staticmethod
-    def _with_capabilities(
-        asset: FlowTemplateAsset,
-        *,
-        can_edit: bool,
-        can_download: bool,
-    ) -> FlowTemplateAsset:
-        return asset.model_copy(
-            update={
-                "can_edit": can_edit,
-                "can_download": can_download,
-                "can_select": can_edit,
-                "can_inspect": True,
-                "status": (
-                    FlowTemplateAssetStatus.READ_ONLY
-                    if not can_edit and asset.status == FlowTemplateAssetStatus.READY
-                    else asset.status
-                ),
-            },
-            deep=True,
-        )
 
 
 def _unique_placeholder_names(placeholders: list[dict[str, str | None]]) -> list[str]:

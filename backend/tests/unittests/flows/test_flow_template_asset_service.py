@@ -143,11 +143,7 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
 
     with pytest.raises(FlowPersistedIdMissingError):
         if operation == "list":
-            await service.list_assets(
-                flow_id=uuid4(),
-                can_edit=True,
-                can_download=True,
-            )
+            await service.list_assets(flow_id=uuid4())
         elif operation == "upload":
             await service.upload_asset(
                 flow_id=uuid4(),
@@ -231,8 +227,6 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     template_asset_repo.create.assert_awaited_once()
     assert template_asset_repo.create.await_args.kwargs["placeholders"] == ["Body"]
     assert asset.placeholders == ["Body"]
-    assert asset.can_edit is True
-    assert asset.can_download is True
     text_extractor.extract.assert_not_called()
 
 

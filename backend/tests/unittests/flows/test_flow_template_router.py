@@ -6,7 +6,7 @@ from unittest.mock import (
     AsyncMock,
     MagicMock,
 )
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import UploadFile
@@ -21,6 +21,7 @@ from intric.flows.api.flow_template_router import (
     delete_flow_template_file,
     generate_flow_template_signed_url,
     inspect_flow_template,
+    list_flow_template_files,
     upload_flow_template_file,
 )
 from intric.flows.domain.flow import FlowTemplateAsset
@@ -31,6 +32,66 @@ from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _flow,
 )
+
+
+def _template_asset(*, flow_id: UUID, tenant_id: UUID) -> FlowTemplateAsset:
+    return FlowTemplateAsset.model_validate(
+        {
+            "id": uuid4(),
+            "flow_id": flow_id,
+            "space_id": uuid4(),
+            "tenant_id": tenant_id,
+            "file_id": uuid4(),
+            "name": "template.docx",
+            "checksum": "checksum",
+            "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "placeholders": ["summary"],
+            "status": "ready",
+            "last_updated_by_name": "User",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_flow_template_files_projects_editor_capabilities(monkeypatch):
+    container = MagicMock()
+    template_asset_service = AsyncMock()
+    user = SimpleNamespace(
+        id=uuid4(), tenant_id=uuid4(), permissions=[Permission.FLOWS]
+    )
+    flow_id = uuid4()
+    asset = _template_asset(flow_id=flow_id, tenant_id=user.tenant_id)
+    container.flow_template_asset_service.return_value = template_asset_service
+    container.user.return_value = user
+    template_asset_service.list_assets.return_value = [asset]
+
+    requested_flow_ids: list[str] = []
+
+    async def allow_edit_access(request, _container, *, flow_id):
+        requested_flow_ids.append(str(flow_id))
+        return SimpleNamespace(flow=_flow(flow_id), actor=MagicMock())
+
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "require_flow_edit_access",
+        allow_edit_access,
+    )
+
+    result = await list_flow_template_files(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert requested_flow_ids == [str(flow_id)]
+    template_asset_service.list_assets.assert_awaited_once_with(flow_id=flow_id)
+    assert len(result) == 1
+    assert result[0].id == asset.id
+    assert result[0].status == asset.status
+    assert result[0].can_edit is True
+    assert result[0].can_download is True
+    assert result[0].can_select is True
+    assert result[0].can_inspect is True
 
 
 @pytest.mark.asyncio
@@ -111,25 +172,7 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         id=uuid4(), tenant_id=uuid4(), permissions=[Permission.FLOWS]
     )
     flow_id = uuid4()
-    asset = FlowTemplateAsset.model_validate(
-        {
-            "id": uuid4(),
-            "flow_id": uuid4(),
-            "space_id": uuid4(),
-            "tenant_id": user.tenant_id,
-            "file_id": uuid4(),
-            "name": "template.docx",
-            "checksum": "checksum",
-            "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "placeholders": ["summary"],
-            "status": "ready",
-            "last_updated_by_name": "User",
-            "can_edit": True,
-            "can_download": True,
-            "can_select": True,
-            "can_inspect": True,
-        }
-    )
+    asset = _template_asset(flow_id=flow_id, tenant_id=user.tenant_id)
     container.flow_template_asset_service.return_value = template_asset_service
     container.audit_service.return_value = audit_service
     container.user.return_value = user
@@ -189,6 +232,10 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
     assert asset.id != asset.file_id
     assert audit_kwargs["entity_id"] == asset.file_id
     assert result.id == asset.id
+    assert result.can_edit is True
+    assert result.can_download is True
+    assert result.can_select is True
+    assert result.can_inspect is True
 
 
 @pytest.mark.asyncio

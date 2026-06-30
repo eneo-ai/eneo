@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from pydantic import BaseModel
 
 from intric.flows.api.flow_template_asset_models import (
@@ -9,6 +12,7 @@ from intric.flows.api.flow_template_asset_models import (
     FlowTemplateInspectionPublic,
     FlowTemplatePlaceholderPublic,
 )
+from intric.flows.domain.flow import FlowTemplateAsset
 
 
 def _assert_example_keys_belong_to_model(
@@ -44,3 +48,41 @@ def test_flow_template_asset_example_matches_public_model() -> None:
     parsed = FlowTemplateAssetPublic.model_validate(FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE)
 
     assert str(parsed.file_id) == FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE["file_id"]
+
+
+def test_flow_template_asset_domain_does_not_carry_public_capabilities() -> None:
+    assert {
+        "can_edit",
+        "can_download",
+        "can_select",
+        "can_inspect",
+    }.isdisjoint(FlowTemplateAsset.model_fields)
+
+
+def test_flow_template_asset_public_projects_editor_capabilities() -> None:
+    now = datetime.now(timezone.utc)
+    asset = FlowTemplateAsset(
+        id=uuid4(),
+        flow_id=uuid4(),
+        space_id=uuid4(),
+        tenant_id=uuid4(),
+        file_id=uuid4(),
+        name="template.docx",
+        checksum="checksum",
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        placeholders=["summary"],
+        status="ready",
+        last_updated_by_name="User",
+        created_at=now,
+        updated_at=now,
+    )
+
+    public = FlowTemplateAssetPublic.for_editor(asset)
+
+    assert public.id == asset.id
+    assert public.file_id == asset.file_id
+    assert public.status == asset.status
+    assert public.can_edit is True
+    assert public.can_download is True
+    assert public.can_select is True
+    assert public.can_inspect is True

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.config import JsonDict
 
+from intric.flows.domain.flow import FlowTemplateAsset
 from intric.flows.enums import FlowTemplateAssetStatus
 
 FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE: JsonDict = {
@@ -79,3 +81,23 @@ class FlowTemplateAssetPublic(BaseModel):
     can_inspect: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @classmethod
+    def for_editor(cls, asset: FlowTemplateAsset) -> Self:
+        return cls(
+            id=asset.id,
+            flow_id=asset.flow_id,
+            file_id=asset.file_id,
+            name=asset.name,
+            checksum=asset.checksum,
+            mimetype=asset.mimetype,
+            placeholders=asset.placeholders,
+            status=asset.status,
+            last_updated_by_name=asset.last_updated_by_name,
+            can_edit=True,
+            can_download=True,
+            can_select=True,
+            can_inspect=True,
+            created_at=asset.created_at,
+            updated_at=asset.updated_at,
+        )

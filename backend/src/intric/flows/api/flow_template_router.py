@@ -73,12 +73,8 @@ async def list_flow_template_files(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    assets = await container.flow_template_asset_service().list_assets(
-        flow_id=id,
-        can_edit=True,
-        can_download=True,
-    )
-    return [FlowTemplateAssetPublic.model_validate(item) for item in assets]
+    assets = await container.flow_template_asset_service().list_assets(flow_id=id)
+    return [FlowTemplateAssetPublic.for_editor(item) for item in assets]
 
 
 @router.get(
@@ -217,7 +213,7 @@ async def upload_flow_template_file(
             },
         ),
     )
-    return FlowTemplateAssetPublic.model_validate(asset)
+    return FlowTemplateAssetPublic.for_editor(asset)
 
 
 @router.delete(

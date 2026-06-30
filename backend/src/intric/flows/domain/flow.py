@@ -124,10 +124,6 @@ class FlowTemplateAsset(BaseModel):
     updated_by_user_id: UUID | None = None
     last_updated_by_name: str | None = None
     status: FlowTemplateAssetStatus = FlowTemplateAssetStatus.READY
-    can_edit: bool = False
-    can_download: bool = False
-    can_select: bool = False
-    can_inspect: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

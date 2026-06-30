@@ -895,6 +895,62 @@
   - Broker/API error-envelope taxonomy is intentionally not redesigned in PG-14; this slice only makes the failure audit-visible and keeps the existing caller-visible exception behavior.
   - Invalid-principal stale queued rows remain skipped/logged rather than terminalized because the current DB constraint makes that branch a defensive recovery path, not a normal product path.
 
+## PG-15
+
+- Slice id: PG-15
+- Findings addressed: `verify-app-authoring:01 / A-MOVE-1`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:34` scopes PG-15 to removing template asset capability flags from the domain while keeping API and run-contract readiness flags stable.
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:106` identifies template asset capability flags as presentation state derived at API/readiness boundaries, not persisted asset identity.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:100` indexes the duplicated `can_*` fields across domain, API, service projection, readiness, and frontend schema, and notes there are no DB columns for the flags.
+  - Fresh source review confirmed `backend/src/intric/flows/domain/flow.py:127-130` carried `can_edit`, `can_download`, `can_select`, and `can_inspect`; `backend/src/intric/flows/flow_template_asset_service.py:180-200` stamped those fields onto domain assets with `_with_capabilities`; and `backend/src/intric/flows/flow_template_asset_repo.py:146-164` never mapped those fields from persistence.
+  - Fresh source review after the change confirms `backend/src/intric/flows/domain/flow.py:111-128` contains only persisted template asset identity/content/status metadata; `backend/src/intric/flows/flow_template_asset_service.py:47-91` returns plain domain assets; `backend/src/intric/flows/api/flow_template_asset_models.py:63-103` owns the public authoring projection via `FlowTemplateAssetPublic.for_editor`; and `backend/src/intric/flows/api/flow_template_router.py:75-77,216` applies that projection at list/upload response boundaries.
+  - Direct `rg -n "can_edit|can_download|can_select|can_inspect" backend/src/intric/flows/domain backend/src/intric/flows/flow_template_asset_repo.py` now returns no matches.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer, but it was noisy for this small API/domain slice; all concrete claims were verified with direct source reads and exact `rg`.
+  - Read-only verifier agents confirmed API response-shape ownership, run-contract readiness derivation, and domain/persistence ownership. Valid feedback applied: keep the API projection beside `FlowTemplateAssetPublic`, use flag-less service mocks in router tests, keep readiness derivation independent, and do not touch generated clients because `FlowTemplateAssetPublic` schema fields remain unchanged.
+  - Claude peer-loop session `pg15-template-capability-projection-20260630` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by replacing the parameterized service projection with `FlowTemplateAssetPublic.for_editor`, deleting the dead authoring `can_edit=False` / `read_only` branch, and adding router-level tests that fail when flag-less service assets are returned without API projection.
+  - Claude peer-loop session `pg15-template-capability-projection-20260630` iteration 2 commit-gate verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; optional follow-ups noted for later API-contract/readiness cleanup, with no PG-15 blocker.
+- Red proof:
+  - Before the implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py::test_list_flow_template_files_projects_editor_capabilities tests/unittests/flows/test_flow_template_router.py::test_upload_flow_template_file_enforces_scope_and_uses_docx_template_save -q` failed as expected: domain still carried capability fields, `FlowTemplateAssetPublic.for_editor` did not exist, list still passed service capability parameters, and upload defaulted public flags to `False`.
+- Files changed:
+  - `backend/src/intric/flows/domain/flow.py`
+  - `backend/src/intric/flows/flow_template_asset_service.py`
+  - `backend/src/intric/flows/api/flow_template_asset_models.py`
+  - `backend/src/intric/flows/api/flow_template_router.py`
+  - `backend/tests/unittests/flows/test_flow_template_asset_models.py`
+  - `backend/tests/unittests/flows/test_flow_template_router.py`
+  - `backend/tests/unittests/flows/test_flow_template_asset_service.py`
+  - `backend/tests/unittests/flows/test_flow_run_contract_service.py`
+  - `backend/tests/unittests/flows/test_flow_template_asset_compatibility.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - `FlowTemplateAsset` domain instances no longer carry public presentation capability flags.
+  - `FlowTemplateAssetService.list_assets` and `upload_asset` return plain persisted asset identity/content/status data; service callers no longer pass or receive presentation capability mutations.
+  - Edit-authorized template asset list/upload API responses still include `can_edit=True`, `can_download=True`, `can_select=True`, and `can_inspect=True` through `FlowTemplateAssetPublic.for_editor`.
+  - Run-contract template readiness keeps its existing separate projection semantics: `can_edit=False` and `can_download=asset_id is not None`, including the current missing-but-parseable asset-id behavior.
+- Complexity deleted or owner clarified:
+  - Deleted the service-owned `_with_capabilities` domain mutation and its constant-only `can_edit` / `can_download` parameters.
+  - Deleted the unreachable authoring `can_edit=False` / `READ_ONLY` status override instead of relocating it to the API model.
+  - `FlowTemplateAssetPublic` is now the API authoring response-shape owner; `FlowRunContractService` remains the runtime readiness projection owner.
+- Architecture delta:
+  - Canonical owner before: domain `FlowTemplateAsset` stored public capability defaults and `FlowTemplateAssetService._with_capabilities` mutated domain copies before API serialization.
+  - Canonical owner after: domain/repository own persisted template asset identity; `FlowTemplateAssetPublic.for_editor` owns edit-authorized authoring presentation flags; `FlowRunContractService` owns runtime readiness flags.
+  - Duplicate paths remaining: `can_select` and `can_inspect` remain in `FlowTemplateAssetPublic`/OpenAPI/generated schema for response-shape stability even though the current frontend only consumes `can_edit` and `can_download`; readiness intentionally exposes its own `can_edit`/`can_download` fields for a different runtime boundary.
+  - 9/10 follow-up candidate: after API/generated-client consumer review, either document a real external consumer for `can_select`/`can_inspect` or remove them from the public model and regenerate clients in a dedicated API contract cleanup slice.
+  - Decision or measurement needed: decide whether a read-only template asset listing/inspection product flow is required; current authoring endpoints are edit-gated and had no live `can_edit=False` caller.
+  - What not to preserve: service/domain capability stamping, the dead authoring `READ_ONLY` override, a generic capability framework, or frontend-only capability derivation.
+- Validation commands and results:
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/domain/flow.py src/intric/flows/flow_template_asset_service.py src/intric/flows/api/flow_template_asset_models.py src/intric/flows/api/flow_template_router.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py && /home/vscode/.local/bin/uv run ruff format --check <same files>` -> pass after applying `ruff format` to `flow_template_asset_service.py`.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/domain/flow.py src/intric/flows/flow_template_asset_service.py src/intric/flows/api/flow_template_asset_models.py src/intric/flows/api/flow_template_router.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/unit/test_flow_openapi_contract.py -q` -> pass, 124 passed.
+  - `rg -n "can_edit|can_download|can_select|can_inspect" backend/src/intric/flows/domain backend/src/intric/flows/flow_template_asset_repo.py` -> no matches.
+  - `rg -n "FlowTemplateAssetPublic\\.model_validate" backend/src backend/tests --glob "*.py"` -> only the dict-based public example test remains.
+  - `rg -n "_with_capabilities" backend/src backend/tests --glob "*.py"` -> no matches.
+- Remaining risk / follow-up:
+  - The API schema remains intentionally unchanged because `FlowTemplateAssetPublic` still declares the four public fields; generated-client cleanup is deferred until a dedicated API contract slice decides whether `can_select`/`can_inspect` are real consumer contract or removable pre-production noise.
+  - The runtime readiness missing-asset `can_download=True` behavior is preserved to avoid a hidden product/API behavior change in PG-15; a future runtime contract cleanup can decide whether download should require accessible asset state.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

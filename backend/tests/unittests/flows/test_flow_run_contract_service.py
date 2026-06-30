@@ -263,6 +263,8 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     )
     assert contract.template_readiness[0].status == "ready"
     assert contract.template_readiness[0].template_asset_id == asset_id
+    assert contract.template_readiness[0].can_edit is False
+    assert contract.template_readiness[0].can_download is True
 
 
 @pytest.mark.asyncio
@@ -739,3 +741,5 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
 
     assert contract.template_readiness[0].status == "unavailable"
     assert contract.template_readiness[0].message_code == "flow_template_not_accessible"
+    assert contract.template_readiness[0].can_edit is False
+    assert contract.template_readiness[0].can_download is True
