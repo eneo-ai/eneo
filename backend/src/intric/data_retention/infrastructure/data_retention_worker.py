@@ -27,6 +27,7 @@ class DeletedCounts(TypedDict):
     questions: int
     app_runs: int
     sessions: int
+    builder_sessions: int
     flow_debug_rows: int
     flow_attempt_provenance: int
     flow_runs_purged: int
@@ -132,6 +133,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "questions": 0,
             "app_runs": 0,
             "sessions": 0,
+            "builder_sessions": 0,
             "flow_debug_rows": 0,
             "flow_attempt_provenance": 0,
             "flow_runs_purged": 0,
@@ -198,6 +200,22 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 results["deleted"]["sessions"] = sessions_count
                 if sessions_count > 0:
                     logger.info(f"Deleted {sessions_count} orphaned sessions")
+
+            builder_sessions_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete expired Builder sessions",
+                action=lambda: retention_service.delete_expired_builder_sessions(
+                    now=start_time,
+                ),
+            )
+            if builder_sessions_count is not None:
+                results["deleted"]["builder_sessions"] = builder_sessions_count
+                if builder_sessions_count > 0:
+                    logger.info(
+                        "Deleted %s expired Builder sessions based on retention policies",
+                        builder_sessions_count,
+                    )
 
             flow_runtime_now = start_time
             flow_purge_drained = True
@@ -296,6 +314,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         results["deleted"]["questions"]
         + results["deleted"]["app_runs"]
         + results["deleted"]["sessions"]
+        + results["deleted"]["builder_sessions"]
         + results["deleted"]["flow_debug_rows"]
         + results["deleted"]["flow_attempt_provenance"]
         + results["deleted"]["flow_runs_purged"]
@@ -315,6 +334,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"(questions: {results['deleted']['questions']}, "
             f"app_runs: {results['deleted']['app_runs']}, "
             f"sessions: {results['deleted']['sessions']}, "
+            f"builder_sessions: {results['deleted']['builder_sessions']}, "
             f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
             f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
             f"flow_runs_purged: {results['deleted']['flow_runs_purged']}, "

@@ -19,6 +19,7 @@ from intric.database.tables.flow_classification_retention_policy_table import (
     FlowClassificationRetentionPolicies,
 )
 from intric.database.tables.flow_tables import (
+    BuilderSessions,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunRerunOperations,
@@ -31,6 +32,7 @@ from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
+from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from intric.flows.enums import (
     TERMINAL_FLOW_RUN_STATUS_VALUES,
     FlowRunRerunOperationStatus,
@@ -59,6 +61,10 @@ logger = logging.getLogger(__name__)
 
 # Statement batch size for retention deletes; worker transaction loops decide commit scope.
 RETENTION_BATCH_SIZE = 5000
+TERMINAL_BUILDER_SESSION_STATUS_VALUES = (
+    SessionStatus.APPLIED.value,
+    SessionStatus.CANCELLED.value,
+)
 
 
 def _sqlalchemy_affected_row_count(result: object) -> int:
@@ -460,6 +466,70 @@ class DataRetentionService:
             logger.info(f"Deleted {total_deleted} orphaned sessions")
         else:
             logger.debug("No orphaned sessions to delete")
+
+        return total_deleted
+
+    def _build_due_builder_session_retention_query(
+        self, *, now: datetime
+    ) -> sa.Select[tuple[UUID]]:
+        effective_retention_days = self._build_effective_retention_days(sa.null())
+        return (
+            sa.select(BuilderSessions.id.label("session_id"))
+            .join(Spaces, BuilderSessions.space_id == Spaces.id)
+            .outerjoin(
+                AuditRetentionPolicy, Spaces.tenant_id == AuditRetentionPolicy.tenant_id
+            )
+            .where(
+                sa.and_(
+                    BuilderSessions.status.in_(TERMINAL_BUILDER_SESSION_STATUS_VALUES),
+                    effective_retention_days.isnot(None),
+                    BuilderSessions.updated_at
+                    < sa.literal(now)
+                    - sa.func.make_interval(0, 0, 0, effective_retention_days),
+                )
+            )
+        )
+
+    async def count_expired_builder_sessions(self, *, now: datetime) -> int:
+        candidate_subquery = self._build_due_builder_session_retention_query(
+            now=now
+        ).subquery()
+        count = await self.session.scalar(
+            sa.select(sa.func.count()).select_from(candidate_subquery)
+        )
+        return count or 0
+
+    async def delete_expired_builder_sessions(self, *, now: datetime) -> int:
+        logger.info("Starting deletion of expired terminal Builder sessions")
+        base_subquery = self._build_due_builder_session_retention_query(now=now)
+
+        total_deleted = 0
+        while True:
+            batch_subquery = base_subquery.order_by(
+                BuilderSessions.updated_at,
+                BuilderSessions.id,
+            ).limit(RETENTION_BATCH_SIZE)
+            result = await self.session.execute(
+                sa.delete(BuilderSessions).where(BuilderSessions.id.in_(batch_subquery))
+            )
+            batch_deleted = _sqlalchemy_affected_row_count(result)
+            if batch_deleted == 0:
+                break
+
+            total_deleted += batch_deleted
+            logger.debug(
+                "Deleted batch of %s expired terminal Builder sessions (total: %s)",
+                batch_deleted,
+                total_deleted,
+            )
+
+        if total_deleted > 0:
+            logger.info(
+                "Deleted %s expired terminal Builder sessions",
+                total_deleted,
+            )
+        else:
+            logger.debug("No expired terminal Builder sessions to delete")
 
         return total_deleted
 

@@ -9,20 +9,33 @@ Tests cover:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.data_retention.infrastructure.data_retention_service import (
+    DataRetentionService,
+)
 from intric.database.tables.app_table import AppRuns, Apps
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from intric.database.tables.files_table import Files
+from intric.database.tables.flow_tables import (
+    BuilderPlans,
+    BuilderSessionFiles,
+    BuilderSessions,
+)
 from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import Spaces
-from intric.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    PlanStatus,
+    SessionStatus,
+    TargetKind,
 )
 
 
@@ -160,6 +173,105 @@ async def create_old_app_run(
     async_session.add(app_run)
     await async_session.flush()
     return app_run
+
+
+@dataclass(frozen=True)
+class BuilderRetentionFixture:
+    session_id: UUID
+    file_id: UUID | None
+
+
+async def create_builder_session_for_retention(
+    async_session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    user_id: UUID,
+    status: SessionStatus,
+    now: datetime,
+    days_old: int,
+    include_plan: bool = False,
+    include_file: bool = False,
+) -> BuilderRetentionFixture:
+    retained_at = now - timedelta(days=days_old)
+    session = BuilderSessions(
+        tenant_id=tenant_id,
+        space_id=space_id,
+        actor_user_id=user_id,
+        target_kind=TargetKind.CREATE.value,
+        status=status.value,
+        conversation=[
+            {
+                "role": "user",
+                "content": "builder conversation content retained by session",
+            }
+        ],
+        planning_state_jsonb={"stage": "retention-test"},
+        planning_state_version=1,
+        created_at=retained_at,
+        updated_at=retained_at,
+    )
+    async_session.add(session)
+    await async_session.flush()
+
+    if include_plan:
+        plan = BuilderPlans(
+            session_id=session.id,
+            tenant_id=tenant_id,
+            status=PlanStatus.PROPOSED.value,
+            proposal_json={
+                "summary": "retention test proposal",
+                "content": {"spec": {"flow_name": "Retention test flow", "steps": []}},
+            },
+            spec_hash="f" * 64,
+            created_at=retained_at,
+            updated_at=retained_at,
+        )
+        async_session.add(plan)
+        await async_session.flush()
+        session.latest_plan_id = plan.id
+        await async_session.flush()
+
+    file_id: UUID | None = None
+    if include_file:
+        file = Files(
+            name=f"builder-context-{uuid4()}.txt",
+            text="builder context file text",
+            blob=None,
+            checksum=f"builder-retention-{uuid4()}",
+            size=25,
+            mimetype="text/plain",
+            file_type="text",
+            transcription=None,
+            owner_type="user",
+            owner_user_id=user_id,
+            owner_service_id=None,
+            tenant_id=tenant_id,
+            created_at=retained_at,
+            updated_at=retained_at,
+        )
+        async_session.add(file)
+        await async_session.flush()
+        async_session.add(
+            BuilderSessionFiles(
+                session_id=session.id,
+                file_id=file.id,
+                tenant_id=tenant_id,
+                created_at=retained_at,
+                updated_at=retained_at,
+            )
+        )
+        await async_session.flush()
+        file_id = file.id
+
+    await async_session.execute(
+        update(BuilderSessions)
+        .where(BuilderSessions.id == session.id)
+        .values(created_at=retained_at, updated_at=retained_at)
+    )
+    await async_session.flush()
+
+    return BuilderRetentionFixture(session_id=session.id, file_id=file_id)
 
 
 @pytest.mark.asyncio
@@ -673,6 +785,109 @@ async def test_tenant_level_retention_fallback_for_app_runs(
 
     assert old_exists is None, "App run older than tenant retention should be deleted"
     assert recent_exists is not None, "App run within tenant retention should be kept"
+
+
+@pytest.mark.asyncio
+async def test_builder_retention_deletes_only_expired_terminal_sessions(
+    async_session: AsyncSession,
+    test_space: Spaces,
+    test_tenant,
+    admin_user,
+    retention_service: DataRetentionService,
+):
+    now = datetime.now(timezone.utc)
+    test_space.data_retention_days = 30
+    async_session.add(test_space)
+    await async_session.flush()
+
+    old_applied = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.APPLIED,
+        now=now,
+        days_old=45,
+        include_plan=True,
+        include_file=True,
+    )
+    old_cancelled = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.CANCELLED,
+        now=now,
+        days_old=45,
+    )
+    recent_applied = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.APPLIED,
+        now=now,
+        days_old=10,
+        include_plan=True,
+        include_file=True,
+    )
+    old_chatting = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.CHATTING,
+        now=now,
+        days_old=45,
+    )
+    old_awaiting_approval = await create_builder_session_for_retention(
+        async_session,
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        user_id=admin_user.id,
+        status=SessionStatus.AWAITING_APPROVAL,
+        now=now,
+        days_old=45,
+    )
+
+    candidate_count = await retention_service.count_expired_builder_sessions(now=now)
+    deleted_count = await retention_service.delete_expired_builder_sessions(now=now)
+    await async_session.flush()
+
+    assert candidate_count == 2
+    assert deleted_count == candidate_count
+    assert await retention_service.count_expired_builder_sessions(now=now) == 0
+
+    assert await async_session.get(BuilderSessions, old_applied.session_id) is None
+    assert await async_session.get(BuilderSessions, old_cancelled.session_id) is None
+    assert (
+        await async_session.get(BuilderSessions, recent_applied.session_id) is not None
+    )
+    assert await async_session.get(BuilderSessions, old_chatting.session_id) is not None
+    assert (
+        await async_session.get(BuilderSessions, old_awaiting_approval.session_id)
+        is not None
+    )
+
+    deleted_plan = await async_session.scalar(
+        select(BuilderPlans.id).where(BuilderPlans.session_id == old_applied.session_id)
+    )
+    deleted_file_link = await async_session.scalar(
+        select(BuilderSessionFiles.file_id).where(
+            BuilderSessionFiles.session_id == old_applied.session_id
+        )
+    )
+    recent_file_link = await async_session.scalar(
+        select(BuilderSessionFiles.file_id).where(
+            BuilderSessionFiles.session_id == recent_applied.session_id
+        )
+    )
+
+    assert deleted_plan is None
+    assert deleted_file_link is None
+    assert recent_file_link == recent_applied.file_id
+    assert old_applied.file_id is not None
+    assert await async_session.get(Files, old_applied.file_id) is not None
 
 
 @pytest.mark.asyncio

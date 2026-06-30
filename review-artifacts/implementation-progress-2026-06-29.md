@@ -1416,6 +1416,76 @@
   - The seam is create-mode only; edit-mode materialization remains covered by scoped/edit-specific tests and can get a separate deterministic eval if future repair-pruning decisions depend on edit goldens.
   - Rollback is low risk: remove the materialization helper, the new eval-matrix test, the stale wording updates, and this ledger entry. No production, schema, API, generated-client, frontend, runtime, retention, audit, or persisted-data rollback is needed.
 
+## C8.6
+
+- Slice id: C8.6 Flow AI Builder retention/deletion/count policy
+- Findings addressed: old terminal Flow AI Builder sessions, plans, conversation/planning/proposal JSON, and session-file pins had no explicit data-retention count/delete path, so Builder could retain user-like content and keep uploaded files pinned indefinitely.
+- Verified evidence before change:
+  - `.codex/artifacts/codex-exec-flow-builder-next-roadmap-analysis-20260630.md` identifies Builder retention/deletion/count policy as the next clean release-hardening gate and names `DataRetentionService` as the retention orchestrator to reuse.
+  - `backend/src/intric/database/tables/flow_tables.py:2074-2079` defines Builder session statuses: `chatting`, `awaiting_approval`, `applied`, and `cancelled`.
+  - `backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py:9-21` makes `applied` and `cancelled` terminal self-transition states, while `backend/src/intric/flows/ai_builder/ai_builder_repo.py:140-172` treats only `chatting` and `awaiting_approval` as resumable.
+  - `backend/src/intric/flows/ai_builder/ai_builder_repo.py:210-237` marks cancelled sessions and updates `updated_at`; `backend/src/intric/flows/ai_builder/ai_builder_repo.py:909-927` marks applied sessions through the same persisted session status/update owner.
+  - `backend/src/intric/database/tables/flow_tables.py:2121-2146` stores Builder conversation and planning JSON on `builder_sessions`; `backend/src/intric/database/tables/flow_tables.py:2222-2259` stores proposal JSON on `builder_plans`.
+  - `backend/src/intric/database/tables/flow_tables.py:2195-2219` declares `builder_session_files` as session-owned with `ondelete="CASCADE"` back to `builder_sessions`; `backend/src/intric/database/tables/flow_tables.py:2225-2255` does the same for `builder_plans`.
+  - `backend/alembic/versions/202603121400_add_ai_builder_tables.py:9-13` records reset/replay policy for unreleased Builder table-shape changes; the same migration already creates the plan-to-session cascade at `backend/alembic/versions/202603121400_add_ai_builder_tables.py:205-209`.
+  - `backend/alembic/versions/20260419_builder_tenant_integrity.py:80-95` adds tenant-consistent cascade FKs for `builder_plans` and `builder_session_files`; `backend/alembic/versions/20260426_latest_plan_fk.py:66-76` preserves latest-plan integrity as a deferrable session-owned relationship.
+  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py:254-284` owns hierarchical retention-day resolution; `backend/src/intric/data_retention/infrastructure/data_retention_worker.py:113-351` owns the scheduled cleanup orchestration/result counts.
+  - `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:249-264` owns candidate-driven deletion of selected `files` rows only after reference checks, and `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:339-372` includes `builder_session_files` as one file-reference owner.
+- Verification agents used, with verdicts:
+  - CRG was used as a first-pass reducer; semantic search was noisy/empty for this specific retention slice, so final evidence came from direct source reads and exact `rg`/`git grep`.
+  - `[no-peer-review]`: the user explicitly asked to skip Claude/Antigravity for this bounded slice and use read-only `codex exec` peer gates instead.
+  - Read-only Codex plan gate artifact `.codex/artifacts/builder-retention-policy-plan-gate-20260630.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`; required feedback was applied by keeping the eligibility/count/delete policy inside `DataRetentionService`, not adding a Builder repository query wrapper, and making the scheduled worker count actual deleted rows.
+  - Read-only Codex commit gate artifact `.codex/artifacts/builder-retention-policy-commit-gate-20260630.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`; its required fix was applied by correcting the file-reclamation wording so the ledger no longer claims a general orphan-file sweep exists.
+  - Final staged-diff Codex commit gate artifact `.codex/artifacts/builder-retention-policy-staged-commit-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with no blockers or required fixes; it explicitly reviewed only the staged retention slice and left unrelated dirty files out of scope.
+- Red proof:
+  - `git grep -n "count_expired_builder_sessions\|delete_expired_builder_sessions" HEAD -- backend/src backend/tests` -> no matches before this working-tree implementation, proving there was no existing Builder retention count/delete path.
+  - A test-only red run for `test_builder_retention_deletes_only_expired_terminal_sessions` was attempted before implementation, but the devcontainer runtime failed before collection because `backend/.venv/bin/python` pointed at a host Homebrew interpreter and native wheels such as `pydantic_core` were unavailable. After the repo pyright wrapper repaired the ignored devcontainer virtualenv, the new DB-bound behavior test passed on the implemented path.
+- Files changed:
+  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - `backend/src/intric/data_retention/infrastructure/data_retention_worker.py`
+  - `backend/tests/integration/test_data_retention_hierarchical.py`
+  - `backend/tests/unittests/data_retention/test_data_retention_worker.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Scheduled data retention now deletes expired terminal Builder sessions (`applied` and `cancelled`) after the existing hierarchical conversation-retention period.
+  - Recent terminal Builder sessions remain; active/resumable `chatting` and `awaiting_approval` sessions remain regardless of age in this slice.
+  - Deleting an expired Builder session removes session-owned conversation/planning JSON, cascades `builder_plans` proposal JSON, and cascades `builder_session_files` links.
+  - Builder retention does not directly delete global `files` rows. Once Builder pins are gone, existing file-reference checks no longer report those Builder links; this slice does not add a general orphan-file sweep.
+  - Public API schema, OpenAPI output, generated clients, frontend UI, Flow runtime execution behavior, evidence export, audit vocabulary, proposal repair/fallback behavior, capability descriptors, MCP adapter, and PR #480 behavior are unchanged.
+- Complexity deleted or owner clarified:
+  - `DataRetentionService` remains the one retention orchestrator and now owns the Builder eligibility predicate, count, and batched delete.
+  - Count and delete share `_build_due_builder_session_retention_query`, avoiding drift between preview/count and actual deletion.
+  - No Builder lifecycle service, generic retention manager, file-deletion path, migration, public API, frontend surface, or repository pass-through was added.
+- Architecture delta:
+  - Canonical owner before: conversation/app retention lived in `DataRetentionService`, while Builder durable session content had no release retention owner.
+  - Canonical owner after: `DataRetentionService` owns Builder session retention eligibility/count/delete; Builder tables remain the persistence owner for cascaded session-owned plans and file pins; `FlowRunHistoryPurgeRepository` remains the candidate-driven Flow file/blob reclamation owner.
+  - Duplicate paths remaining: the older `worker/routes.py` conversation purge path still exists separately from the ARQ data-retention worker; this slice does not broaden into worker topology cleanup.
+  - 9/10 follow-up candidate: define an attended abandoned-active Builder session retention policy if product wants to expire old `chatting` or `awaiting_approval` sessions; this slice deliberately avoids guessing that lifecycle.
+  - Decision or measurement needed: choose whether active Builder sessions need a separate abandoned-work policy and retention anchor; terminal sessions use `updated_at` because current status transitions update it and no separate terminal timestamp exists.
+  - What not to preserve: indefinite terminal Builder session retention, duplicate count/delete predicates, Builder-owned direct file deletion, or a new retention subsystem for one unreleased table family.
+- Migration / schema decision:
+  - No migration was added. Existing table definitions and migrations already declare session-owned cascade semantics for `builder_plans` and `builder_session_files`; the focused DB test proves those cascades delete Builder-owned child rows.
+  - Because this is additive retention behavior over an unreleased Builder table family and not a schema change, reset/replay policy did not require editing migrations.
+- Retention deletion unit:
+  - Delete unit: expired terminal `builder_sessions` row.
+  - Retention anchor: `builder_sessions.updated_at`.
+  - Deletion side effects: database cascade removes `builder_plans` and `builder_session_files`; global `files` rows remain until a separate file-GC owner/policy selects them for deletion.
+- Validation commands and results:
+  - `docker exec ... cd /workspace && python -m py_compile backend/src/intric/data_retention/infrastructure/data_retention_service.py backend/src/intric/data_retention/infrastructure/data_retention_worker.py backend/tests/integration/test_data_retention_hierarchical.py backend/tests/unittests/data_retention/test_data_retention_worker.py` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py::test_builder_retention_deletes_only_expired_terminal_sessions -q` -> pass, 1 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/data_retention/test_data_retention_worker.py -q` -> pass, 2 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py -q` -> pass, 16 passed.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_data_retention_hierarchical.py tests/unittests/data_retention/test_data_retention_worker.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && .venv/bin/pyright ...` -> failed with environment/config resolution errors such as unresolved `sqlalchemy`; the repo wrapper below is the project type gate used for this slice.
+  - `cd backend && scripts/run_pyright_in_devcontainer.sh src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_data_retention_hierarchical.py tests/unittests/data_retention/test_data_retention_worker.py` -> pass, 0 errors.
+- Privacy / safety notes:
+  - The implementation adds no logging of prompts, user messages, model output, resource secrets, or file contents. It deletes old terminal Builder rows and reports only aggregate deletion counts.
+- Remaining risk / rollback:
+  - Active/resumable sessions can still retain content indefinitely if never applied/cancelled; that is deliberate until an abandoned-active-session product policy exists.
+  - Builder-only global `files` rows can remain after Builder pins are removed until a separate file-GC policy selects them; this slice only stops Builder session links from blocking such a policy.
+  - Direct `pyright` in the devcontainer does not resolve the project environment; use `backend/scripts/run_pyright_in_devcontainer.sh` for the repo type gate.
+  - Rollback is low risk: remove the Builder retention query/count/delete methods, the worker deletion step/count field, the focused tests, and this ledger entry. No schema, migration, API, generated-client, frontend, Flow runtime, file-purge, audit, or proposal-repair rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1

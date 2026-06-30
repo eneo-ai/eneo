@@ -75,6 +75,7 @@ class _DataRetentionService:
         self.template_asset_purge_limits: list[int] = []
         self.blocked_now_values: list[datetime] = []
         self.redaction_now_values: list[datetime] = []
+        self.builder_now_values: list[datetime] = []
 
     async def delete_old_questions(self) -> int:
         return 2
@@ -84,6 +85,10 @@ class _DataRetentionService:
 
     async def delete_old_sessions(self) -> int:
         return 5
+
+    async def delete_expired_builder_sessions(self, *, now: datetime) -> int:
+        self.builder_now_values.append(now)
+        return 13
 
     async def purge_old_flow_run_history_batch(
         self, *, now: datetime, limit: int
@@ -159,9 +164,10 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     service = container._service
 
     result = await cleanup_old_data(container=container)
-    expected_independent_cleanup_transactions = 10
+    expected_independent_cleanup_transactions = 11
 
     assert result["success"] is True
+    assert result["deleted"]["builder_sessions"] == 13
     assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23
     assert result["deleted"]["flow_runs_purged"] == 3
     assert result["deleted"]["flow_generated_files_deleted"] == 16
@@ -176,7 +182,7 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     )
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 31
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 37
-    assert result["deleted"]["total"] == 212
+    assert result["deleted"]["total"] == 225
     assert session.transaction_count == expected_independent_cleanup_transactions
     assert container.session.reset_count == 1
     assert service.purge_limits == [RETENTION_BATCH_SIZE] * 3
@@ -187,6 +193,7 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
         + service.redaction_now_values
     )
     assert len(set(all_flow_runtime_now_values)) == 1
+    assert service.builder_now_values == service.purge_now_values[:1]
 
 
 @pytest.mark.asyncio
@@ -228,11 +235,12 @@ async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_late
     assert result["deleted"]["flow_generated_files_deleted"] == 3
     assert result["deleted"]["flow_template_assets_purged"] == 29
     assert result["deleted"]["flow_template_asset_files_deleted"] == 31
+    assert result["deleted"]["builder_sessions"] == 13
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 0
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 0
     assert result["deleted"]["flow_debug_rows"] == 7
     assert result["deleted"]["flow_attempt_provenance"] == 11
     assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23
     assert service.blocked_now_values == []
-    assert session.transaction_count == 8
+    assert session.transaction_count == 9
     assert container.session.reset_count == 1
