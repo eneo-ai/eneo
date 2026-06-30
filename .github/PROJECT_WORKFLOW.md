@@ -24,7 +24,7 @@ Use one source of truth for humans and keep fallback metadata only for automatio
 - Human UI/source of truth: GitHub issue type, Parent issue/sub-issues, GitHub Project fields, and GitHub Project views.
 - Automation/export fallback: `kind:*` labels and issue body sections.
 
-`kind:*` labels are maintained because they are simple, visible, and reliable for scripts. Do not require a separate Project `Kind` field until it is automatically populated. If Project #5 already has `Kind`, it can remain as an optional convenience field, but it must not become a second manual truth.
+Project `Kind` is the human-facing field for project views and draft items. `kind:*` labels remain the issue-template default and automation/export fallback. Keep them aligned where practical, and do not add another kind-like field.
 
 ## Item kinds
 
@@ -44,7 +44,7 @@ Epics carry a `Roadmap version` value in the issue body and/or Project field, fo
 
 `Roadmap version` is a release bucket for grouping, filtering, and export. It is not the timeline field for GitHub's Roadmap layout.
 
-Use the version string that is useful for planning. Adding `2.7` or `2.7 RC` should not require a code change; update the issue or Project field value. If Project #5 uses a single-select `Roadmap version` field, add the new option in GitHub Project settings. The issue body remains a free-form export fallback.
+Use the version string that is useful for planning. Adding `2.7` or `2.7 RC` should not require a code change; update the issue or Project field value. Project #5 should keep `Roadmap version` as a text field so new version buckets do not require Project option maintenance. The issue body remains a free-form export fallback.
 
 GitHub Releases and release-candidate tags are delivery artifacts, not the source of truth for roadmap planning. Use release names such as `2.7 RC` in `Roadmap version` only when the roadmap needs that planning bucket.
 
@@ -72,15 +72,60 @@ Configure this once after merge:
 
 - Organization project: `eneo-ai/5`.
 - Secret: `ADD_TO_PROJECT_PAT`.
-- PAT access: enough to add/read organization Project items and read repo issues/PRs used by the export.
+- Token access: enough to read/update organization Project #5 fields and items, plus read repo issues/PRs used by the export and intake workflows.
 - Required issue types: `task`, `bug`, `feature`.
 - Optional custom issue types later: `Epic`, `Finding`, `Initiative`.
-- Required Project fields: `Status`, `Roadmap version`, `Start date`, `Target date`, `Priority`, `Area`.
-- Recommended Project fields: `Owner / lead`, `Sponsor / municipality`, `Decision needed`, `Visibility`.
+- Required Project fields: `Kind`, `Status`, `Roadmap version`, `Start date`, `Target date`, `Priority`, `Area`, `Owner / lead`, `Sponsor / municipality`, `Decision needed`.
 - Enable hidden Project fields: `Parent issue`, `Sub-issue progress`.
-- Required views: `Committee Roadmap`, `Standup`, `Epics`, `Active work`, `Findings`, `Needs triage`, `Needs epic`, `Done since last committee`.
+- Recommended views: `Committee Roadmap`, `Standup`, `Epics`, `Active work`, `Findings`, `Needs triage`, `Needs epic`, `Done since last committee`.
 
 Issue forms also list `projects: ["eneo-ai/5"]` for convenience. If the issue creator lacks write access to the org project, the intake workflow and Project auto-add should still add the item.
+
+The workflows run `.github/scripts/ensure-project-fields.mjs` after validating `ADD_TO_PROJECT_PAT`. The script creates missing planning fields and adds missing standard options for `Status`, `Area`, `Priority`, and `Kind`. It does not delete team-specific options or change Project view layouts.
+
+Run the setup script manually after changing Project #5 fields:
+
+```bash
+GH_TOKEN=... node .github/scripts/ensure-project-fields.mjs
+```
+
+Run a local script check without touching GitHub:
+
+```bash
+node .github/scripts/ensure-project-fields.mjs --self-test
+```
+
+### `ADD_TO_PROJECT_PAT` setup
+
+`ADD_TO_PROJECT_PAT` must be an Actions secret, not an Actions variable. Variables are visible as plain configuration and must not contain tokens.
+
+Use a fine-grained personal access token when possible:
+
+- Resource owner: `eneo-ai`.
+- Repository access: `eneo-ai/eneo`.
+- Organization permission: Projects read/write.
+- Repository permissions: Issues read-only and Pull requests read-only.
+- Expiration: set a real expiry date and rotate the secret before it expires.
+
+If using a classic personal access token instead, use the narrowest token that can still access organization Projects and this repository. The local `gh` setup used for verification had `repo`, `read:org`, `project`, and `workflow` scopes; the `workflow` scope is only needed for local workflow inspection, not for the Actions secret itself.
+
+Create the repository secret in GitHub:
+
+1. Open `eneo-ai/eneo` -> `Settings`.
+2. Open `Secrets and variables` -> `Actions`.
+3. Stay on the `Secrets` tab.
+4. Click `New repository secret`.
+5. Name: `ADD_TO_PROJECT_PAT`.
+6. Secret: paste the token value.
+7. Save, then rerun `Export roadmap graph`.
+
+You can also set it with GitHub CLI:
+
+```bash
+gh secret set ADD_TO_PROJECT_PAT --repo eneo-ai/eneo
+```
+
+The CLI prompts for the token value. Do not put the token in chat, commit it, or store it as a repository variable.
 
 ## Adding new items
 
@@ -223,14 +268,18 @@ GH_TOKEN=... node scripts/export_github_roadmap.mjs --owner eneo-ai --project 5 
 
 The `Export roadmap graph` workflow can also be run manually in GitHub Actions. It uploads the generated roadmap as an artifact and lets the runner choose `default`, `committee`, or `standup` audience.
 
+If an epic appears under `Unscheduled`, set its `Roadmap version` Project field or fill in the `Roadmap version` section in the epic issue body. The export does not use GitHub Releases, tags, or milestones as the roadmap source of truth.
+
 ## Validation
 
 Run these checks after editing project workflow files:
 
 ```bash
+node --check .github/scripts/ensure-project-fields.mjs
 node --check .github/scripts/project-intake.mjs
 node --check .github/scripts/ensure-planning-labels.mjs
 node --check scripts/export_github_roadmap.mjs
+node .github/scripts/ensure-project-fields.mjs --self-test
 node .github/scripts/project-intake.mjs --self-test
 node scripts/export_github_roadmap.mjs --self-test
 ```

@@ -1,0 +1,182 @@
+---
+title: Project Roadmap
+---
+
+import { Callout, Steps } from 'nextra/components'
+
+# Project Roadmap
+
+Eneo tracks product planning in one GitHub Project:
+
+- Project: [eneo-ai/5](https://github.com/orgs/eneo-ai/projects/5)
+- Repository: [eneo-ai/eneo](https://github.com/eneo-ai/eneo)
+- Main export workflow: `Export roadmap graph`
+
+Use the project for roadmap epics, active development tasks, findings, bugs, and chores. The roadmap export reads the same project data and turns epics into Markdown, Mermaid, or SVG snapshots.
+
+<Callout type="info">
+  Project #5 has the roadmap fields listed below. The Actions workflows also run a setup script that recreates missing fields when the project configuration drifts.
+</Callout>
+
+## Planning Model
+
+Use one item kind per issue or draft item.
+
+| Kind | Use it for | Roadmap export |
+| --- | --- | --- |
+| `Epic` | A roadmap outcome that can own several development tasks. | Exported as a roadmap card. |
+| `Task` | Buildable engineering work under an epic. | Kept out of the roadmap card view. |
+| `Bug` | A product defect. Triage decides whether it becomes planned work. | Kept out of the roadmap card view. |
+| `Finding` | An observed issue, risk, or improvement candidate. | Kept out until converted to an epic or task. |
+| `Chore` | Maintenance work without direct product behavior. | Kept out of the roadmap card view. |
+
+The SVG roadmap shows epics only. Tasks still matter because they show how developers deliver each epic.
+
+## Fields That Matter
+
+Project #5 uses these planning fields.
+
+| Field | Type | Who fills it in | Why it matters |
+| --- | --- | --- | --- |
+| `Kind` | Single select | Creator or triage | Classifies project items for views, draft cards, and roadmap export. |
+| `Roadmap version` | Text | Product or project lead | Places epics under `2.0`, `2.1`, `2.2`, `2.3`, `2.X`, or another export column. |
+| `Status` | Single select | Owner or assignee | Shows whether work is planned, active, or done. |
+| `Sponsor / municipality` | Text | Product or project lead | Shows the requester or sponsor, for example `Sundsvall`. |
+| `Owner / lead` | Text | Product or project lead | Shows the person or team driving the epic. Leave it empty until someone decides ownership. |
+| `Start date` | Date | Project lead | Drives GitHub's Roadmap timeline view. |
+| `Target date` | Date | Project lead | Drives GitHub's Roadmap timeline view. |
+| `Decision needed` | Text | Product, project, or architecture lead | Flags committee, product, or architecture decisions. |
+| `Parent issue` | GitHub relationship | Developer or maintainer | Connects tasks to their epic when sub-issues are available. |
+| `Sub-issues progress` | GitHub field | GitHub | Shows task progress under an epic. |
+
+`Roadmap version` controls the SVG export columns. `Start date` and `Target date` control GitHub's Roadmap timeline. Use both when you need both a release bucket and a calendar view.
+
+## Add An Epic
+
+<Steps>
+
+### Create the epic
+
+Create an issue with the `Epic` template, or create a draft item in Project #5 and set `Kind` to `Epic`.
+
+Use a short, readable title. The title appears on the exported roadmap card.
+
+### Set the roadmap version
+
+Set `Roadmap version` to the release bucket that should contain the epic:
+
+```text
+2.2
+```
+
+The export accepts free text. Use values such as `2.2`, `2.3`, `2.7 RC`, `2.X`, `Future`, or `Unscheduled`.
+
+### Fill in visible roadmap metadata
+
+Add these values when you know them:
+
+```text
+Sponsor / municipality: Sundsvall
+Owner / lead: Team Platform
+Status: Todo
+Decision needed: Need rollout decision
+```
+
+Leave `Owner / lead`, dates, and sponsor empty when nobody has made that decision. The exporter does not infer owners from labels, assignees, areas, or AI text.
+
+### Add dates for the GitHub Roadmap view
+
+Set `Start date` and `Target date` when the team wants the card on GitHub's timeline view. These dates do not decide the SVG version column.
+
+</Steps>
+
+## Add Development Tasks
+
+Create development tasks under an epic when the work is ready to build.
+
+Use the `Development task` issue template and fill in `Parent epic` with the epic issue number:
+
+```text
+#123
+```
+
+When GitHub sub-issues are available, add the task as a sub-issue of the epic too. Keep the `Parent epic` field in the issue body because automation and exports can read it.
+
+Tasks without a parent epic get the `needs:epic` label. That label means the task needs planning context before the team treats it as roadmap work.
+
+## Export The Roadmap
+
+Run the manual GitHub Actions workflow:
+
+```text
+Actions -> Export roadmap graph -> Run workflow
+```
+
+Choose:
+
+| Input | Recommended value | Meaning |
+| --- | --- | --- |
+| `format` | `svg` | Creates the slide-style roadmap. |
+| `audience` | `committee` | Uses stakeholder-oriented labels and layout. |
+| `versions` | `2.0,2.1,2.2,2.3` | Shows these columns even if some are empty. |
+
+The workflow uploads the result as an Actions artifact. It does not commit generated SVG files to the repository.
+
+## Version Rules
+
+The project does not hardcode future versions. Add the version string to the epic's `Roadmap version` field.
+Keep `Roadmap version` as a text field in Project #5. A single-select field would make every new version bucket require Project option maintenance.
+
+Examples:
+
+| Roadmap version | Export behavior |
+| --- | --- |
+| `2.2` | Places the epic in the `2.2` column. |
+| `2.7 RC` | Places the epic in a `2.7 RC` column when that column is requested or present in data. |
+| `2.X` | Places the epic in the future bucket. |
+| `Future` | Normalizes to `2.X` in the export. |
+| Empty | Places the epic in `Unscheduled`. |
+
+GitHub Releases, tags, release candidates, and milestones do not drive the roadmap export. Use them for delivery tracking. Use `Roadmap version` for planning.
+
+## Project Setup Automation
+
+The repo includes a setup script for Project #5:
+
+```bash
+GH_TOKEN=... node .github/scripts/ensure-project-fields.mjs
+```
+
+The script creates missing fields and adds missing standard options. It keeps team-specific options instead of deleting them.
+It does not change Project view layouts.
+
+It ensures these fields exist:
+
+```text
+Roadmap version
+Sponsor / municipality
+Owner / lead
+Decision needed
+Start date
+Target date
+Status
+Area
+Priority
+Kind
+```
+
+The workflows run the script after they validate `ADD_TO_PROJECT_PAT`. You only need to run it by hand after changing Project #5 outside the repo workflow.
+
+`ADD_TO_PROJECT_PAT` must be a repository secret with organization Projects read/write access for Project #5 and read access to issues and pull requests in `eneo-ai/eneo`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| An epic appears under `Unscheduled`. | Set `Roadmap version` on the epic. |
+| A field exists but you cannot see it in the current view. | Open `View` -> `Fields` and tick the field. The export can read hidden fields. |
+| The export workflow says `Missing ADD_TO_PROJECT_PAT`. | Add a repository secret named `ADD_TO_PROJECT_PAT`. |
+| A task gets `needs:epic`. | Add a `Parent epic` issue reference such as `#123`. |
+| A card is missing from the SVG. | Check that `Kind` is `Epic` or the issue has the `kind:epic` label. |
+
+`Add item` creates a new project item. The `+` in a table header adds or shows fields in that view.

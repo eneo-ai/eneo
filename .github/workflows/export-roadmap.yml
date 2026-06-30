@@ -47,6 +47,24 @@ jobs:
             *) echo "extension=md" >> "$GITHUB_OUTPUT" ;;
           esac
 
+      - name: Validate project export token
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=Missing ADD_TO_PROJECT_PAT::Create an Actions repository secret named ADD_TO_PROJECT_PAT. It must contain a GitHub token that can read and update organization project eneo-ai/5."
+            exit 1
+          fi
+
+          gh project item-list 5 --owner eneo-ai --limit 1 --format json >/dev/null
+
+      - name: Ensure roadmap project fields
+        run: node .github/scripts/ensure-project-fields.mjs
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          PROJECT_OWNER: eneo-ai
+          PROJECT_NUMBER: "5"
+
       - name: Export roadmap
         run: |
           node scripts/export_github_roadmap.mjs \

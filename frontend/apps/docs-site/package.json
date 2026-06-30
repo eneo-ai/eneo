@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@theguild/remark-mermaid": "^0.3.0",
     "classnames": "^2.5.1",
     "next": "15.3.8",
     "nextra": "^4.6.1",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "pagefind": "^1.3.0",
     "@eslint/eslintrc": "^3",
+    "@next/eslint-plugin-next": "15.3.8",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

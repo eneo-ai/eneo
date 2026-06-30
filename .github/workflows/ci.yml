@@ -198,6 +198,7 @@ jobs:
 
       - name: Run project workflow self-tests
         run: |
+          node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
 
