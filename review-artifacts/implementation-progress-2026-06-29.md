@@ -3001,6 +3001,58 @@
   - Rollback: restore publish-time `template_file_id`, `get_by_flow_file`, legacy promotion, parser/validator/frontend fallback paths, and the deleted compatibility test file. That would reintroduce two identity paths and should only happen if a real target audit later finds file-id-only persisted configs requiring reset/replay policy.
   - Exact next bounded recommendation: `module_registry.metadata_json` owner/delete decision.
 
+## Module Registry Metadata Owner/Delete Audit
+
+- Slice id: `module-registry-metadata-owner-delete-audit`.
+- Commit target: `refactor(flows): delete unused module registry table`.
+- Findings addressed:
+  - The exact pre-edit inventory command `rg -n "ModuleRegistry|module_registry|module registry" backend/src backend/tests backend/alembic frontend docs review-artifacts --glob '!frontend/node_modules' --glob '!backend/.venv'` found only Flow table/migration/JSONB-registry/docs/test references. No service, API, job, deployment, or platform writer/reader used `module_registry`.
+  - The existing platform module surface is the separate `Modules` table/router/repo, not the dormant Flow-local `ModuleRegistry` table.
+  - `module_registry.metadata_json` was the only deferred JSONB registry row and the only reason the registry carried `DEFERRED_INVENTORY` enum values.
+- Files changed:
+  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/alembic/versions/579199d395dd_add_flow_tables_and_assistant_hidden.py`
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`
+  - `backend/src/intric/flows/infrastructure/flow_schema_docs_exporter.py`
+  - `backend/tests/unittests/flows/test_flow_jsonb_ownership.py`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`
+  - `docs/flows/flow-data-model-production-readiness-gate0.md`
+  - `docs/flows/flow-product-data-model-api-contract-hardening-packet-2026-06-28.md`
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - `ModuleRegistry` is no longer part of Flow-owned SQLAlchemy metadata.
+  - The unreleased Flow foundation migration no longer creates or drops `module_registry`.
+  - The Flow JSONB registry has no deferred inventory category or deferred row; every remaining registry row must name executable owner symbols.
+  - Generated Flow data-schema docs no longer show the table or a deferred JSONB inventory section.
+- Complexity deleted or owner clarified:
+  - Deleted a table/model, an unreleased migration table definition, one JSONB registry exception, three deferred enum values, a docs exporter branch, and a test exception instead of creating a platform wrapper or `ModuleRegistryMetadata` envelope.
+  - Canonical platform module ownership remains the existing `Modules` table/module API. Flow no longer carries an adjacent dormant module registry table.
+- Migration decision:
+  - Edited the unreleased Flow foundation migration rather than adding a cleanup migration. This follows the existing Flow/Builder reset-replay policy for unreleased schema cleanup and deliberately diverges from the generic "never edit applied migrations" rule only for this pre-release branch shape.
+  - Development databases that already applied the older branch migration should reset/replay or manually drop the old local `module_registry` table.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - First read-only Codex plan gate artifact `.codex/artifacts/codex-exec-module-registry-metadata-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`, `BLOCKER: yes`; valid feedback applied by deleting the dead `DEFERRED_INVENTORY` escape hatch instead of leaving an empty compatibility hook.
+  - Revised read-only Codex plan gate artifact `.codex/artifacts/codex-exec-module-registry-metadata-plan-v2-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: no`.
+  - First final read-only Codex diff gate artifact `.codex/artifacts/codex-exec-module-registry-metadata-final-v2-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`, `BLOCKER: yes` because it reviewed the whole unstaged worktree and found pre-existing unrelated `.devcontainer/devcontainer.json` whitespace failures; it found no required source changes in the module-registry deletion slice itself.
+  - Staged final read-only Codex diff gate artifact `.codex/artifacts/codex-exec-module-registry-metadata-final-staged-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: no`, `COMMIT_READY: yes`.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run python scripts/generate_flow_developer_schema_docs.py'` -> pass, regenerated `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_jsonb_ownership.py -q'` -> pass, 7 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py -q'` -> pass, 69 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run alembic heads'` -> pass, head `202606291900_flow_runtime_schema`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/database/tables/flow_tables.py alembic/versions/579199d395dd_add_flow_tables_and_assistant_hidden.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff format --check src/intric/database/tables/flow_tables.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass. The Alembic file was excluded from format-check to avoid unrelated whole-file formatter churn; it was still covered by ruff check and Alembic head validation.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/database/tables/flow_tables.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass, 0 errors.
+  - `rg -n "ModuleRegistry|module_registry|ModuleRegistryMetadata" backend/src backend/tests backend/alembic frontend/apps/docs-site/src/content docs review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md --glob '!frontend/node_modules' --glob '!backend/.venv'` -> remaining hits are the resolved roadmap row and historical progress entries only.
+  - `rg -n "DEFERRED_INVENTORY|deferred_inventory|Deferred adjacent JSONB inventory" backend/src backend/tests frontend/apps/docs-site/src/content docs review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md --glob '!backend/.venv' --glob '!frontend/node_modules'` -> remaining hits are historical progress text and the live guard test asserting no `deferred_inventory` enum value.
+- Remaining risk / rollback:
+  - Risk is limited to local development databases that applied the older unreleased migration; reset/replay or manual local cleanup is the accepted branch policy.
+  - Rollback means restoring the deleted SQLAlchemy model, migration DDL, JSONB registry row, deferred enum values, docs exporter branch, generated docs, and stale platform-owner guidance. That should only happen if a real platform product owner appears.
+  - Unrelated dirty files left untouched: `.devcontainer/devcontainer.json`, `.gitignore`, `frontend/bun.lock`, `.devcontainer/devcontainer-lock.json`, and `AGENTS.md.backup-20260629-220449`.
+  - Exact next bounded recommendation: ask the next supervisor Codex-exec strategy gate to choose between `FlowRunError.code` enum/generated-client typing and Flow terminal failure observability delete-or-wire. Do not dispatch either without that strategy gate.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

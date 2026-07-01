@@ -72,10 +72,6 @@ def test_flow_jsonb_owner_registry_entries_are_reviewable() -> None:
         assert isinstance(owner.corruption_behavior, FlowJsonbCorruptionBehavior)
 
         module = import_module(owner.owner_module)
-        if owner.storage_category is FlowJsonbStorageCategory.DEFERRED_INVENTORY:
-            assert owner.owner_symbols == ()
-            continue
-
         assert owner.owner_symbols, f"{owner.table_name}.{owner.column_name}"
         for symbol_path in owner.owner_symbols:
             assert not symbol_path.endswith(("Service", "Repository"))
@@ -93,14 +89,13 @@ def test_flow_jsonb_owner_registry_rejects_duplicate_keys() -> None:
         build_flow_jsonb_owner_map((owner, owner))
 
 
-def test_flow_jsonb_owner_registry_has_explicit_deferred_inventory_rows() -> None:
-    deferred_rows = {
-        key
-        for key, owner in FLOW_JSONB_COLUMN_OWNERS.items()
-        if owner.storage_category is FlowJsonbStorageCategory.DEFERRED_INVENTORY
-    }
-
-    assert deferred_rows == {("module_registry", "metadata_json")}
+def test_flow_jsonb_owner_registry_has_no_deferred_inventory_escape_hatch() -> None:
+    for enum_type in (
+        FlowJsonbStorageCategory,
+        FlowJsonbSchemaVersionPolicy,
+        FlowJsonbCorruptionBehavior,
+    ):
+        assert "deferred_inventory" not in {item.value for item in enum_type}
 
 
 def test_builder_plan_proposal_json_has_typed_owner() -> None:

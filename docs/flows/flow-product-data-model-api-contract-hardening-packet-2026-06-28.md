@@ -149,7 +149,6 @@ The failing integration tests were rerun directly and still failed. The observed
 | Gap | Recommended next goal |
 |---|---|
 | One golden API consumer journey test | Add an integration test that covers inspect, upload, run, poll, review, evidence/artifacts, and rerun |
-| Platform-owned `module_registry.metadata_json` | Move to a platform data-model inventory outside Flow |
 | SDK examples | Add generated-client examples after the golden API journey is stable |
 | Retention/FK purge audit | Review retention purge behavior against runtime files/results/evidence |
 

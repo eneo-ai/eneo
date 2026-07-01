@@ -2026,51 +2026,6 @@ class FlowRunWebhookDeliveries(BasePublic):
     )
 
 
-class ModuleRegistry(BasePublic):
-    """Stores installed module registry state. Writer: Module registry service. Purpose: track module health, compatibility, versions, and metadata near Flow tables."""
-
-    name: Mapped[str] = mapped_column(nullable=False)
-    module_id: Mapped[str] = mapped_column(nullable=False, unique=True)
-    internal_url: Mapped[str] = mapped_column(nullable=False)
-    health_endpoint: Mapped[str] = mapped_column(
-        nullable=False, server_default="/health"
-    )
-    last_health_check_at: Mapped[Optional[datetime]] = mapped_column(
-        sa.DateTime(timezone=True)
-    )
-    last_health_status: Mapped[str] = mapped_column(
-        sa.String(16),
-        nullable=False,
-        server_default="unknown",
-    )
-    enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
-    module_version: Mapped[Optional[str]] = mapped_column(nullable=True)
-    image_digest: Mapped[Optional[str]] = mapped_column(nullable=True)
-    module_api_contract: Mapped[Optional[str]] = mapped_column(nullable=True)
-    core_compat_min: Mapped[Optional[str]] = mapped_column(nullable=True)
-    core_compat_max: Mapped[Optional[str]] = mapped_column(nullable=True)
-    compat_status: Mapped[str] = mapped_column(
-        sa.String(16),
-        nullable=False,
-        server_default="unknown",
-    )
-    release_notes_url: Mapped[Optional[str]] = mapped_column(nullable=True)
-    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=True
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            "last_health_status IN ('healthy','unhealthy','unknown')",
-            name="ck_module_registry_last_health_status",
-        ),
-        CheckConstraint(
-            "compat_status IN ('compatible','incompatible','unknown')",
-            name="ck_module_registry_compat_status",
-        ),
-    )
-
-
 BUILDER_SESSION_STATUS_VALUES = (
     "chatting",
     "awaiting_approval",

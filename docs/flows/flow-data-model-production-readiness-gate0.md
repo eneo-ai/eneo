@@ -55,7 +55,6 @@ This inventory is based on direct source review, not graph output:
 | `builder_sessions` | Flow AI Builder conversation, target, lock, planning state | AI Builder session/repository/service | Builder router/service/planner | `tenant_id`, `space_id`, actor user | tenant, space, optional flow, latest plan | `conversation`, `planning_state_jsonb` | Keep JSONB but tighten registry to existing typed owners | AI Builder API only, not core Flow runtime consumer path |
 | `builder_session_files` | Files attached to an AI Builder session | AI Builder session service | planner/context loader | `tenant_id`, session | session/tenant, file | none | Already relational because files require identity and cleanup | AI Builder upload/context APIs |
 | `builder_plans` | Immutable AI Builder proposal snapshot and lifecycle status | AI Builder planner/repository/lifecycle service | apply/revise/list/get plan paths | `tenant_id`, session | session/tenant, latest plan composite FK | `proposal_json` | Keep JSONB: immutable typed proposal snapshot with `spec_hash` drift guard | AI Builder API, public enum appears in generated client |
-| `module_registry` | Adjacent module registry state in Flow table module | module registry service | module health/compatibility code | none in table | none | `metadata_json` | Deferred to platform inventory; kept in registry to avoid hidden exclusions | none for Flow runtime consumer |
 
 ## Gate 1 - JSONB Decision Matrix
 
@@ -91,7 +90,6 @@ This inventory is based on direct source review, not graph output:
 | `builder_sessions.conversation` | `intric.flows.ai_builder.ai_builder_domain_models.ConversationMessage` array | owner-validated, message-id migration | no | no | medium | keep JSONB but replace deferred registry row with typed owner |
 | `builder_sessions.planning_state_jsonb` | `intric.flows.ai_builder.planning_state.PlanningState` | embedded FCM/planner/builder schema versions | no | no | medium | keep JSONB but replace deferred registry row with typed owner |
 | `builder_plans.proposal_json` | `intric.flows.ai_builder.ai_builder_domain_models.FlowBuilderProposal` | owner-validated plus `spec_hash` | no | resource bindings are inside proposal but applied relationally on materialization | high | keep JSONB |
-| `module_registry.metadata_json` | platform module registry owner pending | deferred | unknown | unknown | medium | defer to platform inventory |
 
 ## Gate 2 - API Consumer Journey Matrix
 
@@ -133,7 +131,7 @@ Acceptance criteria:
 - A unit test enforces `tuple(status.value for status in PlanStatus) == BUILDER_PLAN_STATUS_VALUES`.
 - The original AI Builder table migration no longer creates a DB check that accepts `rejected`.
 - Generated TypeScript `PlanStatus` no longer includes `rejected`.
-- JSONB registry has only `module_registry.metadata_json` as deferred inventory.
+- JSONB registry has no deferred inventory rows.
 - Builder JSONB registry `owner_module` consistently means model-defining module for `conversation`, `planning_state_jsonb`, and `proposal_json`.
 - Docs-site data schema is regenerated from the updated registry.
 
@@ -157,6 +155,5 @@ Risk and rollback:
 | Gap | Why it remains | Recommended next action |
 |---|---|---|
 | Full API consumer golden journey | Existing tests cover parts, but this batch does not add a single upload-run-review-rerun artifact flow | Add one integration contract test after status cleanup lands |
-| Platform `module_registry.metadata_json` ownership | Adjacent table is registered but not Flow-owned | Move to a platform data-model inventory |
 | Generated SDK examples | OpenAPI schema exists, but examples could be more cohesive | Add docs/examples after API journey test stabilizes |
 | Retention purge proof | Retention state is present and relational, but not re-audited in this source slice | Run a focused retention/FK guard review |

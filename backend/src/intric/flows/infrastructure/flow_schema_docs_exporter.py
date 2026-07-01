@@ -26,7 +26,6 @@ from intric.flows.infrastructure.flow_docs_related_cards import (
 )
 from intric.flows.infrastructure.flow_jsonb_ownership import (
     FLOW_JSONB_COLUMN_OWNERS,
-    FlowJsonbStorageCategory,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -119,9 +118,6 @@ FLOW_SCHEMA_MODEL_REGISTRY: tuple[FlowSchemaModelEntry, ...] = (
         flow_tables.BuilderSessionFiles, FlowSchemaAggregate.DEFERRED_ADJACENT
     ),
     FlowSchemaModelEntry(
-        flow_tables.ModuleRegistry, FlowSchemaAggregate.DEFERRED_ADJACENT
-    ),
-    FlowSchemaModelEntry(
         flow_tables.FlowPackageImports, FlowSchemaAggregate.DEFERRED_ADJACENT
     ),
 )
@@ -165,7 +161,7 @@ _AGGREGATE_DESCRIPTIONS = {
         "security classification."
     ),
     FlowSchemaAggregate.DEFERRED_ADJACENT: (
-        "Adjacent builder, module, and import tables live near Flow persistence "
+        "Adjacent builder and import tables live near Flow persistence "
         "but are not core runtime/history aggregates."
     ),
 }
@@ -328,11 +324,7 @@ def render_flow_schema_docs_page() -> str:
         "",
         "## JSONB policy",
         "",
-        _render_jsonb_policy(include_deferred=False),
-        "",
-        "## Deferred adjacent JSONB inventory",
-        "",
-        _render_jsonb_policy(include_deferred=True),
+        _render_jsonb_policy(),
         "",
         "## Related",
         "",
@@ -685,23 +677,14 @@ def _render_table_summary(table_docs: tuple[FlowSchemaTableDoc, ...]) -> str:
     )
 
 
-def _render_jsonb_policy(*, include_deferred: bool) -> str:
+def _render_jsonb_policy() -> str:
     owners = sorted(
         FLOW_JSONB_COLUMN_OWNERS.values(),
         key=lambda owner: (owner.table_name, owner.column_name),
     )
-    selected_owners = [
-        owner
-        for owner in owners
-        if (owner.storage_category is FlowJsonbStorageCategory.DEFERRED_INVENTORY)
-        is include_deferred
-    ]
-
-    if not selected_owners:
-        return "No entries."
 
     rows: list[tuple[str, ...]] = []
-    for owner in selected_owners:
+    for owner in owners:
         rows.append(
             (
                 f"`{owner.table_name}.{owner.column_name}`",

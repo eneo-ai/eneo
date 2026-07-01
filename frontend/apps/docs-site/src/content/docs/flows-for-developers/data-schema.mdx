@@ -91,7 +91,7 @@ Use these cards to jump to one aggregate ERD. The diagrams stay visible on the p
 | Run execution, results, and files        | Core              | Runtime tables persist runs, attempts, current step results, runtime uploads, generated files, audit delivery, and outbound HTTP delivery. | `flow_run_audit_outbox`, `flow_run_step_input_files`, `flow_run_step_result_files`, `flow_run_webhook_deliveries`, `flow_runs`, `flow_runtime_uploaded_files`, `flow_step_attempts`, `flow_step_results` |
 | Review checkpoints and rerun lineage     | Core              | Review and rerun tables preserve human checkpoints, rerun requests, and invalidation lineage without deleting earlier history.             | `flow_run_rerun_invalidated_steps`, `flow_run_rerun_operations`, `flow_run_review_checkpoints`                                                                                                           |
 | Retention and classification             | Core              | Retention policy tables tighten run-history purge windows by tenant security classification.                                               | `flow_classification_retention_policies`                                                                                                                                                                 |
-| Deferred adjacent tables                 | Deferred adjacent | Adjacent builder, module, and import tables live near Flow persistence but are not core runtime/history aggregates.                        | `builder_plans`, `builder_session_files`, `builder_sessions`, `flow_package_imports`, `module_registry`                                                                                                  |
+| Deferred adjacent tables                 | Deferred adjacent | Adjacent builder and import tables live near Flow persistence but are not core runtime/history aggregates.                                 | `builder_plans`, `builder_session_files`, `builder_sessions`, `flow_package_imports`                                                                                                                     |
 
 ## Aggregate entity relationship diagrams
 
@@ -674,7 +674,7 @@ erDiagram
 
 ### Deferred adjacent tables
 
-Adjacent builder, module, and import tables live near Flow persistence but are not core runtime/history aggregates.
+Adjacent builder and import tables live near Flow persistence but are not core runtime/history aggregates.
 
 <div className="flow-docs-mermaid-figure">
 
@@ -730,26 +730,6 @@ erDiagram
     jsonb import_plan_json "required"
     jsonb selected_mappings_json "required"
     jsonb failure_json "nullable"
-    uuid id PK "required"
-    timestamp created_at "required"
-    timestamp updated_at "required"
-  }
-  module_registry {
-    varchar name "required"
-    varchar module_id "required"
-    varchar internal_url "required"
-    varchar health_endpoint "required"
-    datetime last_health_check_at "nullable"
-    varchar last_health_status "required"
-    boolean enabled "required"
-    varchar module_version "nullable"
-    varchar image_digest "nullable"
-    varchar module_api_contract "nullable"
-    varchar core_compat_min "nullable"
-    varchar core_compat_max "nullable"
-    varchar compat_status "required"
-    varchar release_notes_url "nullable"
-    jsonb metadata_json "nullable"
     uuid id PK "required"
     timestamp created_at "required"
     timestamp updated_at "required"
@@ -816,7 +796,6 @@ erDiagram
 | `builder_session_files`                  | `BuilderSessionFiles`                 | Deferred adjacent tables                 | files attached to Flow AI Builder sessions.   | Flow AI Builder session service.             | keep uploaded builder context files tenant-scoped.                           |
 | `builder_sessions`                       | `BuilderSessions`                     | Deferred adjacent tables                 | Flow AI Builder conversations.                | Flow AI Builder session service.             | keep builder chat, planning state, locks, and target Flow linkage.           |
 | `flow_package_imports`                   | `FlowPackageImports`                  | Deferred adjacent tables                 | Flow package import attempts.                 | FlowPackageImportRepository.                 | keep import plans, selected mappings, and terminal import results auditable. |
-| `module_registry`                        | `ModuleRegistry`                      | Deferred adjacent tables                 | installed module registry state.              | Module registry service.                     | track module health, compatibility, versions, and metadata near Flow tables. |
 
 ## JSONB policy
 
@@ -852,12 +831,6 @@ erDiagram
 | `flow_template_assets.placeholders`                        | `TemplateAssetPlaceholders`          | `intric.flows.flow_template_asset_service`                    | `derived_index`         | `owner_validated_shape`   | `reject_before_write`       | no                   | Extracted placeholder names are a small derived index for template validation and do not need row identity of their own.                                                 |
 | `flow_versions.definition_json`                            | `PublishedFlowDefinition`            | `intric.flows.published_definition`                           | `immutable_snapshot`    | `checksummed_snapshot`    | `reject_before_write`       | no                   | Published definitions are immutable, checksummed snapshots of the runtime contract and should be loaded as one versioned document.                                       |
 | `flows.metadata_json`                                      | `FlowMetadata`                       | `intric.flows.flow_metadata`                                  | `authored_config`       | `owner_validated_shape`   | `normalize_to_empty`        | no                   | Sparse authoring metadata changes independently from the core Flow row and is normalized by the Flow metadata parser before use.                                         |
-
-## Deferred adjacent JSONB inventory
-
-| Column                          | Envelope                 | Owner                                | Category             | Version policy       | Corruption behavior  | Relational candidate | Rationale                                                                                                                                |
-| ------------------------------- | ------------------------ | ------------------------------------ | -------------------- | -------------------- | -------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `module_registry.metadata_json` | `ModuleRegistryMetadata` | `intric.database.tables.flow_tables` | `deferred_inventory` | `deferred_inventory` | `deferred_inventory` | no                   | This adjacent table-module JSON column is registered so the metadata guard has no hidden exclusions; a platform inventory should own it. |
 
 ## Related
 

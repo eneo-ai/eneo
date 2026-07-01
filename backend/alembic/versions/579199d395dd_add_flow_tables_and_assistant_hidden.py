@@ -651,54 +651,6 @@ def upgrade() -> None:
         unique=False,
     )
 
-    op.create_table(
-        "module_registry",
-        sa.Column(
-            "id",
-            postgresql.UUID(as_uuid=True),
-            primary_key=True,
-            nullable=False,
-            server_default=sa.text("gen_random_uuid()"),
-        ),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column("name", sa.String(), nullable=False),
-        sa.Column("module_id", sa.String(), nullable=False),
-        sa.Column("internal_url", sa.String(), nullable=False),
-        sa.Column("health_endpoint", sa.String(), nullable=False, server_default="/health"),
-        sa.Column("last_health_check_at", sa.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column("last_health_status", sa.String(length=16), nullable=False, server_default="unknown"),
-        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-        sa.Column("module_version", sa.String(), nullable=True),
-        sa.Column("image_digest", sa.String(), nullable=True),
-        sa.Column("module_api_contract", sa.String(), nullable=True),
-        sa.Column("core_compat_min", sa.String(), nullable=True),
-        sa.Column("core_compat_max", sa.String(), nullable=True),
-        sa.Column("compat_status", sa.String(length=16), nullable=False, server_default="unknown"),
-        sa.Column("release_notes_url", sa.String(), nullable=True),
-        sa.Column("metadata_json", postgresql.JSONB(), nullable=True),
-        sa.CheckConstraint(
-            "last_health_status IN ('healthy','unhealthy','unknown')",
-            name="ck_module_registry_last_health_status",
-        ),
-        sa.CheckConstraint(
-            "compat_status IN ('compatible','incompatible','unknown')",
-            name="ck_module_registry_compat_status",
-        ),
-        sa.UniqueConstraint("module_id"),
-    )
-    op.create_index("ix_module_registry_module_id", "module_registry", ["module_id"], unique=True)
-
     op.add_column(
         "assistants",
         sa.Column(
@@ -915,9 +867,6 @@ def downgrade() -> None:
     )
     op.drop_column("assistants", "managing_flow_id")
     op.drop_column("assistants", "origin")
-
-    op.drop_index("ix_module_registry_module_id", table_name="module_registry")
-    op.drop_table("module_registry")
 
     op.drop_index("ix_flow_step_attempts_run_flow_step_attempt", table_name="flow_step_attempts")
     op.drop_index("ix_flow_step_attempts_tenant_id", table_name="flow_step_attempts")

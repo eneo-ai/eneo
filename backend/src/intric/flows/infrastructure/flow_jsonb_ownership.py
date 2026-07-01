@@ -14,7 +14,6 @@ class FlowJsonbStorageCategory(StrEnum):
     IMPORT_STATE = "import_state"
     DERIVED_INDEX = "derived_index"
     BUILDER_SESSION_STATE = "builder_session_state"
-    DEFERRED_INVENTORY = "deferred_inventory"
 
 
 class FlowJsonbSchemaVersionPolicy(StrEnum):
@@ -23,7 +22,6 @@ class FlowJsonbSchemaVersionPolicy(StrEnum):
     CHECKSUMMED_SNAPSHOT = "checksummed_snapshot"
     OWNER_VALIDATED_SHAPE = "owner_validated_shape"
     PROVIDER_DEFINED = "provider_defined"
-    DEFERRED_INVENTORY = "deferred_inventory"
 
 
 class FlowJsonbCorruptionBehavior(StrEnum):
@@ -33,7 +31,6 @@ class FlowJsonbCorruptionBehavior(StrEnum):
     KEEP_AUDITABLE_FAILURE = "keep_auditable_failure"
     MARK_EVIDENCE_UNAVAILABLE = "mark_evidence_unavailable"
     NORMALIZE_TO_EMPTY = "normalize_to_empty"
-    DEFERRED_INVENTORY = "deferred_inventory"
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,19 +513,6 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         rationale=(
             "Next-step ids are a small resume snapshot from the published graph; "
             "there is no separate row identity to constrain relationally."
-        ),
-    ),
-    _owner(
-        "module_registry",
-        "metadata_json",
-        owner_module="intric.database.tables.flow_tables",
-        envelope_name="ModuleRegistryMetadata",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
-        rationale=(
-            "This adjacent table-module JSON column is registered so the metadata "
-            "guard has no hidden exclusions; a platform inventory should own it."
         ),
     ),
     _owner(
