@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import inspect
 from importlib import import_module
+from types import ModuleType
 from typing import cast
 
 import pytest
@@ -18,6 +20,17 @@ from intric.flows.infrastructure.flow_jsonb_ownership import (
 )
 
 JsonbColumnKey = tuple[str, str]
+
+
+def _resolve_owner_symbol(module: ModuleType, symbol_path: str) -> object:
+    resolved: object = module
+    for symbol_part in symbol_path.split("."):
+        resolved = getattr(resolved, symbol_part)
+    return resolved
+
+
+def _is_executable_owner_symbol(symbol: object) -> bool:
+    return inspect.isclass(symbol) or inspect.isfunction(symbol) or callable(symbol)
 
 
 def _flow_tables_json_columns() -> set[JsonbColumnKey]:
@@ -58,7 +71,19 @@ def test_flow_jsonb_owner_registry_entries_are_reviewable() -> None:
         assert isinstance(owner.schema_version_policy, FlowJsonbSchemaVersionPolicy)
         assert isinstance(owner.corruption_behavior, FlowJsonbCorruptionBehavior)
 
-        import_module(owner.owner_module)
+        module = import_module(owner.owner_module)
+        if owner.storage_category is FlowJsonbStorageCategory.DEFERRED_INVENTORY:
+            assert owner.owner_symbols == ()
+            continue
+
+        assert owner.owner_symbols, f"{owner.table_name}.{owner.column_name}"
+        for symbol_path in owner.owner_symbols:
+            assert not symbol_path.endswith(("Service", "Repository"))
+            symbol = _resolve_owner_symbol(module, symbol_path)
+            assert _is_executable_owner_symbol(symbol), (
+                f"{owner.table_name}.{owner.column_name} owner symbol "
+                f"{owner.owner_module}.{symbol_path} is not executable"
+            )
 
 
 def test_flow_jsonb_owner_registry_rejects_duplicate_keys() -> None:

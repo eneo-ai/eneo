@@ -2807,7 +2807,48 @@
 - Remaining risk / rollback:
   - Risk is limited to SDK test/type-smoke maintenance. No backend, generated schema, frontend product UI, Flow runtime, Flow AI Builder, DB, migration, or OpenAPI behavior changed.
   - Rollback: remove the added runtime consumer sequence test, operation-response type aliases, and this ledger entry.
-  - Exact next bounded recommendation: Flow terminal failure event/readable diagnostics, then executable JSONB ownership guard, then Flow metadata top-level ownership.
+  - Exact next bounded recommendation: executable JSONB owner probes, then Flow metadata top-level ownership, then template identity cleanup. The broad terminal failure event item is stale for Flow-first ordering because `FlowRunTerminalizer` already emits `flow_run.lifecycle` events; any remaining shared observability cleanup should be a separate cross-owner slice.
+
+## Executable JSONB Owner Probes
+
+- Slice id: `executable-jsonb-owner-probes`.
+- Findings addressed:
+  - The Flow JSONB registry matched SQLAlchemy JSON/JSONB columns and imported owner modules, but non-deferred rows could still point only at prose labels with no executable parser/model/dumper/probe behind the declared owner.
+  - Several `envelope_name` values are deliberately review labels, not Python symbols, so using the label as a convention would have forced fake pass-through classes.
+  - Review-checkpoint JSON rows named the application service as owner even though the existing checkpoint repository is the concrete writer for `original_payload_json`, `current_payload_json`, `output_contract_json`, and `next_step_ids_json`.
+- Evidence reviewed:
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py` owns `FlowJsonbColumnOwner` and `FLOW_JSONB_COLUMN_OWNER_ENTRIES`.
+  - `backend/tests/unittests/flows/test_flow_jsonb_ownership.py` owns the executable registry guard.
+  - `.codex/artifacts/codex-exec-next-slice-after-sdk-smoke-20260701.md` selected this slice and marked the broad terminal-event roadmap item stale for Flows-first ordering.
+  - Read-only Codex plan gate `.codex/artifacts/codex-exec-jsonb-owner-probes-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with the guardrail to use precise existing functions/classes and avoid broad service/repository class names as proof.
+- Red / green proof:
+  - Pre-change gap: `test_flow_jsonb_owner_registry_entries_are_reviewable` only imported `owner.owner_module`; it did not fail if a live row had no executable owner symbol.
+  - Green focused proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_jsonb_ownership.py -q'` -> pass, 7 passed.
+- Files changed:
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`
+  - `backend/tests/unittests/flows/test_flow_jsonb_ownership.py`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - None at runtime. This is an executable ownership guard for hidden-schema maintainability.
+- Complexity deleted or owner clarified:
+  - Reused existing parsers, Pydantic/domain models, builder functions, and concrete repository/service methods instead of creating a JSONB manager, generic probe service, or one-class-per-envelope shims.
+  - Kept `envelope_name` as the human-facing docs label and added `owner_symbols` as the executable source-truth anchors.
+  - Corrected review-checkpoint JSON rows to the existing repository writer instead of preserving the weaker application-service owner label.
+- Architecture delta:
+  - Canonical registry owner remains `flow_jsonb_ownership.py`.
+  - Actual JSON contract owners remain in their existing modules; the registry now points at executable anchors in those owners.
+  - `module_registry.metadata_json` remains the only explicit `DEFERRED_INVENTORY` row.
+  - What not to preserve: rows with only prose labels, broad service/repository class names as proof, fake envelope classes, or a generic JSONB validation framework.
+  - Honest rating impact: improves Flow data/schema maintainability and makes hidden JSONB schema drift easier to catch, but does not resolve Flow metadata top-level bucket policy, template identity cleanup, or `module_registry.metadata_json`.
+- Validation commands and results:
+  - Focused JSONB guard passed as listed above.
+  - Generated schema docs were refreshed with `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/python scripts/generate_flow_developer_schema_docs.py'` because review-checkpoint JSON owner text changed from service to repository.
+  - Remaining validation was run before commit; see this commit's final worker report for full ruff, format, pyright, docs-contract, final-gate, and diff-check results.
+- Remaining risk / rollback:
+  - Risk is limited to registry/test maintenance and generated schema-doc owner text if future rows change owners.
+  - Rollback: remove `owner_symbols`, restore the prior module-import-only guard, and restore the previous review-checkpoint owner module values. That would reintroduce prose-only registry drift, so rollback should only happen if a row has no honest executable owner and must be split into a focused follow-up.
+  - Exact next bounded recommendation: Flow metadata top-level ownership proof/cleanup, then template identity cleanup, then `module_registry.metadata_json` owner/delete decision.
 
 ## 9/10 Follow-Up Candidates
 
