@@ -124,10 +124,6 @@ def test_flow_canonical_layer_imports_are_available() -> None:
         infrastructure.FlowVersionRepository is flow_version_repo.FlowVersionRepository
     )
     assert (
-        application.dispatch_flow_run_after_commit
-        is flow_dispatch.dispatch_flow_run_after_commit
-    )
-    assert (
         application.dispatch_flow_run_recoverably_after_commit
         is flow_dispatch.dispatch_flow_run_recoverably_after_commit
     )

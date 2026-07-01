@@ -4,10 +4,6 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 _EXPORTS = {
-    "dispatch_flow_run_after_commit": (
-        "intric.flows.application.flow_dispatch",
-        "dispatch_flow_run_after_commit",
-    ),
     "dispatch_flow_run_recoverably_after_commit": (
         "intric.flows.application.flow_dispatch",
         "dispatch_flow_run_recoverably_after_commit",
@@ -17,7 +13,6 @@ _EXPORTS = {
 }
 
 __all__ = [
-    "dispatch_flow_run_after_commit",
     "dispatch_flow_run_recoverably_after_commit",
     "FlowRunService",
     "FlowService",
@@ -25,7 +20,6 @@ __all__ = [
 
 if TYPE_CHECKING:
     from intric.flows.application.flow_dispatch import (
-        dispatch_flow_run_after_commit,
         dispatch_flow_run_recoverably_after_commit,
     )
     from intric.flows.application.flow_run_service import FlowRunService

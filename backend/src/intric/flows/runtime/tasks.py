@@ -720,10 +720,9 @@ async def _redispatch_stale_queued_runs_all_tenants(
 ) -> dict[str, int | str]:
     """Re-dispatch QUEUED runs whose initial dispatch was lost.
 
-    `dispatch_flow_run_after_commit` runs as a FastAPI BackgroundTask
-    after the response is sent; if the API process exits before the
-    task fires (autoreload, OOM, deploy), the run sits in QUEUED with
-    no error_code and no automatic retry. This beat task is the
+    Flow run dispatch starts as a FastAPI BackgroundTask after the response
+    is sent; if the API process exits before the task fires (autoreload, OOM,
+    deploy), the run sits in QUEUED with no error_code. This beat task is the
     safety net.
 
     The atomic `claim_stale_queued_run_for_redispatch` is the

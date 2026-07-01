@@ -23,7 +23,7 @@ from intric.main.models import GeneralError
 from intric.roles.permissions import Permission
 
 
-async def _noop_dispatch_flow_run_after_commit(
+async def _noop_dispatch_flow_run_recoverably_after_commit(
     *, request: FlowRunDispatchRequest
 ) -> None:
     _ = request
@@ -530,8 +530,8 @@ async def test_service_key_evidence_permission_matrix(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -631,15 +631,13 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
 ):
     dispatch_requests: list[FlowRunDispatchRequest] = []
 
-    async def _record_dispatch_flow_run_after_commit(
-        *, request: FlowRunDispatchRequest
-    ) -> None:
+    async def _record_dispatch(*, request: FlowRunDispatchRequest) -> None:
         dispatch_requests.append(request)
 
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _record_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _record_dispatch,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -844,13 +842,13 @@ async def test_flow_run_create_rejects_runtime_transcription_cache_key(
 ):
     dispatch_requests: list[object] = []
 
-    async def _record_dispatch_flow_run_after_commit(*, request: object) -> None:
+    async def _record_dispatch(*, request: object) -> None:
         dispatch_requests.append(request)
 
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _record_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _record_dispatch,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -883,13 +881,13 @@ async def test_flow_run_create_rejects_unknown_fields_before_dispatch(
 ):
     dispatch_requests: list[object] = []
 
-    async def _record_dispatch_flow_run_after_commit(*, request: object) -> None:
+    async def _record_dispatch(*, request: object) -> None:
         dispatch_requests.append(request)
 
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _record_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _record_dispatch,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -963,8 +961,8 @@ async def test_flow_run_create_rejects_missing_required_runtime_step_inputs(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -1175,8 +1173,8 @@ async def test_flow_runtime_file_delete_rejects_attached_run_input(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -1237,13 +1235,8 @@ async def test_flow_runtime_file_delete_rejects_attached_rerun_input(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
-    )
-    monkeypatch.setattr(
-        flow_run_execution_router,
         "dispatch_flow_run_recoverably_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     flow, run, step_id, _initial_upload = await _create_completed_runtime_input_run(
@@ -1296,13 +1289,8 @@ async def test_flow_runtime_file_delete_removes_unselected_post_run_upload(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
-    )
-    monkeypatch.setattr(
-        flow_run_execution_router,
         "dispatch_flow_run_recoverably_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     flow, run, step_id, _initial_upload = await _create_completed_runtime_input_run(
@@ -1389,8 +1377,8 @@ async def test_flow_runtime_file_delete_hides_other_principal_attached_file(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -1461,8 +1449,8 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     space_id = await _create_space(client, token=admin_token)
@@ -1528,8 +1516,8 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     output_contract = {
@@ -1698,8 +1686,8 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
 ):
     monkeypatch.setattr(
         flow_run_execution_router,
-        "dispatch_flow_run_after_commit",
-        _noop_dispatch_flow_run_after_commit,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
     )
 
     output_contract = {

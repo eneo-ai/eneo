@@ -37,7 +37,6 @@ from intric.flows.api.flow_run_steps_router import (
     list_flow_run_steps,
 )
 from intric.flows.application.flow_dispatch import (
-    dispatch_flow_run_after_commit,
     dispatch_flow_run_recoverably_after_commit,
 )
 from intric.flows.application.flow_run_service import (
@@ -320,7 +319,7 @@ async def test_create_flow_run_schedules_background_dispatch():
     ]
     assert len(background_tasks.tasks) == 1
     scheduled = background_tasks.tasks[0]
-    assert scheduled.func is dispatch_flow_run_after_commit
+    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
     assert scheduled.kwargs == {
         "request": FlowRunUserDispatchRequest(
             run_id=run.id,
@@ -663,126 +662,6 @@ async def test_rerun_flow_run_step_stale_revision_does_not_schedule_dispatch(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(
-    monkeypatch,
-):
-    run_repo = AsyncMock()
-    terminalizer = AsyncMock()
-    backend = MagicMock()
-    backend.dispatch = AsyncMock(side_effect=RuntimeError("broker down"))
-
-    fake_session = MagicMock()
-
-    class _BeginContext:
-        async def __aenter__(self):
-            return fake_session
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    class _SessionContext:
-        async def __aenter__(self):
-            return fake_session
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    fake_session.begin = lambda: _BeginContext()
-
-    class _FakeContainer:
-        def flow_execution_backend(self):
-            return backend
-
-        def flow_run_repo(self):
-            return run_repo
-
-        def flow_run_terminalizer(self):
-            return terminalizer
-
-    monkeypatch.setattr(
-        flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
-    )
-    monkeypatch.setattr(
-        flow_dispatch_module, "Container", lambda session: _FakeContainer()
-    )
-
-    run_id = uuid4()
-    flow_id = uuid4()
-    tenant_id = uuid4()
-    request = FlowRunUserDispatchRequest(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        principal_user_id=uuid4(),
-    )
-
-    await dispatch_flow_run_after_commit(request=request)
-
-    terminalizer.terminalize_run.assert_awaited_once()
-    kwargs = terminalizer.terminalize_run.await_args.kwargs
-    assert kwargs["run_id"] == run_id
-    assert kwargs["tenant_id"] == tenant_id
-    assert kwargs["target_status"] == FlowRunStatus.FAILED
-    assert kwargs["error"].code == "flow_dispatch_failed"
-    assert kwargs["error"].message == (
-        "flow_dispatch_failed: Flow dispatch failed before execution started. "
-        "Retry creating a new run."
-    )
-
-
-@pytest.mark.asyncio
-async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_on_success(
-    monkeypatch,
-):
-    run_repo = AsyncMock()
-    terminalizer = AsyncMock()
-    backend = MagicMock()
-    backend.dispatch = AsyncMock()
-    fake_session = MagicMock()
-
-    class _SessionContext:
-        async def __aenter__(self):
-            return fake_session
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    class _FakeContainer:
-        def flow_execution_backend(self):
-            return backend
-
-        def flow_run_repo(self):
-            return run_repo
-
-        def flow_run_terminalizer(self):
-            return terminalizer
-
-    monkeypatch.setattr(
-        flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
-    )
-    monkeypatch.setattr(
-        flow_dispatch_module, "Container", lambda session: _FakeContainer()
-    )
-
-    run_id = uuid4()
-    flow_id = uuid4()
-    tenant_id = uuid4()
-    user_id = uuid4()
-    request = FlowRunUserDispatchRequest(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        principal_user_id=user_id,
-    )
-
-    await dispatch_flow_run_after_commit(request=request)
-
-    backend.dispatch.assert_awaited_once_with(request=request)
-    run_repo.update_status.assert_not_awaited()
-    terminalizer.terminalize_run.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_dispatch_flow_run_recoverably_after_commit_dispatches_without_terminalization(
     monkeypatch,
 ):
@@ -879,59 +758,6 @@ async def test_dispatch_flow_run_recoverably_after_commit_logs_without_terminali
     await dispatch_flow_run_recoverably_after_commit(request=request)
 
     assert "flow_recoverable_dispatch_after_commit_failed" in caplog.text
-    terminalizer.terminalize_run.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_dispatch_after_commit_wrappers_dispatch_same_request_shape(monkeypatch):
-    terminalizer = AsyncMock()
-    backend = MagicMock()
-    backend.dispatch = AsyncMock()
-    fake_session = MagicMock()
-
-    class _BeginContext:
-        async def __aenter__(self):
-            return fake_session
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    class _SessionContext:
-        async def __aenter__(self):
-            return fake_session
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    fake_session.begin = lambda: _BeginContext()
-
-    class _FakeContainer:
-        def flow_execution_backend(self):
-            return backend
-
-        def flow_run_terminalizer(self):
-            return terminalizer
-
-    monkeypatch.setattr(
-        flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
-    )
-    monkeypatch.setattr(
-        flow_dispatch_module, "Container", lambda session: _FakeContainer()
-    )
-
-    request = FlowRunUserDispatchRequest(
-        run_id=uuid4(),
-        flow_id=uuid4(),
-        tenant_id=uuid4(),
-        principal_user_id=uuid4(),
-    )
-
-    await dispatch_flow_run_after_commit(request=request)
-    await dispatch_flow_run_recoverably_after_commit(request=request)
-
-    assert backend.dispatch.await_count == 2
-    first_call, second_call = backend.dispatch.await_args_list
-    assert first_call.kwargs == second_call.kwargs == {"request": request}
     terminalizer.terminalize_run.assert_not_awaited()
 
 

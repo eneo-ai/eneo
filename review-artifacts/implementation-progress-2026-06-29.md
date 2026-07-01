@@ -874,7 +874,7 @@
 - Architecture delta:
   - Canonical owner before: queued redispatch mechanics were split between `tasks.py` and `FlowRunService.redispatch_run`, with manual success audit in the router.
   - Canonical owner after: `stale_queued_redispatch.redispatch_stale_queued_run` owns shared claim-result build/dispatch classification; `FlowRunService.redispatch_run` owns manual application orchestration; the router owns HTTP authorization/audit; the beat owns scheduler policy.
-  - Duplicate paths remaining: `dispatch_flow_run_after_commit` and `dispatch_flow_run_recoverably_after_commit` still own separate post-commit dispatch policies for create/rerun/resume, but they do not duplicate stale queued redispatch claim semantics.
+  - Duplicate paths remaining at PG-14 close: create and rerun/resume still owned separate post-commit dispatch policies. This follow-up was resolved by the create-run dispatch recoverability slice below, which deleted the create-only terminalizing wrapper.
   - 9/10 follow-up candidate: review whether manual redispatch should expose a typed public error envelope for broker failure instead of relying on the existing unhandled exception adapter; keep this outside PG-14 unless API contract work is scheduled.
   - Decision or measurement needed: decide whether invalid-principal stale queued rows should become an explicit terminalization/reconciliation slice despite the existing database principal CHECK making them near-unreachable.
   - What not to preserve: duplicated build/dispatch branches, hidden authorization inside claim callbacks, router-owned runtime orchestration, and success-only manual audit visibility.
@@ -2573,6 +2573,58 @@
   - What not to preserve: broad "move all JSONB to tables" work, generic JSONB frameworks, compatibility shims for unreleased Flow-only shapes, or tests that preserve hidden metadata/fallback behavior after the owner decision is made.
 - Roadmap files updated:
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md` now records the post-PG-10c JSONB synthesis addendum and decision-register rows for create-run dispatch, metadata buckets, template identity cutoff, and `module_registry.metadata_json`.
+
+## Create-Run Dispatch Recoverability Implementation
+
+- Slice id: create-run dispatch recoverability.
+- Findings addressed:
+  - Initial create-run dispatch used `dispatch_flow_run_after_commit`, which terminalized a successfully created queued run as failed when the broker/background dispatch step raised.
+  - Resume and rerun already used `dispatch_flow_run_recoverably_after_commit`, leaving accepted queued work recoverable instead of asking clients to create a new run.
+  - Stale queued redispatch already owns the recovery path, so the fix was to reuse that ownership and delete the terminalizing create-only wrapper rather than add a dispatch manager or retry framework.
+- Evidence reviewed:
+  - `backend/src/intric/flows/api/flow_run_execution_router.py:766-770` scheduled `dispatch_flow_run_after_commit` for initial create before this slice.
+  - `backend/src/intric/flows/api/flow_run_execution_router.py:1276-1280` and `:1455-1459` already scheduled `dispatch_flow_run_recoverably_after_commit` for resume and rerun.
+  - `backend/src/intric/flows/application/flow_dispatch.py:18-51` terminalized broker dispatch failure as `RUN_DISPATCH_FAILED` and told clients to retry by creating a new run.
+  - `backend/src/intric/flows/application/stale_queued_redispatch.py:63-97`, `backend/src/intric/flows/infrastructure/flow_run_repo.py:333-356`, and `:386-409` already provide queued-run list/claim/redispatch repair.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Initial Codex-exec plan gate process hung and was interrupted with no verdict.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-create-run-dispatch-recoverability-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, `BLOCKER: no`; valid guidance applied by updating the stale runtime task comment while deleting the obsolete terminalizing wrapper.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-create-run-dispatch-recoverability-final-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, `BLOCKER: no`, `COMMIT_READY: no`; valid guidance applied by keeping unrelated dirty files unstaged, using scoped diff checks, and updating the stale PG-14 ledger sentence above.
+- Red / green proof:
+  - Red before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_execution_router.py::test_create_flow_run_schedules_background_dispatch -q'` failed because create still scheduled `dispatch_flow_run_after_commit`.
+  - Green after source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_execution_router.py -q'` -> pass, 20 passed.
+  - Green integration proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_consumer_api_contract.py -q'` -> pass, 18 passed.
+- Files changed:
+  - `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - `backend/src/intric/flows/application/flow_dispatch.py`
+  - `backend/src/intric/flows/application/__init__.py`
+  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/tests/unittests/flows/test_flow_run_execution_router.py`
+  - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
+  - `backend/tests/unit/test_server_startup_imports.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Initial create-run dispatch now uses the same recoverable after-commit wrapper as resume and rerun.
+  - A transient broker/background dispatch exception after successful create no longer terminalizes the run as failed. The run remains queued for stale queued redispatch.
+  - Public create-run response shape is unchanged.
+- Complexity deleted or owner clarified:
+  - Deleted `dispatch_flow_run_after_commit`, its lazy export, startup assertion, stale tests, and the create-only terminalizing failure policy.
+  - Dispatch failure policy for accepted queued operations now has one owner: `dispatch_flow_run_recoverably_after_commit` plus stale queued redispatch.
+  - No new service, manager, command bus, retry framework, queue topology, or compatibility alias was added.
+- Architecture delta:
+  - Canonical owner before: create had its own terminalizing dispatch wrapper while resume/rerun used recoverable dispatch.
+  - Canonical owner after: all accepted queued Flow run operations use recoverable after-commit dispatch and stale queued redispatch owns repair.
+  - What not to preserve: the unreleased create-only terminalization path that told API clients to create a replacement run after infrastructure dispatch failure.
+  - Honest rating impact: this materially improves runtime reliability and API consumer DX, but Flows still needs evidence export summary cleanup and `flow_runs.error_json` read/corruption work before a 9/10 claim is credible.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/api/flow_run_execution_router.py src/intric/flows/application/flow_dispatch.py src/intric/flows/application/__init__.py src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py && .venv/bin/ruff format --check src/intric/flows/api/flow_run_execution_router.py src/intric/flows/application/flow_dispatch.py src/intric/flows/application/__init__.py src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py'` -> initial format-check failure on `test_flow_run_execution_router.py`, then pass after formatting the touched test file.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/api/flow_run_execution_router.py src/intric/flows/application/flow_dispatch.py src/intric/flows/application/__init__.py src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py'` -> pass, 0 errors. The first pyright attempt used host-style `backend/...` prefixes and failed path resolution before rerunning with backend-relative paths.
+  - `rg -n "dispatch_flow_run_after_commit" backend/src backend/tests || true` -> no matches after deletion.
+- Remaining risk / rollback:
+  - Runtime risk is limited to broker/background dispatch failure after successful create: runs now remain queued instead of terminalizing failed immediately.
+  - Rollback is straightforward: restore the deleted wrapper/export/tests and change create scheduling back to `dispatch_flow_run_after_commit`.
+  - Exact next bounded recommendation: evidence export single public summary contract, then `flow_runs.error_json` read/corruption boundary, then API/SDK consumer runtime smoke.
 
 ## 9/10 Follow-Up Candidates
 

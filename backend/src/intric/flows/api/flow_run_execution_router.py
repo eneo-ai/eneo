@@ -64,7 +64,6 @@ from intric.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
 from intric.flows.application.flow_dispatch import (
-    dispatch_flow_run_after_commit,
     dispatch_flow_run_recoverably_after_commit,
 )
 from intric.flows.application.stale_queued_redispatch import (
@@ -765,7 +764,7 @@ async def create_flow_run(
 
     if dispatch_request is not None:
         background_tasks.add_task(
-            dispatch_flow_run_after_commit,
+            dispatch_flow_run_recoverably_after_commit,
             request=dispatch_request,
         )
     return assembler.to_run_public(run)
