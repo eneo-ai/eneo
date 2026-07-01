@@ -1,0 +1,87 @@
+name: Export roadmap graph
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: Export format
+        type: choice
+        options:
+          - markdown
+          - mermaid
+          - svg
+        default: markdown
+      audience:
+        description: Output audience
+        type: choice
+        options:
+          - default
+          - committee
+          - standup
+        default: default
+      versions:
+        description: Optional comma-separated version columns, for example 2.0,2.1,2.2,2.X
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out export script
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve output extension
+        id: output
+        env:
+          FORMAT: ${{ inputs.format }}
+        run: |
+          case "$FORMAT" in
+            mermaid) echo "extension=mmd" >> "$GITHUB_OUTPUT" ;;
+            svg) echo "extension=svg" >> "$GITHUB_OUTPUT" ;;
+            *) echo "extension=md" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Validate project export token
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=Missing ADD_TO_PROJECT_PAT::Create an Actions repository secret named ADD_TO_PROJECT_PAT. It must contain a GitHub token that can read and update organization project eneo-ai/5."
+            exit 1
+          fi
+
+          gh project item-list 5 --owner eneo-ai --limit 1 --format json >/dev/null
+
+      - name: Ensure roadmap project fields
+        run: node .github/scripts/ensure-project-fields.mjs
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          PROJECT_OWNER: eneo-ai
+          PROJECT_NUMBER: "5"
+
+      - name: Export roadmap
+        run: |
+          node scripts/export_github_roadmap.mjs \
+            --owner eneo-ai \
+            --project 5 \
+            --format "$FORMAT" \
+            --audience "$AUDIENCE" \
+            --versions "$VERSIONS" \
+            --output roadmap.${{ steps.output.outputs.extension }}
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          FORMAT: ${{ inputs.format }}
+          AUDIENCE: ${{ inputs.audience }}
+          VERSIONS: ${{ inputs.versions }}
+
+      - name: Upload roadmap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eneo-roadmap-${{ inputs.audience }}-${{ inputs.format }}
+          path: roadmap.${{ steps.output.outputs.extension }}

@@ -1,6 +1,6 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import AsyncIterator
 
 import redis.asyncio as aioredis
 from dependency_injector import containers, providers
@@ -1593,7 +1593,7 @@ class Container(containers.DeclarativeContainer):
 
     @staticmethod
     @asynccontextmanager
-    async def session_scope() -> AsyncIterator[AsyncSession]:
+    async def session_scope() -> AsyncGenerator[AsyncSession]:
         """Provide a short-lived session for explicit DB operations.
 
         Use this for Unit-of-Work pattern in long-running tasks (crawlers,

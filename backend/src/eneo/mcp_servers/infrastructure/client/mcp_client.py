@@ -1,13 +1,20 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
 import asyncio
-from datetime import timedelta
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any, Callable, Optional, cast
+from typing import Any, AsyncContextManager, Callable, Optional, Protocol, cast
 
 import httpx
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import (
+    GetSessionIdCallback,
+    streamable_http_client,
+)
+from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.shared.message import SessionMessage
 from mcp.types import ServerNotification, ToolListChangedNotification
 
 from eneo.main.config import get_settings
@@ -28,6 +35,35 @@ MCP_TERMINATE_TIMEOUT_SECONDS = 5.0
 # blocks before they flow into persistence or citation rendering.
 RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
+MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
+
+MCPStreams = tuple[
+    MemoryObjectReceiveStream[SessionMessage | Exception],
+    MemoryObjectSendStream[SessionMessage],
+    GetSessionIdCallback,
+]
+
+
+class _SessionIdTransport(Protocol):
+    session_id: str | None
+
+
+@asynccontextmanager
+async def _open_streamable_http_client(
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout_seconds: float,
+    terminate_on_close: bool,
+) -> AsyncGenerator[MCPStreams]:
+    timeout = httpx.Timeout(timeout_seconds, read=MCP_SSE_READ_TIMEOUT_SECONDS)
+    async with create_mcp_http_client(headers=headers, timeout=timeout) as http_client:
+        async with streamable_http_client(
+            url,
+            http_client=http_client,
+            terminate_on_close=terminate_on_close,
+        ) as streams:
+            yield streams
 
 
 def _truncate_text(value: Optional[str], max_bytes: int) -> Optional[str]:
@@ -192,7 +228,7 @@ class MCPClient:
         # on the dirty flag above, set by the actual notification, instead.
         self.supports_tools_list_changed: bool = False
         self.session: Optional[ClientSession] = None
-        self._streams_context = None
+        self._streams_context: AsyncContextManager[MCPStreams] | None = None
         self._session_context = None
         # Populated after a successful connect() / initialize() round-trip.
         # assigned_mcp_session_id is the MCP-protocol session id the server
@@ -202,7 +238,7 @@ class MCPClient:
         self.assigned_mcp_session_id: Optional[str] = None
         # Set by the streamable HTTP transport; reading it after initialize()
         # returns the session id the SDK captured from the server response.
-        self._get_session_id_callable: Optional[Any] = None
+        self._get_session_id_callable: Optional[GetSessionIdCallback] = None
 
     async def _handle_session_message(self, message: Any) -> None:
         """ClientSession message handler.
@@ -326,10 +362,10 @@ class MCPClient:
         # terminate_on_close=False: the SDK otherwise sends DELETE /mcp on
         # transport teardown, which evicts the server-side session and breaks
         # the next turn's resume. Server idle TTL bounds the leak.
-        streams_context = streamablehttp_client(
+        streams_context = _open_streamable_http_client(
             url=self.mcp_server.http_url,
             headers=headers,
-            timeout=timedelta(seconds=self.timeout),
+            timeout_seconds=float(self.timeout),
             terminate_on_close=False,
         )
 
@@ -344,7 +380,9 @@ class MCPClient:
         # directly). Pre-seeding session_id is required for resume — see the
         # docstring.
         self._get_session_id_callable = get_session_id
-        transport = getattr(get_session_id, "__self__", None)
+        transport = cast(
+            _SessionIdTransport | None, getattr(get_session_id, "__self__", None)
+        )
         if transport is None:
             await streams_context.__aexit__(None, None, None)
             self._streams_context = None

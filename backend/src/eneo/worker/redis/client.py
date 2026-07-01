@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import redis.asyncio as aioredis
 from eneo.main.config import get_settings
@@ -35,7 +35,21 @@ def get_redis() -> aioredis.Redis:
     return _redis_client
 
 
-r = get_redis()
+def reset_redis_client() -> aioredis.Redis:
+    """Rebuild the Redis singleton from the current settings."""
+    global _redis_client
+    _redis_client = _get_redis_connection()
+    return _redis_client
+
+
+class _RedisClientProxy:
+    """Lazy compatibility proxy for modules that import the legacy `r` client."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_redis(), name)
+
+
+r = cast(aioredis.Redis, _RedisClientProxy())
 
 
 class WorkerHealth(NamedTuple):

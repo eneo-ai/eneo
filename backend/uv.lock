@@ -724,7 +724,7 @@ dev = [
     { name = "openpyxl", specifier = ">=3.1.5,<4" },
     { name = "pyright", specifier = ">=1.1.390,<2" },
     { name = "pytest", specifier = ">=9.0.3,<10" },
-    { name = "pytest-asyncio", specifier = ">=0.20.3,<0.21" },
+    { name = "pytest-asyncio", specifier = ">=1,<2" },
     { name = "pytest-cov", specifier = ">=4.0.0,<5" },
     { name = "pytest-dotenv", specifier = ">=0.5.2,<0.6" },
     { name = "pytest-env", specifier = ">=1.1.5,<1.2" },
@@ -2063,14 +2063,15 @@ wheels = [
 
 [[package]]
 name = "pytest-asyncio"
-version = "0.20.3"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pytest" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6e/06/38b0ca5d53582bb49697626975b5540435ea064762d852b5c66646c729e9/pytest-asyncio-0.20.3.tar.gz", hash = "sha256:83cbf01169ce3e8eb71c6c278ccb0574d1a7a3bb8eaaf5e50e0ad342afb33b36", size = 28942, upload-time = "2022-12-08T12:28:48.413Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42", size = 58514, upload-time = "2026-05-26T09:56:04.083Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/74/9421cfde8def10c265b4f9ae19c95b8f4dc227f639cb8b89287d4946ac97/pytest_asyncio-0.20.3-py3-none-any.whl", hash = "sha256:f129998b209d04fcc65c96fc85c11e5316738358909a8399e93be553d7656442", size = 12537, upload-time = "2022-12-08T12:28:47.048Z" },
+    { url = "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1", size = 16930, upload-time = "2026-05-26T09:56:02.576Z" },
 ]
 
 [[package]]

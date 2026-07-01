@@ -34,7 +34,12 @@ from eneo.users.user_service import (
     _check_management_permission,
     _check_method_resource_permission,
 )
-from tests.unit.api_key_test_utils import make_api_key
+from tests.unit.api_key_test_utils import (
+    make_api_key,
+    route_has_dependency_named,
+    runtime_app_routes,
+    runtime_router_routes,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,64 +133,36 @@ class TestPublicEndpoints:
 
     def test_version_endpoint_has_no_auth_dependency(self):
         """GET /version must not require auth."""
-        from eneo.server.main import get_application
-
-        app = get_application()
         version_route = None
-        for route in app.routes:
+        for route in runtime_app_routes():
             if getattr(route, "path", None) == "/version":
                 version_route = route
                 break
 
         assert version_route is not None, "/version route not found"
-        # Verify no auth dependencies
-        deps = getattr(version_route, "dependencies", [])
-        dep_names = [
-            getattr(d.dependency, "__name__", "")
-            for d in deps
-            if hasattr(d, "dependency")
-        ]
-        assert "get_current_active_user" not in dep_names
+        assert not route_has_dependency_named(version_route, "get_current_active_user")
 
     def test_healthz_endpoint_exists_without_auth(self):
         """GET /api/healthz must not have auth dependencies."""
-        from eneo.server.main import get_application
-
-        app = get_application()
         healthz_route = None
-        for route in app.routes:
+        for route in runtime_app_routes():
             if getattr(route, "path", None) == "/api/healthz":
                 healthz_route = route
                 break
 
         assert healthz_route is not None, "/api/healthz route not found"
-        deps = getattr(healthz_route, "dependencies", [])
-        dep_names = [
-            getattr(d.dependency, "__name__", "")
-            for d in deps
-            if hasattr(d, "dependency")
-        ]
-        assert "get_current_active_user" not in dep_names
+        assert not route_has_dependency_named(healthz_route, "get_current_active_user")
 
     def test_crawler_healthz_endpoint_exists_without_auth(self):
         """GET /api/healthz/crawler must not have auth dependencies."""
-        from eneo.server.main import get_application
-
-        app = get_application()
         crawler_route = None
-        for route in app.routes:
+        for route in runtime_app_routes():
             if getattr(route, "path", None) == "/api/healthz/crawler":
                 crawler_route = route
                 break
 
         assert crawler_route is not None, "/api/healthz/crawler route not found"
-        deps = getattr(crawler_route, "dependencies", [])
-        dep_names = [
-            getattr(d.dependency, "__name__", "")
-            for d in deps
-            if hasattr(d, "dependency")
-        ]
-        assert "get_current_active_user" not in dep_names
+        assert not route_has_dependency_named(crawler_route, "get_current_active_user")
 
 
 class TestAuthPrecedence:
@@ -788,9 +765,7 @@ class TestUserListingEndpointSplitGate:
 
     def _get_users_listing_route(self):
         """Find the GET /users/ route and return it."""
-        from eneo.server.routers import router as root
-
-        for route in root.routes:
+        for route in runtime_router_routes():
             path = getattr(route, "path", "")
             endpoint = getattr(route, "endpoint", None)
             if path == "/users/" and endpoint is not None:
@@ -800,12 +775,7 @@ class TestUserListingEndpointSplitGate:
 
     def _route_has_dependency(self, route, dep_name: str) -> bool:
         """Check if a route has a specific dependency by function name."""
-        deps = getattr(route, "dependencies", [])
-        for dep in deps:
-            if hasattr(dep, "dependency"):
-                if getattr(dep.dependency, "__name__", "") == dep_name:
-                    return True
-        return False
+        return route_has_dependency_named(route, dep_name)
 
     def test_listing_route_has_route_level_scope_guard(self):
         """GET /users/ must have route-level admin scope guard for API keys."""
@@ -845,14 +815,7 @@ class TestAdminApiKeyGuardContract:
     """Tenant-admin API key mounts require admin key permission."""
 
     def _route_has_dependency(self, route, dep_name: str) -> bool:
-        deps = getattr(route, "dependencies", [])
-        for dep in deps:
-            if (
-                hasattr(dep, "dependency")
-                and getattr(dep.dependency, "__name__", "") == dep_name
-            ):
-                return True
-        return False
+        return route_has_dependency_named(route, dep_name)
 
     def test_read_tenant_key_denied_by_admin_key_guard(self):
         key = _make_key(
@@ -871,10 +834,8 @@ class TestAdminApiKeyGuardContract:
         _check_management_permission(key, ApiKeyPermission.ADMIN.value)
 
     def test_api_keys_list_route_has_scope_but_not_admin_key_guard(self):
-        from eneo.server.routers import router as root
-
         list_route = None
-        for route in root.routes:
+        for route in runtime_router_routes():
             if getattr(route, "path", "") == "/api-keys" and "GET" in getattr(
                 route, "methods", set()
             ):
@@ -973,19 +934,12 @@ class TestSuperKeyIsolationContract:
     """Lock sysadmin/modules auth separation by dependency and auth function behavior."""
 
     def _route_has_dependency(self, route, dep_name: str) -> bool:
-        deps = getattr(route, "dependencies", [])
-        return any(
-            hasattr(dep, "dependency")
-            and getattr(dep.dependency, "__name__", "") == dep_name
-            for dep in deps
-        )
+        return route_has_dependency_named(route, dep_name)
 
     def test_sysadmin_routes_use_super_api_key_only(self):
-        from eneo.server.routers import router as root
-
         sysadmin_routes = [
             route
-            for route in root.routes
+            for route in runtime_router_routes()
             if getattr(route, "path", "").startswith("/sysadmin")
         ]
         assert sysadmin_routes, "No /sysadmin routes found"
@@ -998,11 +952,9 @@ class TestSuperKeyIsolationContract:
             ), f"{route.path} should not use authenticate_super_duper_api_key"
 
     def test_module_routes_use_super_duper_key_only(self):
-        from eneo.server.routers import router as root
-
         module_routes = [
             route
-            for route in root.routes
+            for route in runtime_router_routes()
             if getattr(route, "path", "").startswith("/modules")
         ]
         assert module_routes, "No /modules routes found"

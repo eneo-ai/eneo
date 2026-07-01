@@ -7,17 +7,7 @@
 import { m } from "$lib/paraglide/messages";
 
 export type HostingValue =
-  | "swe"
-  | "eu"
-  | "usa"
-  | "chn"
-  | "can"
-  | "gbr"
-  | "isr"
-  | "kor"
-  | "deu"
-  | "fra"
-  | "jpn";
+  "swe" | "eu" | "usa" | "chn" | "can" | "gbr" | "isr" | "kor" | "deu" | "fra" | "jpn";
 
 export interface HostingOption {
   value: HostingValue;

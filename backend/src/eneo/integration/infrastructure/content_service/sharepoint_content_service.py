@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy import event
 
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
 from eneo.embedding_models.infrastructure.datastore import Datastore
@@ -1454,7 +1455,7 @@ class SharePointContentService:
             task.add_done_callback(self._pending_change_key_tasks.discard)
 
         try:
-            sa.event.listen(sync_session, "after_commit", _on_after_commit, once=True)
+            event.listen(sync_session, "after_commit", _on_after_commit, once=True)
         except Exception as exc:
             # Defensive: a non-ORM session (e.g. in unit tests) cannot register
             # events. Skipping is the safe direction — the item re-processes next sync.

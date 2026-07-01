@@ -33,6 +33,7 @@ from eneo.completion_models.domain.completion_model_migration_history_repo impor
 from eneo.completion_models.presentation.completion_model_models import (
     ValidationResult,
 )
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 
@@ -177,7 +178,7 @@ class CompletionModelMigrationService(BaseModelMigrationService):
             )
         )
         result = await self.session.execute(stmt)
-        migrated_count = result.rowcount or 0
+        migrated_count = affected_row_count(result)
         self.logger.info(
             f"Migrated {migrated_count} assistants from {from_model_id} to {to_model_id}, kwargs reset"
         )

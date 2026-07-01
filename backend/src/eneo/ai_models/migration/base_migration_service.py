@@ -41,6 +41,7 @@ from eneo.completion_models.presentation.completion_model_models import (
     MigrationResult,
     ValidationResult,
 )
+from eneo.database.affected_rows import affected_row_count
 from eneo.events import (
     ModelMigrationCompleted,
     ModelMigrationFailed,
@@ -673,7 +674,7 @@ class BaseModelMigrationService:
             .values(**{self._fk_column: to_model_id})
         )
         result = await self.session.execute(stmt)
-        migrated_count = result.rowcount or 0
+        migrated_count = affected_row_count(result)
         self.logger.info(
             f"Migrated {migrated_count} {entity_type} from {from_model_id} to {to_model_id}"
         )
@@ -712,7 +713,7 @@ class BaseModelMigrationService:
             and_(link_fk == from_model_id, link.space_id.in_(space_ids))
         )
         delete_result = await self.session.execute(delete_stmt)
-        migrated_count = delete_result.rowcount or 0
+        migrated_count = affected_row_count(delete_result)
         self.logger.info(
             f"Migrated {migrated_count} space associations from {from_model_id} to {to_model_id}"
         )

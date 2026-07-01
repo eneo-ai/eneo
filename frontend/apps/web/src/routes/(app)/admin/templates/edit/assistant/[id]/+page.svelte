@@ -50,8 +50,7 @@
   const initialWizardConfigs = untrack(() => {
     const templateRecord = data.template as Record<string, unknown>;
     const wizard = (templateRecord.wizard_config || templateRecord.wizard || {}) as
-      | Record<string, unknown>
-      | Array<Record<string, unknown>>;
+      Record<string, unknown> | Array<Record<string, unknown>>;
 
     let attachments: Record<string, unknown> | undefined;
     let collections: Record<string, unknown> | undefined;

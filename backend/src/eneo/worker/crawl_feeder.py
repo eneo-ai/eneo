@@ -21,6 +21,7 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.redis.connection import build_redis_pool_kwargs
@@ -95,10 +96,11 @@ class CrawlFeeder:
                     .execution_options(synchronize_session=False)
                 )
                 result = await session.execute(cleanup_stmt)
-                if result.rowcount > 0:
+                cleaned_count = affected_row_count(result)
+                if cleaned_count > 0:
                     logger.info(
                         "Cleaned up orphaned CrawlRuns with NULL job_id",
-                        extra={"cleaned_count": result.rowcount},
+                        extra={"cleaned_count": cleaned_count},
                     )
         except Exception as exc:
             logger.warning(

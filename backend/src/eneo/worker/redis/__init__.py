@@ -16,6 +16,7 @@ from eneo.worker.redis.client import (
     get_worker_health,
     parse_arq_health_string,
     r,
+    reset_redis_client,
 )
 from eneo.worker.redis.lease import redis_lease
 from eneo.worker.redis.lua_scripts import LuaScripts
@@ -27,5 +28,6 @@ __all__ = [
     "get_worker_health",
     "parse_arq_health_string",
     "r",
+    "reset_redis_client",
     "redis_lease",
 ]

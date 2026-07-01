@@ -1,6 +1,6 @@
 import hashlib
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -20,7 +20,7 @@ class FileService:
         self.protocol = protocol
 
     @asynccontextmanager
-    async def _write_transaction(self) -> AsyncIterator[None]:
+    async def _write_transaction(self) -> AsyncGenerator[None]:
         """Open a short write transaction only when one is not already active."""
         session = self.repo.session
         if session.in_transaction():
