@@ -5,7 +5,7 @@ TL;DR:
 - Flow AI Builder stays native Eneo authoring; no MCP/capability implementation starts here.
 - C9.2 completed active abandoned-session expiration in `DataRetentionService`.
 - C9.3 accepts retained Builder-uploaded global `Files` rows for first release after Builder session pins are removed.
-- C9.4 records concrete repair/fallback branch decisions; no branch is delete-ready without real branch-level value data.
+- C9.6 accepts current bounded repair/fallback branches for first release; branch value remains unproven.
 
 Primary evidence: `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md`. C9.0 refreshed lifecycle, retention, audit, JSONB ownership, and migration evidence; this packet records the release decisions that follow from that inventory.
 
@@ -56,6 +56,8 @@ Primary evidence: `review-artifacts/flow-builder-release-governance-gate0-2026-0
 
 Current evidence is source reachability, unit behavior coverage, typed failed-turn telemetry coverage, and deterministic materialization goldens. That is useful engineering proof, but it is not real provider-output branch-value data. Do not prune repair/fallback code until a future slice can show branch frequency, recovery contribution, failed cost, final error-code distribution, provider finish reason where available, and content-free payload verification.
 
+C9.6 first-release posture: keep the current bounded JSON/text fallback, forced-tool retry, self-correction, direct terminal classifiers, and architecture-error paths for first release. C9.5 found no usable branch-value dataset, and that no-data result proves neither value nor uselessness. Future pruning is blocked until a real branch-value dataset, production-like controlled eval, or explicitly scheduled live-eval artifact proves a branch is dead, harmful, redundant, or replaced.
+
 | Branch family | Owner / reachability | Existing evidence | Decision | Future prune/delete acceptance criteria |
 |---|---|---|---|---|
 | JSON/text fallback | `ai_builder_proposal_repair.py` owns JSON-text parsing and processing at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:757`; forced retry reaches it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:663`. | C8.14 cites behavior coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:419-531`; deterministic goldens prove materialization coverage, not live provider branch value, at `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:142`. | Blocked: keep until real branch-level value data exists. | Delete only if real branch data proves it never saves proposals, is harmful, or is fully replaced by a stronger live branch. |
@@ -73,41 +75,40 @@ Do not add a telemetry framework, eval framework, metric schema, event bus, or r
 | Builder retention/deletion/count | Done in C8.6 and C9.2. `DataRetentionService` owns terminal and abandoned active Builder count/delete; session rows are the deletion unit; plans and session-file links cascade; global files are not directly deleted. |
 | Builder audit vocabulary delete-or-wire | Done in C8.7. Fake plan proposed/rejected audit actions were deleted; live emitted actions remain. |
 | Lifecycle active-send/apply invariant | Done in C8.8. No-lease lifecycle transitions now respect active send locks. |
-| Repair pruneability evidence and packet reconciliation | Done in C8.14 and reconciled in C9.4. No branch was pruned; no branch is delete-ready; real branch-level value data is required before any pruning slice. |
+| Repair pruneability evidence and packet reconciliation | Done in C8.14 and reconciled in C9.4; C9.6 accepts current bounded branches for first release. No branch was pruned; no branch is delete-ready; real branch-level value data is required before any pruning slice. |
 | Builder global file posture | Done in C9.3. Retained Builder-uploaded global `Files` rows are accepted for first release after Builder pins are removed; no generic file cleaner is added. |
 
 ## Next Release Lane
 
 | Rank | Lane | Release value | Boundary |
 |---|---|---|---|
-| 1 | Real branch-value data review | C9.4 closes the source/test inventory loop: no repair/fallback branch is delete-ready from repo evidence alone. The next pruning-related work is to inspect real or production-like Builder branch data, if available. | Evidence/readiness only; no source pruning, telemetry framework, eval framework, provider rewrite, prompt rewrite, MCP/capability work, API/frontend work, or runtime changes. Stop if no real branch-value artifact exists. |
+| 1 | PG-10b global validation error contract | C9.6 closes the Builder repair/fallback first-release posture without claiming branch value is proven. The next code slice should move back to the app-global API contract gap that still blocks API consumer DX. | Main-app FastAPI `RequestValidationError` -> `GeneralError`; OpenAPI/generated-client impact; Flow endpoint tests; representative non-Flow endpoint tests; SCIM/sub-app compatibility review. Do not implement PG-10b inside Builder governance work. |
 
 Deferred future risk: Builder-only global file-row cleanup is accepted for first release, not selected as the next lane. Revisit only if retained global file rows after Builder pin removal become unacceptable, and only with a named candidate-id source, reference guard, owner, and tests. Do not add a generic sweeper.
 
-Question/slot cleanup and broader Builder maintainability can resume if release owners accept that repair pruning is blocked until real branch-value data exists. Do not send another source-pruning slice for these branches without that data.
+Question/slot cleanup and broader Builder maintainability can resume later. Do not send another repo-only source-pruning or no-data search slice for these branches without a named real branch-value dataset, controlled eval, or scheduled live-eval artifact.
 
 ## Recommended Next Bounded Prompt
 
-Continue with exactly one bounded evidence/readiness slice: Flow AI Builder real repair/fallback branch-value data review.
+Continue with exactly one bounded implementation slice: PG-10b app-global FastAPI validation error contract.
 
 Required acceptance criteria:
-- Inspect available staging, production-like, or persisted log artifacts for `ai_builder.proposal.failed_turn`, `ai_builder.proposal.repair_invoked`, first-attempt architecture failures, and successful proposal outcomes by branch.
-- If no real branch-value artifacts exist, stop with an explicit no-data blocker instead of adding frameworks or editing repair/fallback source.
-- If data exists, decide keep/delete/blocked for each branch with artifact provenance, privacy posture, and file:line owner evidence.
-- Do not prune source unless a branch is proven dead, unreachable, harmful, or redundant by real branch-value data plus the existing source/test inventory.
-- Do not add telemetry frameworks, eval frameworks, MCP/capability descriptors, frontend/API/generated clients, Flow runtime changes, audit vocabulary, retention changes, or schema/migrations.
+- Decide and implement or explicitly defer main-app `RequestValidationError` -> `GeneralError`.
+- Review generated-client/OpenAPI impact before changing the global 422 shape.
+- Cover Flow endpoints plus representative non-Flow endpoints, including SCIM/sub-app compatibility review.
+- Do not touch Builder repair/fallback pruning, telemetry frameworks, eval frameworks, MCP/capability descriptors, frontend redesign, Flow runtime changes, audit vocabulary, retention changes, or schema/migrations outside the API contract slice.
 
-## Remaining Builder Release Blockers
+## Deferred Builder Risks After First-Release Acceptance
 
-| Blocker | Why it remains | Next action |
+| Deferred risk | Why deferred | Next action |
 |---|---|---|
 | Builder-only global file-row cleanup | C9.3 accepts retained global `Files` rows for first release after Builder pins are removed. | Not a release blocker unless product/privacy owners reject this posture; if rejected, use a separate candidate-driven cleanup slice. |
-| Repair branch deletion evidence | Existing source/test/eval evidence is concrete but not branch-value evidence. No branch is delete-ready, and deterministic goldens do not prove live provider branch value. | Collect/review real or production-like branch data before any pruning slice; otherwise accept the branches for first release. |
+| Repair branch deletion evidence | Existing source/test/eval evidence is concrete but not branch-value evidence. C9.6 accepts the current bounded branches for first release, but no branch is delete-ready. | Collect/review real or production-like branch data before any pruning slice; do not repeat repo-only no-data searches. |
 
 ## What Not To Do Next
 
 - Do not implement MCP, capability descriptors, `AssistantConfigurationService`, or PR #480 loopback-MCP behavior.
 - Do not prune repair/fallback branches without branch-level evidence.
 - Do not create a Builder retention service, generic lifecycle manager, command bus, event-sourcing layer, legal-hold framework, or generic file cleaner.
-- Do not broaden into frontend redesign, generated-client cleanup, Flow runtime/API changes, audit vocabulary changes, or schema/migration work from this packet.
+- Do not broaden Builder governance into frontend redesign, generated-client cleanup, Flow runtime/API changes, audit vocabulary changes, or schema/migration work; PG-10b handles API/generated-client impact separately.
 - Do not split large Builder files by line count before deleting or consolidating named duplicate owners.

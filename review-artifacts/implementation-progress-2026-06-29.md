@@ -2315,6 +2315,60 @@
   - Risk is documentation-only. The main risk is over-trusting an outside-review prompt as proof instead of using it to make decisions.
   - Rollback is low risk: delete the July ChatGPT packet, remove the 2026-07-01 roadmap addendum, and delete this progress entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, provider, prompt, file data, or persisted-data rollback is needed.
 
+## C9.6
+
+- Slice id: C9.6 Flow AI Builder repair/fallback first-release posture lock.
+- Findings addressed:
+  - C9.4 recorded that no repair/fallback branch is delete-ready from source/test/golden evidence alone.
+  - C9.5 searched available safe local/log/artifact sources for real branch-value data, found no usable dataset, and stopped with no worker commit.
+  - The Gate 1 governance packet still pointed the next agent back to a real branch-value data review, which C9.5 had already exhausted for available local artifacts.
+- Evidence reviewed:
+  - C9.4 branch owner and decision evidence remains at `review-artifacts/implementation-progress-2026-06-29.md:2221-2268`.
+  - C9.5 no-data stop and no-worker-commit evidence remains at `review-artifacts/implementation-progress-2026-06-29.md:2270-2303`.
+  - The outside review attachment recommended choosing one release posture: accept current branches, run controlled live-eval/staging, or delay Builder; it also recommends PG-10b as the next Flows-proper slice after the Builder posture decision.
+  - The governance packet still named "Real branch-value data review" as the next lane at `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:79-98` before this edit.
+  - Existing branch owners are unchanged: `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`.
+  - Local branch visibility remains ahead of `origin/refactor/flows-clean`; outside review could verify only up to remote `faf91d7b`, so C9.0-C9.6 need to be pushed before remote reviewers can source-verify them.
+- Decision:
+  - Accept the current bounded Flow AI Builder repair/fallback branches for first release.
+  - Branch value remains unproven. C9.5 no-data proves neither usefulness nor uselessness.
+  - Do not prune JSON/text fallback, forced-tool retry, self-correction, direct terminal classifiers, or architecture-error paths from static/source/unit/golden evidence.
+  - Future pruning is blocked until a real branch-value dataset, production-like controlled eval, or explicitly scheduled live-eval artifact proves a branch is dead, harmful, redundant, or replaced.
+  - PG-10b is the next separate code slice after C9.6; it must stay scoped to main-app FastAPI `RequestValidationError` -> `GeneralError`, OpenAPI/generated-client impact, Flow endpoint tests, representative non-Flow endpoint tests, and SCIM/sub-app compatibility review.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec gates instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh for this slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-6-release-posture-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, and `STOP_OR_PROCEED: proceed`; required guidance applied: touch the governance packet, keep the branch-family evidence table, separate first-release acceptance from pruning proof, keep no-data interpretation explicit, avoid score inflation, and keep PG-10b separate.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-6-release-posture-final-20260701.md` initially returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, and `COMMIT_READY: no`; required feedback applied by renaming the stale Builder blocker section to deferred risks after first-release acceptance.
+  - Read-only Codex final re-check artifact `.codex/artifacts/codex-exec-c9-6-release-posture-final-2-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes`.
+- Files changed:
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md`
+  - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - None. No backend source, tests, migrations, frontend, generated clients, API contracts, runtime behavior, MCP/capability code, provider behavior, prompts, repair logic, retention code, audit code, schema, or file cleanup code changed.
+- Complexity deleted or owner clarified:
+  - Removed the stale governance-packet loop that sent the next agent back into another repo-only/no-data repair branch review.
+  - The roadmap now owns the first-release posture decision; the governance packet points to the next code slice; this ledger records the receipt.
+  - No telemetry framework, eval framework, metric schema, event bus, repair-policy layer, MCP/capability path, generic manager, or new roadmap artifact was added.
+- Architecture delta:
+  - Canonical owner before: the roadmap and Gate 1 packet recorded C9.4/C9.5 evidence, but still left the first-release posture open and selected another branch-value review as the next lane.
+  - Canonical owner after: the roadmap Decision Register/status addendum accepts current bounded branches for first release; the Gate 1 packet no longer recommends another no-data branch-value review; source ownership remains unchanged.
+  - Duplicate paths remaining: repair/fallback branches remain by explicit release posture, not because branch value is proven.
+  - 9/10 follow-up candidate: future branch pruning still needs real branch-value data or a controlled eval; do not reopen it with repo-only evidence.
+  - Decision or measurement needed: PG-10b must decide the app-global 422 `GeneralError` code/context contract and generated-client/non-Flow compatibility.
+  - What not to preserve: no-data interpreted as branch uselessness, repeated docs-only repair-pruning loops, source pruning from static/unit evidence, optimistic 9/10 ratings, and mixing PG-10b implementation into Builder governance.
+- Honest rating:
+  - Flow AI Builder remains roughly 6/10. C9.6 improves release governance clarity only; it does not prove repair branch value or raise Builder maintainability to 9/10.
+  - Flows proper remains blocked from 9/10 API consumer DX until PG-10b and other evidence gates are handled.
+- Validation commands and results:
+  - `git status --short --branch` before edits -> branch matched `refactor/flows-clean` at `78dfe564`; unrelated dirty files were `.devcontainer/devcontainer.json`, `.gitignore`, `frontend/bun.lock`, `.devcontainer/devcontainer-lock.json`, and `AGENTS.md.backup-20260629-220449`.
+  - `git diff --check -- review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md review-artifacts/flow-builder-release-governance-packet-2026-06-30.md` -> pass.
+  - `rg -n "real branch-value|branch-value data|first release|PG-10b|RequestValidationError|GeneralError|repo-only|no-data" review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md review-artifacts/flow-builder-release-governance-packet-2026-06-30.md` -> verified the C9.6 posture, PG-10b next-slice wording, and no-data/no-pruning guardrails in the touched docs.
+  - Backend pytest, ruff, pyright, frontend tests, generated-client checks, browser tests, and migration checks are not required because this slice is docs-only.
+- Remaining risk / rollback:
+  - Risk is documentation/governance-only. If release owners choose to require controlled eval before Builder release instead, revert the C9.6 doc changes and send that eval slice.
+  - Rollback is low risk: restore the previous roadmap row, governance next-lane wording, and delete this C9.6 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, provider, prompt, file data, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
