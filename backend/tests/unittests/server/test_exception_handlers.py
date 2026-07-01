@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 
 from intric.main.exceptions import (
@@ -12,6 +13,7 @@ from intric.server.exception_handlers import (
     add_exception_handlers,
     is_active_display_name_violation,
 )
+from intric.server.main import get_application
 
 
 class _FakeOrig:
@@ -28,6 +30,12 @@ class _FakeOrig:
 
 def _integrity_error(orig):
     return IntegrityError("INSERT INTO completion_models ...", {}, orig)
+
+
+class _ValidationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=3)
 
 
 def test_active_nickname_violation_matched_by_constraint_name():
@@ -155,3 +163,54 @@ def test_exception_handler_returns_conflict_contract():
     assert body["intric_error_code"] == ErrorCodes.CONFLICT
     assert body["code"] == "flow_runtime_file_attached"
     assert body["context"] == {"file_id": "file-1"}
+
+
+def test_request_validation_error_returns_sanitized_general_error():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.post("/validate")
+    async def validate(payload: _ValidationPayload) -> dict[str, str]:
+        return {"name": payload.name}
+
+    response = TestClient(app).post(
+        "/validate",
+        json={"name": "x", "secret": "submitted-secret"},
+        headers={"x-request-id": "request-validation-id"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Request validation failed."
+    assert body["intric_error_code"] == ErrorCodes.VALIDATION_ERROR
+    assert body["code"] == "request_validation_error"
+    assert body["request_id"] == "request-validation-id"
+    assert "detail" not in body
+
+    errors = body["details"]["errors"]
+    assert {
+        ("body", "name"),
+        ("body", "secret"),
+    } <= {tuple(error["location"]) for error in errors}
+    assert {"location", "message", "type"} == set(errors[0])
+    response_text = response.text
+    assert "submitted-secret" not in response_text
+    assert "RequestValidationError" not in response_text
+    assert '"input"' not in response_text
+
+
+def test_main_app_request_validation_error_uses_general_error_for_non_flow_route():
+    response = TestClient(get_application()).get(
+        "/api/healthz/crawler",
+        params={"include_all": "not-bool"},
+        headers={"x-request-id": "crawler-validation-id"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Request validation failed."
+    assert body["intric_error_code"] == ErrorCodes.VALIDATION_ERROR
+    assert body["code"] == "request_validation_error"
+    assert body["request_id"] == "crawler-validation-id"
+    assert body["details"]["errors"][0]["location"] == ["query", "include_all"]
+    assert "not-bool" not in response.text

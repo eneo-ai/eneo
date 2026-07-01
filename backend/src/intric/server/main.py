@@ -26,11 +26,14 @@ from intric.flows.runtime.flow_runtime_health import (
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.observability import init_observability, instrument_fastapi
-from intric.main.request_context import get_request_context
 from intric.scim.app import scim_app
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
-from intric.server.exception_handlers import add_exception_handlers
+from intric.server.exception_handlers import (
+    add_exception_handlers,
+    extract_request_id,
+    validation_error_response_content,
+)
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.middleware.request_context import RequestContextMiddleware
 from intric.server.middleware.trace_id import (
@@ -46,6 +49,11 @@ logger = get_logger(__name__)
 # Used in both the normal CORSMiddleware config and the manual CORS block in
 # 500 error handlers so they stay in sync.
 _TRACE_EXPOSE_HEADERS = ("X-Trace-Id", "X-Correlation-ID")
+_GENERAL_ERROR_SCHEMA_REF = "#/components/schemas/GeneralError"
+_HTTP_VALIDATION_ERROR_SCHEMA_REF = "#/components/schemas/HTTPValidationError"
+_FASTAPI_VALIDATION_ERROR_SCHEMA_NAMES = frozenset(
+    {"HTTPValidationError", "ValidationError"}
+)
 
 
 # Initialise OTEL before the FastAPI app is created so that SQLAlchemy,
@@ -306,6 +314,41 @@ def _retag_flow_ai_builder_operations(openapi_schema: dict[str, Any]) -> None:
                 cast(dict[str, Any], operation)["tags"] = ["ai-builder"]
 
 
+def _normalize_request_validation_error_responses(
+    openapi_schema: dict[str, Any],
+) -> None:
+    paths = _json_obj(openapi_schema.get("paths"))
+
+    for path, path_item in paths.items():
+        if path.startswith("/scim/"):
+            continue
+        if not isinstance(path_item, dict):
+            continue
+        for operation in _json_obj(path_item).values():
+            if not isinstance(operation, dict):
+                continue
+            operation_obj = _json_obj(operation)
+            response = _json_obj(_json_obj(operation_obj.get("responses")).get("422"))
+            content = _json_obj(response.get("content"))
+            app_json = _json_obj(content.get("application/json"))
+            schema = _json_obj(app_json.get("schema"))
+            if schema.get("$ref") == _HTTP_VALIDATION_ERROR_SCHEMA_REF:
+                app_json["schema"] = {"$ref": _GENERAL_ERROR_SCHEMA_REF}
+
+    components = _json_obj(openapi_schema.get("components"))
+    schemas = _json_obj(components.get("schemas"))
+    removed_schemas: dict[str, Any] = {}
+    for schema_name in _FASTAPI_VALIDATION_ERROR_SCHEMA_NAMES:
+        removed_schema = schemas.pop(schema_name, None)
+        if removed_schema is not None:
+            removed_schemas[schema_name] = removed_schema
+
+    openapi_json = json.dumps(openapi_schema)
+    for schema_name, schema in removed_schemas.items():
+        if f"#/components/schemas/{schema_name}" in openapi_json:
+            schemas[schema_name] = schema
+
+
 def get_application():
     app = FastAPI(
         lifespan=app_lifespan,
@@ -346,14 +389,19 @@ def get_application():
     ) -> JSONResponse:
         detail = exc.detail
         headers = exc.headers or None
-        request_id = request.headers.get("x-correlation-id") or request.headers.get(
-            "x-request-id"
-        )
-        if not request_id:
-            request_id = cast(str | None, get_request_context().get("correlation_id"))
+
+        if exc.status_code == 422:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=validation_error_response_content(
+                    request=request, detail=detail
+                ),
+                headers=headers,
+            )
 
         if isinstance(detail, dict) and "code" in detail and "message" in detail:
             normalized_detail: dict[str, Any] = cast(dict[str, Any], detail)
+            request_id = extract_request_id(request)
             if request_id and "request_id" not in normalized_detail:
                 normalized_detail["request_id"] = request_id
             return JSONResponse(
@@ -402,6 +450,7 @@ def get_application():
 
         _normalize_multipart_upload_file_schemas(openapi_schema)
         _retag_flow_ai_builder_operations(openapi_schema)
+        _normalize_request_validation_error_responses(openapi_schema)
 
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
         components = _json_obj(openapi_schema.setdefault("components", {}))

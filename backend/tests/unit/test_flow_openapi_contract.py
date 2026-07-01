@@ -1206,6 +1206,28 @@ def test_openapi_flow_consumer_typed_error_schemas(openapi_spec: dict) -> None:
             )
 
 
+def test_openapi_flow_request_validation_responses_use_general_error(
+    openapi_spec: dict,
+) -> None:
+    paths = openapi_spec.get("paths", {})
+    checked: list[str] = []
+    for (path, method), expected_codes in REQUIRED_ERROR_RESPONSES.items():
+        if "422" not in expected_codes:
+            continue
+        response = paths[path][method].get("responses", {}).get("422", {})
+        schema = (
+            response.get("content", {}).get("application/json", {}).get("schema", {})
+        )
+        resolved = _resolve_component_ref(openapi_spec, schema)
+        assert schema, f"{method.upper()} {path} 422 must include JSON schema"
+        assert resolved.get("title") == "GeneralError", (
+            f"{method.upper()} {path} 422 should use GeneralError schema"
+        )
+        checked.append(f"{method.upper()} {path}")
+
+    assert checked
+
+
 def test_openapi_flow_consumer_schemas_present(openapi_spec: dict) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     missing = REQUIRED_SCHEMAS - set(schemas.keys())

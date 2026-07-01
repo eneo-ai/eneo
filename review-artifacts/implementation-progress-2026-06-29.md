@@ -2419,6 +2419,66 @@
   - Rollback is low risk: remove `_provider_truncation_error_event`, the two `finish_reason == "length"` checks, the `truncation_error_phase` field and proposal caller assignment, the focused tests, and this C9.7 ledger entry.
   - Exact next bounded recommendation: PG-10b remains the next separate code slice unless final review uncovers a sharper Builder blocker.
 
+## PG-10b Implementation
+
+- Slice id: PG-10b app-global FastAPI request-validation error contract.
+- Findings addressed:
+  - Main-app FastAPI request-validation failures returned FastAPI's raw `{"detail": [...]}` / `HTTPValidationError` shape, while mapped application exceptions used the public `GeneralError` envelope.
+  - The raw validation shape leaked a second public error contract into OpenAPI/generated clients and made Flow API consumers handle 422 differently from other API errors.
+  - Explicit main-app `HTTPException(status_code=422, detail=[...])` paths could still bypass the `GeneralError` envelope even after adding a `RequestValidationError` handler.
+- Evidence reviewed:
+  - `backend/src/intric/server/exception_handlers.py:121-131` now owns the app validation `GeneralError` response content with `ErrorCodes.VALIDATION_ERROR`, stable `code="request_validation_error"`, request id, and sanitized details.
+  - `backend/src/intric/server/exception_handlers.py:210-231` now registers the main-app `RequestValidationError` handler in the same exception-handler owner that already maps application exceptions.
+  - `backend/src/intric/server/main.py:386-413` now keeps the existing main-app `HTTPException` handler but normalizes only status 422 through the same validation response helper while preserving headers.
+  - `backend/src/intric/server/main.py:317-349` now normalizes main-app OpenAPI 422 response schemas from `HTTPValidationError` to `GeneralError` and drops unused FastAPI validation schemas.
+  - `backend/src/intric/scim/app.py:59-77` remains the SCIM sub-app owner for `RequestValidationError` and preserves RFC 7644 status 400 / `scimType=invalidValue` behavior.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec gates instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh for this slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-pg-10b-validation-error-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`; valid blocker applied: explicit main-app `HTTPException(422)` paths also needed normalization or OpenAPI would over-promise `GeneralError`.
+  - Read-only Codex revised plan gate artifact `.codex/artifacts/codex-exec-pg-10b-validation-error-plan-r2-20260701.md` returned `VERDICT: green_with_guardrails`, `GREEN_LIGHT: yes`; guardrails applied: one sanitizer owner, no body/input leaks, preserve SCIM, preserve non-422 HTTPException behavior, add representative non-Flow and Flow/OpenAPI coverage, and regenerate generated schema through the established OpenAPI workflow.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-pg-10b-validation-error-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKERS: none`, and `COMMIT_READY: yes`; its only Ponytail suggestion was applied by storing `exc.errors()` once in the request-validation handler. The gate also noted that the regenerated schema carries current-OpenAPI audit action-count drift (`150` -> `148`, `67` -> `65`) alongside the intended validation-error type change.
+- Red / green proof:
+  - Red before source change: the focused PG-10b tests failed because local and main-app request validation returned raw FastAPI validation shape, explicit `HTTPException(422)` returned raw `detail`, OpenAPI still exposed `HTTPValidationError`, and Flow 422 schemas resolved to `HTTPValidationError`.
+  - Green after source change: main-app request validation, explicit main-app 422, Flow API contract, representative non-Flow route, OpenAPI schema, generated client schema, and SCIM regression coverage all passed in the validation commands below.
+- Files changed:
+  - `backend/src/intric/server/exception_handlers.py`
+  - `backend/src/intric/server/main.py`
+  - `backend/tests/unittests/server/test_exception_handlers.py`
+  - `backend/tests/unit/test_http_exception_handler_contract.py`
+  - `backend/tests/unit/test_route_error_contract.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Main-app `RequestValidationError` now returns HTTP 422 with the public `GeneralError` envelope instead of raw FastAPI validation JSON.
+  - Main-app explicit `HTTPException(status_code=422)` now uses the same validation `GeneralError` envelope while preserving response headers.
+  - Validation `details.errors` includes only safe `location`, `message`, and `type` values. It strips Pydantic `input`, `ctx`, `url`, request body values, raw exception repr, prompts, secrets, and other content-bearing payloads.
+  - Main-app OpenAPI/generated client 422 validation responses now point at `GeneralError`; `HTTPValidationError` and `ValidationError` components are removed when unused.
+  - SCIM mounted app behavior is unchanged: validation failures remain status 400 SCIM error bodies with `scimType=invalidValue`.
+- Complexity deleted or owner clarified:
+  - The duplicate public FastAPI validation error shape was removed from the main-app API contract instead of wrapped route-by-route.
+  - Runtime validation translation stays in `backend/src/intric/server/exception_handlers.py`; OpenAPI response normalization stays in `backend/src/intric/server/main.py`; `GeneralError` remains the single public error envelope model.
+  - No new error DTO, compatibility shim, generic error framework, per-route 422 declarations, frontend UI change, migration, or service abstraction was added.
+- Architecture delta:
+  - Canonical owner before: mapped application exceptions used `GeneralError`, but main-app FastAPI validation errors and explicit 422 HTTP exceptions could expose a separate raw FastAPI validation contract.
+  - Canonical owner after: the main app has one public validation-error envelope; the SCIM sub-app remains deliberately separate under its RFC 7644 owner.
+  - Duplicate paths remaining: non-422 `HTTPException` behavior remains unchanged because broad HTTP exception normalization was outside PG-10b.
+  - What not to preserve: raw FastAPI validation envelopes for the main app, route-local 422 response declarations, and generated-client `HTTPValidationError` exposure for normal API routes.
+  - Honest rating impact: PG-10b materially improves Flow/API consumer DX and maintainer DX for 422 handling, but it does not by itself make the whole API 9/10. Remaining API DX work should be chosen from the roadmap with the same public-contract and generated-client evidence standard.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/server/test_exception_handlers.py tests/unit/test_http_exception_handler_contract.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/scim/test_error_responses.py -q'` -> pass, 113 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_consumer_api_contract.py -q'` -> pass, 18 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/server/exception_handlers.py src/intric/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py && .venv/bin/ruff format --check src/intric/server/exception_handlers.py src/intric/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/server/exception_handlers.py src/intric/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py'` -> pass, 0 errors.
+  - OpenAPI/generated-client drift check: dumped `app.openapi()` in the devcontainer with the same placeholder environment used by `scripts/pre_push_check.py`, generated a temporary schema with `bun x openapi-typescript ... --default-non-nullable=false`, formatted it with `bun x prettier`, and `cmp` matched `frontend/packages/intric-js/src/types/schema.d.ts`.
+  - Local environment note: host-side `scripts/pre_push_check.py` initially rewrote the shared backend `.venv` with host executables; the devcontainer venv was repaired with `python3 -m pip install --user uv==0.5.9` and `~/.local/bin/uv sync --group dev`. No tracked repo config or source files were changed by that environment repair.
+- Remaining risk / rollback:
+  - Runtime/API risk: clients that depended on raw FastAPI validation `detail` arrays for the main app must switch to `GeneralError.details.errors`. This is intentional because Flows/main API validation now has one contract.
+  - OpenAPI/generated-client risk: generated types changed from `HTTPValidationError` to `GeneralError` for validation 422s. Drift was validated against the current OpenAPI snapshot.
+  - Rollback is straightforward: remove the `RequestValidationError` handler, validation sanitizer/response helper, 422 branch in the main `HTTPException` handler, OpenAPI normalization, generated schema update, focused tests, and this ledger entry.
+  - Exact next bounded recommendation: select the next roadmap API/runtime blocker only after reviewing PG-10b fallout; do not reopen Builder repair/fallback pruning without real branch-value data.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

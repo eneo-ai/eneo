@@ -13,9 +13,9 @@ What it derives (high-signal, low false-positive):
      ``raise HTTPException(status_code=N)``, ``raise <Mapped
      DomainException>(...)`` (mapped via EXCEPTION_MAP) and
      ``validate_permission(...)`` calls (-> 403).
-  3. Response-shape traps: ``422`` listed in ``responses`` (overrides FastAPI's
-     HTTPValidationError); ``response_model=None`` while the return annotation is
-     a Pydantic model / TypedDict (erases the success schema).
+  3. Response-shape traps: ``422`` listed in ``responses`` (fights the global
+     validation-error OpenAPI owner); ``response_model=None`` while the return
+     annotation is a Pydantic model / TypedDict (erases the success schema).
 
 What it deliberately does NOT do: trace error codes raised deep inside services
 /repositories the handler delegates to (e.g. a repo ``UniqueException`` -> 400).
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import textwrap
 import typing
 from dataclasses import dataclass
@@ -66,9 +67,10 @@ EXCEPTION_NAME_TO_CODE: dict[str, int] = {
     exc.__name__: spec[0] for exc, spec in EXCEPTION_MAP.items()
 }
 
-# Codes excluded from the declared/required comparison: 2xx successes and 422
-# (FastAPI auto-documents validation as HTTPValidationError).
+# Codes excluded from the declared/required comparison: 2xx successes and 422.
+# Main-app validation 422s are normalized globally by the OpenAPI owner.
 _SUCCESS_AND_VALIDATION = {200, 201, 202, 203, 204, 422}
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
 
 
 @dataclass(frozen=True)
@@ -316,6 +318,44 @@ def test_rejects_string_422_response_key() -> None:
 
     route = next(route for route in router.routes if isinstance(route, APIRoute))
     assert _shape_violations(route) == ["forbidden_422_declared"]
+
+
+def test_main_app_openapi_validation_errors_use_general_error() -> None:
+    from intric.server.main import app
+
+    openapi_spec = app.openapi()
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    assert "HTTPValidationError" not in schemas
+    assert "ValidationError" not in schemas
+    assert "HTTPValidationError" not in json.dumps(openapi_spec)
+
+    checked: list[str] = []
+    non_flow_checked: list[str] = []
+    for path, methods in openapi_spec.get("paths", {}).items():
+        if not isinstance(path, str) or not path.startswith("/api/"):
+            continue
+        if not isinstance(methods, dict):
+            continue
+        for method, operation in methods.items():
+            if method not in _HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            response = operation.get("responses", {}).get("422")
+            if not isinstance(response, dict):
+                continue
+            schema = (
+                response.get("content", {})
+                .get("application/json", {})
+                .get("schema", {})
+            )
+            assert schema == {"$ref": "#/components/schemas/GeneralError"}, (
+                f"{method.upper()} {path} 422 should use GeneralError"
+            )
+            checked.append(f"{method.upper()} {path}")
+            if not path.startswith("/api/v1/flows"):
+                non_flow_checked.append(f"{method.upper()} {path}")
+
+    assert checked
+    assert non_flow_checked
 
 
 def test_route_error_contract() -> None:

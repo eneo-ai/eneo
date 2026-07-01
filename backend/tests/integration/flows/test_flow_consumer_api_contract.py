@@ -38,11 +38,18 @@ async def _flow_run_first_page_count(client, *, flow_id: str, token: str) -> int
     return response.json()["count"]
 
 
-def _validation_error_types(payload: dict[str, object]) -> set[str]:
-    detail = payload.get("detail")
-    assert isinstance(detail, list)
+def _validation_error_types(payload: dict[str, object], *, request_id: str) -> set[str]:
+    error = GeneralError.model_validate(payload)
+    assert error.message == "Request validation failed."
+    assert error.intric_error_code == ErrorCodes.VALIDATION_ERROR
+    assert error.code == "request_validation_error"
+    assert error.request_id == request_id
+    details = error.details
+    assert isinstance(details, dict)
+    errors = details.get("errors")
+    assert isinstance(errors, list)
     error_types: set[str] = set()
-    for item in detail:
+    for item in errors:
         if not isinstance(item, dict):
             continue
         error_type = item.get("type")
@@ -899,11 +906,19 @@ async def test_flow_run_create_rejects_unknown_fields_before_dispatch(
             "input_payload_json": {"text": "hello"},
             "client_trace_id": "client-owned-metadata-belongs-outside-this-body",
         },
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "X-Request-ID": "flow-top-level-validation",
+        },
     )
 
     assert top_level_response.status_code == 422, top_level_response.text
-    assert "extra_forbidden" in _validation_error_types(top_level_response.json())
+    assert "extra_forbidden" in _validation_error_types(
+        top_level_response.json(), request_id="flow-top-level-validation"
+    )
+    assert (
+        "client-owned-metadata-belongs-outside-this-body" not in top_level_response.text
+    )
     assert dispatch_requests == []
     assert (
         await _flow_run_first_page_count(client, flow_id=flow["id"], token=admin_token)
@@ -922,11 +937,16 @@ async def test_flow_run_create_rejects_unknown_fields_before_dispatch(
                 }
             },
         },
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "X-Request-ID": "flow-nested-validation",
+        },
     )
 
     assert nested_response.status_code == 422, nested_response.text
-    assert "extra_forbidden" in _validation_error_types(nested_response.json())
+    assert "extra_forbidden" in _validation_error_types(
+        nested_response.json(), request_id="flow-nested-validation"
+    )
     assert dispatch_requests == []
     assert (
         await _flow_run_first_page_count(client, flow_id=flow["id"], token=admin_token)

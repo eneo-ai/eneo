@@ -1,7 +1,9 @@
 import logging
-from typing import Protocol, cast
+from collections.abc import Mapping, Sequence
+from typing import Protocol, TypeGuard, cast
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
@@ -12,6 +14,8 @@ from intric.main.request_context import get_request_context
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
 _ACTIVE_NICKNAME_INDEX_SUFFIX = "_active_nickname"
+REQUEST_VALIDATION_ERROR_CODE = "request_validation_error"
+REQUEST_VALIDATION_ERROR_MESSAGE = "Request validation failed."
 
 
 def is_active_display_name_violation(exc: IntegrityError) -> bool:
@@ -65,6 +69,66 @@ def extract_request_id(request: Request) -> str | None:
         if isinstance(context_request_id, str) and context_request_id
         else None
     )
+
+
+def _validation_error_location(raw_location: object) -> list[str | int]:
+    if not _is_validation_error_sequence(raw_location):
+        return []
+    return [part for part in raw_location if isinstance(part, (str, int))]
+
+
+def _is_validation_error_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    )
+
+
+def _is_validation_error_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _validation_error_entry(error: Mapping[str, object]) -> dict[str, object]:
+    entry: dict[str, object] = {}
+    location = _validation_error_location(error.get("loc"))
+    if location:
+        entry["location"] = location
+
+    message = error.get("msg")
+    if isinstance(message, str):
+        entry["message"] = message
+
+    error_type = error.get("type")
+    if isinstance(error_type, str):
+        entry["type"] = error_type
+
+    return entry
+
+
+def validation_error_details(detail: object) -> dict[str, object]:
+    errors: list[dict[str, object]] = []
+    if _is_validation_error_sequence(detail):
+        for item in detail:
+            if _is_validation_error_mapping(item):
+                entry = _validation_error_entry(item)
+                if entry:
+                    errors.append(entry)
+    elif isinstance(detail, str) and detail.strip():
+        errors.append({"message": detail, "type": "value_error"})
+
+    return {"errors": errors}
+
+
+def validation_error_response_content(
+    *, request: Request, detail: object, details: dict[str, object] | None = None
+) -> dict[str, object]:
+    content = GeneralError(
+        message=REQUEST_VALIDATION_ERROR_MESSAGE,
+        intric_error_code=ErrorCodes.VALIDATION_ERROR,
+        code=REQUEST_VALIDATION_ERROR_CODE,
+        request_id=extract_request_id(request),
+        details=details or validation_error_details(detail),
+    ).model_dump(exclude_none=True)
+    return {str(key): value for key, value in content.items()}
 
 
 def _exception_context(
@@ -142,6 +206,30 @@ def add_exception_handlers(app: FastAPI):
             )
 
         app.add_exception_handler(exception, handler)
+
+    async def request_validation_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        if not isinstance(exc, RequestValidationError):
+            raise exc
+
+        errors = exc.errors()
+        details = validation_error_details(errors)
+        logger.warning(
+            "%s %s → 422: %s",
+            request.method,
+            request.url.path,
+            REQUEST_VALIDATION_ERROR_MESSAGE,
+            extra={"details": details, "error_code": ErrorCodes.VALIDATION_ERROR},
+        )
+        return JSONResponse(
+            status_code=422,
+            content=validation_error_response_content(
+                request=request, detail=errors, details=details
+            ),
+        )
+
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
     async def integrity_error_handler(request: Request, exc: Exception) -> JSONResponse:
         # Concurrent creates/renames to the same display name both pass the
