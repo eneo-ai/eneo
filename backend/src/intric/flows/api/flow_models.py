@@ -130,7 +130,7 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "created_by_user_id": "00000000-0000-0000-0000-000000000030",
     "owner_user_id": "00000000-0000-0000-0000-000000000030",
     "published_version": 3,
-    "metadata_json": {"category": "hr"},
+    "metadata_json": {"wizard": {"transcription_enabled": True}},
     "data_retention_days": 30,
     "created_at": "2026-03-17T09:30:00Z",
     "updated_at": "2026-03-17T10:00:00Z",
@@ -489,7 +489,7 @@ class FlowUpdateRequest(BaseModel):
                         "mcp_policy": "inherit",
                     }
                 ],
-                "metadata_json": {"category": "municipality-intake"},
+                "metadata_json": {"wizard": {"transcription_enabled": True}},
                 "data_retention_days": 30,
             }
         },

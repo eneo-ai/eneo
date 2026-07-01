@@ -92,7 +92,7 @@ async def test_prepare_removes_stale_ai_builder_description_metadata() -> None:
     assert prepared.changeset.metadata_json is not None
     ai_builder = prepared.changeset.metadata_json["ai_builder"]
     assert "description" not in ai_builder
-    assert ai_builder["other"] == {"kept": True}
+    assert "other" not in ai_builder
     assert ai_builder["origin"]["builder_plan_id"] == str(origin.plan_id)
 
 

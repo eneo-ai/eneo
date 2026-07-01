@@ -307,19 +307,19 @@ def test_flow_request_shell_models_keep_nested_maps_open() -> None:
     )
     flow_request = FlowCreateRequest.model_validate(
         _flow_create_payload(
-            metadata_json={"workflow": {"custom": True}},
+            metadata_json={"wizard": {"transcription_enabled": True}},
             steps=[step_request.model_dump(mode="json")],
         )
     )
     update_request = FlowUpdateRequest.model_validate(
-        {"metadata_json": {"workflow": {"custom": True}}}
+        {"metadata_json": {"wizard": {"transcription_enabled": True}}}
     )
     assert step_request.input_contract == {
         "type": "object",
         "x-workflow-contract": {"nested": True},
     }
-    assert flow_request.metadata_json == {"workflow": {"custom": True}}
-    assert update_request.metadata_json == {"workflow": {"custom": True}}
+    assert flow_request.metadata_json == {"wizard": {"transcription_enabled": True}}
+    assert update_request.metadata_json == {"wizard": {"transcription_enabled": True}}
 
 
 def test_flow_run_contract_public_parses_typed_form_fields() -> None:

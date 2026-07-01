@@ -121,16 +121,14 @@ _UNSUPPORTED_REASONS: dict[str, str] = {
 # Engine-truth mapping from input type to the runtime input mode used by
 # published flow execution. `IMAGE` and `ANY` are intentionally absent because
 # the runtime has no input_mode for those input types.
-RUNTIME_INPUT_MODE_BY_TYPE: Mapping[FlowInputType, RuntimeInputMode] = (
-    MappingProxyType(
-        {
-            FlowInputType.DOCUMENT: "documents",
-            FlowInputType.FILE: "documents",
-            FlowInputType.AUDIO: "audio",
-            FlowInputType.TEXT: "text",
-            FlowInputType.JSON: "text",
-        }
-    )
+RUNTIME_INPUT_MODE_BY_TYPE: Mapping[FlowInputType, RuntimeInputMode] = MappingProxyType(
+    {
+        FlowInputType.DOCUMENT: "documents",
+        FlowInputType.FILE: "documents",
+        FlowInputType.AUDIO: "audio",
+        FlowInputType.TEXT: "text",
+        FlowInputType.JSON: "text",
+    }
 )
 
 
@@ -200,8 +198,8 @@ def _absorbed_invariants(
                 id="requires_enabled_flow_transcription_config",
                 description=(
                     "Flows containing any `AUDIO`-input step require "
-                    "`metadata_json.transcription.enabled=True` and a "
-                    "non-null `model_id`; "
+                    "`metadata_json.wizard.transcription_enabled=True` and "
+                    "a non-null `transcription_model.id`; "
                     "`_validate_audio_transcription_settings` rejects "
                     "missing config for every audio step regardless of "
                     "`output_mode`."

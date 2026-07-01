@@ -21,6 +21,15 @@ def _metadata(fields: list[dict[str, object]]) -> dict[str, object]:
     return {"form_schema": {"fields": fields}}
 
 
+def _ai_builder_origin() -> dict[str, object]:
+    return {
+        "builder_session_id": "00000000-0000-0000-0000-000000000001",
+        "builder_plan_id": "00000000-0000-0000-0000-000000000002",
+        "builder_spec_hash": "spec-hash",
+        "applied_at": "2026-07-01T12:00:00+00:00",
+    }
+
+
 @pytest.mark.parametrize(
     ("metadata_json", "message"),
     [
@@ -260,23 +269,55 @@ def test_parse_flow_form_schema_persisted_read_rejects_duplicate_options() -> No
         )
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [FlowMetadataParseMode.WRITE, FlowMetadataParseMode.PERSISTED_READ],
-)
-def test_parse_flow_metadata_preserves_unrelated_top_level_keys(
-    mode: FlowMetadataParseMode,
-) -> None:
+def test_parse_flow_metadata_rejects_unknown_top_level_keys_on_write() -> None:
+    with pytest.raises(
+        BadRequestException,
+        match=re.escape(
+            "metadata_json contains unknown top-level fields: transcription"
+        ),
+    ):
+        parse_flow_metadata(
+            {
+                "form_schema": {
+                    "fields": [{"name": "case_id", "type": "string"}],
+                },
+                "transcription": {"language": "sv"},
+            },
+            mode=FlowMetadataParseMode.WRITE,
+        )
+
+
+def test_parse_flow_metadata_rejects_unknown_ai_builder_keys_on_write() -> None:
+    with pytest.raises(
+        BadRequestException,
+        match=re.escape("metadata_json.ai_builder contains unknown fields: other"),
+    ):
+        parse_flow_metadata(
+            {
+                "ai_builder": {
+                    "origin": _ai_builder_origin(),
+                    "other": {"stale": True},
+                },
+            },
+            mode=FlowMetadataParseMode.WRITE,
+        )
+
+
+def test_parse_flow_metadata_persisted_read_drops_unowned_metadata() -> None:
     parsed = parse_flow_metadata(
         {
             "form_schema": {
                 "fields": [{"name": "case_id", "type": "string"}],
             },
             "care_data_policy": {"sensitive": True},
-            "ai_builder": {"description": "Generated draft"},
+            "wizard": {"transcription_enabled": True, "custom_ui": "compact"},
+            "ai_builder": {
+                "origin": _ai_builder_origin(),
+                "other": {"stale": True},
+            },
             "transcription": {"language": "sv"},
         },
-        mode=mode,
+        mode=FlowMetadataParseMode.PERSISTED_READ,
     )
 
     assert serialize_flow_metadata(parsed) == {
@@ -284,8 +325,8 @@ def test_parse_flow_metadata_preserves_unrelated_top_level_keys(
             "fields": [{"name": "case_id", "type": "text"}],
         },
         "care_data_policy": {"sensitive": True},
-        "ai_builder": {"description": "Generated draft"},
-        "transcription": {"language": "sv"},
+        "wizard": {"transcription_enabled": True, "custom_ui": "compact"},
+        "ai_builder": {"origin": _ai_builder_origin()},
     }
 
 

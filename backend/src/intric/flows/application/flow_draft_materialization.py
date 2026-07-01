@@ -23,6 +23,7 @@ from intric.flows.flow_authoring_variable_rewriting import (
     build_ref_to_order,
     rewrite_step_spec_variables,
 )
+from intric.flows.flow_metadata import normalize_persisted_flow_metadata
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
 from intric.flows.step_lineage import existing_step_ref_for_order
 from intric.main.exceptions import BadRequestException
@@ -326,7 +327,7 @@ def build_flow_draft_metadata_json(
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if current_flow and current_flow.metadata_json:
-        metadata = dict(current_flow.metadata_json)
+        metadata = normalize_persisted_flow_metadata(current_flow.metadata_json) or {}
 
     if spec.form_fields is not None:
         fields: list[FlowPersistedJsonObject] = []

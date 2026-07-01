@@ -62,6 +62,15 @@ def _step(step_order: int = 1) -> FlowStep:
     )
 
 
+def _ai_builder_origin_metadata() -> dict[str, str]:
+    return {
+        "builder_session_id": str(uuid4()),
+        "builder_plan_id": str(uuid4()),
+        "builder_spec_hash": "spec-hash",
+        "applied_at": "2026-07-01T12:00:00+00:00",
+    }
+
+
 def _http_authored_config(secret_value: str | dict[str, str]):
     return {
         "url": "https://example.org/output",
@@ -497,6 +506,7 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
     flow_id = uuid4()
+    builder_origin = _ai_builder_origin_metadata()
     flow = Flow(
         id=flow_id,
         tenant_id=user.tenant_id,
@@ -511,7 +521,10 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
                 "fields": [{"name": "case_id", "type": "string"}],
             },
             "care_data_policy": {},
-            "ai_builder": {"description": "Generated draft"},
+            "ai_builder": {
+                "origin": builder_origin,
+                "description": "Generated draft",
+            },
         },
         data_retention_days=None,
         created_at=datetime.now(timezone.utc),
@@ -528,7 +541,7 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
     assert definition["metadata_json"] == {
         "form_schema": {"fields": [{"name": "case_id", "type": "text"}]},
         "care_data_policy": {"sensitive": False},
-        "ai_builder": {"description": "Generated draft"},
+        "ai_builder": {"origin": builder_origin},
     }
     assert "definition_checksum" not in version_repo.create.await_args.kwargs
 
@@ -2862,8 +2875,8 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
                     {"name": "Anteckning", "type": "textarea", "required": False},
                 ]
             },
-            "ai_builder": {"description": "Generated draft"},
-            "transcription": {"language": "sv"},
+            "wizard": {"transcription_enabled": True},
+            "ai_builder": {"origin": _ai_builder_origin_metadata()},
         },
     )
 
@@ -2871,8 +2884,27 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
         field["type"] for field in created.metadata_json["form_schema"]["fields"]
     ]
     assert field_types == ["text", "text"]
-    assert created.metadata_json["ai_builder"] == {"description": "Generated draft"}
-    assert created.metadata_json["transcription"] == {"language": "sv"}
+    assert created.metadata_json["wizard"] == {"transcription_enabled": True}
+    assert "origin" in created.metadata_json["ai_builder"]
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_unknown_metadata_bucket(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(
+        BadRequestException,
+        match="metadata_json contains unknown top-level fields: transcription",
+    ):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={"transcription": {"language": "sv"}},
+        )
+    flow_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2911,8 +2943,7 @@ async def test_update_flow_without_metadata_normalizes_existing_metadata_toleran
     assert updated.metadata_json == {
         "form_schema": {
             "fields": [{"name": "case_id", "type": "text", "required": False}]
-        },
-        "ai_builder": {"description": "Generated draft"},
+        }
     }
 
 

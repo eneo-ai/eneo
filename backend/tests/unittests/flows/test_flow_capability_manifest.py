@@ -1091,8 +1091,9 @@ _FCM_SURFACE_FINGERPRINT_V2: tuple[object, ...] = (
                 (
                     "requires_enabled_flow_transcription_config",
                     "Flows containing any `AUDIO`-input step require "
-                    "`metadata_json.transcription.enabled=True` and a non-null "
-                    "`model_id`; `_validate_audio_transcription_settings` rejects "
+                    "`metadata_json.wizard.transcription_enabled=True` and "
+                    "a non-null `transcription_model.id`; "
+                    "`_validate_audio_transcription_settings` rejects "
                     "missing config for every audio step regardless of `output_mode`.",
                 ),
             ),

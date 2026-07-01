@@ -892,13 +892,18 @@ class TestCompileMetadata:
         changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert changeset.metadata_json is None
 
-    def test_preserves_existing_metadata_when_no_form_fields(self) -> None:
-        """When editing, preserve existing metadata if spec has no form_fields."""
-        flow = _make_flow(metadata_json={"custom_key": "value"})
+    def test_normalizes_existing_metadata_when_no_form_fields(self) -> None:
+        flow = _make_flow(
+            metadata_json={
+                "custom_key": "value",
+                "care_data_policy": {"sensitive": True},
+            }
+        )
         spec = _make_spec(steps=[_make_step_spec(plan_step_ref="step_a")])
         changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert changeset.metadata_json is not None
-        assert changeset.metadata_json.get("custom_key") == "value"
+        assert "custom_key" not in changeset.metadata_json
+        assert changeset.metadata_json["care_data_policy"] == {"sensitive": True}
 
     def test_form_fields_override_existing_form_schema(self) -> None:
         """When spec has form_fields, they replace existing form_schema."""
@@ -909,6 +914,7 @@ class TestCompileMetadata:
         flow = _make_flow(
             metadata_json={
                 "custom_key": "preserve",
+                "wizard": {"layout": "compact"},
                 "form_schema": {"fields": [{"name": "old", "type": "text"}]},
             }
         )
@@ -922,9 +928,8 @@ class TestCompileMetadata:
         )
         changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert changeset.metadata_json is not None
-        # Custom key preserved
-        assert changeset.metadata_json.get("custom_key") == "preserve"
-        # Form schema replaced
+        assert "custom_key" not in changeset.metadata_json
+        assert changeset.metadata_json["wizard"] == {"layout": "compact"}
         fields = changeset.metadata_json["form_schema"]["fields"]
         assert len(fields) == 1
         assert fields[0]["name"] == "New field"

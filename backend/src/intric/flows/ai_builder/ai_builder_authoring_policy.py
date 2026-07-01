@@ -10,7 +10,6 @@ from intric.flows.application.flow_draft_materialization import FlowDraftChangeS
 from intric.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
-    clone_json_object,
 )
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -108,15 +107,12 @@ def _stamp_ai_builder_metadata(
     origin: AIBuilderFlowAuthoringOrigin,
 ) -> FlowPersistedJsonObject:
     result = dict(metadata or {})
-    raw_ai_builder = result.get("ai_builder")
-    ai_builder = clone_json_object(raw_ai_builder) or {}
-    # Drop pre-production provenance so future applies converge to origin-only metadata.
-    ai_builder.pop("description", None)
-    ai_builder["origin"] = {
-        "builder_session_id": str(origin.session_id),
-        "builder_plan_id": str(origin.plan_id),
-        "builder_spec_hash": origin.spec_hash,
-        "applied_at": origin.applied_at.isoformat(),
+    result["ai_builder"] = {
+        "origin": {
+            "builder_session_id": str(origin.session_id),
+            "builder_plan_id": str(origin.plan_id),
+            "builder_spec_hash": origin.spec_hash,
+            "applied_at": origin.applied_at.isoformat(),
+        }
     }
-    result["ai_builder"] = ai_builder
     return result

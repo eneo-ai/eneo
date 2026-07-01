@@ -2850,6 +2850,71 @@
   - Rollback: remove `owner_symbols`, restore the prior module-import-only guard, and restore the previous review-checkpoint owner module values. That would reintroduce prose-only registry drift, so rollback should only happen if a row has no honest executable owner and must be split into a focused follow-up.
   - Exact next bounded recommendation: Flow metadata top-level ownership proof/cleanup, then template identity cleanup, then `module_registry.metadata_json` owner/delete decision.
 
+## Flow Metadata Top-Level Buckets
+
+- Slice id: `flow-metadata-top-level-buckets`.
+- Findings addressed:
+  - `FlowMetadata` allowed arbitrary top-level extras, so pre-release metadata such as `custom_key`, `external_owner`, `workflow`, top-level `transcription`, and arbitrary `ai_builder` subkeys could become persisted or published contract by accident.
+  - Builder draft materialization copied `current_flow.metadata_json` directly before composing form/wizard metadata, so stale buckets could enter a changeset before the service write boundary.
+  - Builder authoring metadata stamped `ai_builder.origin` but preserved arbitrary old `ai_builder` subkeys after only dropping `description`.
+  - Capability manifest wording still documented top-level `metadata_json.transcription`, while the live transcription owner writes and reads `metadata_json.wizard.transcription_*`.
+- Evidence reviewed:
+  - `backend/src/intric/flows/flow_metadata.py` owns `FlowMetadata`, `parse_flow_metadata`, `normalize_flow_metadata_for_write`, and `normalize_persisted_flow_metadata`.
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py` now points `flows.metadata_json` at `intric.flows.flow_metadata` with `NORMALIZE_TO_EMPTY` persisted-read behavior.
+  - `backend/src/intric/flows/application/flow_service.py` uses `normalize_flow_metadata_for_write` on create/update writes and `normalize_persisted_flow_metadata` before publishing/metadata-preserving updates.
+  - `backend/src/intric/flows/application/flow_draft_materialization.py` owned the Builder draft metadata composition path that copied current metadata before this slice.
+  - `backend/src/intric/flows/ai_builder/ai_builder_authoring_policy.py` owns `ai_builder.origin` stamping.
+  - Read-only dev DB probe for top-level `flows.metadata_json` keys returned `metadata_top_level_keys: none`; no local persisted unknown bucket blocked tightening.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-flow-metadata-top-level-buckets-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: yes`, `BLOCKER: none`; valid feedback applied by normalizing Builder draft metadata, making Builder stamping origin-only, and cleaning stale API examples/tests.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-flow-metadata-top-level-buckets-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, `BLOCKERS: none`, `CHANGES_REQUIRED: none`.
+- Behavior changed:
+  - `parse_flow_metadata(..., WRITE)` rejects unknown top-level metadata buckets and unknown `ai_builder` subkeys.
+  - `parse_flow_metadata(..., PERSISTED_READ)` drops unknown top-level buckets and unowned `ai_builder` subkeys instead of publishing them back out.
+  - Owned first-release buckets remain: `form_schema`, `care_data_policy`, open `wizard`, and `ai_builder.origin`.
+  - Builder draft materialization now starts from normalized persisted metadata before applying form/transcription metadata.
+  - Builder authoring policy now stamps `ai_builder` as origin-only.
+  - Capability manifest wording now points audio transcription to `metadata_json.wizard.transcription_enabled` and `wizard.transcription_model.id`, not a top-level `transcription` bucket.
+- Files changed:
+  - `backend/src/intric/flows/flow_metadata.py`
+  - `backend/src/intric/flows/application/flow_draft_materialization.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_authoring_policy.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/intric/flows/flow_capability_manifest.py`
+  - `backend/tests/unittests/flows/test_flow_metadata.py`
+  - `backend/tests/unittests/flows/test_flow_service.py`
+  - `backend/tests/unittests/flows/test_published_definition_contract.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py`
+  - `backend/tests/unittests/flows/test_flow_models.py`
+  - `backend/tests/unittests/flows/test_flow_capability_manifest.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Tests deleted or rewritten because they preserved dead behavior:
+  - Rewrote parser/service/published-definition/materializer/request-model tests that previously preserved arbitrary `custom_key`, `workflow`, `external_owner`, top-level `transcription`, and `ai_builder.other`.
+  - Those names remain only in negative tests or stale-row fixtures proving rejection/drop behavior, not as accepted metadata contract.
+- Complexity deleted or owner clarified:
+  - The metadata bucket policy lives in `flow_metadata.py`; no metadata registry/framework, manager, migration, or compatibility shim was added.
+  - Builder materialization and Builder authoring now reuse or align with the metadata owner instead of preserving unowned JSON buckets.
+  - Top-level `transcription` is not a contract; the existing wizard transcription owner remains canonical.
+- Architecture delta:
+  - Canonical owner before: `flow_metadata.py` was named by the JSONB registry but still allowed hidden top-level schema through `extra="allow"`.
+  - Canonical owner after: `flow_metadata.py` enforces write rejection and persisted-read cleanup for top-level Flow metadata buckets, while existing bucket owners remain local.
+  - What not to preserve: arbitrary pre-release metadata, unowned Builder subkeys, top-level transcription, broad generated-client churn, relational migration, or a generic JSONB framework.
+  - Honest rating impact: materially improves Flow JSONB/data-model maintainability and API maintainer clarity, but remaining 9/10 blockers still include template identity cleanup and `module_registry.metadata_json` owner/delete decision.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py::test_publish_flow_uses_normalized_metadata_in_snapshot tests/unittests/flows/test_flow_service.py::test_create_flow_normalizes_legacy_form_field_types tests/unittests/flows/test_flow_service.py::test_create_flow_rejects_unknown_metadata_bucket tests/unittests/flows/test_flow_service.py::test_update_flow_without_metadata_normalizes_existing_metadata_tolerantly tests/unittests/flows/test_published_definition_contract.py::test_parser_exposes_typed_metadata_without_raw_metadata_field tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py::TestCompileMetadata tests/unittests/flows/test_flow_draft_materialization.py tests/unittests/flows/test_flow_capability_manifest.py -q'` -> pass, 181 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_jsonb_ownership.py -q'` -> pass, 7 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py -q'` -> pass, 154 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_validators.py::test_normalize_flow_metadata_for_write_maps_legacy_string_type_to_text -q'` -> pass, 1 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/ai_builder/ai_builder_authoring_policy.py src/intric/flows/api/flow_models.py src/intric/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/ai_builder/ai_builder_authoring_policy.py src/intric/flows/api/flow_models.py src/intric/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_metadata.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/ai_builder/ai_builder_authoring_policy.py src/intric/flows/api/flow_models.py src/intric/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py'` -> pass, 0 errors.
+- Remaining risk / rollback:
+  - Risk is limited to pre-release Flow metadata writes/reads that used arbitrary top-level JSON. They now fail on write or sanitize on persisted read.
+  - No generated-client regeneration, frontend changes, migration, relational schema change, Flow AI Builder planner/session work, MCP/capability implementation, template identity cleanup, or `module_registry.metadata_json` decision was part of this slice.
+  - Rollback: restore permissive `FlowMetadata.extra="allow"`, restore raw metadata copying in Builder materialization and clone-plus-pop Builder stamping, and restore tests that preserved arbitrary metadata. That would reintroduce hidden-schema drift and should only be used if a real owned bucket was identified after release review.
+  - Exact next bounded recommendation: template identity cleanup, then `module_registry.metadata_json` owner/delete decision.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

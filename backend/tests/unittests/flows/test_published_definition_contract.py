@@ -224,6 +224,7 @@ def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
             },
             "care_data_policy": {"sensitive": True},
             "external_owner": "case-system",
+            "wizard": {"transcription_enabled": True},
         },
         steps=[_step(order=1)],
     )
@@ -236,7 +237,21 @@ def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
     assert metadata.form_schema.fields[0].name == "case_id"
     assert metadata.form_schema.fields[0].type is FlowFormFieldType.TEXT
     assert metadata.care_data_policy.sensitive is True
-    assert serialize_flow_metadata(metadata)["external_owner"] == "case-system"
+    assert serialize_flow_metadata(metadata) == {
+        "form_schema": {
+            "fields": [
+                {
+                    "name": "case_id",
+                    "type": "text",
+                    "label": "Case",
+                    "required": True,
+                    "order": 2,
+                }
+            ]
+        },
+        "care_data_policy": {"sensitive": True},
+        "wizard": {"transcription_enabled": True},
+    }
 
 
 @pytest.mark.parametrize(
