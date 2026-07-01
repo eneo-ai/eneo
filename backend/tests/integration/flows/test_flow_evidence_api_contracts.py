@@ -934,8 +934,8 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     redacted_bundle = redacted_payload["bundle"]
     raw_bundle = raw_payload["bundle"]
 
-    assert redacted_payload["schema_version"] == "flow-evidence-export.v6"
-    assert raw_payload["schema_version"] == "flow-evidence-export.v6"
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v7"
+    assert raw_payload["schema_version"] == "flow-evidence-export.v7"
     assert (
         redacted_payload["content_hash"] == (repeated_redacted_payload["content_hash"])
     )
@@ -1021,8 +1021,8 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
     redacted_checkpoint = redacted_payload["bundle"]["review_checkpoints"][0]
     raw_checkpoint = raw_payload["bundle"]["review_checkpoints"][0]
 
-    assert raw_payload["schema_version"] == "flow-evidence-export.v6"
-    assert redacted_payload["schema_version"] == "flow-evidence-export.v6"
+    assert raw_payload["schema_version"] == "flow-evidence-export.v7"
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v7"
     assert raw_checkpoint["id"] == seeded["review_checkpoint_id"]
     assert raw_checkpoint["original_payload_json"]["summary"] == "Looks good"
     assert raw_checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
@@ -1041,6 +1041,8 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
         raw_payload["summary"]["review_checkpoints"]
         == (raw_payload["manifest"]["review_checkpoint_summary"])
     )
+    assert "summary_typed" not in raw_payload
+    assert "summary_typed" not in redacted_payload
     assert raw_payload["manifest"]["review_checkpoint_summary"] == {
         "count": 1,
         "by_state": {
@@ -1057,13 +1059,7 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
         "active_checkpoint_id": None,
         "active_checkpoint_conflict": False,
     }
-    assert (
-        raw_payload["summary_typed"]["review_checkpoints"]
-        == raw_payload["manifest"]["review_checkpoint_summary"]
-    )
-    raw_review_impact = raw_payload["summary_typed"]["step_overview"][0][
-        "review_impact"
-    ]
+    raw_review_impact = raw_payload["summary"]["step_overview"][0]["review_impact"]
     raw_review_event = raw_review_impact["events"][0]
     assert raw_review_impact["checkpoint_count"] == 1
     assert raw_review_impact["any_edited"] is True
@@ -1076,7 +1072,7 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
     assert raw_review_event["attempt_no"] == 1
     assert raw_review_event["revision"] == 4
     assert raw_review_event["output_changed"] is True
-    redacted_review_event = redacted_payload["summary_typed"]["step_overview"][0][
+    redacted_review_event = redacted_payload["summary"]["step_overview"][0][
         "review_impact"
     ]["events"][0]
     assert redacted_review_event["output_changed"] is True
@@ -1111,7 +1107,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert response.headers["content-type"].startswith("application/json")
     assert "attachment;" in response.headers["content-disposition"]
     payload = response.json()
-    assert payload["schema_version"] == "flow-evidence-export.v6"
+    assert payload["schema_version"] == "flow-evidence-export.v7"
     assert payload["manifest"]["schema_version"] == payload["schema_version"]
     assert payload["manifest"]["run_id"] == seeded["run_id"]
     assert payload["manifest"]["tenant_id"] == str(trace_user.tenant_id)

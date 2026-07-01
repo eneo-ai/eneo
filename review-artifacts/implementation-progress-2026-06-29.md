@@ -2626,6 +2626,79 @@
   - Rollback is straightforward: restore the deleted wrapper/export/tests and change create scheduling back to `dispatch_flow_run_after_commit`.
   - Exact next bounded recommendation: evidence export single public summary contract, then `flow_runs.error_json` read/corruption boundary, then API/SDK consumer runtime smoke.
 
+## Evidence Export Summary Contract Implementation
+
+- Slice id: evidence export single public summary contract.
+- Findings addressed:
+  - Evidence export responses exposed two public summary shapes: an open legacy `summary` dict and a typed `summary_typed` transition field.
+  - The typed summary did not yet carry all consumer-relevant legacy summary data, so deleting `summary_typed` safely required typed parity first rather than dropping compliance/debug information.
+  - Generated TypeScript clients still saw the transition contract, making API consumer DX and maintainer DX worse than the backend's actual intended owner.
+- Evidence reviewed:
+  - `backend/src/intric/flows/flow_run_export_json.py` owned rendering of evidence export JSON and previously built both legacy and typed summary payloads.
+  - `backend/src/intric/flows/flow_run_evidence_export_summary.py` owned typed evidence summary models, but lacked typed fields for artifact details, RAG source names/details, usage tracking, citations, rerun lineage, and step-level input/RAG/artifact extras.
+  - `backend/src/intric/flows/api/flow_models.py` owned `FlowRunEvidenceExportResponse`, which previously surfaced both `summary` and `summary_typed`.
+  - `frontend/packages/intric-js/src/types/schema.d.ts` and `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts` carried the generated/client-visible transition shape.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-evidence-export-summary-contract-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`, `BLOCKER: no`; valid guidance applied by making typed parity explicit before deletion, keeping top-level/schema-version literals at `flow-evidence-export.v7`, preserving `rag_sources_count`, reusing manifest artifact item typing, leaving intentionally open provenance-derived pockets as `JsonObject`/`JsonValue`, and adding OpenAPI coverage for the full public shape.
+  - Read-only Codex final staged-diff gate artifact `.codex/artifacts/codex-exec-evidence-export-summary-contract-final-staged-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, `BLOCKERS: none`; it confirmed one public typed `summary`, no active `summary_typed`, bundle-only hashing, generated TypeScript alignment, and no staged out-of-scope files.
+- Red / green proof:
+  - Red before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_evidence.py::test_evidence_export_summary_is_single_typed_contract tests/unit/test_flow_openapi_contract.py::test_openapi_flow_evidence_export_documents_single_typed_summary -q'` failed because exports still emitted `summary_typed` and OpenAPI still documented `summary_typed`.
+  - Green after source change: the same focused tests passed with one typed public `summary`, no `summary_typed`, and rich summary fields present.
+- Files changed:
+  - `backend/src/intric/flows/flow_run_evidence_export_summary.py`
+  - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - `backend/src/intric/flows/flow_run_export_json.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+  - `backend/tests/unittests/flows/test_flow_router.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts`
+  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Evidence export JSON now has exactly one public summary field: `summary: EvidenceExportSummary`.
+  - `summary_typed` is deleted from renderer output, API response schema, OpenAPI/generated TypeScript, and fixtures.
+  - `EvidenceExportSummary` now carries artifact names/details, RAG source counts/names/display names/details, RAG usage tracking, citations, rerun lineage, review checkpoints, final output, and full step overview extras including knowledge retrieval and input lineage.
+  - `EVIDENCE_EXPORT_SCHEMA_VERSION` is bumped from `flow-evidence-export.v6` to `flow-evidence-export.v7`.
+  - `content_hash` remains bundle-only; summary, manifest, redaction, generated time, and schema version were not added to the hash input.
+- Complexity deleted or owner clarified:
+  - The never-shipped public transition shape is deleted instead of preserved behind a compatibility alias.
+  - `EvidenceExportSummary` is the single public summary contract owner; `bundle` and `redaction` remain intentionally open for separate slices.
+  - Renderer code no longer builds parallel legacy and typed summary payloads.
+  - No generic export manager, redaction rewrite, evidence rewrite, migration, Builder work, or API compatibility shim was added.
+- Architecture delta:
+  - Canonical owner before: evidence export summary data was split between an open legacy dict and a typed transition field.
+  - Canonical owner after: the typed summary model owns public summary semantics; the export renderer produces one summary path; the API response and generated SDK expose that single path.
+  - What not to preserve: pre-release `summary_typed`, duplicate summary projection helpers, and generated-client exposure of both shapes.
+  - Honest rating impact: this materially improves evidence export API consumer DX and maintainer DX, but Flows still needs `flow_runs.error_json` read/corruption handling and runtime/API smoke before a 9/10 claim is credible.
+- Generated client:
+  - Dumped the devcontainer backend OpenAPI snapshot to `.codex/artifacts/openapi-evidence-summary-v7-unsorted-20260701.json`.
+  - Regenerated `frontend/packages/intric-js/src/types/schema.d.ts` with the existing `frontend/packages/intric-js/update.js --schema-file` workflow.
+  - Updated the TypeScript flow resource smoke fixture to use the typed `summary` contract and no `summary_typed`.
+  - Updated two frontend evidence-export test fixtures that still hard-coded the pre-release v6 export version.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_evidence.py -q'` -> pass, 63 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unit/test_flow_openapi_contract.py -q'` -> pass, 89 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_evidence_api_contracts.py -q'` -> pass, 11 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py -q'` -> pass, 107 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/flow_run_evidence_export_summary.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py && .venv/bin/ruff format --check src/intric/flows/flow_run_evidence_export_summary.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py'` -> initial format-check caught `flow_run_export_json.py`, then pass after formatting.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_evidence_export_summary.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py'` -> pass, 0 errors.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run lint` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts` -> pass, 35 passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --check apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts packages/intric-js/src/endpoints/flows.test.js packages/intric-js/src/types/flow-resource-aliases.types.ts` -> initial failure on `flowRunEvidenceActions.test.ts`, then pass after formatting the touched file.
+  - `git diff --check -- backend/src/intric/flows/flow_run_evidence_export_summary.py backend/src/intric/flows/flow_run_evidence_export_manifest.py backend/src/intric/flows/flow_run_export_json.py backend/src/intric/flows/api/flow_models.py backend/tests/unittests/flows/test_flow_run_evidence.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/integration/flows/test_flow_evidence_api_contracts.py backend/tests/unittests/flows/test_flow_router.py backend/tests/unittests/flows/test_flow_run_service.py frontend/apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts frontend/packages/intric-js/src/endpoints/flows.test.js frontend/packages/intric-js/src/types/schema.d.ts frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / rollback:
+  - Runtime/API risk: clients using the pre-release `summary_typed` field must read `summary` instead. This is intentional for the release contract.
+  - Data risk is low: this changes the export response shape, not persisted Flow run state or migrations.
+  - Rollback is straightforward but undesirable: restore the v6 schema version, dual summary payload construction, `summary_typed` response field, generated TypeScript shape, focused tests, and this ledger entry.
+  - Exact next bounded recommendation: `flow_runs.error_json` read/corruption boundary, then API/SDK consumer runtime smoke, then Flow terminal failure event/readable diagnostics.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

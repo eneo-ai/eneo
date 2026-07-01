@@ -288,7 +288,7 @@ describe("flows templates endpoint", () => {
 
   it("exports evidence from the canonical flow run route", async () => {
     const fetch = vi.fn(async () => ({
-      schema_version: "flow-evidence-export.v6",
+      schema_version: "flow-evidence-export.v7",
       content_hash: "abc123"
     }));
     const flows = initFlows({ fetch });

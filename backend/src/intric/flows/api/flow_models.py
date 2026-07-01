@@ -1648,11 +1648,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v6",
+                "schema_version": "flow-evidence-export.v7",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v6",
+                    "schema_version": "flow-evidence-export.v7",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
                     "provenance_persisted_version_status": "not_tracked",
@@ -1774,6 +1774,18 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         "cited_source_count": 1,
                         "unknown_citation_ids": [],
                         "uncited_inserted_source_ids": [],
+                    },
+                    "rerun_lineage": {
+                        "operations_count": 0,
+                        "queued_operations_count": 0,
+                        "running_operations_count": 0,
+                        "completed_operations_count": 0,
+                        "failed_operations_count": 0,
+                        "cancelled_operations_count": 0,
+                        "active_operations_count": 0,
+                        "terminal_operations_count": 0,
+                        "invalidated_steps_count": 0,
+                        "completed_replacement_count": 0,
                     },
                     "review_checkpoints": {
                         "count": 1,
@@ -1947,68 +1959,6 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             },
                             "configured_input_type": "text",
                             "configured_output_type": "pdf",
-                        }
-                    ],
-                },
-                "summary_typed": {
-                    "status": "completed",
-                    "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
-                    "steps_count": 1,
-                    "completed_steps": 1,
-                    "failed_steps": 0,
-                    "attempts_count": 1,
-                    "artifacts_count": 1,
-                    "duration_ms": 5240,
-                    "models_used": ["gpt-4.1-mini"],
-                    "review_checkpoints": {
-                        "count": 1,
-                        "by_state": {
-                            "awaiting_review": 0,
-                            "edited": 0,
-                            "approved": 0,
-                            "rejected": 0,
-                            "resumed": 1,
-                            "cancelled": 0,
-                            "expired": 0,
-                        },
-                        "any_edited": True,
-                        "any_resumed": True,
-                        "active_checkpoint_id": None,
-                        "active_checkpoint_conflict": False,
-                    },
-                    "final_output": {
-                        "kind": "mixed",
-                        "text_present": True,
-                        "text_preview": {
-                            "preview": "Decision support generated.",
-                            "truncated": False,
-                            "byte_size": 27,
-                            "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
-                        },
-                        "structured_present": False,
-                        "artifact_count": 1,
-                        "artifact_names": ["case-summary.pdf"],
-                    },
-                    "step_overview": [
-                        {
-                            "step_order": 1,
-                            "step_id": "step-1",
-                            "user_description": "Draft the decision support summary",
-                            "status": "completed",
-                            "attempts_count": 1,
-                            "retries": 0,
-                            "duration_ms": 5240,
-                            "models_used": ["gpt-4.1-mini"],
-                            "artifact_names": ["case-summary.pdf"],
-                            "result_output_kind": "mixed",
-                            "output_summary": {
-                                "preview": "Decision support generated.",
-                                "truncated": False,
-                                "byte_size": 27,
-                                "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
-                            },
-                            "configured_input_type": "text",
-                            "configured_output_type": "pdf",
                             "review_impact": {
                                 "checkpoint_count": 1,
                                 "any_edited": True,
@@ -2069,18 +2019,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: str
+    schema_version: Literal["flow-evidence-export.v7"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest
-    summary: dict[str, Any]
-    summary_typed: EvidenceExportSummary = Field(
-        description=(
-            "Typed additive read-model for API consumers. It mirrors stable "
-            "summary fields and adds per-step review impact while legacy "
-            "summary remains available."
-        )
-    )
+    summary: EvidenceExportSummary
     redaction: dict[str, Any]
     bundle: dict[str, Any] = Field(
         description=(

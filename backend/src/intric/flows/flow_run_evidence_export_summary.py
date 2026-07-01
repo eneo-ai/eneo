@@ -7,14 +7,84 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.flows.flow_run_evidence_export_manifest import (
+    EvidenceArtifactManifestItem,
     EvidenceReviewCheckpointSummary,
 )
 from intric.flows.flow_run_provenance import PayloadPreview
+from intric.json_types import JsonObject, JsonValue
 
 EvidenceOutputKind: TypeAlias = Literal[
     "empty", "text", "structured", "artifact", "mixed"
 ]
 EvidenceReviewDecision: TypeAlias = Literal["approved", "rejected", "cancelled"]
+
+
+class EvidenceRagSourceSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    name: str | None = None
+    display_name: str | None = None
+    source_title_raw: str | None = None
+    source_display_name: str | None = None
+    source_url: str | None = None
+    source_kind: str | None = None
+    source_container_kind: str | None = None
+    source_container_name: str | None = None
+    source_container_name_raw: str | None = None
+    source_container_display_name: str | None = None
+    source_container_label: str | None = None
+    source_container_id: str | None = None
+    usage_state: str | None = None
+
+
+class EvidenceRerunLineageSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operations_count: int
+    queued_operations_count: int
+    running_operations_count: int
+    completed_operations_count: int
+    failed_operations_count: int
+    cancelled_operations_count: int
+    active_operations_count: int
+    terminal_operations_count: int
+    invalidated_steps_count: int
+    completed_replacement_count: int
+
+
+class EvidenceStepInputLineageSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_source: JsonValue
+    used_question_binding: JsonValue
+    uses_runtime_input: bool
+    runtime_input_format: JsonValue
+    runtime_file_count: int
+    runtime_file_ids: list[str]
+    runtime_file_names: list[str]
+    runtime_file_checksums: list[str]
+    runtime_files: list[JsonObject]
+    question_binding_references_runtime_input: bool
+    question_binding_expressions: list[str]
+    upstream_step_orders: list[int]
+    upstream_step_labels: list[str]
+
+
+class EvidenceStepKnowledgeRetrievalSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: JsonValue
+    attempted: JsonValue
+    retrieval_duration_ms: JsonValue
+    unique_sources: JsonValue
+    references_truncated: JsonValue
+    reference_metadata_status: JsonValue
+    retrieval_error_type: JsonValue = None
+    error_code: JsonValue = None
+    source_names: JsonValue
+    source_display_names: JsonValue
+    prompt_context: JsonObject | None
 
 
 class EvidenceFinalOutputSummary(BaseModel):
@@ -26,6 +96,7 @@ class EvidenceFinalOutputSummary(BaseModel):
     structured_present: bool
     artifact_count: int
     artifact_names: list[str]
+    artifact_details: list[EvidenceArtifactManifestItem]
 
 
 class EvidenceStepReviewEvent(BaseModel):
@@ -70,9 +141,15 @@ class EvidenceStepOverview(BaseModel):
     retries: int
     duration_ms: int | None = None
     models_used: list[str]
+    knowledge_sources_count: int
+    knowledge_usage_state: str | None = None
+    knowledge_retrieval: EvidenceStepKnowledgeRetrievalSummary | None = None
+    citations: JsonObject
     artifact_names: list[str]
+    artifact_details: list[EvidenceArtifactManifestItem]
     result_output_kind: EvidenceOutputKind | None = None
     output_summary: PayloadPreview | None = None
+    input_lineage: EvidenceStepInputLineageSummary
     configured_input_type: str | None = None
     configured_output_type: str | None = None
     review_impact: EvidenceStepReviewImpact
@@ -88,8 +165,17 @@ class EvidenceExportSummary(BaseModel):
     failed_steps: int
     attempts_count: int
     artifacts_count: int
+    artifact_names: list[str]
+    artifact_details: list[EvidenceArtifactManifestItem]
     duration_ms: int | None = None
     models_used: list[str]
+    rag_sources_count: int
+    rag_source_names: list[str]
+    rag_source_display_names: list[str]
+    rag_sources: list[EvidenceRagSourceSummary]
+    rag_usage_tracking: JsonObject
+    citations: JsonObject
+    rerun_lineage: EvidenceRerunLineageSummary
     review_checkpoints: EvidenceReviewCheckpointSummary
     final_output: EvidenceFinalOutputSummary
     step_overview: list[EvidenceStepOverview]

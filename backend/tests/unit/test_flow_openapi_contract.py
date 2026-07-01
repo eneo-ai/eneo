@@ -2629,7 +2629,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v6"}
+    ) == {"flow-evidence-export.v7"}
     assert _extract_enum_values(
         openapi_spec, manifest_properties["content_hash_input"]
     ) == {
@@ -2683,7 +2683,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     assert bad_request_example.get("code") == "flow_evidence_export_reason_required"
 
 
-def test_openapi_flow_evidence_export_documents_typed_summary_review_impact(
+def test_openapi_flow_evidence_export_documents_single_typed_summary(
     openapi_spec: dict,
 ) -> None:
     operation = _get_operation(
@@ -2695,8 +2695,8 @@ def test_openapi_flow_evidence_export_documents_typed_summary_review_impact(
     schema = response.get("content", {}).get("application/json", {}).get("schema", {})
     export_response = _resolve_component_ref(openapi_spec, schema)
     export_properties = export_response.get("properties", {})
-    summary_schema = export_properties.get("summary_typed", {})
-    assert summary_schema.get("description")
+    assert "summary_typed" not in export_properties
+    summary_schema = export_properties.get("summary", {})
     summary = _resolve_component_ref(openapi_spec, summary_schema)
 
     assert summary.get("title") == "EvidenceExportSummary"
@@ -2709,8 +2709,17 @@ def test_openapi_flow_evidence_export_documents_typed_summary_review_impact(
         "failed_steps",
         "attempts_count",
         "artifacts_count",
+        "artifact_names",
+        "artifact_details",
         "duration_ms",
         "models_used",
+        "rag_sources_count",
+        "rag_source_names",
+        "rag_source_display_names",
+        "rag_sources",
+        "rag_usage_tracking",
+        "citations",
+        "rerun_lineage",
         "review_checkpoints",
         "final_output",
         "step_overview",
@@ -2732,9 +2741,15 @@ def test_openapi_flow_evidence_export_documents_typed_summary_review_impact(
         "retries",
         "duration_ms",
         "models_used",
+        "knowledge_sources_count",
+        "knowledge_usage_state",
+        "knowledge_retrieval",
+        "citations",
         "artifact_names",
+        "artifact_details",
         "result_output_kind",
         "output_summary",
+        "input_lineage",
         "configured_input_type",
         "configured_output_type",
         "review_impact",

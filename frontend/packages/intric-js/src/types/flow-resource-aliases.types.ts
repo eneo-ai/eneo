@@ -298,11 +298,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 };
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v6",
+  schema_version: "flow-evidence-export.v7",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v6",
+    schema_version: "flow-evidence-export.v7",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
     provenance_persisted_version_status: "not_tracked",
@@ -346,8 +346,7 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
       active_checkpoint_conflict: false
     }
   },
-  summary: {},
-  summary_typed: {
+  summary: {
     status: "completed",
     trace_id: validFlowRun.trace_id,
     steps_count: 1,
@@ -355,8 +354,28 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
     failed_steps: 0,
     attempts_count: 1,
     artifacts_count: 1,
+    artifact_names: [validFlowRunResultFile.name],
+    artifact_details: [validFlowRunResultFile],
     duration_ms: 1000,
     models_used: ["gpt-5.4-nano"],
+    rag_sources_count: 0,
+    rag_source_names: [],
+    rag_source_display_names: [],
+    rag_sources: [],
+    rag_usage_tracking: { tracking_state: "not_tracked" },
+    citations: {},
+    rerun_lineage: {
+      operations_count: 0,
+      queued_operations_count: 0,
+      running_operations_count: 0,
+      completed_operations_count: 0,
+      failed_operations_count: 0,
+      cancelled_operations_count: 0,
+      active_operations_count: 0,
+      terminal_operations_count: 0,
+      invalidated_steps_count: 0,
+      completed_replacement_count: 0
+    },
     review_checkpoints: {
       count: 1,
       by_state: { resumed: 1 },
@@ -371,7 +390,8 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
       text_preview: null,
       structured_present: false,
       artifact_count: 1,
-      artifact_names: [validFlowRunResultFile.name]
+      artifact_names: [validFlowRunResultFile.name],
+      artifact_details: [validFlowRunResultFile]
     },
     step_overview: [
       {
@@ -383,9 +403,29 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
         retries: 0,
         duration_ms: 1000,
         models_used: ["gpt-5.4-nano"],
+        knowledge_sources_count: 0,
+        knowledge_usage_state: null,
+        knowledge_retrieval: null,
+        citations: {},
         artifact_names: [validFlowRunResultFile.name],
+        artifact_details: [validFlowRunResultFile],
         result_output_kind: "artifact",
         output_summary: null,
+        input_lineage: {
+          input_source: "flow_input",
+          used_question_binding: false,
+          uses_runtime_input: false,
+          runtime_input_format: null,
+          runtime_file_count: 0,
+          runtime_file_ids: [],
+          runtime_file_names: [],
+          runtime_file_checksums: [],
+          runtime_files: [],
+          question_binding_references_runtime_input: false,
+          question_binding_expressions: [],
+          upstream_step_orders: [],
+          upstream_step_labels: []
+        },
         configured_input_type: "text",
         configured_output_type: "docx",
         review_impact: {

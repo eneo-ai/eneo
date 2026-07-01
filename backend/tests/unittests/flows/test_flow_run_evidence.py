@@ -1672,7 +1672,8 @@ def test_evidence_export_typed_summary_adds_review_impact_without_changing_conte
     assert "resume-key-must-not-leak" not in serialized_export
     assert "resume_idempotency_key" not in serialized_export
 
-    step_1_review = export["summary_typed"]["step_overview"][0]["review_impact"]
+    assert "summary_typed" not in export
+    step_1_review = export["summary"]["step_overview"][0]["review_impact"]
     events = step_1_review["events"]
     assert step_1_review["checkpoint_count"] == 3
     assert step_1_review["any_edited"] is True
@@ -1693,7 +1694,7 @@ def test_evidence_export_typed_summary_adds_review_impact_without_changing_conte
     assert step_1_review["last_event"]["attempt_no"] == 2
     assert step_1_review["last_event"]["revision"] == 2
 
-    step_2_review = export["summary_typed"]["step_overview"][1]["review_impact"]
+    step_2_review = export["summary"]["step_overview"][1]["review_impact"]
     assert step_2_review == {
         "checkpoint_count": 0,
         "any_edited": False,
@@ -1769,7 +1770,7 @@ def test_evidence_export_typed_summary_maps_review_impact_states(
         review_checkpoints=[checkpoint],
     )
 
-    review = export["summary_typed"]["step_overview"][0]["review_impact"]
+    review = export["summary"]["step_overview"][0]["review_impact"]
     event = review["events"][0]
     expected_decision = {
         FlowRunReviewCheckpointState.APPROVED: "approved",
@@ -1787,7 +1788,7 @@ def test_evidence_export_typed_summary_maps_review_impact_states(
     assert event["output_changed"] is True
 
 
-def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> None:
+def test_evidence_export_summary_is_single_typed_contract() -> None:
     run, _ = _evidence_run_and_version()
     step_id = uuid4()
     version = _evidence_version_with_steps(run, step_ids=[step_id])
@@ -1808,9 +1809,10 @@ def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> N
         ],
     )
 
-    legacy_summary = export["summary"]
-    typed_summary = export["summary_typed"]
-    top_level_fields = (
+    assert "summary_typed" not in export
+
+    summary = export["summary"]
+    assert set(summary) == {
         "status",
         "trace_id",
         "steps_count",
@@ -1818,16 +1820,24 @@ def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> N
         "failed_steps",
         "attempts_count",
         "artifacts_count",
+        "artifact_names",
+        "artifact_details",
         "duration_ms",
         "models_used",
+        "rag_sources_count",
+        "rag_source_names",
+        "rag_source_display_names",
+        "rag_sources",
+        "rag_usage_tracking",
+        "citations",
+        "rerun_lineage",
         "review_checkpoints",
-    )
-    for field in top_level_fields:
-        assert typed_summary[field] == legacy_summary[field]
+        "final_output",
+        "step_overview",
+    }
 
-    legacy_step = legacy_summary["step_overview"][0]
-    typed_step = typed_summary["step_overview"][0]
-    step_fields = (
+    step = summary["step_overview"][0]
+    assert set(step) == {
         "step_order",
         "step_id",
         "user_description",
@@ -1836,14 +1846,19 @@ def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> N
         "retries",
         "duration_ms",
         "models_used",
+        "knowledge_sources_count",
+        "knowledge_usage_state",
+        "knowledge_retrieval",
+        "citations",
         "artifact_names",
+        "artifact_details",
         "result_output_kind",
         "output_summary",
+        "input_lineage",
         "configured_input_type",
         "configured_output_type",
-    )
-    for field in step_fields:
-        assert typed_step[field] == legacy_step[field]
+        "review_impact",
+    }
 
 
 @pytest.mark.parametrize(
@@ -1879,9 +1894,7 @@ def test_evidence_export_ignores_legacy_webhook_delivery_payload_mirror(
     )
 
     assert export["summary"]["final_output"]["kind"] == "text"
-    assert export["summary_typed"]["final_output"]["kind"] == "text"
     assert export["summary"]["step_overview"][0]["result_output_kind"] == "text"
-    assert export["summary_typed"]["step_overview"][0]["result_output_kind"] == "text"
 
 
 def test_evidence_export_summary_shared_fields_use_typed_normalization() -> None:
@@ -1930,7 +1943,6 @@ def test_evidence_export_summary_shared_fields_use_typed_normalization() -> None
         "duration_ms": None,
         "models_used": [],
     }.items():
-        assert export["summary_typed"][field] == expected
         assert export["summary"][field] == expected
 
 

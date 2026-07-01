@@ -12909,7 +12909,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v6";
+      schema_version: "flow-evidence-export.v7";
       /** Provenance Schema Version Min */
       provenance_schema_version_min: string;
       /** Provenance Schema Version Current */
@@ -12980,10 +12980,31 @@ export interface components {
       attempts_count: number;
       /** Artifacts Count */
       artifacts_count: number;
+      /** Artifact Names */
+      artifact_names: string[];
+      /** Artifact Details */
+      artifact_details: components["schemas"]["EvidenceArtifactManifestItem"][];
       /** Duration Ms */
       duration_ms?: number | null;
       /** Models Used */
       models_used: string[];
+      /** Rag Sources Count */
+      rag_sources_count: number;
+      /** Rag Source Names */
+      rag_source_names: string[];
+      /** Rag Source Display Names */
+      rag_source_display_names: string[];
+      /** Rag Sources */
+      rag_sources: components["schemas"]["EvidenceRagSourceSummary"][];
+      /** Rag Usage Tracking */
+      rag_usage_tracking: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+      /** Citations */
+      citations: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+      rerun_lineage: components["schemas"]["EvidenceRerunLineageSummary"];
       review_checkpoints: components["schemas"]["EvidenceReviewCheckpointSummary"];
       final_output: components["schemas"]["EvidenceFinalOutputSummary"];
       /** Step Overview */
@@ -13005,6 +13026,62 @@ export interface components {
       artifact_count: number;
       /** Artifact Names */
       artifact_names: string[];
+      /** Artifact Details */
+      artifact_details: components["schemas"]["EvidenceArtifactManifestItem"][];
+    };
+    /** EvidenceRagSourceSummary */
+    EvidenceRagSourceSummary: {
+      /** Id */
+      id?: string | null;
+      /** Name */
+      name?: string | null;
+      /** Display Name */
+      display_name?: string | null;
+      /** Source Title Raw */
+      source_title_raw?: string | null;
+      /** Source Display Name */
+      source_display_name?: string | null;
+      /** Source Url */
+      source_url?: string | null;
+      /** Source Kind */
+      source_kind?: string | null;
+      /** Source Container Kind */
+      source_container_kind?: string | null;
+      /** Source Container Name */
+      source_container_name?: string | null;
+      /** Source Container Name Raw */
+      source_container_name_raw?: string | null;
+      /** Source Container Display Name */
+      source_container_display_name?: string | null;
+      /** Source Container Label */
+      source_container_label?: string | null;
+      /** Source Container Id */
+      source_container_id?: string | null;
+      /** Usage State */
+      usage_state?: string | null;
+    };
+    /** EvidenceRerunLineageSummary */
+    EvidenceRerunLineageSummary: {
+      /** Operations Count */
+      operations_count: number;
+      /** Queued Operations Count */
+      queued_operations_count: number;
+      /** Running Operations Count */
+      running_operations_count: number;
+      /** Completed Operations Count */
+      completed_operations_count: number;
+      /** Failed Operations Count */
+      failed_operations_count: number;
+      /** Cancelled Operations Count */
+      cancelled_operations_count: number;
+      /** Active Operations Count */
+      active_operations_count: number;
+      /** Terminal Operations Count */
+      terminal_operations_count: number;
+      /** Invalidated Steps Count */
+      invalidated_steps_count: number;
+      /** Completed Replacement Count */
+      completed_replacement_count: number;
     };
     /** EvidenceRetentionStateSummary */
     EvidenceRetentionStateSummary: {
@@ -13043,6 +13120,51 @@ export interface components {
       /** Active Checkpoint Conflict */
       active_checkpoint_conflict: boolean;
     };
+    /** EvidenceStepInputLineageSummary */
+    EvidenceStepInputLineageSummary: {
+      input_source: components["schemas"]["JsonValue"];
+      used_question_binding: components["schemas"]["JsonValue"];
+      /** Uses Runtime Input */
+      uses_runtime_input: boolean;
+      runtime_input_format: components["schemas"]["JsonValue"];
+      /** Runtime File Count */
+      runtime_file_count: number;
+      /** Runtime File Ids */
+      runtime_file_ids: string[];
+      /** Runtime File Names */
+      runtime_file_names: string[];
+      /** Runtime File Checksums */
+      runtime_file_checksums: string[];
+      /** Runtime Files */
+      runtime_files: {
+        [key: string]: components["schemas"]["JsonValue"];
+      }[];
+      /** Question Binding References Runtime Input */
+      question_binding_references_runtime_input: boolean;
+      /** Question Binding Expressions */
+      question_binding_expressions: string[];
+      /** Upstream Step Orders */
+      upstream_step_orders: number[];
+      /** Upstream Step Labels */
+      upstream_step_labels: string[];
+    };
+    /** EvidenceStepKnowledgeRetrievalSummary */
+    EvidenceStepKnowledgeRetrievalSummary: {
+      status: components["schemas"]["JsonValue"];
+      attempted: components["schemas"]["JsonValue"];
+      retrieval_duration_ms: components["schemas"]["JsonValue"];
+      unique_sources: components["schemas"]["JsonValue"];
+      references_truncated: components["schemas"]["JsonValue"];
+      reference_metadata_status: components["schemas"]["JsonValue"];
+      retrieval_error_type?: components["schemas"]["JsonValue"];
+      error_code?: components["schemas"]["JsonValue"];
+      source_names: components["schemas"]["JsonValue"];
+      source_display_names: components["schemas"]["JsonValue"];
+      /** Prompt Context */
+      prompt_context: {
+        [key: string]: components["schemas"]["JsonValue"];
+      } | null;
+    };
     /** EvidenceStepOverview */
     EvidenceStepOverview: {
       /** Step Order */
@@ -13061,11 +13183,23 @@ export interface components {
       duration_ms?: number | null;
       /** Models Used */
       models_used: string[];
+      /** Knowledge Sources Count */
+      knowledge_sources_count: number;
+      /** Knowledge Usage State */
+      knowledge_usage_state?: string | null;
+      knowledge_retrieval?: components["schemas"]["EvidenceStepKnowledgeRetrievalSummary"] | null;
+      /** Citations */
+      citations: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
       /** Artifact Names */
       artifact_names: string[];
+      /** Artifact Details */
+      artifact_details: components["schemas"]["EvidenceArtifactManifestItem"][];
       /** Result Output Kind */
       result_output_kind?: ("empty" | "text" | "structured" | "artifact" | "mixed") | null;
       output_summary?: components["schemas"]["PayloadPreview"] | null;
+      input_lineage: components["schemas"]["EvidenceStepInputLineageSummary"];
       /** Configured Input Type */
       configured_input_type?: string | null;
       /** Configured Output Type */
@@ -15459,7 +15593,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v6",
+     *         "schema_version": "flow-evidence-export.v7",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -15479,7 +15613,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v6",
+     *       "schema_version": "flow-evidence-export.v7",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -15585,6 +15719,18 @@ export interface components {
      *           "prompt_context_inclusion_tracked": true,
      *           "retrieval_tracked": true,
      *           "selection_basis": "semantic_search_ranked_chunks_grouped_by_source"
+     *         },
+     *         "rerun_lineage": {
+     *           "active_operations_count": 0,
+     *           "cancelled_operations_count": 0,
+     *           "completed_operations_count": 0,
+     *           "completed_replacement_count": 0,
+     *           "failed_operations_count": 0,
+     *           "invalidated_steps_count": 0,
+     *           "operations_count": 0,
+     *           "queued_operations_count": 0,
+     *           "running_operations_count": 0,
+     *           "terminal_operations_count": 0
      *         },
      *         "review_checkpoints": {
      *           "active_checkpoint_conflict": false,
@@ -15741,75 +15887,6 @@ export interface components {
      *             },
      *             "result_output_kind": "mixed",
      *             "retries": 0,
-     *             "status": "completed",
-     *             "step_id": "step-1",
-     *             "step_order": 1,
-     *             "user_description": "Draft the decision support summary"
-     *           }
-     *         ],
-     *         "steps_count": 1,
-     *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
-     *       },
-     *       "summary_typed": {
-     *         "artifacts_count": 1,
-     *         "attempts_count": 1,
-     *         "completed_steps": 1,
-     *         "duration_ms": 5240,
-     *         "failed_steps": 0,
-     *         "final_output": {
-     *           "artifact_count": 1,
-     *           "artifact_names": [
-     *             "case-summary.pdf"
-     *           ],
-     *           "kind": "mixed",
-     *           "structured_present": false,
-     *           "text_present": true,
-     *           "text_preview": {
-     *             "byte_size": 27,
-     *             "preview": "Decision support generated.",
-     *             "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
-     *             "truncated": false
-     *           }
-     *         },
-     *         "models_used": [
-     *           "gpt-4.1-mini"
-     *         ],
-     *         "review_checkpoints": {
-     *           "active_checkpoint_conflict": false,
-     *           "any_edited": true,
-     *           "any_resumed": true,
-     *           "by_state": {
-     *             "approved": 0,
-     *             "awaiting_review": 0,
-     *             "cancelled": 0,
-     *             "edited": 0,
-     *             "expired": 0,
-     *             "rejected": 0,
-     *             "resumed": 1
-     *           },
-     *           "count": 1
-     *         },
-     *         "status": "completed",
-     *         "step_overview": [
-     *           {
-     *             "artifact_names": [
-     *               "case-summary.pdf"
-     *             ],
-     *             "attempts_count": 1,
-     *             "configured_input_type": "text",
-     *             "configured_output_type": "pdf",
-     *             "duration_ms": 5240,
-     *             "models_used": [
-     *               "gpt-4.1-mini"
-     *             ],
-     *             "output_summary": {
-     *               "byte_size": 27,
-     *               "preview": "Decision support generated.",
-     *               "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
-     *               "truncated": false
-     *             },
-     *             "result_output_kind": "mixed",
-     *             "retries": 0,
      *             "review_impact": {
      *               "any_edited": true,
      *               "any_output_changed": true,
@@ -15850,8 +15927,11 @@ export interface components {
      *     }
      */
     FlowRunEvidenceExportResponse: {
-      /** Schema Version */
-      schema_version: string;
+      /**
+       * Schema Version
+       * @constant
+       */
+      schema_version: "flow-evidence-export.v7";
       /**
        * Generated At
        * Format: date-time
@@ -15860,12 +15940,7 @@ export interface components {
       /** Content Hash */
       content_hash: string;
       manifest: components["schemas"]["EvidenceExportManifest"];
-      /** Summary */
-      summary: {
-        [key: string]: unknown;
-      };
-      /** @description Typed additive read-model for API consumers. It mirrors stable summary fields and adds per-step review impact while legacy summary remains available. */
-      summary_typed: components["schemas"]["EvidenceExportSummary"];
+      summary: components["schemas"]["EvidenceExportSummary"];
       /** Redaction */
       redaction: {
         [key: string]: unknown;

@@ -30,10 +30,6 @@ from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_evidence_export_manifest import (
     EvidenceReviewCheckpointSummary,
 )
-from intric.flows.flow_run_evidence_export_summary import (
-    EvidenceExportSummary,
-    EvidenceFinalOutputSummary,
-)
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import (
     UnauthorizedException,
@@ -176,11 +172,6 @@ def _evidence_export_payload(run: FlowRun) -> dict:
     content_hash = "abc123"
     exported_by_user_id = run.principal_user_id
     assert exported_by_user_id is not None
-    summary = {
-        "status": run.status.value,
-        "trace_id": str(run.trace_id),
-        "steps_count": 0,
-    }
     review_checkpoint_summary = EvidenceReviewCheckpointSummary(
         count=0,
         by_state={state: 0 for state in FlowRunReviewCheckpointState},
@@ -189,33 +180,15 @@ def _evidence_export_payload(run: FlowRun) -> dict:
         active_checkpoint_id=None,
         active_checkpoint_conflict=False,
     )
-    summary_typed = EvidenceExportSummary(
-        status=run.status.value,
-        trace_id=str(run.trace_id),
-        steps_count=0,
-        completed_steps=0,
-        failed_steps=0,
-        attempts_count=0,
-        artifacts_count=0,
-        duration_ms=None,
-        models_used=[],
-        review_checkpoints=review_checkpoint_summary,
-        final_output=EvidenceFinalOutputSummary(
-            kind="empty",
-            text_present=False,
-            text_preview=None,
-            structured_present=False,
-            artifact_count=0,
-            artifact_names=[],
-        ),
-        step_overview=[],
+    review_checkpoint_summary_payload = review_checkpoint_summary.model_dump(
+        mode="json"
     )
     return {
-        "schema_version": "flow-evidence-export.v6",
+        "schema_version": "flow-evidence-export.v7",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v6",
+            "schema_version": "flow-evidence-export.v7",
             "provenance_schema_version_min": "flow-attempt-provenance.v1",
             "provenance_schema_version_current": "flow-attempt-provenance.v1",
             "provenance_persisted_version_status": "not_tracked",
@@ -254,24 +227,50 @@ def _evidence_export_payload(run: FlowRun) -> dict:
                 "artifacts": [],
                 "note": "Artifact availability is row-backed.",
             },
-            "review_checkpoint_summary": {
-                "count": 0,
-                "by_state": {
-                    "awaiting_review": 0,
-                    "edited": 0,
-                    "approved": 0,
-                    "rejected": 0,
-                    "resumed": 0,
-                    "cancelled": 0,
-                },
-                "any_edited": False,
-                "any_resumed": False,
-                "active_checkpoint_id": None,
-                "active_checkpoint_conflict": False,
-            },
+            "review_checkpoint_summary": review_checkpoint_summary_payload,
         },
-        "summary": summary,
-        "summary_typed": summary_typed.model_dump(mode="json"),
+        "summary": {
+            "status": run.status.value,
+            "trace_id": str(run.trace_id),
+            "steps_count": 0,
+            "completed_steps": 0,
+            "failed_steps": 0,
+            "attempts_count": 0,
+            "artifacts_count": 0,
+            "artifact_names": [],
+            "artifact_details": [],
+            "duration_ms": None,
+            "models_used": [],
+            "rag_sources_count": 0,
+            "rag_source_names": [],
+            "rag_source_display_names": [],
+            "rag_sources": [],
+            "rag_usage_tracking": {},
+            "citations": {},
+            "rerun_lineage": {
+                "operations_count": 0,
+                "queued_operations_count": 0,
+                "running_operations_count": 0,
+                "completed_operations_count": 0,
+                "failed_operations_count": 0,
+                "cancelled_operations_count": 0,
+                "active_operations_count": 0,
+                "terminal_operations_count": 0,
+                "invalidated_steps_count": 0,
+                "completed_replacement_count": 0,
+            },
+            "review_checkpoints": review_checkpoint_summary_payload,
+            "final_output": {
+                "kind": "empty",
+                "text_present": False,
+                "text_preview": None,
+                "structured_present": False,
+                "artifact_count": 0,
+                "artifact_names": [],
+                "artifact_details": [],
+            },
+            "step_overview": [],
+        },
         "redaction": {
             "applied": True,
             "policy_version": "flow-evidence-redaction.v3",
