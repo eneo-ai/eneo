@@ -300,6 +300,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Redispatch only if capabilities allow it, then escalate recurring stalls.",
         user_action="Retry or contact support with the run ID.",
     ),
+    FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The stored run error payload is invalid or no longer matches the public contract.",
+        consumer_action="Treat the run as failed and contact support with the run ID.",
+        user_action="Contact support with the run ID.",
+    ),
     FlowApiErrorCode.RUN_EVIDENCE_FORBIDDEN: _entry(
         category="Evidence and artifacts",
         surfaced_through="API error response",

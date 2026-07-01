@@ -1838,6 +1838,7 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
 
     assert error_schema.get("title") == "FlowRunError"
     assert {"code", "message"}.issubset(set(error_schema.get("required", [])))
+    assert error_schema.get("additionalProperties") is False
     assert "Clients should branch on `code`" in error_schema.get("description", "")
 
     details_property = error_schema.get("properties", {}).get("details", {})

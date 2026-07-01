@@ -4109,6 +4109,7 @@
   "flow_error_flow_run_concurrency_limit_reached": "För många flödeskörningar är aktiva just nu. Försök igen när en har avslutats.",
   "flow_error_flow_run_evidence_forbidden": "Du har inte behörighet att visa evidens för den här körningen.",
   "flow_error_flow_run_evidence_raw_export_forbidden": "Råexport av evidens blockeras av policy för den här körningen.",
+  "flow_error_flow_run_error_payload_invalid": "Körningen misslyckades, men de sparade feldetaljerna kunde inte läsas. Kontakta support med körnings-ID.",
   "flow_error_flow_run_file_not_accessible": "En eller flera valda filer är inte längre tillgängliga för anroparen. Ladda upp filerna igen.",
   "flow_error_flow_run_file_not_bound_to_flow": "En eller flera valda filer laddades upp för ett annat flöde. Ladda upp dem via det här flödet och försök igen.",
   "flow_error_flow_run_idempotency_conflict": "Den här omförsöksnyckeln har redan använts med annan indata. Starta en ny körning eller försök igen med samma indata.",

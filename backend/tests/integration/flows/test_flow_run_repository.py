@@ -1311,6 +1311,92 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_get_sanitizes_corrupt_persisted_run_error_json(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows run-repo space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow Run Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "corrupt-error-json"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(
+                status=FlowRunStatus.FAILED.value,
+                error_json={
+                    "schema_version": 2,
+                    "code": "flow_task_failure",
+                    "message": "raw provider secret must not leak",
+                },
+            )
+        )
+        await session.flush()
+
+        refetched = await run_repo.get(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+
+        assert refetched.error == FlowRunError(
+            code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
+            message="Persisted flow run error payload is invalid.",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_failed_terminalization_stamps_active_step_result_error_code(
     db_container,
     completion_model_factory,

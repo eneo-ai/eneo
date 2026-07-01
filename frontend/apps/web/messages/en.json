@@ -4109,6 +4109,7 @@
   "flow_error_flow_run_concurrency_limit_reached": "Too many flow runs are active right now. Try again when one finishes.",
   "flow_error_flow_run_evidence_forbidden": "You do not have permission to view evidence for this run.",
   "flow_error_flow_run_evidence_raw_export_forbidden": "Raw evidence export is blocked by policy for this run.",
+  "flow_error_flow_run_error_payload_invalid": "The run failed, but its stored error details could not be read. Contact support with the run ID.",
   "flow_error_flow_run_file_not_accessible": "One or more selected files are no longer available to this caller. Upload the files again.",
   "flow_error_flow_run_file_not_bound_to_flow": "One or more selected files were uploaded for another flow. Upload them through this flow and try again.",
   "flow_error_flow_run_idempotency_conflict": "This retry key was already used with different input. Start a new run or retry with the original input.",

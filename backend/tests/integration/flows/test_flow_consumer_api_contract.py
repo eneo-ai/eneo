@@ -791,6 +791,64 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_run_poll_sanitizes_corrupt_persisted_error_json(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_execution_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+
+    create_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "hello"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    run = create_response.json()
+
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(run["id"]))
+            .values(
+                status="failed",
+                error_json="Step review_policy leaked invalid persisted payload.",
+            )
+        )
+        await session.flush()
+
+    poll_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert poll_response.status_code == 200, poll_response.text
+    error = poll_response.json()["error"]
+    assert error == {
+        "schema_version": 1,
+        "code": "flow_run_error_payload_invalid",
+        "message": "Persisted flow run error payload is invalid.",
+        "source": None,
+        "step_id": None,
+        "step_order": None,
+        "details": None,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_create_rejects_removed_top_level_file_ids_before_body_shape_errors(
     client,
     admin_token,

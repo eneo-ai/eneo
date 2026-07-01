@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_api_error_code import FlowApiErrorCode
@@ -13,6 +13,7 @@ FlowRunErrorJson: TypeAlias = dict[str, object]
 _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
 _MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
+_INVALID_PERSISTED_ERROR_MESSAGE = "Persisted flow run error payload is invalid."
 
 
 class FlowRunErrorDetails(BaseModel):
@@ -47,6 +48,7 @@ class FlowRunErrorDetails(BaseModel):
 class FlowRunError(BaseModel):
     model_config = ConfigDict(
         frozen=True,
+        extra="forbid",
         json_schema_extra={
             "description": (
                 "Structured terminal run error. Clients should branch on `code`, "
@@ -121,7 +123,15 @@ def dump_flow_run_error(error: FlowRunError | None) -> FlowRunErrorJson | None:
 def parse_flow_run_error(value: object) -> FlowRunError | None:
     if value is None:
         return None
-    return FlowRunError.model_validate(value)
+    if isinstance(value, FlowRunError):
+        return value
+    try:
+        return FlowRunError.model_validate(value)
+    except ValidationError:
+        return FlowRunError(
+            code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
+            message=_INVALID_PERSISTED_ERROR_MESSAGE,
+        )
 
 
 def _bound_message(message: str) -> str:

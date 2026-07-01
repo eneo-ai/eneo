@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import get_type_hints
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from intric.authentication.principal_types import PrincipalType
+from intric.flows.domain.flow import FlowRun, FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import (
@@ -90,9 +94,55 @@ def test_flow_run_error_details_reject_unknown_public_keys() -> None:
         FlowRunErrorDetails.model_validate({"secret_token": "must not leak"})
 
 
-def test_parse_flow_run_error_rejects_unstructured_legacy_values() -> None:
-    with pytest.raises(ValidationError):
-        parse_flow_run_error("Step review_policy is invalid.")
+def _assert_corrupt_run_error(error: FlowRunError | None) -> None:
+    assert error == FlowRunError(
+        code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
+        message="Persisted flow run error payload is invalid.",
+    )
+
+
+@pytest.mark.parametrize(
+    "payload,leaked_text",
+    [
+        ("Step review_policy is invalid.", "review_policy"),
+        ({"schema_version": 1, "code": "flow_task_failure"}, "flow_task_failure"),
+        (
+            {
+                "schema_version": 2,
+                "code": "flow_task_failure",
+                "message": "Unsupported schema with secret-token.",
+            },
+            "secret-token",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": "flow_task_failure",
+                "message": "Invalid source with secret-token.",
+                "source": "not-a-source",
+            },
+            "secret-token",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": "flow_task_failure",
+                "message": "Extra hidden schema with secret-token.",
+                "secret_token": "must not leak",
+            },
+            "secret_token",
+        ),
+    ],
+)
+def test_parse_flow_run_error_sanitizes_corrupt_persisted_values(
+    payload: object,
+    leaked_text: str,
+) -> None:
+    error = parse_flow_run_error(payload)
+
+    _assert_corrupt_run_error(error)
+    serialized = json.dumps(dump_flow_run_error(error), sort_keys=True)
+    assert leaked_text not in serialized
 
 
 def test_parse_flow_run_error_accepts_historical_string_codes() -> None:
@@ -107,6 +157,29 @@ def test_parse_flow_run_error_accepts_historical_string_codes() -> None:
 
     assert error is not None
     assert error.code == "legacy_uncataloged_code"
+
+
+def test_flow_run_read_model_sanitizes_corrupt_persisted_error_json() -> None:
+    now = datetime.now(timezone.utc)
+
+    run = FlowRun.model_validate(
+        {
+            "id": uuid4(),
+            "flow_id": uuid4(),
+            "flow_version": 1,
+            "principal_type": PrincipalType.USER,
+            "principal_user_id": uuid4(),
+            "tenant_id": uuid4(),
+            "trace_id": uuid4(),
+            "revision": 1,
+            "status": FlowRunStatus.FAILED,
+            "error_json": "Step review_policy is invalid.",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+    _assert_corrupt_run_error(run.error)
 
 
 def test_flow_run_error_requires_machine_readable_code() -> None:

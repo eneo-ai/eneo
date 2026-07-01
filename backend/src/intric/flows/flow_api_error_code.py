@@ -39,6 +39,7 @@ class FlowApiErrorCode(str, Enum):
     RUN_TASK_TIMEOUT = "flow_task_timeout"
     RUN_TASK_FAILURE = "flow_task_failure"
     RUN_WORKER_STALLED = "flow_worker_stalled"
+    RUN_ERROR_PAYLOAD_INVALID = "flow_run_error_payload_invalid"
     RUN_EVIDENCE_FORBIDDEN = "flow_run_evidence_forbidden"
     RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN = "flow_run_evidence_raw_export_forbidden"
     RUN_ARTIFACT_NOT_FOUND = "flow_run_artifact_not_found"
@@ -212,6 +213,7 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.RUN_TASK_TIMEOUT,
         FlowApiErrorCode.RUN_TASK_FAILURE,
         FlowApiErrorCode.RUN_WORKER_STALLED,
+        FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID,
         FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
         FlowApiErrorCode.DEFINITION_INVALID,
         FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING,

@@ -37,7 +37,7 @@ from intric.flows.enums import (
     RerunDependencyKind,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.flows.flow_run_error import FlowRunError
+from intric.flows.flow_run_error import FlowRunError, parse_flow_run_error
 
 # Flow domain models load persisted JSONB rows before each writer path has a
 # strict serializer boundary. Tighten fields one by one at those chokepoints.
@@ -202,6 +202,11 @@ class FlowRun(BaseModel):
     job_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def _parse_persisted_error(cls, value: object) -> FlowRunError | None:
+        return parse_flow_run_error(value)
 
 
 class FlowRunTokenUsage(BaseModel):

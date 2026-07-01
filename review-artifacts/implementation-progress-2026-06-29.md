@@ -2699,6 +2699,73 @@
   - Rollback is straightforward but undesirable: restore the v6 schema version, dual summary payload construction, `summary_typed` response field, generated TypeScript shape, focused tests, and this ledger entry.
   - Exact next bounded recommendation: `flow_runs.error_json` read/corruption boundary, then API/SDK consumer runtime smoke, then Flow terminal failure event/readable diagnostics.
 
+## Flow Run Error JSON Read/Corruption Boundary Implementation
+
+- Slice id: `flow_runs.error_json` typed read/corruption boundary.
+- Findings addressed:
+  - `flow_runs.error_json` was documented as `KEEP_AUDITABLE_FAILURE`, but production reads still hydrated the persisted JSONB value directly into `FlowRun.error`.
+  - Corrupt persisted values could raise Pydantic validation during ordinary run reads instead of returning a stable failed-run diagnostic.
+  - `FlowRunError` allowed unknown top-level keys, so hidden persisted schema could leak into the public contract if a row had extra fields.
+- Evidence reviewed:
+  - `backend/src/intric/flows/flow_run_error.py` already owned `FlowRunError`, `dump_flow_run_error`, and `parse_flow_run_error`.
+  - `backend/src/intric/flows/domain/flow.py` already mapped persisted `error_json` into public `FlowRun.error` through the `AliasChoices("error", "error_json")` field.
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py` already writes terminal run errors through `dump_flow_run_error(error)`.
+  - `.codex/artifacts/codex-exec-next-slice-flow-runs-error-json-20260701.md` selected this as the next bounded slice after the typed evidence summary contract.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-flow-runs-error-json-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: none`; valid guidance applied by adding the OpenAPI `additionalProperties: false` assertion and wiring the new public error code through taxonomy, docs, localized messages, and generated SDK constants.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-flow-runs-error-json-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, `BLOCKER: none`; it confirmed the canonical owner, read boundary, public-code wiring, no raw-payload leak, and no generic JSONB abstraction.
+- Red / green proof:
+  - Red before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_error.py -q'` failed because corrupt strings, missing messages, unsupported schema versions, invalid sources, and extra top-level keys either raised validation or were accepted as valid public shape instead of degrading to one sanitized run error.
+  - Green after source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_error.py -q'` -> pass, 15 passed.
+  - Green repository/API/OpenAPI/taxonomy proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_run_repository.py::test_get_sanitizes_corrupt_persisted_run_error_json tests/integration/flows/test_flow_consumer_api_contract.py::test_flow_run_poll_sanitizes_corrupt_persisted_error_json tests/unit/test_flow_openapi_contract.py::test_openapi_flow_run_public_exposes_structured_error tests/unittests/flows/test_flow_api_error_codes.py tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages -q'` -> pass, 18 passed.
+  - Green generated-doc proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_data_schema_is_generated_from_backend_metadata tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_when_things_fail_is_generated_from_error_taxonomy tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_consumer_error_reference_is_generated_from_taxonomy -q'` -> pass, 3 passed.
+- Files changed:
+  - `backend/src/intric/flows/flow_run_error.py`
+  - `backend/src/intric/flows/domain/flow.py`
+  - `backend/src/intric/flows/flow_api_error_code.py`
+  - `backend/src/intric/flows/flow_error_taxonomy.py`
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`
+  - `backend/tests/unittests/flows/test_flow_run_error.py`
+  - `backend/tests/integration/flows/test_flow_run_repository.py`
+  - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/when-things-fail.mdx`
+  - `frontend/apps/docs-site/src/content/guides/flows/reference/errors.mdx`
+  - `frontend/apps/web/messages/en.json`
+  - `frontend/apps/web/messages/sv.json`
+  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.d.ts`
+  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.js`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Production reads now route persisted `FlowRun.error` / `error_json` through `parse_flow_run_error`.
+  - Corrupt persisted `flow_runs.error_json` values degrade to one sanitized `FlowRunError` with `code="flow_run_error_payload_invalid"` and message `"Persisted flow run error payload is invalid."`.
+  - `FlowRunError` now rejects unknown top-level fields and OpenAPI documents that with `additionalProperties: false`.
+  - The new public code is present in the backend catalog, terminal error-code set, taxonomy, generated docs, localized frontend messages, and generated SDK constants.
+- Complexity deleted or owner clarified:
+  - The JSONB registry no longer claims an unimplemented string-safe old-row parser; it now describes the actual sanitized typed read behavior.
+  - The read boundary lives in the existing `FlowRun` domain read model and reuses the existing parser rather than adding a JSONB manager, repository wrapper, router fallback, migration, or read-time repair job.
+  - Unstructured string payloads are not preserved as valid legacy behavior; they are classified as corrupt and sanitized.
+- Architecture delta:
+  - Canonical owner before: `flow_run_error.py` owned the parser contract, but production `FlowRun` hydration bypassed the corruption policy.
+  - Canonical owner after: `flow_run_error.py` owns the contract/parser/dumper, `FlowRun` owns persisted read hydration, and `FlowRunRepository.terminalize_run_status` remains the write owner.
+  - What not to preserve: raw historical strings as valid payloads, unknown top-level schema, broad JSONB infrastructure, read-time DB mutation, or API/router catch-alls hiding corrupt state.
+  - Honest rating impact: this materially improves Flow JSONB ownership and API failed-run read reliability, but it is one runtime-data boundary and does not make Flows 9/10 by itself.
+- Validation commands and results:
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/flow_run_error.py src/intric/flows/domain/flow.py src/intric/flows/flow_api_error_code.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py && .venv/bin/ruff format --check src/intric/flows/flow_run_error.py src/intric/flows/domain/flow.py src/intric/flows/flow_api_error_code.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_error.py src/intric/flows/domain/flow.py src/intric/flows/flow_api_error_code.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/apps/web && bun run i18n:compile` -> pass.
+- Generated/docs updates:
+  - Regenerated SDK Flow error-code constants with `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/python scripts/generate_flow_api_error_codes_ts.py'`.
+  - Regenerated Flow docs with `make docs:regen`; generated contract tests confirmed the checked-in docs match backend metadata.
+- Remaining risk / rollback:
+  - Runtime/API risk is limited to failed-run reads whose stored diagnostic is corrupt. They now return a sanitized terminal diagnostic instead of surfacing a validation failure.
+  - No DB mutation, migration, relational schema change, Flow AI Builder change, evidence export change, dispatch change, frontend UI change, or generated OpenAPI schema regeneration was part of this slice.
+  - Rollback: remove the `FlowRun.error` validator, restore strict parser raises and permissive top-level `FlowRunError`, remove the public code/taxonomy/docs/i18n/SDK additions, and remove the focused corruption-boundary tests.
+  - Exact next bounded recommendation: API/SDK consumer runtime smoke, then Flow terminal failure event/readable diagnostics, then executable JSONB ownership guard.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

@@ -285,7 +285,8 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         corruption_behavior=FlowJsonbCorruptionBehavior.KEEP_AUDITABLE_FAILURE,
         rationale=(
             "Terminal error details are a public diagnostic envelope with an "
-            "embedded schema version and string-safe parser for old rows."
+            "embedded schema version; invalid stored payloads read as one "
+            "sanitized typed run error."
         ),
     ),
     _owner(

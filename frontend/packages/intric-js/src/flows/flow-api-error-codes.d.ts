@@ -32,6 +32,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_TASK_TIMEOUT: "flow_task_timeout";
   RUN_TASK_FAILURE: "flow_task_failure";
   RUN_WORKER_STALLED: "flow_worker_stalled";
+  RUN_ERROR_PAYLOAD_INVALID: "flow_run_error_payload_invalid";
   RUN_EVIDENCE_FORBIDDEN: "flow_run_evidence_forbidden";
   RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN: "flow_run_evidence_raw_export_forbidden";
   RUN_ARTIFACT_NOT_FOUND: "flow_run_artifact_not_found";
@@ -164,6 +165,7 @@ export type FlowApiErrorCode =
   | "flow_task_timeout"
   | "flow_task_failure"
   | "flow_worker_stalled"
+  | "flow_run_error_payload_invalid"
   | "flow_run_evidence_forbidden"
   | "flow_run_evidence_raw_export_forbidden"
   | "flow_run_artifact_not_found"
