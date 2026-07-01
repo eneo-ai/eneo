@@ -41,6 +41,16 @@ export type TemplateBindingSuggestionGroup = {
   options: TemplateBindingSuggestion[];
 };
 
+export type TemplateBindingFormSchema = {
+  fields: {
+    name: string;
+    type: string;
+    required?: boolean;
+    options?: string[];
+    order?: number;
+  }[];
+};
+
 export type TemplateBindingStatus = "matched" | "missing" | "invalid" | "orphaned";
 
 export type TemplateBindingRow = {
@@ -64,7 +74,6 @@ export type TemplateFillReadiness = {
 
 export type TemplateFillOutputConfig = {
   template_asset_id?: string;
-  template_file_id?: string;
   template_name?: string;
   template_checksum?: string;
   placeholders?: string[];
@@ -96,12 +105,7 @@ export function getTemplateFillOutputConfig(
   }
   const parsedConfig: TemplateFillOutputConfig = {};
 
-  for (const key of [
-    "template_asset_id",
-    "template_file_id",
-    "template_name",
-    "template_checksum"
-  ] as const) {
+  for (const key of ["template_asset_id", "template_name", "template_checksum"] as const) {
     const value = outputConfig[key];
     if (typeof value === "string") {
       parsedConfig[key] = value;
@@ -142,14 +146,6 @@ export function resolveTemplateAssetSelection(
     return { asset: directMatch, assetId: directMatch.id };
   }
 
-  const legacyMatch =
-    !config.template_asset_id && config.template_file_id
-      ? (assets.find((asset) => asset.file_id === config.template_file_id) ?? null)
-      : null;
-  if (legacyMatch) {
-    return { asset: legacyMatch, assetId: legacyMatch.id };
-  }
-
   return {
     asset: null,
     assetId: config.template_asset_id ?? null
@@ -182,10 +178,9 @@ export function applyTemplateInspection(
     }
   }
   return {
-    ...currentConfig,
     template_asset_id: inspection.asset_id ?? undefined,
-    template_file_id: inspection.file_id,
     template_name: inspection.file_name,
+    template_checksum: currentConfig.template_checksum,
     placeholders: inspection.placeholders.map((item) => item.name),
     bindings: nextBindings
   };
@@ -223,17 +218,7 @@ export function buildTemplateBindingSuggestions(params: {
   steps: Pick<FlowStep, "step_order" | "user_description" | "output_type">[];
   currentStepOrder: number;
   labels: TemplateBindingSuggestionLabels;
-  formSchema:
-    | {
-        fields: {
-          name: string;
-          type: string;
-          required?: boolean;
-          options?: string[];
-          order?: number;
-        }[];
-      }
-    | undefined;
+  formSchema: TemplateBindingFormSchema | undefined;
 }): TemplateBindingSuggestion[] {
   const suggestions: TemplateBindingSuggestion[] = [];
   const seen = new Set<string>();
@@ -313,17 +298,7 @@ export function buildTemplateBindingAutoSuggestions(params: {
   placeholders: string[];
   steps: Pick<FlowStep, "step_order" | "user_description" | "output_type">[];
   currentStepOrder: number;
-  formSchema:
-    | {
-        fields: {
-          name: string;
-          type: string;
-          required?: boolean;
-          options?: string[];
-          order?: number;
-        }[];
-      }
-    | undefined;
+  formSchema: TemplateBindingFormSchema | undefined;
 }): Record<string, string> {
   const fieldMatches = new Map<string, string>();
   for (const field of params.formSchema?.fields ?? []) {
@@ -418,7 +393,7 @@ export function getTemplateFillDryRunIssues(params: {
     issues.push("Template fill requires Word output.");
   }
 
-  if (!config.template_file_id?.trim()) {
+  if (!config.template_asset_id?.trim()) {
     issues.push("Missing DOCX template.");
   }
 

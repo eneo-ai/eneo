@@ -43,14 +43,6 @@ logger = logging.getLogger(__name__)
 class _FlowTemplateAssetRepositoryProtocol(Protocol):
     async def get(self, *, asset_id: UUID, tenant_id: UUID) -> FlowTemplateAsset: ...
 
-    async def get_by_flow_file(
-        self,
-        *,
-        flow_id: UUID,
-        file_id: UUID,
-        tenant_id: UUID,
-    ) -> FlowTemplateAsset: ...
-
 
 @dataclass(frozen=True)
 class FlowRunContractService:
@@ -123,7 +115,7 @@ class FlowRunContractService:
         output_config = step.output_config or {}
         asset_id_raw = output_config.get("template_asset_id")
         template_name = _string_or_none(output_config.get("template_name"))
-        template_file_id = _uuid_or_none(output_config.get("template_file_id"))
+        template_file_id: UUID | None = None
         checksum = _string_or_none(output_config.get("template_checksum"))
         published_checksum = checksum if checksum else None
         asset_id: UUID | None = None
@@ -151,27 +143,6 @@ class FlowRunContractService:
                             "template_asset_id": str(asset_id_raw),
                         },
                     )
-        elif template_file_id is not None:
-            try:
-                asset = await self.template_asset_repo.get_by_flow_file(
-                    flow_id=flow_id,
-                    file_id=template_file_id,
-                    tenant_id=flow.tenant_id,
-                )
-                asset_id = asset.id
-                asset_status = FlowTemplateAssetStatus.READY
-                template_name = asset.name
-                template_file_id = asset.file_id
-                checksum = asset.checksum
-            except NotFoundException:
-                logger.info(
-                    "Published flow template file is not accessible.",
-                    extra={
-                        "flow_id": str(flow_id),
-                        "step_id": str(step.step_id),
-                        "template_file_id": str(template_file_id),
-                    },
-                )
 
         if (
             asset_status is FlowTemplateAssetStatus.READY

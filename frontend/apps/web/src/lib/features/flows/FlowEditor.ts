@@ -224,7 +224,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     for (const step of steps) {
       if (step.output_mode === "template_fill") {
         const config = getTemplateFillOutputConfig(step);
-        if (!config.template_asset_id && !config.template_file_id) {
+        if (!config.template_asset_id) {
           entries.set(`${stepConfigValidationPrefix}template_fill_no_template:${step.step_order}`, [
             "template_fill_no_template"
           ]);

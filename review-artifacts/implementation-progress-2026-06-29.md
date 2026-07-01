@@ -2915,6 +2915,92 @@
   - Rollback: restore permissive `FlowMetadata.extra="allow"`, restore raw metadata copying in Builder materialization and clone-plus-pop Builder stamping, and restore tests that preserved arbitrary metadata. That would reintroduce hidden-schema drift and should only be used if a real owned bucket was identified after release review.
   - Exact next bounded recommendation: template identity cleanup, then `module_registry.metadata_json` owner/delete decision.
 
+## Template Identity Cutoff Audit-Gated
+
+- Slice id: `template-identity-cutoff-audit-gated`.
+- Preflight audit result:
+  - Existing persisted FlowVersion audit was run through `audit_flow_version_template_identity_readiness` in `backend/src/intric/flows/infrastructure/flow_version_repo.py`.
+  - Command shape: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run python - <<PY ... audit_flow_version_template_identity_readiness ... PY'`.
+  - Result: `is_ready_for_template_file_fallback_deletion=true`, `blocked_template_fill_steps=0`, `blocker_counts=[]`, `samples=[]`, `total_versions=0`, `template_fill_steps=0`, `ready_template_fill_steps=0`.
+  - Interpretation: no persisted target data blocks deleting the file-id-only identity fallback; the dev DB had no FlowVersion rows, so this is a green reset/pre-release audit, not evidence of migrated production history.
+- Findings addressed:
+  - Publish-time template-fill output config wrote both `template_asset_id` and `template_file_id`, making file id look like a second identity.
+  - Runtime parsing/loading, run-contract readiness, validators, and frontend authored config still accepted or resolved `template_file_id` as identity fallback.
+  - `FlowTemplateAssetRepository.get_by_flow_file` existed only to support the file-id fallback after asset ownership had become the canonical identity.
+  - Legacy tests preserved file-id-only publish/runtime/readiness behavior even though Flows are unreleased and the audit is green.
+- Evidence reviewed:
+  - `backend/src/intric/flows/application/flow_service.py` owns publish-time template config pinning.
+  - `backend/src/intric/flows/runtime/step_definition_parser.py` and `backend/src/intric/flows/runtime/template_fill_runtime.py` own published/runtime parsing and loading.
+  - `backend/src/intric/flows/flow_run_contract_service.py` owns run-contract readiness projection.
+  - `backend/src/intric/flows/flow_validators_template.py` owns authored template-fill validation.
+  - `frontend/apps/web/src/lib/features/flows/templateFillConfig.ts`, `FlowEditor.ts`, and `FlowTemplateState.svelte.ts` own frontend authored template config normalization and editor state.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-template-identity-cutoff-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: no`; valid guidance applied by keeping the cut inside current owners, retaining `template_file_id` only as resolved provenance/readiness output, deleting the repository fallback method, and avoiding a resolver service or feature flag.
+  - Interrupted read-only Codex final gate artifact `.codex/artifacts/codex-exec-template-identity-cutoff-final-20260701.md` flagged one valid cleanup gap before commit: AI Builder normalization must still delete stale `template_file_id` when a step leaves `template_fill`. The gap was fixed with a focused behavior test; unrelated `.devcontainer`/`.gitignore`/`frontend/bun.lock` dirt was left unstaged.
+  - Staged Codex final gate artifact `.codex/artifacts/codex-exec-template-identity-cutoff-staged-final-20260701.md` was interrupted after surfacing one valid package-export guard: stale `template_file_id` must still block portable package export as an unportable template resource reference. The guard remains cleanup-only and does not restore file-id lookup identity.
+- Behavior changed:
+  - `template_asset_id` is now the only accepted authored, published, parsed, and runtime lookup identity for template-fill config.
+  - Published template-fill `output_config` no longer writes `template_file_id`.
+  - Runtime template loading always resolves the file through the live `FlowTemplateAsset.file_id`; `template_file_id` remains only resolved provenance in logs, model parameters, evidence provenance, and readiness output.
+  - Run-contract readiness looks up only by `template_asset_id`; the returned `template_file_id` is resolved asset provenance, not fallback identity.
+  - Frontend authored config ignores file-id-only output config, requires `template_asset_id` for dry-run/readiness, and no longer carries stale `template_file_id` through template inspection.
+  - `FlowTemplateAssetRepository.get_by_flow_file` was deleted; `rg -n "get_by_flow_file" backend/src backend/tests frontend docs --glob '!**/bun.lock'` returns no matches. `review-artifacts` keeps historical receipt text only.
+- Files changed:
+  - `backend/src/intric/flows/application/flow_service.py`
+  - `backend/src/intric/flows/runtime/template_fill_runtime.py`
+  - `backend/src/intric/flows/runtime/step_definition_parser.py`
+  - `backend/src/intric/flows/flow_validators_template.py`
+  - `backend/src/intric/flows/flow_run_contract_service.py`
+  - `backend/src/intric/flows/flow_template_asset_repo.py`
+  - `backend/tests/unittests/flows/test_template_fill_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_service.py`
+  - `backend/tests/unittests/flows/test_flow_run_contract_service.py`
+  - `backend/tests/unittests/flows/test_flow_validators.py`
+  - `backend/tests/unittests/flows/test_flow_models.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_profile.py`
+  - Deleted `backend/tests/unittests/flows/test_flow_template_asset_compatibility.py`
+  - `backend/tests/unittests/flow_packages/test_flow_package_export_service.py`
+  - `frontend/apps/web/src/lib/features/flows/templateFillConfig.ts`
+  - `frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/FlowEditor.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowTemplateState.svelte.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Tests deleted or rewritten because they preserved dead file-id-only identity:
+  - Deleted `test_flow_template_asset_compatibility.py`, whose tests protected file-id-only publish promotion/readiness fallback.
+  - Rewrote runtime tests so `template_file_id` is fixture/provenance data after asset lookup, not a step identity helper argument.
+  - Rewrote service/readiness/validator/frontend tests to author `template_asset_id`, assert `template_file_id` is absent from published config, and assert file-id-only config is rejected or ignored.
+- Remaining `template_file_id` classifications:
+  - Rejection/resource guard: validators, runtime parser, and published step parser reject `output_config.template_file_id`; flow package export still treats stale `template_file_id` as an unportable resource reference and blocks export.
+  - Resolved provenance: runtime logs/model parameters/evidence provenance, `flowEvidenceProvenance.ts`, `FlowTemplateAssetService` event payloads, and run-contract readiness output.
+  - Audit/history/reference safety: `published_definition.py`, `flow_version_repo.py`, `flow_run_history_purge_repo.py`, and their tests still scan historical `template_file_id` references so retention/audit remains safe.
+  - Generated/docs output: `frontend/packages/intric-js/src/types/schema.d.ts`, `flow-resource-aliases.types.ts`, and docs examples expose readiness `template_file_id` as nullable resolved output, not authored identity.
+- Complexity deleted or owner clarified:
+  - The asset table/service is the only template identity owner; file id is no longer a second lookup route.
+  - Deleted a repository lookup method and a legacy promotion helper instead of adding a resolver service, compatibility wrapper, feature flag, or migration.
+  - Frontend template config is explicit around `template_asset_id`; inspection constructs the allowed config shape rather than spreading stale unknown keys.
+  - The existing AI Builder transition-policy cleanup keeps `template_file_id` as a stale template key to delete when a step leaves `template_fill`; this slice adds a behavior test for that guard without treating file id as accepted identity.
+- Architecture delta:
+  - Canonical owner before: template assets were the intended owner, but publish/runtime/readiness/frontend still had file-id fallback paths.
+  - Canonical owner after: `FlowTemplateAssetService` / `flow_template_assets` own identity, publish/runtime/readiness/frontend consume `template_asset_id`, and `template_file_id` is provenance/history only.
+  - What not to preserve: file-id-only authored config, publish-time `template_file_id`, repository fallback lookup, legacy promotion, or tests that keep unreleased compatibility alive.
+  - Honest rating impact: materially improves Flow template identity clarity and API/frontend maintainer DX, but remaining data-model work still includes `module_registry.metadata_json` owner/delete decision.
+- Validation commands and results:
+  - Focused backend contract: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_published_definition_template_identity_audit.py tests/integration/flows/test_flow_version_repository.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_profile.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py::TestCompileMetadata -q'` -> pass, 356 passed.
+  - Adjacent template/runtime ownership: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_published_definition_template_references.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py -q'` -> pass, 145 passed before a larger mixed-order run exposed unrelated `test_flow_executor_runtime.py` caplog order sensitivity; `test_flow_executor_runtime.py -q` alone was rerun and passed, 75 passed.
+  - AI Builder stale-template cleanup proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_profile.py -q'` -> pass.
+  - Package export stale-resource guard: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flow_packages/test_flow_package_export_service.py -q'` -> pass.
+  - Frontend behavior: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run apps/web/src/lib/features/flows/templateFillConfig.test.ts packages/intric-js/src/endpoints/flows.test.js` -> pass, 53 passed.
+  - Frontend generated type smoke: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - Scoped frontend format/lint: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --check apps/web/src/lib/features/flows/templateFillConfig.ts apps/web/src/lib/features/flows/templateFillConfig.test.ts apps/web/src/lib/features/flows/FlowEditor.ts apps/web/src/lib/features/flows/components/FlowTemplateState.svelte.ts` -> pass; `cd /Users/cimen/eneo/eneo-flows-clean/frontend/apps/web && bun x eslint src/lib/features/flows/templateFillConfig.ts src/lib/features/flows/templateFillConfig.test.ts src/lib/features/flows/FlowEditor.ts src/lib/features/flows/components/FlowTemplateState.svelte.ts` -> pass.
+  - Scoped backend lint/format/type: ruff check/format and `backend/scripts/run_pyright_in_devcontainer.sh` on touched backend source/tests -> pass, pyright `0 errors`.
+  - Optional app-wide web check: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @intric/web check` still fails on unrelated pre-existing diagnostics in `frontend/packages/intric-js/src/client/client.js:394` and `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`; touched Flow files had no diagnostics.
+- Remaining risk / rollback:
+  - Risk is limited to unreleased template-fill configs that still author file-id-only identity; the green audit and pre-release posture allow deleting that path.
+  - No historical `flow_versions.definition_json` mutation, schema migration, evidence export work, Builder planner/session change, MCP/capability work, or `module_registry.metadata_json` decision was part of this slice.
+  - Rollback: restore publish-time `template_file_id`, `get_by_flow_file`, legacy promotion, parser/validator/frontend fallback paths, and the deleted compatibility test file. That would reintroduce two identity paths and should only happen if a real target audit later finds file-id-only persisted configs requiring reset/replay policy.
+  - Exact next bounded recommendation: `module_registry.metadata_json` owner/delete decision.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

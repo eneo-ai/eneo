@@ -60,7 +60,6 @@ describe("templateFillConfig", () => {
       })
     ).toEqual({
       template_asset_id: "asset-1",
-      template_file_id: "file-1",
       template_name: "rapport.docx",
       template_checksum: "sha256:abc",
       placeholders: ["Body", "Author"],
@@ -78,12 +77,12 @@ describe("templateFillConfig", () => {
     });
     expect(
       createTemplateFillDraftConfig({
-        template_file_id: "file-1",
+        template_asset_id: "asset-1",
         bindings: { summary: "{{step_1.output.text}}" },
         placeholders: ["summary"]
       })
     ).toEqual({
-      template_file_id: "file-1",
+      template_asset_id: "asset-1",
       bindings: { summary: "{{step_1.output.text}}" },
       placeholders: ["summary"]
     });
@@ -92,10 +91,12 @@ describe("templateFillConfig", () => {
   it("merges inspection placeholders into bindings without losing existing values", () => {
     const next = applyTemplateInspection(
       {
-        template_file_id: "old-file",
+        template_asset_id: "old-asset",
+        template_checksum: "sha256:old",
         bindings: { summary: "{{step_1.output.text}}" }
       },
       {
+        asset_id: "new-asset",
         file_id: "new-file",
         file_name: "rapport.docx",
         placeholders: [
@@ -107,8 +108,9 @@ describe("templateFillConfig", () => {
     );
 
     expect(next).toEqual({
-      template_file_id: "new-file",
+      template_asset_id: "new-asset",
       template_name: "rapport.docx",
+      template_checksum: "sha256:old",
       placeholders: ["summary", "author"],
       bindings: {
         summary: "{{step_1.output.text}}",
@@ -117,33 +119,36 @@ describe("templateFillConfig", () => {
     });
   });
 
-  it("resolves a legacy template_file_id-only config to the matching flow asset", () => {
+  it("does not resolve file-id-only config as authored template identity", () => {
     expect(
       resolveTemplateAssetSelection(
-        {
-          template_file_id: "file-1"
-        },
+        getTemplateFillOutputConfig({
+          output_config: {
+            template_file_id: "file-1"
+          }
+        }),
         [
           { id: "asset-1", file_id: "file-1", name: "Mall 1" },
           { id: "asset-2", file_id: "file-2", name: "Mall 2" }
         ]
       )
     ).toEqual({
-      asset: { id: "asset-1", file_id: "file-1", name: "Mall 1" },
-      assetId: "asset-1"
+      asset: null,
+      assetId: null
     });
   });
 
   it("preserves orphaned bindings when a template is re-inspected", () => {
     const next = applyTemplateInspection(
       {
-        template_file_id: "old-file",
+        template_asset_id: "old-asset",
         bindings: {
           summary: "{{step_1.output.text}}",
           removed_section: "{{step_2.output.text}}"
         }
       },
       {
+        asset_id: "new-asset",
         file_id: "new-file",
         file_name: "rapport.docx",
         placeholders: [{ name: "summary", location: "body" }]
@@ -349,7 +354,7 @@ describe("templateFillConfig", () => {
           output_mode: "template_fill",
           output_type: "docx",
           output_config: {
-            template_file_id: "file-1",
+            template_asset_id: "asset-1",
             placeholders: ["bakgrund"],
             bindings: {
               bakgrund: "{{step_3.output.text}}",
@@ -372,7 +377,7 @@ describe("templateFillConfig", () => {
           output_mode: "template_fill",
           output_type: "text",
           output_config: {
-            template_file_id: "file-1",
+            template_asset_id: "asset-1",
             bindings: {}
           }
         }
@@ -391,7 +396,7 @@ describe("templateFillConfig", () => {
           output_mode: "template_fill",
           output_type: "docx",
           output_config: {
-            template_file_id: "file-1",
+            template_asset_id: "asset-1",
             placeholders: ["valfri_del"],
             bindings: {
               valfri_del: ""

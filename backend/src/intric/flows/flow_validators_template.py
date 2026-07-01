@@ -42,28 +42,25 @@ def validate_template_fill_output_config(
             )
         return
 
+    if output_config.get("template_file_id") not in (None, ""):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_config.template_file_id is not supported; use template_asset_id.",
+            step_order=step.step_order,
+        )
+
     template_asset_id = output_config.get("template_asset_id")
-    template_file_id = output_config.get("template_file_id")
-    if template_asset_id in (None, "") and template_file_id in (None, ""):
+    if template_asset_id in (None, ""):
         if require_complete_config:
             raise FlowStepValidationError(
-                f"Step {step.step_order}: output_config.template_asset_id or template_file_id must be a UUID.",
+                f"Step {step.step_order}: output_config.template_asset_id must be a UUID.",
                 step_order=step.step_order,
             )
-    if template_asset_id not in (None, ""):
+    else:
         try:
             UUID(str(template_asset_id))
         except Exception as exc:
             raise FlowStepValidationError(
                 f"Step {step.step_order}: output_config.template_asset_id must be a UUID.",
-                step_order=step.step_order,
-            ) from exc
-    if template_file_id not in (None, ""):
-        try:
-            UUID(str(template_file_id))
-        except Exception as exc:
-            raise FlowStepValidationError(
-                f"Step {step.step_order}: output_config.template_file_id must be a UUID.",
                 step_order=step.step_order,
             ) from exc
 

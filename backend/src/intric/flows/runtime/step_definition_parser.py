@@ -412,12 +412,13 @@ def _parse_output_config(
             raise BadRequestException(
                 "Template fill output_config.bindings must be an object."
             )
-        if (
-            "template_asset_id" not in output_config
-            and "template_file_id" not in output_config
-        ):
+        if not _non_empty_string(output_config.get("template_asset_id")):
             raise BadRequestException(
-                "Template fill output_config.template_asset_id or template_file_id is required."
+                "Template fill output_config.template_asset_id is required."
+            )
+        if output_config.get("template_file_id") not in (None, ""):
+            raise BadRequestException(
+                "Template fill output_config.template_file_id is not supported; use template_asset_id."
             )
         if output_type != "docx":
             raise BadRequestException(

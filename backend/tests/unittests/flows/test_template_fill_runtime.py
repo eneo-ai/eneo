@@ -114,8 +114,11 @@ def _state(*, result: FlowStepResult) -> RunExecutionState:
 
 
 def _step(
-    *, template_file_id, template_checksum: str | None = "checksum"
+    *,
+    template_asset_id=None,
+    template_checksum: str | None = "checksum",
 ) -> RuntimeStep:
+    template_asset_id = template_asset_id or uuid4()
     return RuntimeStep(
         step_id=uuid4(),
         step_order=2,
@@ -126,7 +129,7 @@ def _step(
         input_config=None,
         output_mode="template_fill",
         output_config={
-            "template_file_id": str(template_file_id),
+            "template_asset_id": str(template_asset_id),
             "template_checksum": template_checksum,
             "bindings": {
                 "title": "{{title}}",
@@ -141,15 +144,12 @@ def _step(
 def _asset_step(
     *,
     template_asset_id,
-    template_file_id,
     template_checksum: str | None = "checksum",
 ) -> RuntimeStep:
-    step = _step(
-        template_file_id=template_file_id,
+    return _step(
+        template_asset_id=template_asset_id,
         template_checksum=template_checksum,
     )
-    step.output_config["template_asset_id"] = str(template_asset_id)
-    return step
 
 
 def _logger() -> SimpleNamespace:
@@ -165,8 +165,9 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
+    template_asset_id = uuid4()
     template_file_id = uuid4()
-    step = _step(template_file_id=template_file_id)
+    step = _step(template_asset_id=template_asset_id)
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_tenant.return_value = [
         SimpleNamespace(
@@ -179,6 +180,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
     apply_output_cap = AsyncMock()
     template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
@@ -220,7 +222,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         },
         "template_provenance": {
             "template_name": "template.docx",
-            "template_asset_id": None,
+            "template_asset_id": str(template_asset_id),
             "template_file_id": str(template_file_id),
             "template_checksum": "checksum",
             "published_flow_version": run.flow_version,
@@ -230,7 +232,10 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     assert output.num_tokens_output == 0
     assert '"title": "Social medias påverkan"' in output.input_text
     file_repo.add.assert_awaited_once()
-    template_asset_repo.get.assert_not_awaited()
+    template_asset_repo.get.assert_awaited_once_with(
+        asset_id=template_asset_id,
+        tenant_id=run.tenant_id,
+    )
     apply_output_cap.assert_not_awaited()
 
 
@@ -265,7 +270,6 @@ async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> No
     output = await execute_template_fill_step(
         step=_asset_step(
             template_asset_id=template_asset_id,
-            template_file_id=template_file_id,
         ),
         run=run,
         state=state,
@@ -299,9 +303,7 @@ async def test_execute_template_fill_step_resolves_asset_id_only_config() -> Non
     asset_file_id = uuid4()
     step = _asset_step(
         template_asset_id=template_asset_id,
-        template_file_id=uuid4(),
     )
-    del step.output_config["template_file_id"]
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_tenant.return_value = [
         SimpleNamespace(
@@ -356,7 +358,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset() -> No
     result = _completed_result(run=run)
     state = _state(result=result)
     template_asset_id = uuid4()
-    template_file_id = uuid4()
     template_asset_repo = AsyncMock()
     template_asset_repo.get.side_effect = NotFoundException("missing asset")
     file_repo = AsyncMock()
@@ -373,7 +374,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset() -> No
         await execute_template_fill_step(
             step=_asset_step(
                 template_asset_id=template_asset_id,
-                template_file_id=template_file_id,
             ),
             run=run,
             state=state,
@@ -408,7 +408,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset_file() 
         await execute_template_fill_step(
             step=_asset_step(
                 template_asset_id=template_asset_id,
-                template_file_id=template_file_id,
             ),
             run=run,
             state=state,
@@ -419,16 +418,17 @@ async def test_execute_template_fill_step_reports_missing_template_asset_file() 
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_rejects_template_asset_file_mismatch() -> (
-    None
-):
+async def test_execute_template_fill_step_rejects_template_file_id_identity() -> None:
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
     template_asset_id = uuid4()
     template_file_id = uuid4()
+    step = _asset_step(
+        template_asset_id=template_asset_id,
+    )
+    step.output_config["template_file_id"] = str(template_file_id)
     template_asset_repo = AsyncMock()
-    template_asset_repo.get.return_value = SimpleNamespace(file_id=uuid4())
     file_repo = AsyncMock()
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
@@ -439,18 +439,17 @@ async def test_execute_template_fill_step_rejects_template_asset_file_mismatch()
         logger=_logger(),
     )
 
-    with pytest.raises(TypedIOValidationException) as exc_info:
+    with pytest.raises(
+        TypedIOValidationException, match="template_file_id is not supported"
+    ):
         await execute_template_fill_step(
-            step=_asset_step(
-                template_asset_id=template_asset_id,
-                template_file_id=template_file_id,
-            ),
+            step=step,
             run=run,
             state=state,
             deps=deps,
         )
 
-    assert exc_info.value.code == FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value
+    template_asset_repo.get.assert_not_awaited()
     file_repo.get_list_by_id_and_tenant.assert_not_awaited()
 
 
@@ -487,7 +486,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset_content
         await execute_template_fill_step(
             step=_asset_step(
                 template_asset_id=template_asset_id,
-                template_file_id=template_file_id,
             ),
             run=run,
             state=state,
@@ -530,7 +528,6 @@ async def test_execute_template_fill_step_reports_template_asset_checksum_drift(
         await execute_template_fill_step(
             step=_asset_step(
                 template_asset_id=template_asset_id,
-                template_file_id=template_file_id,
                 template_checksum="expected-checksum",
             ),
             run=run,
@@ -567,9 +564,7 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
 
     with pytest.raises(TypedIOValidationException, match="checksum"):
         await execute_template_fill_step(
-            step=_step(
-                template_file_id=template_file_id, template_checksum="expected-checksum"
-            ),
+            step=_step(template_checksum="expected-checksum"),
             run=run,
             state=state,
             deps=deps,
@@ -603,7 +598,7 @@ async def test_execute_template_fill_step_allows_explicit_empty_binding() -> Non
         logger=_logger(),
     )
 
-    step = _step(template_file_id=template_file_id)
+    step = _step()
     step.output_config["bindings"]["author"] = ""
 
     output = await execute_template_fill_step(
@@ -669,7 +664,7 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
-    step = _step(template_file_id=template_file_id)
+    step = _step()
     step.output_config["bindings"] = {"slutsats": "{{step_1.output.text}}"}
     step.output_config["placeholders"] = ["slutsats"]
 
@@ -739,7 +734,7 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
 
     with pytest.raises(TypedIOValidationException, match="failed earlier in the run"):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id),
+            step=_step(),
             run=run,
             state=state,
             deps=deps,
@@ -777,7 +772,7 @@ async def test_execute_template_fill_step_reports_missing_template_blob_clearly(
         match="could not be read because the saved file content is missing",
     ):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id),
+            step=_step(),
             run=run,
             state=state,
             deps=deps,
@@ -813,7 +808,7 @@ async def test_execute_template_fill_step_reports_generated_document_save_failur
 
     with pytest.raises(TypedIOValidationException, match="saving the generated DOCX"):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id),
+            step=_step(),
             run=run,
             state=state,
             deps=deps,
@@ -854,7 +849,7 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
 
     with pytest.raises(TypedIOValidationException, match="reading the generated DOCX"):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id),
+            step=_step(),
             run=run,
             state=state,
             deps=deps,
@@ -862,12 +857,12 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_rejects_invalid_template_file_id() -> None:
+async def test_execute_template_fill_step_rejects_template_file_id_key() -> None:
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
-    step = _step(template_file_id=uuid4())
-    step.output_config["template_file_id"] = "not-a-uuid"
+    step = _step()
+    step.output_config["template_file_id"] = str(uuid4())
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
         file_repo=AsyncMock(),
@@ -877,7 +872,9 @@ async def test_execute_template_fill_step_rejects_invalid_template_file_id() -> 
         logger=_logger(),
     )
 
-    with pytest.raises(TypedIOValidationException, match="valid template_file_id"):
+    with pytest.raises(
+        TypedIOValidationException, match="template_file_id is not supported"
+    ):
         await execute_template_fill_step(
             step=step,
             run=run,
@@ -891,7 +888,7 @@ async def test_execute_template_fill_step_rejects_non_string_binding_values() ->
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
-    step = _step(template_file_id=uuid4())
+    step = _step()
     step.output_config["bindings"]["summary"] = {"bad": "value"}
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
@@ -918,7 +915,6 @@ async def test_execute_template_fill_step_reports_missing_published_template_fil
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
-    template_file_id = uuid4()
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_tenant.return_value = []
     deps = TemplateFillRuntimeDeps(
@@ -930,9 +926,11 @@ async def test_execute_template_fill_step_reports_missing_published_template_fil
         logger=_logger(),
     )
 
-    with pytest.raises(TypedIOValidationException, match="was not found"):
+    with pytest.raises(
+        TypedIOValidationException, match="asset file is no longer available"
+    ):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id),
+            step=_step(),
             run=run,
             state=state,
             deps=deps,
@@ -972,7 +970,7 @@ async def test_execute_template_fill_step_reports_render_stage_failure(
 
     with pytest.raises(TypedIOValidationException, match="rendering the DOCX template"):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id),
+            step=_step(),
             run=run,
             state=state,
             deps=deps,
@@ -1003,7 +1001,7 @@ async def test_execute_template_fill_step_supports_datum_system_variable() -> No
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
-    step = _step(template_file_id=template_file_id)
+    step = _step()
     step.output_config["bindings"]["author"] = "{{datum}}"
 
     output = await execute_template_fill_step(
@@ -1051,7 +1049,7 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
-    step = _step(template_file_id=template_file_id)
+    step = _step()
     step.output_config["bindings"]["summary"] = "{{step_1.output.structured}}"
 
     output = await execute_template_fill_step(
@@ -1085,7 +1083,7 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
-    step = _step(template_file_id=template_file_id)
+    step = _step()
     step.output_config["placeholders"] = ["ämne", "summary"]
     step.output_config["bindings"] = {
         "ämne": "{{title}}",
@@ -1134,7 +1132,7 @@ async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary()
     )
 
     output = await execute_template_fill_step(
-        step=_step(template_file_id=template_file_id),
+        step=_step(),
         run=run,
         state=state,
         deps=deps,

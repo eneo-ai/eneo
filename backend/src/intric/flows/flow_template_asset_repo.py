@@ -80,24 +80,6 @@ class FlowTemplateAssetRepository:
         )
         return [self._to_domain(item) for item in rows.mappings().all()]
 
-    async def get_by_flow_file(
-        self,
-        *,
-        flow_id: UUID,
-        file_id: UUID,
-        tenant_id: UUID,
-    ) -> FlowTemplateAsset:
-        row = await self.session.execute(
-            self._base_query()
-            .where(FlowTemplateAssets.flow_id == flow_id)
-            .where(FlowTemplateAssets.file_id == file_id)
-            .where(FlowTemplateAssets.tenant_id == tenant_id)
-        )
-        item = row.mappings().one_or_none()
-        if item is None:
-            raise NotFoundException("Flow template asset not found.")
-        return self._to_domain(item)
-
     async def soft_delete(
         self,
         *,

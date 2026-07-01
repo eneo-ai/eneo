@@ -324,6 +324,39 @@ def test_normalize_ai_builder_spec_clears_invalid_citation_sidecar_config() -> N
     ] == ["output_config_citation_mode_cleared"]
 
 
+def test_normalize_ai_builder_spec_clears_stale_template_identity_on_mode_change() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Template report",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Fill template",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_config={
+                    "bindings": {"body": "{{flow_input.title}}"},
+                    "template_asset_id": "template-1",
+                    "template_file_id": "legacy-file-1",
+                    "preserve": "value",
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[0].output_mode == OutputMode.PASS_THROUGH
+    assert normalized.steps[0].output_config == {"preserve": "value"}
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "output_config_template_fill_keys_cleared"
+    ] == ["output_config_template_fill_keys_cleared"]
+
+
 def test_supports_inline_inref_citation_uses_flow_output_capability_rules() -> None:
     assert (
         supports_inline_inref_citation(

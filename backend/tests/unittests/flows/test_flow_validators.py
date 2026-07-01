@@ -204,7 +204,7 @@ def test_validate_steps_fail_fast_prefers_global_chain_violation_before_type_pai
             _step(
                 output_mode="template_fill",
                 output_type="pdf",
-                output_config={"template_file_id": str(uuid4()), "bindings": {}},
+                output_config={"template_asset_id": str(uuid4()), "bindings": {}},
             ),
             "template_fill requires output_type 'docx'",
         ),
@@ -661,8 +661,24 @@ def test_validate_steps_rejects_template_fill_for_non_docx_output():
                     output_mode="template_fill",
                     output_type="pdf",
                     output_config={
-                        "template_file_id": str(uuid4()),
+                        "template_asset_id": str(uuid4()),
                         "bindings": {"section": "{{step_1.output.text}}"},
+                    },
+                )
+            ]
+        )
+
+
+def test_validate_steps_rejects_template_file_id_identity():
+    with pytest.raises(BadRequestException, match="template_file_id is not supported"):
+        validate_steps(
+            [
+                _step(
+                    output_mode="template_fill",
+                    output_type="docx",
+                    output_config={
+                        "template_file_id": str(uuid4()),
+                        "bindings": {},
                     },
                 )
             ]
@@ -690,7 +706,7 @@ def test_validate_steps_rejects_template_fill_binding_to_future_step():
                     output_mode="template_fill",
                     output_type="docx",
                     output_config={
-                        "template_file_id": str(uuid4()),
+                        "template_asset_id": str(uuid4()),
                         "bindings": {"section": "{{step_2.output.text}}"},
                     },
                 ),
@@ -706,7 +722,7 @@ def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
                 output_mode="template_fill",
                 output_type="docx",
                 output_config={
-                    "template_file_id": str(uuid4()),
+                    "template_asset_id": str(uuid4()),
                     "bindings": {"optional_section": ""},
                 },
             )

@@ -109,7 +109,7 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
             output_mode="template_fill",
             output_type="docx",
             output_config={
-                "template_file_id": str(uuid4()),
+                "template_asset_id": str(uuid4()),
                 "bindings": {"summary": "{{ step_2.output.summary }}"},
             },
         ),

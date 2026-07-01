@@ -439,6 +439,30 @@ def test_export_rejects_template_asset_refs_in_output_config() -> None:
     )
 
 
+def test_export_rejects_stale_template_file_refs_in_output_config() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        output_config={"template_file_id": str(uuid4())},
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert (
+        exc_info.value.code
+        is FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
+    )
+
+
 def test_export_does_not_reject_unrelated_template_named_config_keys() -> None:
     assistant_id = uuid4()
     envelope = _build_envelope(

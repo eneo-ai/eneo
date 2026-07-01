@@ -177,7 +177,7 @@ def test_flow_step_create_request_accepts_template_fill_output_mode() -> None:
             output_mode="template_fill",
             output_type="docx",
             output_config={
-                "template_file_id": str(uuid4()),
+                "template_asset_id": str(uuid4()),
                 "bindings": {"title": "{{flow_input.title}}"},
             },
         )

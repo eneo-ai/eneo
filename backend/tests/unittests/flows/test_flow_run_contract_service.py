@@ -153,7 +153,6 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
             "output_type": "docx",
             "output_config": {
                 "template_asset_id": str(uuid4()),
-                "template_file_id": str(uuid4()),
                 "template_checksum": "published-checksum",
                 "template_name": "Published template",
                 "bindings": {"Body": "{{step_1.output.text}}"},
@@ -180,9 +179,10 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     asset_id = UUID(str(template_step.output_config["template_asset_id"]))
+    template_file_id = uuid4()
     template_asset_repo.get.return_value = SimpleNamespace(
         id=asset_id,
-        file_id=UUID(str(template_step.output_config["template_file_id"])),
+        file_id=template_file_id,
         name="Shared template",
         checksum="published-checksum",
     )
@@ -274,10 +274,8 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
         (" template-checksum ", "template-checksum"),
     ],
 )
-@pytest.mark.parametrize("use_template_asset_id", [True, False])
 @pytest.mark.asyncio
 async def test_get_run_contract_marks_template_checksum_drift_needs_action(
-    use_template_asset_id: bool,
     published_checksum: str,
     current_checksum: str,
 ) -> None:
@@ -288,15 +286,12 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
 
     template_asset_id = uuid4()
     template_file_id = uuid4()
-    fallback_asset_id = uuid4()
     output_config = {
-        "template_file_id": str(template_file_id),
+        "template_asset_id": str(template_asset_id),
         "template_checksum": published_checksum,
         "template_name": "Published template",
         "bindings": {"Body": "{{step_1.output.text}}"},
     }
-    if use_template_asset_id:
-        output_config["template_asset_id"] = str(template_asset_id)
 
     template_step = _step(step_order=1, input_type="text").model_copy(
         update={
@@ -316,14 +311,7 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
         name="Asset-id template",
         checksum=current_checksum,
     )
-    file_id_asset = SimpleNamespace(
-        id=fallback_asset_id,
-        file_id=template_file_id,
-        name="File-id template",
-        checksum=current_checksum,
-    )
     template_asset_repo.get.return_value = asset_id_asset
-    template_asset_repo.get_by_flow_file.return_value = file_id_asset
     flow_version_repo.get.return_value = SimpleNamespace(
         version=flow.published_version,
         definition_json={
@@ -353,15 +341,14 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
     ).get_run_contract(flow_id=flow.id)
 
     readiness = contract.template_readiness[0]
-    expected_asset = asset_id_asset if use_template_asset_id else file_id_asset
     assert readiness.status == "needs_action"
     assert (
         readiness.message_code
         == FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH.value
     )
-    assert readiness.template_asset_id == expected_asset.id
+    assert readiness.template_asset_id == asset_id_asset.id
     assert readiness.template_file_id == template_file_id
-    assert readiness.template_name == expected_asset.name
+    assert readiness.template_name == asset_id_asset.name
     assert readiness.checksum == current_checksum
     assert readiness.can_edit is False
     assert readiness.can_download is True
@@ -798,7 +785,6 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
             "output_type": "docx",
             "output_config": {
                 "template_asset_id": str(uuid4()),
-                "template_file_id": str(uuid4()),
                 "template_checksum": "published-checksum",
                 "template_name": "Published template",
                 "bindings": {"Body": "{{step_1.output.text}}"},

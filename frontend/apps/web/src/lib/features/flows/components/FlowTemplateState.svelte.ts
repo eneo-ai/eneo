@@ -5,7 +5,6 @@ import { get } from "svelte/store";
 import { m } from "$lib/paraglide/messages";
 import { toast } from "$lib/components/toast";
 import {
-  applyAutoTemplateBindings,
   applyTemplateInspection,
   buildTemplateBindingAutoSuggestions,
   buildTemplateBindingSuggestions,
@@ -16,7 +15,7 @@ import {
   listTemplateBindingRows,
   listTemplatePlaceholders,
   resolveTemplateAssetSelection,
-  updateTemplateBinding,
+  type TemplateBindingFormSchema,
   type TemplateBindingSuggestionLabels,
   type FlowTemplateInspection
 } from "$lib/features/flows/templateFillConfig";
@@ -27,6 +26,13 @@ import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeError
  * Manages template fill state: file listing, inspection, binding management,
  * and all derived template-related values.
  */
+type TemplateFillContext = {
+  activeStep: FlowStep;
+  steps: FlowStep[];
+  formSchema: TemplateBindingFormSchema | undefined;
+  updateStep: (field: string, value: unknown) => void;
+};
+
 export class FlowTemplateState {
   #intric: Intric;
   #flowEditor: FlowEditor;
@@ -81,16 +87,7 @@ export class FlowTemplateState {
     }
   }
 
-  async inspectFile(
-    assetId: string,
-    options: { persist: boolean },
-    context: {
-      activeStep: FlowStep;
-      steps: FlowStep[];
-      formSchema: any;
-      updateStep: (field: string, value: unknown) => void;
-    }
-  ) {
+  async inspectFile(assetId: string, options: { persist: boolean }, context: TemplateFillContext) {
     this.inspecting = true;
     this.configError = null;
     try {
@@ -125,21 +122,12 @@ export class FlowTemplateState {
     }
   }
 
-  async handleFileSelection(
-    assetId: string,
-    context: {
-      activeStep: FlowStep;
-      steps: FlowStep[];
-      formSchema: any;
-      updateStep: (field: string, value: unknown) => void;
-    }
-  ) {
+  async handleFileSelection(assetId: string, context: TemplateFillContext) {
     if (!assetId) {
       const config = getTemplateFillOutputConfig(context.activeStep);
       context.updateStep("output_config", {
         ...config,
         template_asset_id: undefined,
-        template_file_id: undefined,
         template_name: undefined,
         placeholders: [],
         bindings: {}
@@ -150,15 +138,7 @@ export class FlowTemplateState {
     await this.inspectFile(assetId, { persist: true }, context);
   }
 
-  async handleUpload(
-    event: Event,
-    context: {
-      activeStep: FlowStep;
-      steps: FlowStep[];
-      formSchema: any;
-      updateStep: (field: string, value: unknown) => void;
-    }
-  ) {
+  async handleUpload(event: Event, context: TemplateFillContext) {
     const input = event.currentTarget as HTMLInputElement | null;
     const file = input?.files?.[0];
     if (!file) return;
@@ -206,7 +186,11 @@ export class FlowTemplateState {
   }
 
   /** Build all derived template values from the current step */
-  getDerived(activeStep: FlowStep | null, steps: FlowStep[], formSchema: any) {
+  getDerived(
+    activeStep: FlowStep | null,
+    steps: FlowStep[],
+    formSchema: TemplateBindingFormSchema | undefined
+  ) {
     const config = getTemplateFillOutputConfig(activeStep);
     const placeholders = listTemplatePlaceholders(this.inspection, config);
     const suggestions = activeStep
@@ -235,7 +219,7 @@ export class FlowTemplateState {
     });
     const readiness = getTemplateFillReadiness(config);
     const orphanedRows = bindingRows.filter((row) => row.status === "orphaned");
-    const hasSelection = Boolean(config.template_asset_id ?? config.template_file_id);
+    const hasSelection = Boolean(config.template_asset_id);
     const resolved = resolveTemplateAssetSelection(config, this.availableFiles);
     const unnamedStepWarning =
       activeStep !== null &&

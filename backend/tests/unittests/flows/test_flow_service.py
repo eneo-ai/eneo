@@ -144,7 +144,6 @@ def _stub_template_asset_lookup(
         name=name,
         checksum=checksum,
     )
-    service.template_asset_repo.get_by_flow_file.return_value = asset
     service.template_asset_repo.get.return_value = asset
     service.file_repo.get_by_id.return_value = SimpleNamespace(
         id=file_id,
@@ -191,12 +190,12 @@ async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
         flow_repo=AsyncMock(),
         version_repo=AsyncMock(),
     )
-    template_file_id = uuid4()
+    template_asset_id = uuid4()
     step = _step(step_order=1).model_copy(
         update={
             "output_mode": "template_fill",
             "output_type": "docx",
-            "output_config": {"template_file_id": str(template_file_id)},
+            "output_config": {"template_asset_id": str(template_asset_id)},
         }
     )
     flow = Flow(
@@ -210,7 +209,7 @@ async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
     with pytest.raises(FlowPersistedIdMissingError):
         await service._resolve_template_asset_reference(step=step, flow=flow)
 
-    service.template_asset_repo.get_by_flow_file.assert_not_awaited()
+    service.template_asset_repo.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1049,6 +1048,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    template_asset_id = uuid4()
     template_file_id = uuid4()
     flow_id = uuid4()
     source_flow = Flow(
@@ -1070,7 +1070,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": {
-                        "template_file_id": str(template_file_id),
+                        "template_asset_id": str(template_asset_id),
                         "bindings": {"section": "{{flow_input.title}}"},
                     },
                 }
@@ -1086,6 +1086,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
         service,
         flow_id=flow_id,
         file_id=template_file_id,
+        asset_id=template_asset_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
@@ -1096,7 +1097,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     definition = version_repo.create.await_args.kwargs["definition_json"]
     output_config = definition["steps"][0]["output_config"]
     assert output_config["template_asset_id"] == str(asset.id)
-    assert output_config["template_file_id"] == str(template_file_id)
+    assert "template_file_id" not in output_config
     assert output_config["template_checksum"] == "abc123"
     assert output_config["template_name"] == "rapport.docx"
     assert output_config["placeholders"] == ["section"]
@@ -1107,6 +1108,7 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    template_asset_id = uuid4()
     template_file_id = uuid4()
     flow_id = uuid4()
     source_flow = Flow(
@@ -1132,7 +1134,7 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": {
-                        "template_file_id": str(template_file_id),
+                        "template_asset_id": str(template_asset_id),
                         "bindings": {
                             "bakgrund": "{{step_1.output.text}}",
                             "analys": "{{step_1.output.text}}",
@@ -1152,6 +1154,7 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
         service,
         flow_id=flow_id,
         file_id=template_file_id,
+        asset_id=template_asset_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[
@@ -1236,6 +1239,7 @@ async def test_publish_flow_rejects_empty_template_bindings(user):
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
     flow_id = uuid4()
+    template_asset_id = uuid4()
     template_file_id = uuid4()
     flow_repo.get.return_value = Flow(
         id=flow_id,
@@ -1256,7 +1260,7 @@ async def test_publish_flow_rejects_empty_template_bindings(user):
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": {
-                        "template_file_id": str(template_file_id),
+                        "template_asset_id": str(template_asset_id),
                         "bindings": {},
                     },
                 }
@@ -1268,6 +1272,7 @@ async def test_publish_flow_rejects_empty_template_bindings(user):
         service,
         flow_id=flow_id,
         file_id=template_file_id,
+        asset_id=template_asset_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
@@ -1284,6 +1289,7 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
     flow_id = uuid4()
+    template_asset_id = uuid4()
     template_file_id = uuid4()
     source_flow = Flow(
         id=flow_id,
@@ -1304,7 +1310,7 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": {
-                        "template_file_id": str(template_file_id),
+                        "template_asset_id": str(template_asset_id),
                         "bindings": {"optional_section": ""},
                     },
                 }
@@ -1320,6 +1326,7 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
         service,
         flow_id=flow_id,
         file_id=template_file_id,
+        asset_id=template_asset_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[

@@ -16,7 +16,13 @@ from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
-from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowSparse, FlowStep
+from intric.flows.domain.flow import (
+    Flow,
+    FlowPersistedJsonObject,
+    FlowSparse,
+    FlowStep,
+    FlowTemplateAsset,
+)
 from intric.flows.domain.flow_invariant_exceptions import (
     FlowPublishedDefinitionInvalidError,
 )
@@ -910,7 +916,6 @@ class FlowService:
 
         next_output_config = dict(step.output_config)
         next_output_config["template_asset_id"] = str(template_asset.id)
-        next_output_config["template_file_id"] = str(template_file.id)
         next_output_config["template_checksum"] = template_file.checksum
         next_output_config["template_name"] = template_file.name
         next_output_config["placeholders"] = placeholder_names
@@ -921,7 +926,7 @@ class FlowService:
         *,
         flow_id: UUID | None,
         asset_id: UUID,
-    ) -> tuple[Any, File]:
+    ) -> tuple[FlowTemplateAsset, File]:
         template_asset_repo = self._require_template_asset_repo()
         asset = await template_asset_repo.get(
             asset_id=asset_id,
@@ -944,7 +949,7 @@ class FlowService:
         *,
         step: FlowStep,
         flow: Flow,
-    ) -> tuple[Any, File]:
+    ) -> tuple[FlowTemplateAsset, File]:
         if not isinstance(step.output_config, dict):
             raise BadRequestException(
                 f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
@@ -969,43 +974,9 @@ class FlowService:
                     step_order=step.step_order
                 ) from exc
 
-        template_file_id_raw = step.output_config.get("template_file_id")
-        if template_file_id_raw in (None, ""):
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.template_asset_id or template_file_id must be configured."
-            )
-        try:
-            template_file_id = UUID(str(template_file_id_raw))
-        except Exception as exc:
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.template_file_id must be a UUID."
-            ) from exc
-        try:
-            template_asset_repo = self._require_template_asset_repo()
-            asset = await template_asset_repo.get_by_flow_file(
-                flow_id=flow_id,
-                file_id=template_file_id,
-                tenant_id=self.user.tenant_id,
-            )
-        except NotFoundException:
-            try:
-                asset = await self._promote_legacy_template_file_to_asset(
-                    flow=flow,
-                    file_id=template_file_id,
-                )
-            except NotFoundException as exc:
-                raise self._template_not_accessible_error(
-                    step_order=step.step_order
-                ) from exc
-        try:
-            return await self._get_template_asset_file(
-                flow_id=flow_id,
-                asset_id=asset.id,
-            )
-        except NotFoundException as exc:
-            raise self._template_not_accessible_error(
-                step_order=step.step_order
-            ) from exc
+        raise BadRequestException(
+            f"Step {step.step_order}: output_config.template_asset_id must be configured."
+        )
 
     def _inspect_docx_template(self, file: File) -> list[dict[str, Any]]:
         return inspect_docx_template_bytes(file.blob or b"", filename=file.name)
@@ -1015,38 +986,6 @@ class FlowService:
         return BadRequestException(
             f"Step {step_order}: selected DOCX template is no longer available for this flow. Upload the template again or choose another DOCX file.",
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
-        )
-
-    async def _promote_legacy_template_file_to_asset(
-        self,
-        *,
-        flow: Flow,
-        file_id: UUID,
-    ) -> Any:
-        template_file = await self.file_repo.get_by_id(file_id=file_id)
-        if template_file.tenant_id != self.user.tenant_id:
-            raise NotFoundException("Flow template asset file not found.")
-        if template_file.blob is None:
-            raise BadRequestException(
-                "The selected DOCX template could not be read because the file content is missing. Upload the template again or choose another DOCX file.",
-                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
-            )
-
-        placeholders = self._inspect_docx_template(template_file)
-        flow_id = flow.require_persisted_id()
-        template_asset_repo = self._require_template_asset_repo()
-        return await template_asset_repo.create(
-            flow_id=flow_id,
-            space_id=flow.space_id,
-            tenant_id=self.user.tenant_id,
-            file_id=template_file.id,
-            name=template_file.name,
-            checksum=template_file.checksum,
-            mimetype=template_file.mimetype,
-            placeholders=self._placeholder_names(placeholders),
-            created_by_user_id=self.user.id,
-            updated_by_user_id=self.user.id,
-            status="ready",
         )
 
     @staticmethod
