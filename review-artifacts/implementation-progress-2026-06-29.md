@@ -2479,6 +2479,51 @@
   - Rollback is straightforward: remove the `RequestValidationError` handler, validation sanitizer/response helper, 422 branch in the main `HTTPException` handler, OpenAPI normalization, generated schema update, focused tests, and this ledger entry.
   - Exact next bounded recommendation: select the next roadmap API/runtime blocker only after reviewing PG-10b fallout; do not reopen Builder repair/fallback pruning without real branch-value data.
 
+## PG-10c Implementation
+
+- Slice id: PG-10c SDK `GeneralError` readable-message fallout from PG-10b.
+- Findings addressed:
+  - PG-10b moved main-app validation 422 responses to the public `GeneralError` envelope, but the shared SDK adapter still assumed every 422 used FastAPI's legacy `detail[0]` validation array.
+  - That could turn a useful validation response into a frontend `TypeError` before SDK or Flow UI consumers saw the backend message, request id, numeric error code, or string machine code.
+- Evidence reviewed:
+  - `backend/src/intric/server/exception_handlers.py:121-130` emits `GeneralError` validation content with `message`, numeric `intric_error_code`, string `code`, `request_id`, and safe `details.errors`.
+  - `frontend/packages/intric-js/src/client/client.js:386-391` previously dereferenced `this.response.detail[0]` for every HTTP 422.
+  - `frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts:134-138` already treats `error.response.code` as the string machine-code owner, so the SDK fix did not add a second string-code property.
+  - `.codex/artifacts/codex-exec-flows-next-slice-synthesis-20260701.md:7592-7601` ranked this SDK adapter fallout as the next bounded slice after PG-10b.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-pg-10c-sdk-general-error-plan-20260701.md` returned `VERDICT: green_with_guardrails`, `GREEN_LIGHT: yes`; valid guidance applied by keeping the fix in `IntricError.getReadableMessage()`, preserving `IntricError.code` as numeric, keeping string code on `error.response.code`, adding a real `createClient`/mock-fetch 422 test, and recording the explicit package-test validation command because SDK package tests are not covered by the normal web Vitest include.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-pg-10c-sdk-general-error-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes` for the reviewed three-file slice only; no source/test changes were required.
+- Red / green proof:
+  - Red before source change: `cd frontend && bun x vitest run packages/intric-js/src/client/client.test.js` failed 5 tests because PG-10b `GeneralError` 422s and no-body 422s threw from `response.detail[0]`, while malformed/string-detail cases fell through to the old generic validation message.
+  - Green after source change: the same focused SDK test file passed with PG-10b `GeneralError`, legacy FastAPI detail arrays, string/malformed/no-body validation responses, numeric `error.code`, string `error.response.code`, and trace-header behavior covered.
+- Files changed:
+  - `frontend/packages/intric-js/src/client/client.js`
+  - `frontend/packages/intric-js/src/client/client.test.js`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - `IntricError.getReadableMessage()` now handles HTTP 422 by reading the first safe `GeneralError.details.errors[].message`, then `GeneralError.message`, then legacy FastAPI `detail[0].ctx.reason` / `detail[0].msg`, then the existing error message or a generic validation message.
+  - `getReadableMessage()` no longer throws for PG-10b `GeneralError`, malformed, string-detail, or no-body 422 responses.
+  - Numeric `IntricError.code` remains sourced from `intric_error_code` / `x-error-code`; string machine codes remain available at `error.response.code`.
+- Complexity deleted or owner clarified:
+  - The SDK adapter remains the single readable-message owner for HTTP-client errors; no Flow UI parsing, backend change, OpenAPI regeneration, wrapper, manager, or compatibility service was added.
+  - The unsafe legacy 422 assumption was deleted while the cheap legacy FastAPI fallback remains for existing SDK compatibility.
+- Architecture delta:
+  - Canonical owner before: the backend had one `GeneralError` validation envelope, but the SDK readable-message boundary still encoded the old FastAPI validation envelope as if it were universal.
+  - Canonical owner after: backend error shape stays owned by the API; SDK readable-message fallback owns client-side presentation across both current `GeneralError` and legacy validation shapes.
+  - What not to preserve: frontend/UI components parsing validation envelopes directly, overloading `IntricError.code` with the new string code, or adding a second machine-code property while `response.code` already exists.
+  - Honest rating impact: PG-10c finishes an important PG-10b client-boundary fallout and improves API consumer DX, but it is a narrow SDK adapter fix and does not by itself make Flows/API 9/10.
+- Validation commands and results:
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/client/client.test.js` -> red before source change, pass after source change, 12 passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @intric/intric-js check` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @intric/intric-js lint` -> initial Prettier failure on `src/client/client.test.js`, then pass after running Prettier on the two touched SDK files.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --write packages/intric-js/src/client/client.js packages/intric-js/src/client/client.test.js` -> formatted the touched SDK files only; `client.js` unchanged, `client.test.js` formatted.
+  - `git diff --check -- frontend/packages/intric-js/src/client/client.js frontend/packages/intric-js/src/client/client.test.js review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / rollback:
+  - Risk is limited to SDK-readable messages for HTTP 422. Runtime backend behavior, OpenAPI, generated schema, Flow UI, SCIM, and Flow AI Builder are untouched.
+  - Rollback is straightforward: restore the old 422 branch in `getReadableMessage()`, remove the focused tests, and remove this ledger entry.
+  - Exact next bounded recommendation: create-run dispatch recoverability, then evidence export single summary contract, runtime golden smoke, and `flow_runs.error_json` parser/corruption policy.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

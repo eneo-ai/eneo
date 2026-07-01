@@ -384,15 +384,36 @@ export class IntricError extends Error {
    * Get a message that can be presented to users, ie. in an alert
    */
   getReadableMessage() {
-    let message;
-    if (this.status === 422) {
-      const reason = this.response.detail[0]?.ctx?.reason;
-      const msg = this.response.detail[0]?.msg ?? "A validation error occured.";
-      message = reason ?? msg;
-    } else {
-      message = this.message;
+    if (this.status !== 422) {
+      return this.message;
     }
-    return message;
+
+    const response = this.response;
+    const generalErrorMessage = Array.isArray(response?.details?.errors)
+      ? response.details.errors.find(
+          (error) => typeof error?.message === "string" && error.message.length > 0
+        )?.message
+      : undefined;
+    if (generalErrorMessage) {
+      return generalErrorMessage;
+    }
+
+    if (typeof response?.message === "string" && response.message.length > 0) {
+      return response.message;
+    }
+
+    const legacyError = Array.isArray(response?.detail) ? response.detail[0] : undefined;
+    const legacyReason = legacyError?.ctx?.reason;
+    if (typeof legacyReason === "string" && legacyReason.length > 0) {
+      return legacyReason;
+    }
+
+    const legacyMessage = legacyError?.msg;
+    if (typeof legacyMessage === "string" && legacyMessage.length > 0) {
+      return legacyMessage;
+    }
+
+    return this.message || "A validation error occurred.";
   }
 
   /** @returns {string | undefined} */

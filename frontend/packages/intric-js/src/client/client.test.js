@@ -106,3 +106,97 @@ describe("createClient path parameters", () => {
     });
   });
 });
+
+describe("IntricError readable messages", () => {
+  it("reads validation messages from GeneralError details without changing error code fields", async () => {
+    const client = createClient({
+      baseUrl: "https://api.example.test",
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              message: "Request validation failed.",
+              intric_error_code: 4220,
+              code: "request_validation_error",
+              request_id: "request-1",
+              details: {
+                errors: [
+                  {
+                    location: ["body", "name"],
+                    message: "Name is required.",
+                    type: "missing"
+                  }
+                ]
+              }
+            }),
+            { status: 422 }
+          )
+      )
+    });
+
+    let caught;
+    try {
+      await client.fetch("/api/v1/flows/", {
+        method: "post",
+        requestBody: { "application/json": {} }
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(IntricError);
+    expect(caught.getReadableMessage()).toBe("Name is required.");
+    expect(caught.code).toBe(4220);
+    expect(caught.response.code).toBe("request_validation_error");
+  });
+
+  it("falls back to the GeneralError message when validation details are absent", () => {
+    const error = new IntricError(
+      "Request validation failed.",
+      "RESPONSE",
+      422,
+      4220,
+      {
+        message: "Request validation failed.",
+        intric_error_code: 4220,
+        code: "request_validation_error"
+      },
+      { endpoint: "POST@test" }
+    );
+
+    expect(error.getReadableMessage()).toBe("Request validation failed.");
+  });
+
+  it("keeps legacy FastAPI validation messages working", () => {
+    const reasonError = new IntricError(
+      "See details for more info.",
+      "RESPONSE",
+      422,
+      0,
+      { detail: [{ ctx: { reason: "Legacy reason." }, msg: "Legacy message." }] },
+      { endpoint: "POST@test" }
+    );
+    const msgError = new IntricError(
+      "See details for more info.",
+      "RESPONSE",
+      422,
+      0,
+      { detail: [{ msg: "Legacy message." }] },
+      { endpoint: "POST@test" }
+    );
+
+    expect(reasonError.getReadableMessage()).toBe("Legacy reason.");
+    expect(msgError.getReadableMessage()).toBe("Legacy message.");
+  });
+
+  it.each([
+    ["string detail", { detail: "Invalid request body." }, "See details for more info."],
+    ["malformed detail", { detail: { unexpected: true } }, "See details for more info."],
+    ["no response body", undefined, "Request validation failed."]
+  ])("does not throw for %s validation responses", (_case, response, message) => {
+    const error = new IntricError(message, "RESPONSE", 422, 0, response, { endpoint: "POST@test" });
+
+    expect(() => error.getReadableMessage()).not.toThrow();
+    expect(error.getReadableMessage()).toBe(message);
+  });
+});
