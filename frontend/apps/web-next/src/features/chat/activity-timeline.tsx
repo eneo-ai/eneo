@@ -11,6 +11,7 @@ import {
   StatusNode,
   ToolStateIcon,
   ToolStatusBadge,
+  humanizeToolName,
   toolStateTone,
   type ToolState
 } from "@/components/ai-elements/tool-status";
@@ -50,7 +51,10 @@ export function ActivityTimeline({ parts, isStreaming }: { parts: Part[]; isStre
   const steps = parts.filter(isActivityPart);
   if (steps.length === 0) return null;
 
-  const open = userOpen ?? isStreaming;
+  // Collapsed by default in BOTH states: while streaming the trigger shows a
+  // single live action line; once done it shows the resolved summary. The reader
+  // expands to see the full timeline.
+  const open = userOpen ?? false;
   const toolCount = steps.filter((part) => part.type === "dynamic-tool").length;
   const errorCount = steps.filter(
     (part) => part.type === "dynamic-tool" && part.state === "output-error"
@@ -64,6 +68,18 @@ export function ActivityTimeline({ parts, isStreaming }: { parts: Part[]; isStre
     .filter(Boolean)
     .join(" · ");
 
+  // The current action, shown live while streaming: the running tool, the
+  // reasoning, or — once the activity is done — that the answer is being written.
+  const lastStep = steps[steps.length - 1];
+  if (!lastStep) return null;
+  const liveText =
+    lastStep.type === "dynamic-tool" &&
+    (lastStep.state === "input-available" || lastStep.state === "input-streaming")
+      ? humanizeToolName(lastStep.toolName)
+      : lastStep.type === "reasoning"
+        ? t("chat_reasoning_thinking")
+        : t("chat_activity_writing");
+
   return (
     <Collapsible
       open={open}
@@ -71,9 +87,19 @@ export function ActivityTimeline({ parts, isStreaming }: { parts: Part[]; isStre
       className="bg-card/40 not-prose w-full rounded-xl border"
     >
       <CollapsibleTrigger className="group/act text-muted-foreground hover:text-foreground flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors">
-        <SparklesIcon aria-hidden="true" className="size-4 shrink-0" />
-        <span className="truncate">{summary || t("chat_activity_label")}</span>
-        {isStreaming && <Spinner className="text-primary size-3.5 shrink-0" />}
+        {isStreaming ? (
+          <>
+            <Spinner aria-hidden="true" className="text-primary size-4 shrink-0" />
+            <span className="text-foreground min-w-0 truncate">
+              <Shimmer as="span" duration={1}>{`${liveText}…`}</Shimmer>
+            </span>
+          </>
+        ) : (
+          <>
+            <SparklesIcon aria-hidden="true" className="size-4 shrink-0" />
+            <span className="truncate">{summary || t("chat_activity_label")}</span>
+          </>
+        )}
         <span className="ml-auto shrink-0 text-xs">
           {open ? t("chat_activity_hide") : t("chat_activity_show")}
         </span>
@@ -123,7 +149,7 @@ function ReasoningStep({ part }: { part: ReasoningPart }) {
       </StatusNode>
       <div className="min-w-0 flex-1 pt-1">
         <Reasoning isStreaming={isStreaming} className="mb-0">
-          <ReasoningTrigger getThinkingMessage={thinkingMessage} />
+          <ReasoningTrigger getThinkingMessage={thinkingMessage} showIcon={false} />
           <ReasoningContent>{part.text}</ReasoningContent>
         </Reasoning>
       </div>
@@ -143,8 +169,15 @@ function ToolStep({ part, label }: { part: ToolPart; label: string }) {
       </StatusNode>
       <Collapsible defaultOpen={defaultOpen} className="group/tool min-w-0 flex-1">
         <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-left">
-          <span className="text-foreground truncate text-sm font-medium">{part.toolName}</span>
-          <ToolStatusBadge state={part.state} label={label} className="ml-auto shrink-0" />
+          <span className="text-foreground truncate text-sm font-medium">
+            {humanizeToolName(part.toolName)}
+          </span>
+          <ToolStatusBadge
+            state={part.state}
+            label={label}
+            showIcon={false}
+            className="ml-auto shrink-0"
+          />
           <ChevronDownIcon
             aria-hidden="true"
             className="text-muted-foreground size-4 shrink-0 transition-transform group-data-[state=open]/tool:rotate-180"

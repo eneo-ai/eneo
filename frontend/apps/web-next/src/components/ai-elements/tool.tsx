@@ -3,7 +3,8 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import { ChevronDownIcon, WrenchIcon } from "lucide-react";
+import { ChevronDownIcon, WrenchIcon, XCircleIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 
@@ -74,16 +75,17 @@ export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"];
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
-    <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-      Parameters
-    </h4>
-    <div className="bg-muted/50 rounded-md">
-      <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+export const ToolInput = ({ className, input, ...props }: ToolInputProps) => {
+  const t = useTranslations();
+  return (
+    <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
+      <h4 className="text-muted-foreground text-xs font-medium">{t("chat_tool_input")}</h4>
+      <div className="bg-muted/50 rounded-md">
+        <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export type ToolOutputProps = ComponentProps<"div"> & {
   output: ToolPart["output"];
@@ -91,8 +93,20 @@ export type ToolOutputProps = ComponentProps<"div"> & {
 };
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
+  const t = useTranslations();
   if (!(output || errorText)) {
     return null;
+  }
+
+  if (errorText) {
+    return (
+      <div className={cn("space-y-2", className)} {...props}>
+        <div className="text-warning border-warning/30 bg-warning/10 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
+          <XCircleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span className="min-w-0 break-words">{errorText}</span>
+        </div>
+      </div>
+    );
   }
 
   let Output = <div>{output as ReactNode}</div>;
@@ -105,16 +119,8 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
-      <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-        {errorText ? "Error" : "Result"}
-      </h4>
-      <div
-        className={cn(
-          "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-          errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground"
-        )}
-      >
-        {errorText && <div>{errorText}</div>}
+      <h4 className="text-muted-foreground text-xs font-medium">{t("chat_tool_result")}</h4>
+      <div className="bg-muted/50 text-foreground overflow-x-auto rounded-md text-xs [&_table]:w-full">
         {Output}
       </div>
     </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { Globe } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -16,66 +15,94 @@ import { AttachmentPreviewDialog, FileKindIcon, useSignedUrl } from "./attachmen
 
 type Part = EneoUIMessage["parts"][number];
 
-/** Numbered source chips, per the design's chat thread. */
-export function MessageSources({ parts }: { parts: Part[] }) {
-  const sources = parts.filter((part) => part.type === "source-document");
+/** How many source/web chips to show before collapsing behind a show-more toggle. */
+const CHIPS_COLLAPSE_AT = 5;
+
+const chipClass =
+  "bg-card hover:border-ring hover:bg-accent flex max-w-full items-center gap-1.5 rounded-lg border py-1.5 pr-2.5 pl-2 text-xs transition-colors";
+
+const moreButtonClass =
+  "text-muted-foreground hover:text-foreground hover:border-ring rounded-lg border px-2.5 py-1.5 text-xs transition-colors";
+
+type SourceChip = { key: string; title: string; url?: string };
+
+/**
+ * Unified provenance: knowledge documents and web references shown as one
+ * numbered "sources" section, collapsed to the first few behind a show-more
+ * toggle. One section instead of two stacked rows.
+ */
+export function MessageSources({
+  parts,
+  webReferences
+}: {
+  parts: Part[];
+  webReferences?: { id: string; title: string; url: string }[];
+}) {
+  const t = useTranslations();
+  const [expanded, setExpanded] = useState(false);
+
+  const docs: SourceChip[] = parts
+    .filter((part) => part.type === "source-document")
+    .map((source) => {
+      const eneo = (source.providerMetadata?.eneo ?? {}) as { metadata?: { url?: string | null } };
+      return {
+        key: `doc-${source.sourceId}`,
+        title: source.title || source.sourceId,
+        url: eneo.metadata?.url ?? undefined
+      };
+    });
+  const web: SourceChip[] = (webReferences ?? []).map((ref) => ({
+    key: `web-${ref.id}`,
+    title: ref.title || ref.url,
+    url: ref.url
+  }));
+  const sources = [...docs, ...web];
   if (sources.length === 0) return null;
 
-  const chipClass =
-    "bg-card hover:border-ring hover:bg-accent flex max-w-full items-center gap-1.5 rounded-lg border py-1.5 pr-2.5 pl-2 text-xs transition-colors";
+  const visible = expanded ? sources : sources.slice(0, CHIPS_COLLAPSE_AT);
+  const hidden = sources.length - visible.length;
 
   return (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {sources.map((source, index) => {
-        const eneo = (source.providerMetadata?.eneo ?? {}) as {
-          metadata?: { url?: string | null };
-        };
-        const url = eneo.metadata?.url ?? undefined;
-        const body = (
-          <>
-            <span className="bg-secondary text-secondary-foreground flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[10px] font-bold">
-              {index + 1}
+    <div className="mt-3 flex flex-col gap-2">
+      <span className="text-muted-foreground text-xs">
+        {t("chat_sources_label")} · {sources.length}
+      </span>
+      <div className="flex flex-wrap gap-2">
+        {visible.map((source, index) => {
+          const body = (
+            <>
+              <span className="bg-secondary text-secondary-foreground flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[10px] font-bold">
+                {index + 1}
+              </span>
+              <span className="truncate">{source.title}</span>
+            </>
+          );
+          return source.url ? (
+            <a
+              key={source.key}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              className={chipClass}
+            >
+              {body}
+            </a>
+          ) : (
+            <span key={source.key} className={chipClass}>
+              {body}
             </span>
-            <span className="truncate">{source.title || source.sourceId}</span>
-          </>
-        );
-        return url ? (
-          <a
-            key={source.sourceId}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className={chipClass}
+          );
+        })}
+        {sources.length > CHIPS_COLLAPSE_AT && (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className={moreButtonClass}
           >
-            {body}
-          </a>
-        ) : (
-          <span key={source.sourceId} className={chipClass}>
-            {body}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Web-search results cited by the answer, shown as favicon link chips. */
-export function WebSources({
-  references
-}: {
-  references?: { id: string; title: string; url: string }[];
-}) {
-  if (!references || references.length === 0) return null;
-  const chipClass =
-    "bg-card hover:border-ring hover:bg-accent flex max-w-full items-center gap-1.5 rounded-lg border py-1.5 pr-2.5 pl-2 text-xs transition-colors";
-  return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {references.map((ref) => (
-        <a key={ref.id} href={ref.url} target="_blank" rel="noreferrer" className={chipClass}>
-          <Globe className="text-muted-foreground size-3.5 shrink-0" />
-          <span className="truncate">{ref.title || ref.url}</span>
-        </a>
-      ))}
+            {expanded ? t("chat_sources_less") : t("chat_sources_more", { count: hidden })}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -182,7 +209,7 @@ export function ToolApprovalCard({
                 disabled={submit.isPending}
                 onClick={() => decideAll(true)}
               >
-                {t("tool_accept_all")}
+                {t("tool_accept_all", { count: pending.length })}
               </Button>
               <Button
                 size="sm"

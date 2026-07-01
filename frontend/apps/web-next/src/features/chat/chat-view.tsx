@@ -2,23 +2,16 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Globe, Paperclip, Sparkles } from "lucide-react";
+import { Globe, Paperclip, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { toast } from "sonner";
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton
 } from "@/components/ai-elements/conversation";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-  MessageResponse
-} from "@/components/ai-elements/message";
+import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputBody,
@@ -43,17 +36,10 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
-import { ActivityTimeline } from "./activity-timeline";
 import { ComposerAttachments } from "./attachments";
+import { ChatMessage } from "./chat-message";
 import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
-import {
-  GeneratedFile,
-  MessageFiles,
-  MessageSources,
-  ToolApprovalCard,
-  WebSources
-} from "./message-parts";
 import { useAttachments } from "./use-attachments";
 
 const NO_MENTION = "__none__";
@@ -312,82 +298,15 @@ export function ChatView({
             ) : (
               <ConversationEmptyState title={partner.name} description={t("ask_a_question")} />
             ))}
-          {messages.map((message, messageIndex) => {
-            const isAssistant = message.role === "assistant";
-            const isStreamingThis = busy && messageIndex === messages.length - 1;
-            const textContent = message.parts
-              .filter((part) => part.type === "text")
-              .map((part) => part.text)
-              .join("\n\n");
-            const answering =
-              message.metadata?.answeringAssistant ?? (isStreamingThis ? liveAnswering : null);
-            return (
-              <Message key={message.id} from={message.role}>
-                <MessageContent>
-                  {isAssistant && partner.showResponseLabel && answering && (
-                    <span className="bg-secondary text-secondary-foreground w-fit rounded-full px-2 py-0.5 text-xs font-medium">
-                      @{answering.handle}
-                    </span>
-                  )}
-                  {isAssistant && (
-                    <ActivityTimeline parts={message.parts} isStreaming={isStreamingThis} />
-                  )}
-                  {message.parts.map((part, index) => {
-                    // Reasoning and tool calls are grouped into ActivityTimeline above.
-                    if (part.type === "reasoning" || part.type === "dynamic-tool") {
-                      return null;
-                    }
-                    if (part.type === "text") {
-                      return isAssistant ? (
-                        <MessageResponse key={index}>{part.text}</MessageResponse>
-                      ) : (
-                        <span key={index} className="whitespace-pre-wrap">
-                          {part.text}
-                        </span>
-                      );
-                    }
-                    if (part.type === "data-tool-approval") {
-                      return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
-                    }
-                    if (part.type === "file") {
-                      return part.mediaType.startsWith("image/") ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
-                        <img
-                          key={index}
-                          src={part.url}
-                          alt={part.filename ?? "generated"}
-                          className="max-h-96 rounded-lg border"
-                        />
-                      ) : null;
-                    }
-                    return null;
-                  })}
-                  {!isAssistant && (message.metadata?.files?.length ?? 0) > 0 && (
-                    <MessageFiles files={message.metadata!.files!} />
-                  )}
-                  {isAssistant &&
-                    message.metadata?.generatedFiles?.map((file) => (
-                      <GeneratedFile key={file.id} file={file} />
-                    ))}
-                </MessageContent>
-                {isAssistant && <MessageSources parts={message.parts} />}
-                {isAssistant && <WebSources references={message.metadata?.webSearchReferences} />}
-                {isAssistant && textContent && !isStreamingThis && (
-                  <MessageActions className="-ml-1.5">
-                    <MessageAction
-                      tooltip={t("copy")}
-                      onClick={() => {
-                        navigator.clipboard.writeText(textContent);
-                        toast.success(t("copied"));
-                      }}
-                    >
-                      <Copy className="size-3.5" />
-                    </MessageAction>
-                  </MessageActions>
-                )}
-              </Message>
-            );
-          })}
+          {messages.map((message, messageIndex) => (
+            <ChatMessage
+              key={message.id}
+              message={message}
+              isStreaming={busy && messageIndex === messages.length - 1}
+              showResponseLabel={partner.showResponseLabel ?? false}
+              liveAnswering={liveAnswering}
+            />
+          ))}
           {status === "submitted" && (
             <Message from="assistant">
               <MessageContent>

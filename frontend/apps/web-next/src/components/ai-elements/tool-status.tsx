@@ -23,6 +23,17 @@ export type ToolState = (ToolUIPart | DynamicToolUIPart)["state"];
 
 export type StatusTone = "running" | "success" | "error" | "warning" | "neutral";
 
+/**
+ * Turn a raw tool identifier into a readable label: drop a server/ prefix,
+ * swap separators for spaces, and capitalize. `search_knowledge_base` →
+ * `Search knowledge base`, `jira/create_issue` → `Jira create issue`.
+ */
+export function humanizeToolName(name: string): string {
+  const words = name.replace(/[/_-]+/g, " ").trim();
+  if (!words) return name;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function toolStateTone(state: ToolState): StatusTone {
   switch (state) {
     case "input-available":
@@ -31,7 +42,10 @@ export function toolStateTone(state: ToolState): StatusTone {
     case "approval-responded":
       return "success";
     case "output-error":
-      return "error";
+      // A single failed tool call inside a turn is a caution, not a page-level
+      // error — the agent usually recovers. Red is reserved for a turn that
+      // produced no answer (rendered separately by ChatView).
+      return "warning";
     case "approval-requested":
       return "warning";
     default: // input-streaming, output-denied
@@ -83,14 +97,20 @@ export function ToolStateIcon({ state, className }: { state: ToolState; classNam
   return <Icon aria-hidden="true" className={cn(className, spin && "animate-spin")} />;
 }
 
-/** Tone-tinted status pill (icon + label). `label` overrides the English fallback. */
+/**
+ * Tone-tinted status pill. `label` overrides the English fallback; `showIcon`
+ * is set false where a timeline rail node already carries the status glyph (so
+ * the icon isn't shown twice).
+ */
 export function ToolStatusBadge({
   state,
   label,
+  showIcon = true,
   className
 }: {
   state: ToolState;
   label?: string;
+  showIcon?: boolean;
   className?: string;
 }) {
   return (
@@ -101,7 +121,7 @@ export function ToolStatusBadge({
         className
       )}
     >
-      <ToolStateIcon state={state} className="size-3.5" />
+      {showIcon && <ToolStateIcon state={state} className="size-3.5" />}
       {label ?? DEFAULT_LABEL[state]}
     </span>
   );

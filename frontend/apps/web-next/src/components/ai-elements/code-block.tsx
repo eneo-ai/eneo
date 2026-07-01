@@ -365,38 +365,39 @@ export const CodeBlockContent = ({
 }) => {
   // Memoized raw tokens for immediate display
   const rawTokens = useMemo(() => createRawTokens(code), [code]);
+  const tokenKey = useMemo(() => getTokensCacheKey(code, language), [code, language]);
 
-  // Synchronous cache lookup — avoids setState in effect for cached results
-  const syncTokens = useMemo(
-    () => highlightCode(code, language) ?? rawTokens,
-    [code, language, rawTokens]
-  );
-
-  // Async highlighting result (populated after shiki loads)
-  const [asyncTokens, setAsyncTokens] = useState<TokenizedCode | null>(null);
-  const asyncKeyRef = useRef({ code, language });
-
-  // Invalidate stale async tokens synchronously during render
-  if (asyncKeyRef.current.code !== code || asyncKeyRef.current.language !== language) {
-    asyncKeyRef.current = { code, language };
-    setAsyncTokens(null);
-  }
+  // Keep the first server/client render deterministic. Shiki may be cached on
+  // the server but not yet in the browser, so highlighted tokens are applied
+  // only after mount.
+  const [highlighted, setHighlighted] = useState<{
+    key: string;
+    tokenized: TokenizedCode;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    highlightCode(code, language, (result) => {
+    const cached = highlightCode(code, language, (result) => {
       if (!cancelled) {
-        setAsyncTokens(result);
+        setHighlighted({ key: tokenKey, tokenized: result });
       }
     });
+
+    if (cached) {
+      Promise.resolve().then(() => {
+        if (!cancelled) {
+          setHighlighted({ key: tokenKey, tokenized: cached });
+        }
+      });
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [code, language]);
+  }, [code, language, tokenKey]);
 
-  const tokenized = asyncTokens ?? syncTokens;
+  const tokenized = highlighted?.key === tokenKey ? highlighted.tokenized : rawTokens;
 
   return (
     <div className="relative overflow-auto">

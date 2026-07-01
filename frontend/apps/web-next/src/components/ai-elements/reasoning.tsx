@@ -141,6 +141,8 @@ export const Reasoning = memo(
 
 export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
+  /** Hide the brain glyph when an outer surface (e.g. the timeline rail) already shows it. */
+  showIcon?: boolean;
 };
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
@@ -158,6 +160,7 @@ export const ReasoningTrigger = memo(
     className,
     children,
     getThinkingMessage = defaultGetThinkingMessage,
+    showIcon = true,
     ...props
   }: ReasoningTriggerProps) => {
     const { isStreaming, isOpen, duration } = useReasoning();
@@ -172,7 +175,7 @@ export const ReasoningTrigger = memo(
       >
         {children ?? (
           <>
-            <BrainIcon className="size-4" />
+            {showIcon && <BrainIcon className="size-4" />}
             {getThinkingMessage(isStreaming, duration)}
             <ChevronDownIcon
               className={cn("size-4 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
