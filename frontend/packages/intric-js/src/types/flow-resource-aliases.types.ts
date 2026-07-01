@@ -14,12 +14,18 @@ import type {
   FlowRunStepInputs,
   FlowRuntimeUploadPolicy,
   FlowStep,
-  FlowTemplateAsset
+  FlowTemplateAsset,
+  operations
 } from "@intric/intric-js";
 import { resolveFlowRuntimeUploadInitialTimeoutMs } from "@intric/intric-js";
 import type { FlowRuntimeUploadTimeoutEvent } from "@intric/intric-js";
 
 type FlowRunCreateRequest = components["schemas"]["FlowRunCreateRequest"];
+type FlowRunPublic = components["schemas"]["FlowRunPublic"];
+type CreateFlowRunResponse =
+  operations["create_flow_run"]["responses"][201]["content"]["application/json"];
+type GetFlowRunResponse =
+  operations["get_flow_run"]["responses"][200]["content"]["application/json"];
 type FlowRunReviewCheckpointEvidence =
   components["schemas"]["FlowRunReviewCheckpointEvidencePublic"];
 
@@ -129,7 +135,7 @@ const validFlowRunResultFile: FlowRunResultFile = {
   availability: "available"
 };
 
-const validFlowRun: FlowRun = {
+const validFlowRun = {
   id: runId,
   flow_id: flowId,
   flow_version: 3,
@@ -144,7 +150,10 @@ const validFlowRun: FlowRun = {
   result_files: [validFlowRunResultFile],
   created_at: isoTimestamp,
   updated_at: isoTimestamp
-};
+} satisfies FlowRun & FlowRunPublic;
+
+const validCreateFlowRunResponse: CreateFlowRunResponse = validFlowRun;
+const validGetFlowRunResponse: GetFlowRunResponse = validFlowRun;
 
 const validFlowRunStep: FlowRunStep = {
   id: stepResultId,
@@ -492,6 +501,8 @@ validRerunOperation.input_payload_json = { case_id: "CASE-2" };
 
 void validFlow;
 void validRunContract;
+void validCreateFlowRunResponse;
+void validGetFlowRunResponse;
 void validFlowGraph;
 void validFlowEvidence;
 void validFlowEvidenceExport;

@@ -2766,6 +2766,49 @@
   - Rollback: remove the `FlowRun.error` validator, restore strict parser raises and permissive top-level `FlowRunError`, remove the public code/taxonomy/docs/i18n/SDK additions, and remove the focused corruption-boundary tests.
   - Exact next bounded recommendation: API/SDK consumer runtime smoke, then Flow terminal failure event/readable diagnostics, then executable JSONB ownership guard.
 
+## SDK Consumer Runtime Contract Smoke
+
+- Slice id: `sdk-consumer-runtime-contract-smoke`.
+- Findings addressed:
+  - Backend Flow consumer/API tests now cover the create/poll/read/evidence path, but the shipped `@intric/intric-js` wrapper did not have one focused receipt for the same public consumer sequence.
+  - Existing SDK endpoint tests covered `runContract.get`, `runs.create`, idempotency, and `exportEvidence`, but not `runs.get`, `runs.steps`, or `runs.evidence`.
+  - The generated type smoke used `FlowRunCreateRequest` and the SDK `FlowRun` alias, but did not pin raw `FlowRunPublic` or the generated `create_flow_run` / `get_flow_run` operation response aliases.
+- Evidence reviewed:
+  - `frontend/packages/intric-js/src/endpoints/flows.js` already owns the Flow SDK wrappers for `runContract.get`, `runs.create`, `runs.get`, `runs.steps`, `runs.evidence`, and `runs.exportEvidence`.
+  - `frontend/packages/intric-js/src/endpoints/flows.test.js` already owns route-wrapper behavior checks; no new harness was needed.
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts` already owns generated Flow type-smoke coverage.
+  - `.codex/artifacts/codex-exec-next-slice-after-flow-run-error-json-20260701.md` selected this as the next bounded slice after the `flow_runs.error_json` read/corruption boundary.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-sdk-consumer-runtime-smoke-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: none`; valid guidance applied by keeping the slice in the existing SDK wrapper test/type-smoke owners and using exact `create_flow_run` 201 / `get_flow_run` 200 operation response aliases.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-sdk-consumer-runtime-smoke-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, `BLOCKER: none`; it confirmed the scoped diff stays in the existing SDK wrapper test/type-smoke owners and does not pretend to prove live backend/Celery semantics.
+- Red / green proof:
+  - No source bug was fixed in this slice. The pre-change gap was coverage/readiness: direct `rg` found no `runs.get`, `runs.steps`, or `runs.evidence` tests in `frontend/packages/intric-js/src/endpoints/flows.test.js`.
+  - Green endpoint-wrapper proof: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js` -> pass, 31 passed.
+  - Green generated type-smoke proof: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+- Files changed:
+  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - None. This is SDK wrapper/type-smoke coverage only.
+- Complexity deleted or owner clarified:
+  - Reused the existing SDK wrapper test owner instead of creating an E2E/smoke framework, live server fixture, backend duplicate contract test, or SDK abstraction.
+  - Reused the generated OpenAPI `operations` export directly so `create_flow_run` and `get_flow_run` stay tied to their generated response payloads.
+- Architecture delta:
+  - Canonical owner before: `flows.js` owned SDK runtime wrappers, but the wrapper test coverage did not prove the minimal create/poll/read/evidence consumer path end to end.
+  - Canonical owner after: unchanged; `flows.test.js` now protects that public wrapper sequence, and `flow-resource-aliases.types.ts` pins the generated runtime response aliases.
+  - Duplicate paths remaining: backend consumer integration tests still own live API/DB/runtime semantics; this SDK smoke intentionally does not duplicate them.
+  - What not to preserve: untested SDK read wrappers, top-level `file_ids` compatibility, or generated operation names that drift without a type-smoke failure.
+  - Honest rating impact: this improves generated-client/API consumer DX confidence, but it is not live backend/Celery proof and does not by itself make Flows 9/10.
+- Validation commands and results:
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js` -> pass, 31 passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+- Remaining risk / rollback:
+  - Risk is limited to SDK test/type-smoke maintenance. No backend, generated schema, frontend product UI, Flow runtime, Flow AI Builder, DB, migration, or OpenAPI behavior changed.
+  - Rollback: remove the added runtime consumer sequence test, operation-response type aliases, and this ledger entry.
+  - Exact next bounded recommendation: Flow terminal failure event/readable diagnostics, then executable JSONB ownership guard, then Flow metadata top-level ownership.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

@@ -303,6 +303,56 @@ describe("flows templates endpoint", () => {
     });
   });
 
+  it("supports the minimal create/poll/read runtime consumer sequence", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1", flow_id: "flow-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.runContract.get({ id: "flow-1" });
+    const createdRun = await flows.runs.create({
+      flow: { id: "flow-1" },
+      expected_flow_version: 7,
+      idempotencyKey: "flow-run:test-key",
+      input_payload_json: { text: "test" },
+      step_inputs: {
+        "step-1": { file_ids: ["file-1"] }
+      }
+    });
+    await flows.runs.get(createdRun);
+    await flows.runs.steps({ flowId: createdRun.flow_id, runId: createdRun.id });
+    await flows.runs.evidence(createdRun);
+    await flows.runs.exportEvidence(createdRun);
+
+    expect(fetch.mock.calls).toEqual([
+      ["/api/v1/flows/flow-1/run-contract/", { method: "get" }],
+      [
+        "/api/v1/flows/flow-1/runs/",
+        {
+          method: "post",
+          params: { header: { "Idempotency-Key": "flow-run:test-key" } },
+          requestBody: {
+            "application/json": {
+              expected_flow_version: 7,
+              input_payload_json: { text: "test" },
+              step_inputs: {
+                "step-1": { file_ids: ["file-1"] }
+              }
+            }
+          }
+        }
+      ],
+      ["/api/v1/flows/flow-1/runs/run-1/", { method: "get" }],
+      ["/api/v1/flows/flow-1/runs/run-1/steps/", { method: "get" }],
+      ["/api/v1/flows/flow-1/runs/run-1/evidence/", { method: "get" }],
+      [
+        "/api/v1/flows/flow-1/runs/run-1/evidence/export",
+        {
+          method: "get",
+          params: { query: { format: "json" } }
+        }
+      ]
+    ]);
+  });
+
   it("calls review checkpoint endpoints from flow-run routes", async () => {
     const fetch = vi.fn(async () => ({ id: "checkpoint-1" }));
     const flows = initFlows({ fetch });
