@@ -5,6 +5,11 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import {
+  CitationSourcesProvider,
+  citationComponents,
+  remarkCitations
+} from "@/components/ai-elements/citation";
+import {
   Message,
   MessageAction,
   MessageActions,
@@ -14,7 +19,13 @@ import {
 import type { EneoUIMessage } from "@/lib/chat/types";
 
 import { ActivityTimeline } from "./activity-timeline";
-import { GeneratedFile, MessageFiles, MessageSources, ToolApprovalCard } from "./message-parts";
+import {
+  GeneratedFile,
+  MessageFiles,
+  MessageSources,
+  mergeSources,
+  ToolApprovalCard
+} from "./message-parts";
 
 /**
  * Renders one conversation message: the activity timeline (reasoning + tool
@@ -40,6 +51,7 @@ export function ChatMessage({
     .map((part) => part.text)
     .join("\n\n");
   const answering = message.metadata?.answeringAssistant ?? (isStreaming ? liveAnswering : null);
+  const sources = mergeSources(message.parts, message.metadata?.webSearchReferences);
 
   return (
     <Message from={message.role}>
@@ -57,7 +69,15 @@ export function ChatMessage({
           }
           if (part.type === "text") {
             return isAssistant ? (
-              <MessageResponse key={index}>{part.text}</MessageResponse>
+              <CitationSourcesProvider key={index} value={sources}>
+                <MessageResponse
+                  className="font-voice text-[15px] leading-[1.7]"
+                  remarkPlugins={[remarkCitations(sources.length, message.id)]}
+                  components={citationComponents}
+                >
+                  {part.text}
+                </MessageResponse>
+              </CitationSourcesProvider>
             ) : (
               <span key={index} className="whitespace-pre-wrap">
                 {part.text}
@@ -88,12 +108,7 @@ export function ChatMessage({
             <GeneratedFile key={file.id} file={file} />
           ))}
       </MessageContent>
-      {isAssistant && (
-        <MessageSources
-          parts={message.parts}
-          webReferences={message.metadata?.webSearchReferences}
-        />
-      )}
+      {isAssistant && <MessageSources sources={sources} idPrefix={message.id} />}
       {isAssistant && textContent && !isStreaming && (
         <MessageActions className="-ml-1.5">
           <MessageAction

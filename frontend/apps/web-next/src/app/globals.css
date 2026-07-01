@@ -67,6 +67,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-jetbrains-mono);
+  --font-voice: var(--font-source-serif);
 }
 
 :root {

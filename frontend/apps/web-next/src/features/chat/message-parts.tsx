@@ -24,23 +24,13 @@ const chipClass =
 const moreButtonClass =
   "text-muted-foreground hover:text-foreground hover:border-ring rounded-lg border px-2.5 py-1.5 text-xs transition-colors";
 
-type SourceChip = { key: string; title: string; url?: string };
+export type SourceChip = { key: string; title: string; url?: string };
 
-/**
- * Unified provenance: knowledge documents and web references shown as one
- * numbered "sources" section, collapsed to the first few behind a show-more
- * toggle. One section instead of two stacked rows.
- */
-export function MessageSources({
-  parts,
-  webReferences
-}: {
-  parts: Part[];
-  webReferences?: { id: string; title: string; url: string }[];
-}) {
-  const t = useTranslations();
-  const [expanded, setExpanded] = useState(false);
-
+/** Merge a message's knowledge documents and web references into one ordered list. */
+export function mergeSources(
+  parts: Part[],
+  webReferences?: { id: string; title: string; url: string }[]
+): SourceChip[] {
   const docs: SourceChip[] = parts
     .filter((part) => part.type === "source-document")
     .map((source) => {
@@ -56,7 +46,17 @@ export function MessageSources({
     title: ref.title || ref.url,
     url: ref.url
   }));
-  const sources = [...docs, ...web];
+  return [...docs, ...web];
+}
+
+/**
+ * Unified provenance: one numbered "sources" section (documents + web) with
+ * show-more. Each chip carries a `{idPrefix}-cite-N` anchor so inline citations
+ * can jump to it.
+ */
+export function MessageSources({ sources, idPrefix }: { sources: SourceChip[]; idPrefix: string }) {
+  const t = useTranslations();
+  const [expanded, setExpanded] = useState(false);
   if (sources.length === 0) return null;
 
   const visible = expanded ? sources : sources.slice(0, CHIPS_COLLAPSE_AT);
@@ -77,18 +77,26 @@ export function MessageSources({
               <span className="truncate">{source.title}</span>
             </>
           );
+          const anchorId = `${idPrefix}-cite-${index + 1}`;
           return source.url ? (
             <a
               key={source.key}
+              id={anchorId}
               href={source.url}
               target="_blank"
               rel="noreferrer"
-              className={chipClass}
+              title={source.title}
+              className={`${chipClass} scroll-mt-24`}
             >
               {body}
             </a>
           ) : (
-            <span key={source.key} className={chipClass}>
+            <span
+              key={source.key}
+              id={anchorId}
+              title={source.title}
+              className={`${chipClass} scroll-mt-24`}
+            >
               {body}
             </span>
           );

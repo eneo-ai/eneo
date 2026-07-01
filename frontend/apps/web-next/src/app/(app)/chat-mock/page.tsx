@@ -34,7 +34,7 @@ const CHART =
 const ANSWER = [
   "## Sammanfattning",
   "",
-  "Er upphandlingspolicy uppfyller **i huvudsak** LOU. Direktupphandlingsgränsen `700 000 kr` stämmer med tröskelvärdet, men tre kommuner avviker på efterannonsering.",
+  "Er upphandlingspolicy uppfyller **i huvudsak** LOU. Direktupphandlingsgränsen `700 000 kr` stämmer med tröskelvärdet[1], men tre kommuner avviker på efterannonsering[2].",
   "",
   "### Avvikelser per kommun",
   "",
