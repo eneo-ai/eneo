@@ -17,8 +17,8 @@
         "@theguild/remark-mermaid": "^0.3.0",
         "classnames": "^2.5.1",
         "next": "15.5.18",
-        "nextra": "^4.6.1",
-        "nextra-theme-docs": "^4.6.1",
+        "nextra": "4.6.1",
+        "nextra-theme-docs": "4.6.1",
         "react": "19.2.7",
         "react-dom": "19.2.7",
       },
@@ -152,6 +152,9 @@
         "svelte": "^5.0.0",
       },
     },
+  },
+  "patchedDependencies": {
+    "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
   },
   "overrides": {
     "cookie": "0.7.2",
