@@ -408,6 +408,20 @@ These decisions are the single source of truth for roadmap-level policy gates. T
 
 Honest target: Flows proper can reach 9/10 pre-production with disciplined execution. A credible 10/10 likely needs staging/load evidence and some production-like usage feedback. Flow AI Builder should not be called 9/10 until the control plane is smaller, deterministic evals exist, and repair/fallback paths are measured or deleted.
 
+## 2026-07-01 Current Status Addendum
+
+This addendum records the state after C9.0-C9.5. It does not replace the existing decision register or stop rules.
+
+| Area | Current status | Roadmap effect |
+|---|---|---|
+| Flow AI Builder release governance | C9.0-C9.4 closed the governance inventory loop for lifecycle, retention, audit vocabulary, global file posture, and repair/fallback branch decisions. | Governance is more explicit, but Builder is still not 9/10. Continue to avoid broad redesign until the next decision point is settled. |
+| Active abandoned Builder session retention | C9.2 implemented expiration in `DataRetentionService` and protected fresh send leases. | This specific retention blocker is closed; do not create a Builder-specific retention service. |
+| Builder-uploaded global `Files` rows | C9.3 accepts retained global rows for first release after Builder session pins are removed. | Not a general privacy/delete proof. Revisit only if product/privacy rejects the posture or a candidate-id source exists. |
+| Builder repair/fallback pruning | C9.4 records no branch as delete-ready without real branch-value data. C9.5 searched available local/log/artifact sources and stopped no-data with no commit. | Do not run another repo-only pruning slice. Either accept current branches for first release, provide a real branch-value dataset/live-eval run, or defer Builder release/simplification. |
+| Honest score | Flows proper is roughly 7.5-8/10; Flow AI Builder is roughly 6/10. | Do not claim 9/10 or 9.5/10. The next work should raise the lowest dimension with evidence, not prose. |
+
+Next decision packet for outside review: `review-artifacts/chatgpt-pro-review-packet-2026-07-01.md`.
+
 ## Prompt Addendum For The Current PG Agent
 
 Use this addendum with the current PG implementation agent:

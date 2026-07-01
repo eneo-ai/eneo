@@ -2267,6 +2267,54 @@
   - Risk is documentation/governance-only. Real branch-value data can supersede this decision and justify a later dedicated source deletion slice.
   - Rollback is low risk: restore the previous Gate 1 packet text and delete this C9.4 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, provider, prompt, file data, or persisted-data rollback is needed.
 
+## C9.5 / ChatGPT Pro Handoff
+
+- Slice id: C9.5 Flow AI Builder real repair/fallback branch-value data review and ChatGPT Pro handoff packet.
+- Findings addressed:
+  - C9.5 searched for real or production-like branch-value evidence after C9.4 recorded that source/test/golden evidence is not enough to prune repair/fallback branches.
+  - The C9.5 plan gate stopped with no source/docs commit because no usable branch-value dataset was found.
+  - The user then requested a current ChatGPT Pro packet, roadmap addendum, and progress entry to decide the next path before more worker slices.
+- Evidence reviewed:
+  - C9.5 plan artifact `.codex/artifacts/codex-exec-c9-5-branch-value-plan-20260701.md:1-12` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `STOP_OR_PROCEED: stop_no_data`, and `COMMIT_RECOMMENDED: no`.
+  - The C9.5 final artifact `.codex/artifacts/codex-exec-c9-5-branch-value-final-20260701.md` is empty because the worker was interrupted during final-gate after the user asked to stop.
+  - C9.4 remains the durable repair/fallback decision record at `review-artifacts/implementation-progress-2026-06-29.md:2221-2268`.
+  - The Gate 1 packet still says no branch is delete-ready without real branch-level value data at `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`.
+- Verification agents used, with verdicts:
+  - Claude peer-loop was attempted for the ChatGPT Pro packet plan, but the process stalled without a usable verdict and was interrupted before it produced an artifact. The user then explicitly required Codex-exec GPT-5.5 instead of Claude.
+  - `[no-peer-review]`: used read-only Codex-exec as the reviewer because the user explicitly limited Claude and requested GPT-5.5.
+  - A transient read-only Codex-exec plan review challenged the first draft and required a compact delta packet, a dated roadmap addendum, and a small progress entry. That terminal output was not preserved as a durable artifact, so this entry treats the applied changes as local review context rather than an auditable gate artifact.
+- Files changed:
+  - `review-artifacts/chatgpt-pro-review-packet-2026-07-01.md`
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - No backend source, tests, migrations, frontend, generated clients, API contracts, runtime behavior, MCP/capability code, provider behavior, prompts, repair logic, retention code, audit code, schema, or file cleanup code changed.
+  - No repair/fallback branch was pruned.
+- Complexity deleted or owner clarified:
+  - The new packet is a delta handoff, not a second roadmap.
+  - It separates durable C9.4 repair/fallback decisions from transient C9.5 no-data orientation.
+  - It explicitly avoids telemetry/eval frameworks, MCP/capability implementation, generic managers, generic file cleanup, or broad Builder redesign as default next work.
+- Architecture delta:
+  - Canonical owner before: the roadmap and Gate 1 packet remained the durable plan, but the existing ChatGPT Pro packet was stale after C9.0-C9.5.
+  - Canonical owner after: `review-artifacts/chatgpt-pro-review-packet-2026-07-01.md` is the outside-review handoff; `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md` remains the roadmap owner; this progress ledger remains the implementation receipt.
+  - Duplicate paths remaining: no new roadmap owner is created. The July packet must be deleted or superseded after ChatGPT Pro feedback is integrated.
+  - 9/10 follow-up candidate: integrate ChatGPT Pro's decisions into the roadmap decision register, then choose one bounded implementation slice.
+  - Decision or measurement needed: decide whether to accept current Builder repair/fallback branches for first release without branch-value data, require a controlled live-eval/staging run, or defer Builder release/simplification.
+  - What not to preserve: stale ChatGPT packet assumptions, no-data interpreted as branch uselessness, optimistic 9/10 ratings, and documentation churn that repeats C9.4 without changing decisions.
+- Honest rating:
+  - Flows proper: roughly 7.5-8/10.
+  - Flow AI Builder: roughly 6/10.
+  - API/data/runtime/test confidence remain below 9/10 until the evidence named in the roadmap exists.
+- Validation commands and results:
+  - `git status --short --branch` -> branch stayed `refactor/flows-clean`; only the intended review-artifact docs plus pre-existing unrelated dirty files were present.
+  - `git check-ignore -v --no-index review-artifacts/chatgpt-pro-review-packet-2026-07-01.md` -> confirmed `.gitignore:114` ignores the new packet by default, so it must be force-staged if committed for branch review.
+  - `rg -n "TODO|TBD|PLACEHOLDER|release-complete|branch-prune-ready" review-artifacts/chatgpt-pro-review-packet-2026-07-01.md review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md` -> no live unresolved markers in the new/changed sections; historical validation-command text remains in older ledger entries.
+  - `git diff --check -- review-artifacts/chatgpt-pro-review-packet-2026-07-01.md review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - Backend pytest, ruff, pyright, frontend tests, generated-client checks, and browser tests were not run because this is a docs-only handoff slice with no source, schema, API, generated-client, runtime, frontend, or test changes.
+- Remaining risk / rollback:
+  - Risk is documentation-only. The main risk is over-trusting an outside-review prompt as proof instead of using it to make decisions.
+  - Rollback is low risk: delete the July ChatGPT packet, remove the 2026-07-01 roadmap addendum, and delete this progress entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, provider, prompt, file data, or persisted-data rollback is needed.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
