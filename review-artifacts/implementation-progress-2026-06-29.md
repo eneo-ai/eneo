@@ -2369,6 +2369,56 @@
   - Risk is documentation/governance-only. If release owners choose to require controlled eval before Builder release instead, revert the C9.6 doc changes and send that eval slice.
   - Rollback is low risk: restore the previous roadmap row, governance next-lane wording, and delete this C9.6 ledger entry. No source, test, schema, API, generated-client, frontend, runtime, retention, audit, MCP, capability, provider, prompt, file data, or persisted-data rollback is needed.
 
+## C9.7
+
+- Slice id: C9.7 Flow AI Builder repair-response truncation boundary.
+- Findings addressed:
+  - First proposal attempts already terminalized explicit provider truncation, but repair completions could still route `finish_reason == "length"` into malformed-tool parsing, JSON/text fallback, forced-tool retry, or generic self-correction failure.
+  - C9.6 accepted bounded fallback branches for first release, but did not exempt deterministic provider-boundary truncation bugs from proper terminal classification.
+- Evidence reviewed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:276-295` already classified first-attempt `choice.finish_reason == "length"` as `planner_output_too_long` / `provider_truncation` before fallback.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:501-503` selected self-correction `response.choices[0]` and went straight to message/tool/text handling before this fix.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:700-706` selected forced-retry `response.choices[0]` and went straight to missing-tool handling before this fix.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:642-653` also calls the shared forced-retry helper from first-attempt proposal submission, so the repair helper needs caller-owned error phase instead of a hard-coded self-correction phase.
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` and `:332-380` already owned `provider_truncation`, `provider_finish_reason`, and the content-free failed-turn payload; no telemetry schema change was needed.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: used read-only Codex-exec gates instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh for this slice.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-7-repair-truncation-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no` for the initial hard-coded self-correction-phase plan. Required guidance was applied: keep the fix in the repair owner, add caller-owned truncation phase to the existing forced-retry request, pass `proposal` phase from `ProposalSubmissionOwner`, and bring loose response doubles up to the normalized completion contract instead of adding source `getattr` compatibility.
+  - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-7-repair-truncation-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKERS: none`, `CHANGES_REQUIRED: none`. Its only Ponytail note was non-blocking test-file line-wrap churn from formatter-aligned edits; no source simplification was required.
+- Red / green proof:
+  - Red before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_forced_tool_retry_after_text_terminalizes_provider_truncation tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_terminalizes_provider_truncation -q'` -> failed as expected. Forced retry returned parse feedback for the truncated malformed tool call; self-correction returned `self_correction_invalid_payload` while telemetry still carried `provider_finish_reason="length"`.
+  - Green after source change: same two tests plus `test_ai_builder_proposal_submission.py::test__retry_forced_proposal_after_text_uses_create_target_for_create_mode` -> pass, 3 passed.
+  - Nearby regression: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q'` -> pass, 87 passed.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Self-correction repair completions whose first choice has explicit `finish_reason == "length"` now return terminal `planner_output_too_long` before tool parsing, text fallback, forced retry, or generic self-correction failure.
+  - Forced-tool retry completions whose first choice has explicit `finish_reason == "length"` now return terminal `planner_output_too_long` before missing-tool, parse, or validation handling.
+  - The shared forced-retry path keeps proposal-phase errors when called from first-attempt proposal submission and self-correction-phase errors when called from self-correction.
+- Complexity deleted or owner clarified:
+  - No fallback branches were pruned and no new provider/telemetry/policy abstraction was added.
+  - `ai_builder_proposal_repair.py` remains the canonical owner for repair response classification; `ai_builder_proposal_telemetry.py` remains the payload owner.
+  - Test response doubles now include `finish_reason`, matching the normalized completion contract instead of forcing source compatibility for under-shaped tests.
+- Architecture delta:
+  - Canonical owner before: first-attempt provider truncation was terminalized in `ProposalSubmissionOwner`, while repair-owner completions could fall through to generic repair/fallback behavior.
+  - Canonical owner after: the repair owner enforces the same explicit truncation invariant at both repair completion boundaries, and the shared forced-retry request carries the caller's existing error phase.
+  - Duplicate paths remaining: JSON/text fallback, forced-tool retry, self-correction, direct terminal classifiers, and architecture-error paths remain for non-truncation behavior by the C9.6 first-release posture.
+  - What not to preserve: explicit provider truncation entering repair parsing/fallback, heuristic truncation guesses, source compatibility for incomplete test doubles, or broad Builder provider abstraction work.
+- Validation commands and results:
+  - `.venv/bin/pytest` was used because `uv` is not on PATH in the devcontainer; no tools were installed and no environment config was changed.
+  - Focused red/green and nearby regression commands are recorded above.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py && .venv/bin/ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py'` -> pass.
+  - `backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / rollback:
+  - Risk is limited to repair-response terminal classification. Non-length finish reasons and empty-choice paths are unchanged.
+  - Rollback is low risk: remove `_provider_truncation_error_event`, the two `finish_reason == "length"` checks, the `truncation_error_phase` field and proposal caller assignment, the focused tests, and this C9.7 ledger entry.
+  - Exact next bounded recommendation: PG-10b remains the next separate code slice unless final review uncovers a sharper Builder blocker.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

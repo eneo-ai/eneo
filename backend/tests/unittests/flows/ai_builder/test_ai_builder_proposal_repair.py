@@ -112,7 +112,12 @@ def _single_failed_turn_payload(
     return payloads[0]
 
 
-def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNamespace:
+def _tool_response(
+    *,
+    tool_name: str,
+    arguments: dict[str, object],
+    finish_reason: str = "tool_calls",
+) -> SimpleNamespace:
     tool_call = SimpleNamespace(
         id="call_create",
         function=SimpleNamespace(
@@ -121,7 +126,7 @@ def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNam
         ),
     )
     message = SimpleNamespace(content=None, tool_calls=[tool_call])
-    choice = SimpleNamespace(message=message)
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
     return SimpleNamespace(choices=[choice])
 
 
@@ -136,7 +141,15 @@ def _bad_tool_response(call_index: int) -> SimpleNamespace:
         ),
     )
     message = SimpleNamespace(content="", tool_calls=[tool_call])
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason="tool_calls")]
+    )
+
+
+def _truncated_response(*, message: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason="length")]
+    )
 
 
 def _original_tool_call() -> SimpleNamespace:
@@ -543,7 +556,8 @@ async def test_run_forced_tool_retry_after_text_preserves_forced_payload_parse_f
     response = SimpleNamespace(
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content=None, tool_calls=[tool_call])
+                message=SimpleNamespace(content=None, tool_calls=[tool_call]),
+                finish_reason="tool_calls",
             )
         ]
     )
@@ -564,6 +578,83 @@ async def test_run_forced_tool_retry_after_text_preserves_forced_payload_parse_f
     assert "Invalid tool call arguments:" in result.feedback
     assert "Expecting property name enclosed" in result.feedback
     assert result.failure_kind == "parse"
+
+
+@pytest.mark.asyncio
+async def test_run_forced_tool_retry_after_text_terminalizes_provider_truncation() -> (
+    None
+):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-forced-truncated",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    tool_call = SimpleNamespace(
+        id="call_truncated",
+        function=SimpleNamespace(
+            name=PROPOSE_FLOW_TOOL_NAME,
+            arguments="{not json MODEL OUTPUT SECRET",
+        ),
+    )
+    response = _truncated_response(
+        message=SimpleNamespace(
+            content="MODEL OUTPUT SECRET",
+            tool_calls=[tool_call],
+        )
+    )
+
+    async def call_proposal_completion(
+        request: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason="length",
+            usage=_make_usage(prompt_tokens=5, completion_tokens=7, total_tokens=12),
+            counts_as_repair=request.counts_as_repair,
+        )
+        return response
+
+    process_invocation = AsyncMock()
+    request = _make_forced_tool_after_text_request(
+        assistant_text="Här är mitt förslag.",
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+        request_id="req-forced-truncated",
+        correction_messages=[{"role": "user", "content": "Build flow USER SECRET"}],
+    )
+    session_id = request.ctx.session_id
+
+    with _captured_proposal_telemetry() as telemetry_records:
+        result = await run_forced_tool_retry_after_text(request)
+
+    process_invocation.assert_not_awaited()
+    assert result.feedback is None
+    assert result.failure_kind is None
+    assert result.events is not None
+    wire_events = _wire_events(result.events)
+    assert [event["event"] for event in wire_events] == ["error"]
+    payload = json.loads(wire_events[0]["data"])
+    assert payload["code"] == "planner_output_too_long"
+    assert payload["phase"] == "self_correction"
+    assert payload["request_id"] == "req-forced-truncated"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-forced-truncated"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "provider_truncation"
+    assert failed_payload["repair_attempts"] == 1
+    assert failed_payload["llm_calls"] == 1
+    assert failed_payload["prompt_tokens"] == 5
+    assert failed_payload["completion_tokens"] == 7
+    assert failed_payload["total_tokens"] == 12
+    assert failed_payload["final_failure_kind"] == "provider_truncation"
+    assert failed_payload["final_error_code"] == "planner_output_too_long"
+    assert failed_payload["provider_finish_reason"] == "length"
+    encoded_payload = json.dumps(failed_payload, default=str)
+    assert "USER SECRET" not in encoded_payload
+    assert "MODEL OUTPUT SECRET" not in encoded_payload
 
 
 @pytest.mark.asyncio
@@ -811,7 +902,8 @@ async def test_run_tool_self_correction_emits_error_event_when_planner_bails_to_
                         "Säg bara 'OK, platta ut JSON-fälten' så bygger jag om planen."
                     ),
                     tool_calls=None,
-                )
+                ),
+                finish_reason="stop",
             )
         ]
     )
@@ -878,7 +970,8 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
                 message=SimpleNamespace(
                     content="Här är en korrigerad plan.",
                     tool_calls=None,
-                )
+                ),
+                finish_reason="stop",
             )
         ]
     )
@@ -1048,6 +1141,82 @@ async def test_run_tool_self_correction_handles_empty_completion_choices() -> No
 
 
 @pytest.mark.asyncio
+async def test_run_tool_self_correction_terminalizes_provider_truncation() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-repair-truncated",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    tool_call = SimpleNamespace(
+        id="call_truncated_repair",
+        function=SimpleNamespace(
+            name=PROPOSE_FLOW_TOOL_NAME,
+            arguments="{not json MODEL OUTPUT SECRET",
+        ),
+    )
+    response = _truncated_response(
+        message=SimpleNamespace(
+            content="MODEL OUTPUT SECRET",
+            tool_calls=[tool_call],
+        )
+    )
+
+    async def call_proposal_completion(
+        request: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        tracker.record_response(
+            finish_reason="length",
+            usage=_make_usage(prompt_tokens=6, completion_tokens=8, total_tokens=14),
+            counts_as_repair=request.counts_as_repair,
+        )
+        return response
+
+    process_invocation = AsyncMock()
+    request = _make_self_correction_request(
+        request_id="req-repair-truncated",
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow USER SECRET"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        repair_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+    session_id = request.ctx.session_id
+
+    with _captured_proposal_telemetry() as telemetry_records:
+        events = _wire_events(
+            [event async for event in run_tool_self_correction(request)]
+        )
+
+    process_invocation.assert_not_awaited()
+    assert [event["event"] for event in events] == ["status", "error"]
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "planner_output_too_long"
+    assert payload["phase"] == "self_correction"
+    assert payload["request_id"] == "req-repair-truncated"
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-repair-truncated"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "provider_truncation"
+    assert failed_payload["repair_attempts"] == 1
+    assert failed_payload["llm_calls"] == 1
+    assert failed_payload["prompt_tokens"] == 6
+    assert failed_payload["completion_tokens"] == 8
+    assert failed_payload["total_tokens"] == 14
+    assert failed_payload["final_failure_kind"] == "provider_truncation"
+    assert failed_payload["final_error_code"] == "planner_output_too_long"
+    assert failed_payload["provider_finish_reason"] == "length"
+    encoded_payload = json.dumps(failed_payload, default=str)
+    assert "USER SECRET" not in encoded_payload
+    assert "MODEL OUTPUT SECRET" not in encoded_payload
+
+
+@pytest.mark.asyncio
 async def test_run_tool_self_correction_invalid_tool_result_logs_failed_turn() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-quality-repair",
@@ -1109,7 +1278,10 @@ async def test_run_tool_self_correction_missing_tool_response_logs_failed_turn()
     )
     response = SimpleNamespace(
         choices=[
-            SimpleNamespace(message=SimpleNamespace(content="", tool_calls=None)),
+            SimpleNamespace(
+                message=SimpleNamespace(content="", tool_calls=None),
+                finish_reason="stop",
+            ),
         ]
     )
 
@@ -1171,7 +1343,8 @@ async def test_run_tool_self_correction_rejects_malformed_correction_tool_argume
     response = SimpleNamespace(
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content=None, tool_calls=[tool_call])
+                message=SimpleNamespace(content=None, tool_calls=[tool_call]),
+                finish_reason="tool_calls",
             )
         ]
     )
@@ -1229,7 +1402,8 @@ async def test_run_tool_self_correction_retries_forced_retry_validation_feedback
                 message=SimpleNamespace(
                     content="Här är en korrigerad plan.",
                     tool_calls=None,
-                )
+                ),
+                finish_reason="stop",
             )
         ]
     )
@@ -1306,7 +1480,8 @@ async def test_run_tool_self_correction_limits_text_feedback_retry_budget() -> N
                 message=SimpleNamespace(
                     content="Här är en plan med samma fel.",
                     tool_calls=None,
-                )
+                ),
+                finish_reason="stop",
             )
         ]
     )
@@ -1381,7 +1556,8 @@ async def test_run_tool_self_correction_still_yields_text_for_legitimate_info_re
                 message=SimpleNamespace(
                     content=info_request_text,
                     tool_calls=None,
-                )
+                ),
+                finish_reason="stop",
             )
         ]
     )
@@ -1506,7 +1682,8 @@ async def test_self_correction_forced_text_architecture_error_uses_sanitized_eve
                 message=SimpleNamespace(
                     content="Här är den korrigerade planen.",
                     tool_calls=None,
-                )
+                ),
+                finish_reason="stop",
             )
         ]
     )

@@ -90,6 +90,7 @@ class ForcedToolAfterTextRequest:
     retry_config: ToolRetryConfig
     forced_proposal_temperature: float
     repair_completion: ProposalCompletionFn
+    truncation_error_phase: AIBuilderErrorPhase = AIBuilderErrorPhase.SELF_CORRECTION
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +186,31 @@ def _log_self_correction_validation_failed_turn(
         branch=branch,
         final_failure_kind=_self_correction_terminal_failure_kind(failure_kind),
         final_error_code=_self_correction_error_code(failure_kind),
+    )
+
+
+def _provider_truncation_error_event(
+    *,
+    ctx: ProposalTurnContext,
+    phase: AIBuilderErrorPhase,
+) -> AIBuilderErrorEvent:
+    if ctx.usage_tracker is not None:
+        log_proposal_failed_turn(
+            usage_tracker=ctx.usage_tracker,
+            session_id=ctx.session_id,
+            branch="provider_truncation",
+            final_failure_kind="provider_truncation",
+            final_error_code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG.value,
+        )
+    return build_ai_builder_error_event(
+        message=(
+            "The AI planner output was cut off before it returned a complete "
+            "flow proposal. Try again with a shorter request or a model with "
+            "a larger output limit."
+        ),
+        code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+        phase=phase,
+        request_id=ctx.request_id,
     )
 
 
@@ -499,6 +525,13 @@ async def _request_self_correction_events(
             return
 
         choice = response.choices[0]
+        if choice.finish_reason == "length":
+            yield _provider_truncation_error_event(
+                ctx=ctx,
+                phase=AIBuilderErrorPhase.SELF_CORRECTION,
+            )
+            return
+
         message = choice.message
         assistant_text = _safe_assistant_text(message.content)
 
@@ -701,6 +734,16 @@ async def _execute_forced_tool_retry(
         return ForcedToolRetryOutcome()
 
     choice = response.choices[0]
+    if choice.finish_reason == "length":
+        return ForcedToolRetryOutcome(
+            events=(
+                _provider_truncation_error_event(
+                    ctx=ctx,
+                    phase=request.truncation_error_phase,
+                ),
+            )
+        )
+
     message = choice.message
     if not message.tool_calls:
         return ForcedToolRetryOutcome()

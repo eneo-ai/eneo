@@ -650,6 +650,7 @@ class ProposalSubmissionOwner:
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
                 ),
+                truncation_error_phase=AIBuilderErrorPhase.PROPOSAL,
             )
         )
         return outcome.events

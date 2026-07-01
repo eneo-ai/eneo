@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorPhase
 from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_events import (
     build_status_event,
@@ -242,7 +243,9 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
         {
             "flow_name": "Audio report",
             "plan_rationale": "Create a report from audio.",
-            "steps": [{"name": "Summarize", "instructions": "Summarize the recording."}],
+            "steps": [
+                {"name": "Summarize", "instructions": "Summarize the recording."}
+            ],
         },
         tool_call_id="call-architecture",
     )
@@ -418,9 +421,7 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
     process_edit = AsyncMock(
         return_value=ToolProcessingResult(compiled_proposal=compiled)
     )
-    finalize = AsyncMock(
-        return_value=ToolProcessingResult(events=expected_events)
-    )
+    finalize = AsyncMock(return_value=ToolProcessingResult(events=expected_events))
 
     with (
         patch(
@@ -681,7 +682,9 @@ async def test_create_propose_flow_self_correction_returns_typed_error_when_comp
         tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
     )
 
-    litellm_client.acompletion = AsyncMock(side_effect=RuntimeError("provider unavailable"))
+    litellm_client.acompletion = AsyncMock(
+        side_effect=RuntimeError("provider unavailable")
+    )
     dispatched = submission.dispatch_submission_tool_call(ctx=ctx, tool_call=tool_call)
     assert dispatched is not None
     events = _wire_events([event async for event in dispatched])
@@ -973,9 +976,7 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
-            return_value=ForcedToolRetryOutcome(
-                events=(_plan_stream_event(),)
-            )
+            return_value=ForcedToolRetryOutcome(events=(_plan_stream_event(),))
         ),
     ) as retry_forced_tool:
         result = await submission._retry_forced_proposal_after_text(
@@ -989,6 +990,7 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_kind == TargetKind.CREATE
     assert request.ctx is ctx
+    assert request.truncation_error_phase == AIBuilderErrorPhase.PROPOSAL
     assert "Now call propose_flow" in request.retry_config.forced_tool_prompt
 
 
@@ -1018,9 +1020,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
-            return_value=ForcedToolRetryOutcome(
-                events=(_plan_stream_event(),)
-            )
+            return_value=ForcedToolRetryOutcome(events=(_plan_stream_event(),))
         ),
     ) as retry_forced_tool:
         result = await submission._retry_forced_proposal_after_text(
