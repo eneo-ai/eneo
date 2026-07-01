@@ -379,9 +379,13 @@ These decisions are the single source of truth for roadmap-level policy gates. T
 |---|---|---|---|---|
 | Does Flow AI Builder ship in the first production cut? | Product / Flow AI Builder owner | Builder PG slices and C8 scope | Release intent and feature flag/gating plan. | Do not start Builder-conditional PG work; continue only Flows-proper slices. |
 | Global FastAPI 422 / `GeneralError` contract | API / generated-client owner | C2 API consumer DX and PG-10b | Decide whether main-app `RequestValidationError` becomes `GeneralError`, including generated-client and non-Flow endpoint compatibility. | Do not claim API consumer DX is 9/10 or touch global validation behavior; continue Flow-local contract cleanup. |
+| Create-run dispatch recoverability | Flow runtime owner | C1 runtime reliability and the post-PG-10c next code slice | Decide whether any product/API contract requires transient broker failure during initial run creation to terminalize immediately. | Recommended default is no: prefer recoverable queued runs and stale queued redispatch. Do not add a new dispatch manager; reuse the existing recoverable dispatch owner. |
 | Migration policy for pre-launch Flow/Builder tables | Platform / data owner; user-delegated Codex + Claude decision on 2026-06-30 for this roadmap run | C4 schema cleanup | Use real reversible downgrades when the migration only adds structural, data-preserving DDL such as constraints or indexes; use reset/replay or explicit non-reversibility for lossy migrations; never fabricate deleted or invalid historical state in a downgrade. | Resolved for delegated roadmap execution. Future lossy migrations must name their reset/replay or non-reversible contract before implementation. |
 | JSONB corruption behavior | Flow runtime/data owner | C4 JSONB 9/10 score | Degrade-on-read, reject-before-write, or documented hard failure per envelope. | Do not add broad repair/fallback code; record affected JSONB owners and prove write-time validation where possible. |
 | Evidence export typed summary strategy | Flow API / compliance owner | C2 API consumer DX and PG-D4 | Expand typed parity and version-deprecate/delete legacy open `summary`, or explicitly accept the generated-client weakness. | Do not delete the legacy open `summary`; close typed parity gaps and mark generated-client weakness. |
+| Flow metadata top-level bucket policy | Flow authoring / Builder integration owner | C4 metadata cleanup and Builder materialization tests | Decide which `flows.metadata_json` top-level buckets are first-release contracts. | Recommended default: keep only named owners such as `form_schema`, `care_data_policy`, `wizard`, and explicitly owned Builder metadata. Do not preserve unknown top-level keys or top-level `transcription` by accident. |
+| Template identity cutoff | Flow template asset owner | C5 template identity cleanup | Prove target data has no file-only published template references, or backfill/reset before release. | Recommended default: `flow_template_assets` is canonical; require `template_asset_id` and delete `template_file_id` fallback once audit is green. |
+| `module_registry.metadata_json` ownership | Platform/module owner | C4 JSONB score and registry guard | Decide whether `module_registry` is platform-owned production/shared schema or an unused Flow-adjacent artifact. | If platform-owned, move it out of Flow scoring and give it a platform owner/parser; if unused Flow-only, delete/squash it. |
 | Proposal repair pruning / first-release posture | Flow AI Builder owner | C8 repair simplification | C9.6 accepts current bounded repair/fallback branches for first release after C9.5 found no usable branch-value dataset. Future pruning still requires real branch-value data, a production-like controlled eval, or an explicitly scheduled live-eval artifact proving a branch is dead, harmful, redundant, or replaced. | Resolved for first release only. Do not remove JSON/text fallback, forced-tool retry, self-correction, direct terminal classifiers, or architecture-error paths from static/source/unit/golden evidence. |
 | Builder provider truncation behavior | Flow AI Builder provider-boundary owner | C8 release readiness if Builder ships | `finish_reason == "length"` should produce a typed truncation error before repair, unless a measured exception is deliberately retained. | Do not route truncation into generic repair as a new pattern; classify the gap and keep dependent simplification blocked. |
 | Builder session/plan retention | Product / privacy owner | C8 if Builder ships | Retention/deletion policy for stored Builder conversations, plans, and telemetry. | Do not add new stored Builder payloads beyond the current contract without deletion/count accounting. |
@@ -422,6 +426,53 @@ This addendum records the state after C9.0-C9.6. It does not replace the existin
 | Honest score | Flows proper is roughly 7.5-8/10; Flow AI Builder is roughly 6/10. | Do not claim 9/10 or 9.5/10. The next work should raise the lowest dimension with evidence, not prose. |
 
 Next decision packet for outside review: `review-artifacts/chatgpt-pro-review-packet-2026-07-01.md`.
+
+## 2026-07-01 PG-10c And JSONB Synthesis Addendum
+
+This addendum supersedes the "next code slice" row in the previous C9.0-C9.6 status addendum. PG-10b and PG-10c have now landed locally. The JSONB/data-model research did not change the immediate runtime-first ordering, but it added concrete C4/C5 slices that should not be lost.
+
+Inputs:
+
+- `.codex/artifacts/flows-jsonb-data-model-research-2026-07-01.md`
+- `.codex/artifacts/codex-exec-flows-jsonb-roadmap-synthesis-20260701.md`
+- `.codex/artifacts/flows-data-schema-cleanup-research-2026-07-01.md`
+- `review-artifacts/implementation-progress-2026-06-29.md`
+
+Codex GPT-5.5 xhigh synthesis verdict: `yellow`, with `GREEN_LIGHT: yes` for the ordering below and `no` for any claim that Flows is already 9/10 or release-complete. Claude was explicitly skipped for this review because the user directed `[no-peer-review]` / Codex-exec while Claude was blocked.
+
+Honest current score after PG-10c:
+
+| Area | Current score | Main floor |
+|---|---:|---|
+| Flows proper overall | ~8.0/10 | Runtime recovery, evidence contract cleanup, API-consumer smoke, diagnostics, and JSONB read boundaries. |
+| API consumer DX | ~8.2/10 | Evidence export dual summary contract and full generated-client journey proof. |
+| Runtime reliability | ~7.8/10 | Initial create dispatch is less recoverable than resume/rerun. |
+| Data/schema/JSONB | ~7.8-8.1/10 | Hidden JSONB ownership, `error_json` read corruption policy, metadata bucket ownership, and template identity dual keys. |
+| Observability/error DX | ~7.4/10 | Failure-event helper is tests-only unless wired into real Flow terminal paths. |
+
+Revised roadmap ordering after PG-10c:
+
+| Order | Slice | Why it is next |
+|---:|---|---|
+| 1 | Create-run dispatch recoverability | Initial create broker failure is a first-run reliability defect; resume/rerun already use a recoverable path. Reuse existing stale queued redispatch instead of adding a dispatch manager. |
+| 2 | Evidence export single public summary contract | `summary` plus `summary_typed` is a generated-client-visible duplicate API contract. Delete/rename rather than adding compatibility scaffolding. |
+| 3 | `flow_runs.error_json` read/corruption boundary | First JSONB implementation slice: keep JSONB, but production reads must use the typed parser/corruption policy. |
+| 4 | API/SDK consumer runtime smoke | PG-9 already covers a browser/API/Celery happy path; the remaining proof should be a narrow generated-client/API-engine journey with real dispatch semantics. |
+| 5 | Flow terminal failure event and readable diagnostics | Wire `log_failure_event` into real terminal/dead-letter/dispatch-failure paths with sanitized fields, or delete the tests-only contract. |
+| 6 | Executable JSONB ownership guard | Strengthen registry tests so non-deferred Flow rows resolve to real model/parser/dumper/callable probes; do not add pass-through symbols only to satisfy tests. |
+| 7 | Flow metadata top-level ownership | Reject, drop, or explicitly type unowned top-level `metadata_json` keys before release. |
+| 8 | Template identity cleanup | After audit/backfill/reset proof, require `template_asset_id` and delete `template_file_id` fallback from publish/runtime/readiness/tests. |
+| 9 | `module_registry.metadata_json` owner/delete decision | Move it to platform ownership and out of Flow scoring, or delete/squash if unused. |
+| 10 | Remaining targeted JSONB guardrails | Runtime payloads, review checkpoint payloads, provenance, and package imports stay JSONB unless future query/lifecycle/FK pressure appears. |
+
+JSONB policy from the synthesis:
+
+- Keep JSONB for flow-defined runtime payloads, step contracts/config, immutable published definitions, review checkpoint payloads, provenance/model parameters, package imports, and bounded derived snapshots.
+- Move to relational columns/tables only when the value has identity, lifecycle, FK/query/index pressure, retention/audit semantics, or authorization behavior.
+- Delete/squash unreleased Flow-only duplicate JSON shapes when reset/replay is safe. Do not preserve compatibility paths for imaginary production users.
+- Treat template identity as the real relational candidate because `flow_template_assets` already owns the identity; do not create a new resolver layer.
+
+Projected score if the revised roadmap lands: Flows proper roughly 8.7-8.9/10. Do not claim 9.5/10 until queue saturation/crash evidence, full API-consumer journey proof, observability wiring, data/schema owner enforcement, and no known dead compatibility paths are all green.
 
 ## Prompt Addendum For The Current PG Agent
 

@@ -2524,6 +2524,56 @@
   - Rollback is straightforward: restore the old 422 branch in `getReadableMessage()`, remove the focused tests, and remove this ledger entry.
   - Exact next bounded recommendation: create-run dispatch recoverability, then evidence export single summary contract, runtime golden smoke, and `flow_runs.error_json` parser/corruption policy.
 
+## 2026-07-01 Flows JSONB/Data-Model Roadmap Synthesis
+
+- Purpose:
+  - Research Flow-owned JSONB fields before sending more implementation prompts, specifically whether hidden JSONB schema should move into relational tables/columns before release.
+  - Decide whether JSONB/data-model work should preempt the post-PG-10c runtime/API roadmap.
+- Artifacts produced and reviewed:
+  - `.codex/artifacts/flows-jsonb-data-model-research-2026-07-01.md`
+  - `.codex/artifacts/codex-exec-flows-jsonb-data-model-research-run-20260701.log`
+  - `.codex/artifacts/codex-exec-flows-jsonb-roadmap-synthesis-20260701.md`
+  - Existing comparison inputs: `.codex/artifacts/flows-data-schema-cleanup-research-2026-07-01.md`, `.codex/artifacts/codex-exec-flows-next-slice-synthesis-20260701.md`, and `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md`.
+- Verification agents used, with verdicts:
+  - `[no-peer-review]`: Claude and Antigravity were not invoked because the user explicitly directed Codex-exec GPT-5.5 xhigh while Claude was blocked/limited.
+  - Read-only Codex-exec JSONB research returned `yellow` and rated Flow JSONB/data-model maintainability around `7.7/10`, with the core warning that the problem is hidden schema without executable ownership, not JSONB itself.
+  - Read-only Codex-exec roadmap synthesis returned `VERDICT: yellow`, `GREEN_LIGHT: yes` for the revised ordering, and `no` for claims that Flows is already 9/10 or release-complete.
+- Source claims spot-verified by the supervisor:
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:39-49` stores `envelope_name` as a plain string; `backend/tests/unittests/flows/test_flow_jsonb_ownership.py:49-62` imports only the owner module and does not prove the named model/parser exists.
+  - `backend/src/intric/flows/flow_run_error.py:115-124` has `dump_flow_run_error` and `parse_flow_run_error`, but `backend/src/intric/flows/domain/flow.py:198-201` hydrates `FlowRun.error` directly from the `error_json` alias.
+  - `backend/src/intric/flows/flow_metadata.py:50-76` allows extras for form schema and top-level Flow metadata, preserving unowned top-level buckets.
+  - `backend/src/intric/flows/application/flow_service.py:911-916` still publishes both `template_asset_id` and `template_file_id`; `backend/src/intric/flows/runtime/template_fill_runtime.py:284-309` and `:350-383` still accept file-id fallback.
+  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:447-458` marks `module_registry.metadata_json` as deferred inventory rather than a Flow-owned JSONB contract.
+- Revised roadmap after PG-10c:
+  1. Create-run dispatch recoverability.
+  2. Evidence export single public summary contract.
+  3. `flow_runs.error_json` read/corruption boundary.
+  4. API/SDK consumer runtime smoke.
+  5. Flow terminal failure event and readable diagnostics.
+  6. Executable JSONB ownership guard.
+  7. Flow metadata top-level ownership.
+  8. Template identity cleanup.
+  9. `module_registry.metadata_json` owner/delete decision.
+  10. Remaining targeted JSONB guardrails.
+- JSONB policy:
+  - Keep JSONB for dynamic flow-defined payloads, immutable published snapshots, review checkpoint payloads, provenance, package import state, and bounded derived snapshots when they have real typed owners and corruption behavior.
+  - Do not relationalize dynamic payloads just because they are JSONB; that would create brittle table sprawl.
+  - Move or delete JSONB only when the value has independent identity, lifecycle, FK/query/index pressure, retention/audit semantics, authorization behavior, or unreleased duplicate compatibility shape.
+  - Template identity is the concrete relational/delete candidate because `flow_template_assets` already owns the identity and `template_file_id` is now duplicate fallback.
+- Honest rating:
+  - Flows proper after PG-10c: roughly `8.0/10`.
+  - API consumer DX: roughly `8.2/10`.
+  - Runtime reliability: roughly `7.8/10`.
+  - Data/schema/JSONB: roughly `7.8-8.1/10`.
+  - Observability/error DX: roughly `7.4/10`.
+  - If the revised roadmap lands cleanly, Flows proper may reach roughly `8.7-8.9/10`; do not claim 9.5/10 until runtime/load/crash, generated-client journey, observability, data/schema ownership, and dead-compatibility deletion gates are green.
+- Architecture delta:
+  - Canonical owner clarified: Flow JSONB ownership stays in the existing registry/parser modules, but registry claims must become executable instead of documentation-only.
+  - Duplicate paths remaining: evidence export `summary`/`summary_typed`, template `template_asset_id`/`template_file_id`, tests-only failure-event contract, unowned metadata buckets, and deferred `module_registry.metadata_json`.
+  - What not to preserve: broad "move all JSONB to tables" work, generic JSONB frameworks, compatibility shims for unreleased Flow-only shapes, or tests that preserve hidden metadata/fallback behavior after the owner decision is made.
+- Roadmap files updated:
+  - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md` now records the post-PG-10c JSONB synthesis addendum and decision-register rows for create-run dispatch, metadata buckets, template identity cutoff, and `module_registry.metadata_json`.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2
