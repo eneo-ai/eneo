@@ -9,8 +9,9 @@ from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import auth
 from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import ModelId, PaginatedResponse
-from eneo.modules.module import ModuleBase, ModuleInDB
+from eneo.modules.module import ModuleBase, ModuleClientConfig, ModuleInDB
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantInDB
@@ -48,6 +49,29 @@ async def add_module(module: ModuleBase, container: _Container) -> ModuleInDB:
     module_repo = container.module_repo()
     # Note: Global module addition is system-level - no tenant-specific audit logging
     return await module_repo.add(module)
+
+
+@router.patch(
+    "/{module_id}/client-config/",
+    response_model=ModuleInDB,
+    description=(
+        "Set a module's auth-broker client config: the exact-match redirect "
+        "URI allowlist and the sk_ service key allowed to exchange its "
+        "login tickets."
+    ),
+    responses=responses.get_responses([404]),
+)
+async def update_module_client_config(
+    module_id: UUID,
+    config: ModuleClientConfig,
+    container: _Container,
+) -> ModuleInDB:
+    module_repo = container.module_repo()
+    module = await module_repo.update_client_config(module_id, config)
+    if module is None:
+        raise NotFoundException("Module not found.")
+
+    return module
 
 
 @router.post(

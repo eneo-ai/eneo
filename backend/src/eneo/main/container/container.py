@@ -288,6 +288,7 @@ from eneo.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
+from eneo.modules.module_auth import ModuleAuthBroker
 from eneo.modules.module_repo import ModuleRepository
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.runtime import object_content_runtime
@@ -960,6 +961,14 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    module_auth_broker = providers.Factory(
+        ModuleAuthBroker,
+        redis_client=redis_client,
+        module_repo=module_repo,
+        user_repo=user_repo,
+        auth_service=auth_service,
+        audit_service=audit_service,
     )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,

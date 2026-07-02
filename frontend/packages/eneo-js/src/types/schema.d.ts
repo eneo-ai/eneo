@@ -7517,6 +7517,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/modules/{module_id}/client-config/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Module Client Config
+     * @description Set a module's auth-broker client config: the exact-match redirect URI allowlist and the sk_ service key allowed to exchange its login tickets.
+     */
+    patch: operations["update_module_client_config_api_v1_modules__module_id__client_config__patch"];
+    trace?: never;
+  };
   "/api/v1/modules/{tenant_id}/": {
     parameters: {
       query?: never;
@@ -7531,6 +7551,46 @@ export interface paths {
      * @description Assign a list of modules to a tenant.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/modules/auth/tickets/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Issue Module Ticket
+     * @description Issue a one-time, short-lived login ticket for a module. Requires a session token; the frontend redirects the browser to `redirect_target`, where the module exchanges the ticket server-side.
+     */
+    post: operations["issue_module_ticket_api_v1_modules_auth_tickets__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/modules/auth/token/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Exchange Module Ticket
+     * @description Exchange a one-time login ticket for a short-lived, module-scoped user token. Requires the sk_ service key registered for the ticket's module; the ticket is consumed atomically and cannot be reused.
+     */
+    post: operations["exchange_module_ticket_api_v1_modules_auth_token__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8042,6 +8102,9 @@ export interface components {
       | "prompt_library_entry_deleted"
       | "module_added"
       | "module_added_to_tenant"
+      | "module_client_config_updated"
+      | "module_auth_ticket_issued"
+      | "module_auth_token_exchanged"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -14168,6 +14231,17 @@ export interface components {
       /** Name */
       name: components["schemas"]["Modules"] | string;
     };
+    /**
+     * ModuleClientConfig
+     * @description Auth-broker client config for a module: which callback URLs are allowed
+     *     and which sk_ key alone may exchange the module's login tickets.
+     */
+    ModuleClientConfig: {
+      /** Redirect Uris */
+      redirect_uris?: string[] | null;
+      /** Service Key Id */
+      service_key_id?: string | null;
+    };
     /** ModuleInDB */
     ModuleInDB: {
       /** Name */
@@ -14181,6 +14255,66 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Redirect Uris */
+      redirect_uris?: string[] | null;
+      /** Service Key Id */
+      service_key_id?: string | null;
+    };
+    /** ModuleTicketRequest */
+    ModuleTicketRequest: {
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
+      /** Redirect Uri */
+      redirect_uri: string;
+    };
+    /** ModuleTicketResponse */
+    ModuleTicketResponse: {
+      /** Ticket */
+      ticket: string;
+      /** Redirect Target */
+      redirect_target: string;
+      /** Expires In */
+      expires_in: number;
+    };
+    /** ModuleTokenRequest */
+    ModuleTokenRequest: {
+      /** Ticket */
+      ticket: string;
+    };
+    /** ModuleTokenResponse */
+    ModuleTokenResponse: {
+      /** Access Token */
+      access_token: string;
+      /**
+       * Token Type
+       * @default bearer
+       */
+      token_type?: string;
+      /** Expires In */
+      expires_in: number;
+      /** Module */
+      module: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      user: components["schemas"]["ModuleTokenUser"];
+    };
+    /** ModuleTokenUser */
+    ModuleTokenUser: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Email */
+      email: string;
+      /** Username */
+      username?: string | null;
     };
     /**
      * Modules
@@ -46190,6 +46324,59 @@ export interface operations {
       };
     };
   };
+  update_module_client_config_api_v1_modules__module_id__client_config__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        module_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModuleClientConfig"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   add_module_to_tenant_api_v1_modules__tenant_id___post: {
     parameters: {
       query?: never;
@@ -46225,6 +46412,126 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  issue_module_ticket_api_v1_modules_auth_tickets__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModuleTicketRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleTicketResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  exchange_module_ticket_api_v1_modules_auth_token__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModuleTokenRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleTokenResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

@@ -76,6 +76,7 @@ from eneo.mcp_servers.presentation.mcp_server_router import (
 from eneo.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
+from eneo.modules.module_auth_router import router as module_auth_router
 from eneo.modules.module_router import router as module_router
 from eneo.object_content.deployment_policy_router import (
     router as object_content_deployment_policy_router,
@@ -559,6 +560,7 @@ router.include_router(
 )
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])
+router.include_router(module_auth_router, prefix="/modules", tags=["modules"])
 router.include_router(
     federation_router, prefix="", tags=["authentication"]
 )  # Public auth endpoints (no prefix)
