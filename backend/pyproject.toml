@@ -44,7 +44,7 @@ dependencies = [
     "sentry-sdk[fastapi]==2.8.0",
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.88.1",
+    "litellm==1.90.2",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
     "cryptography>=48.0.1,<49", # For Fernet encryption of HTTP auth passwords
     "httpx~=0.28.0",

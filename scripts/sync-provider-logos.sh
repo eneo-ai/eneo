@@ -28,18 +28,22 @@ RENAME = {
     "fireworks": "fireworks_ai",
     "perplexity-ai": "perplexity",
     "assemblyai_small": "assemblyai",
+    "vercel": "vercel_ai_gateway",
 }
 
 # Skip non-provider files (tools, infra, monitoring, etc.)
 SKIP = {
-    "a2a_agent", "aim_logo", "aim_security", "aporia", "arize", "braintrust",
-    "cometapi", "cursor", "datadog", "enkrypt_ai", "guardrails_ai", "lago",
-    "lakeraai", "langfuse", "langsmith", "langgraph", "lasso", "litellm",
-    "litellm_logo", "llm_guard", "lmstudio", "mcp_logo", "milvus",
-    "noma_security", "openmeter", "otel", "palo_alto_networks", "pangea",
-    "parallel_ai", "pillar", "postgresql", "presidio", "prompt_security",
-    "pydantic", "s3_vector", "secret_detect", "topaz", "v0", "vercel",
-    "github", "github_copilot",
+    "a2a_agent", "aim_logo", "aim_security", "akto", "aporia", "arize",
+    "braintrust", "cato_networks", "cisco", "cometapi", "cursor", "datadog",
+    "enkrypt_ai", "figma", "gitlab", "gmail", "google_drive", "guardrails_ai",
+    "hubspot", "jira", "lago", "lakeraai", "langflow", "langfuse",
+    "langsmith", "langgraph", "lasso", "linear", "litellm", "litellm_logo",
+    "llm_guard", "lmstudio", "mcp_logo", "milvus", "newrelic",
+    "noma_security", "notion", "openmeter", "otel", "palo_alto_networks",
+    "pangea", "parallel_ai", "pillar", "postgresql", "presidio",
+    "prompt_security", "promptguard", "pydantic", "qohash", "repelloai",
+    "s3_vector", "salesforce", "secret_detect", "sentry", "shopify", "slack",
+    "stripe", "topaz", "twilio", "xecguard", "zapier", "github",
 }
 
 
