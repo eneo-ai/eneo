@@ -17,22 +17,22 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.data_retention.infrastructure.data_retention_service import (
+from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from intric.database.tables.app_table import AppRuns, Apps
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.app_table import AppRuns, Apps
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
     BuilderPlans,
     BuilderSessionFiles,
     BuilderSessions,
 )
-from intric.database.tables.questions_table import Questions
-from intric.database.tables.sessions_table import Sessions
-from intric.database.tables.spaces_table import Spaces
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     PlanStatus,
     SessionStatus,
     TargetKind,

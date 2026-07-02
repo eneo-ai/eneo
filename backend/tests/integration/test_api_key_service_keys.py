@@ -17,10 +17,10 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.roles_table import Roles
-from intric.database.tables.users_table import users_roles_table
-from intric.roles.permissions import Permission
-from intric.users.user import UserAdd, UserState
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.users_table import users_roles_table
+from eneo.roles.permissions import Permission
+from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
 # Fixtures

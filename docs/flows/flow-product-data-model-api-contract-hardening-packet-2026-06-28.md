@@ -40,11 +40,11 @@ The Builder plan status enum is public through OpenAPI and the generated TypeScr
 
 | Concept | Current owner |
 |---|---|
-| Builder plan domain status | `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:39` |
-| Builder plan DB check | `backend/src/intric/database/tables/flow_tables.py:2058` |
-| Builder plan proposal JSONB owner | `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:484` |
-| Builder session conversation JSONB | `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:81` and `backend/src/intric/flows/ai_builder/ai_builder_repo.py:473` |
-| Builder session planning state JSONB | `backend/src/intric/flows/ai_builder/planning_state.py:1` and `backend/src/intric/flows/ai_builder/ai_builder_repo.py:961` |
+| Builder plan domain status | `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:39` |
+| Builder plan DB check | `backend/src/eneo/database/tables/flow_tables.py:2058` |
+| Builder plan proposal JSONB owner | `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py:484` |
+| Builder session conversation JSONB | `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:81` and `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:473` |
+| Builder session planning state JSONB | `backend/src/eneo/flows/ai_builder/planning_state.py:1` and `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:961` |
 
 ### Proposed Canonical Owner
 
@@ -65,7 +65,7 @@ Keep ownership where it already belongs:
 | Migration | No new migration; remove `rejected` from the original unreleased AI Builder table-creation migration |
 | JSONB registry | Replace deferred Builder session rows with typed owners and explicit fail-on-session-load corruption behavior |
 | Tests | Add enum/check sync coverage and JSONB positive owner assertions |
-| Generated client | Regenerate `frontend/packages/intric-js/src/types/schema.d.ts` if OpenAPI changes |
+| Generated client | Regenerate `frontend/packages/eneo-js/src/types/schema.d.ts` if OpenAPI changes |
 | Docs | Regenerate generated Flow data schema docs after registry change |
 
 ## What Will Not Change
@@ -95,9 +95,9 @@ The original migration carries a pre-production reset/replay note so future bran
 
 `owner_module` means the module defining the typed model/envelope, not necessarily the repository that writes the column. This batch applies that meaning consistently across the Builder JSONB rows:
 
-- `builder_sessions.conversation` -> `intric.flows.ai_builder.ai_builder_domain_models.ConversationMessage`
-- `builder_sessions.planning_state_jsonb` -> `intric.flows.ai_builder.planning_state.PlanningState`
-- `builder_plans.proposal_json` -> `intric.flows.ai_builder.ai_builder_domain_models.FlowBuilderProposal`
+- `builder_sessions.conversation` -> `eneo.flows.ai_builder.ai_builder_domain_models.ConversationMessage`
+- `builder_sessions.planning_state_jsonb` -> `eneo.flows.ai_builder.planning_state.PlanningState`
+- `builder_plans.proposal_json` -> `eneo.flows.ai_builder.ai_builder_domain_models.FlowBuilderProposal`
 
 ## API And Generated Client Impact
 
@@ -111,8 +111,8 @@ Run at minimum:
 cd backend && uv run pytest tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py
 cd backend && uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_data_schema_is_generated_from_backend_metadata
 cd backend && uv run alembic heads
-cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py alembic/versions/202603121400_add_ai_builder_tables.py
-cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py
+cd backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_domain_models.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py src/eneo/database/tables/flow_tables.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py alembic/versions/202603121400_add_ai_builder_tables.py
+cd backend && uv run pyright src/eneo/flows/ai_builder/ai_builder_domain_models.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py
 PYTHONPATH=scripts python3 -c "from pathlib import Path; from pre_push_check import run_schema_drift_check; run_schema_drift_check(Path.cwd())"
 ```
 
@@ -134,12 +134,12 @@ cd backend && uv run pyright
 | `cd backend && uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_data_schema_is_generated_from_backend_metadata` | passed |
 | `PYTHONPATH=scripts python3 -c "from pathlib import Path; from pre_push_check import run_schema_drift_check; run_schema_drift_check(Path.cwd())"` | passed |
 | `cd backend && uv run alembic heads` | passed; single head `202606281530_builder_state` |
-| `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py alembic/versions/202603121400_add_ai_builder_tables.py` | passed |
-| `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py` | passed |
+| `cd backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_domain_models.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py src/eneo/database/tables/flow_tables.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py alembic/versions/202603121400_add_ai_builder_tables.py` | passed |
+| `cd backend && uv run pyright src/eneo/flows/ai_builder/ai_builder_domain_models.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_jsonb_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/test_flow_enums.py` | passed |
 | `cd backend && uv run pyright` | passed |
 | `cd backend && uv run lint-imports --no-cache` | passed |
 | `cd backend && uv run pytest tests/unittests/flows` | failed in pre-existing PDF renderer tests: 4,561 passed, 10 failed because WeasyPrint cannot load native `libgobject-2.0-0` in this local environment |
-| `cd backend && uv run ruff check src/intric/flows src/intric/database/tables/flow_tables.py tests/unittests/flows tests/integration/flows` | failed on pre-existing import order in `tests/unittests/flows/test_docx_template_runtime.py`, which this batch did not touch |
+| `cd backend && uv run ruff check src/eneo/flows src/eneo/database/tables/flow_tables.py tests/unittests/flows tests/integration/flows` | failed on pre-existing import order in `tests/unittests/flows/test_docx_template_runtime.py`, which this batch did not touch |
 | `cd backend && uv run pytest tests/integration/flows` | failed with 249 passed, 6 failed; failures are in audit outbox, runtime worker, and webhook delivery paths unrelated to Builder plan status/schema ownership |
 
 The failing integration tests were rerun directly and still failed. The observed failure signatures are completion model fixture uniqueness and authored HTTP output-config expectations, not the Builder plan status or JSONB ownership lane.

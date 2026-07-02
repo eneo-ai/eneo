@@ -8,9 +8,9 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 
-from intric.authentication.auth_models import FlowServicePrincipalActorPublic
-from intric.authentication.principal_types import PrincipalType
-from intric.database.tables.flow_tables import (
+from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.flow_tables import (
     FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES,
     FLOW_RUN_RERUN_OPERATION_STATUS_VALUES,
     FlowRunRerunInvalidatedSteps,
@@ -19,9 +19,9 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows.api.flow_models import FlowRunRerunOperationPublic
-from intric.flows.domain.flow import FlowRunRerunOperation, RerunStepInputOverride
-from intric.flows.enums import (
+from eneo.flows.api.flow_models import FlowRunRerunOperationPublic
+from eneo.flows.domain.flow import FlowRunRerunOperation, RerunStepInputOverride
+from eneo.flows.enums import (
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
 )

@@ -5,7 +5,7 @@ import pytest
 from litellm.exceptions import BadRequestError
 from litellm.litellm_core_utils.get_llm_provider_logic import get_llm_provider
 
-from intric.model_providers.infrastructure.litellm_runtime_config import (
+from eneo.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
 )
 
@@ -60,7 +60,7 @@ def test_config_default_request_timeout_tracks_flow_llm_setting(
     bumping `FLOW_LLM_REQUEST_TIMEOUT_SECONDS` to e.g. 900 propagates
     to LiteLLM without code changes.
     """
-    from intric.main.config import get_settings
+    from eneo.main.config import get_settings
 
     settings = get_settings()
     monkeypatch.setattr(settings, "flow_llm_request_timeout_seconds", 777)

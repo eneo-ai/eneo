@@ -3,17 +3,17 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from intric.flows.flow_evidence_policy import (
+from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
 )
-from intric.flows.flow_retention_policy import (
+from eneo.flows.flow_retention_policy import (
     FLOW_RETENTION_POLICY_STORAGE_VERSION,
     FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
 )
-from intric.main.exceptions import BadRequestException
-from intric.settings.setting_service import SettingService
-from intric.settings.settings import (
+from eneo.main.exceptions import BadRequestException
+from eneo.settings.setting_service import SettingService
+from eneo.settings.settings import (
     AIBuilderBudgetSettingsUpdate,
     FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsUpdate,
@@ -71,7 +71,7 @@ class MockTenantRepo:
 
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
-        from intric.tenants.tenant import TenantInDB, TenantState
+        from eneo.tenants.tenant import TenantInDB, TenantState
 
         return TenantInDB(
             id=tenant_id,
@@ -184,6 +184,7 @@ async def test_update_settings():
     assert settings.using_templates == False
     assert repo.settings[TEST_USER.id] == settings_expected
 
+
 async def test_update_settings_creates_row_when_missing():
     repo = MockRepo()
     service = SettingService(
@@ -221,7 +222,7 @@ async def test_get_flow_input_limits_reads_tenant_override(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: SimpleNamespace(
             upload_max_file_size=10_000_000,
             transcription_max_file_size=25_000_000,
@@ -261,7 +262,7 @@ async def test_get_flow_input_limits_resolved_returns_domain_limits(monkeypatch)
     )
 
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: SimpleNamespace(
             upload_max_file_size=10_000_000,
             transcription_max_file_size=25_000_000,
@@ -298,7 +299,7 @@ async def test_update_flow_input_limits_persists_and_audits(monkeypatch):
     audit_service.log_async = _capture
 
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: SimpleNamespace(
             upload_max_file_size=10_000_000,
             transcription_max_file_size=25_000_000,
@@ -346,7 +347,7 @@ async def test_update_flow_input_limits_scrubs_unknown_top_level_flow_settings(
     )
 
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: SimpleNamespace(
             upload_max_file_size=10_000_000,
             transcription_max_file_size=25_000_000,
@@ -385,7 +386,7 @@ async def test_update_flow_input_limits_null_clears_nullable_overrides(monkeypat
     )
 
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: SimpleNamespace(
             upload_max_file_size=10_000_000,
             transcription_max_file_size=25_000_000,
@@ -690,7 +691,7 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
     )
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_settings.get_settings",
+        "eneo.flows.ai_builder.ai_builder_settings.get_settings",
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
@@ -726,7 +727,7 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
     audit_service.log_async = _capture
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_settings.get_settings",
+        "eneo.flows.ai_builder.ai_builder_settings.get_settings",
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
@@ -800,7 +801,7 @@ async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_policy.get_settings",
+        "eneo.flows.flow_runtime_policy.get_settings",
         lambda: SimpleNamespace(
             flow_llm_request_timeout_seconds=600,
             flow_task_timeout_seconds=3600,
@@ -835,7 +836,7 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
 
     audit_service.log_async = _capture
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_policy.get_settings",
+        "eneo.flows.flow_runtime_policy.get_settings",
         lambda: SimpleNamespace(
             flow_llm_request_timeout_seconds=600,
             flow_task_timeout_seconds=3600,

@@ -7,49 +7,49 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_architecture_errors import (
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorPhase
-from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorPhase
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     encode_ai_builder_stream_event,
 )
-from intric.flows.ai_builder.ai_builder_litellm_completion import (
+from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionMessage,
     LLMCompletionToolCall,
     LLMCompletionToolCallFunction,
 )
-from intric.flows.ai_builder.ai_builder_mcp_intent import (
+from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_WITHOUT,
 )
-from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
-from intric.flows.ai_builder.ai_builder_proposal_repair import (
+from eneo.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     build_self_correction_error_event,
 )
-from intric.flows.ai_builder.ai_builder_proposal_submission import (
+from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     _forced_submission_response,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _compiled_edit_proposal,
     _compiled_outline_proposal,
@@ -208,7 +208,7 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction",
             side_effect=_repair_events,
         ),
@@ -265,11 +265,11 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction"
         ) as repair,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -322,11 +322,11 @@ async def test_edit_propose_flow_architecture_error_is_not_translated_to_create_
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction"
         ) as repair,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
             new=process_edit,
         ),
         pytest.raises(AIBuilderArchitectureError),
@@ -359,7 +359,7 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -394,7 +394,7 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -425,7 +425,7 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
             new=process_edit,
         ),
         patch.object(
@@ -462,11 +462,11 @@ async def test_edit_propose_flow_user_message_routes_to_self_correction() -> Non
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
             new=process_edit,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction",
             side_effect=_repair_events,
         ) as repair,
@@ -507,7 +507,7 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch.object(
@@ -566,12 +566,12 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction",
             return_value=_events(),
         ) as repair,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -633,7 +633,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "process_create_intent_arguments",
             new=process_outline,
         ),
@@ -721,8 +721,7 @@ async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() 
         yield build_self_correction_error_event(feedback=None, failure_kind=None)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission."
-        "run_tool_self_correction",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
         side_effect=_repair_events,
     ):
         dispatched = submission.dispatch_submission_tool_call(
@@ -753,7 +752,7 @@ async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
         new=process_edit,
     ):
         dispatched = submission.dispatch_submission_tool_call(
@@ -806,7 +805,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
         new=process_edit,
     ):
         result = await config.process_tool_invocation(invocation)
@@ -869,7 +868,7 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
             new=process_edit,
         ),
         patch.object(
@@ -927,7 +926,7 @@ async def test_edit_propose_flow_preserves_description_advisory_without_completi
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
             new=process_edit,
         ),
         patch.object(
@@ -974,7 +973,7 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
             return_value=ForcedToolRetryOutcome(events=(_plan_stream_event(),))
         ),
@@ -1018,7 +1017,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
             return_value=ForcedToolRetryOutcome(events=(_plan_stream_event(),))
         ),
@@ -1062,8 +1061,7 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
         yield build_status_event("repairing")
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission."
-        "run_tool_self_correction",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
         return_value=_events(),
     ) as repair:
         dispatched = submission.dispatch_submission_tool_call(

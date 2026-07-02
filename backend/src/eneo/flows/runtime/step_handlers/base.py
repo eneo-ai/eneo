@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+from eneo.flows.domain.flow import FlowRun
+from eneo.flows.enums import FlowOutputMode
+from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
+from eneo.flows.runtime.step_execution_runtime import (
+    PreparedStepExecution,
+    StepExecutionRuntimeDeps,
+)
+
+
+@dataclass(frozen=True)
+class PreparedAssistantStep:
+    prepared: PreparedStepExecution
+    deps: StepExecutionRuntimeDeps
+
+
+class PrepareAssistantStepFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: dict[str, object] | None,
+        attempt_no: int,
+    ) -> PreparedAssistantStep: ...
+
+
+class StepHandler(Protocol):
+    @property
+    def output_mode(self) -> FlowOutputMode: ...
+
+    async def execute(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: dict[str, object] | None,
+        attempt_no: int,
+    ) -> StepExecutionResult: ...

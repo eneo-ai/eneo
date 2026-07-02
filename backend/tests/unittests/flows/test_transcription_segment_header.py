@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.runtime.transcription import transcribe_audio_input
+from eneo.flows.runtime.transcription import transcribe_audio_input
 
 
 def _frontend_segment_filename(

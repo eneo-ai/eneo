@@ -5,12 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
-from intric.flows.variable_resolver import (
+from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.variable_resolver import (
     FlowVariableResolver,
     iter_template_expressions,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _result(step_order: int, output_payload: dict) -> FlowStepResult:

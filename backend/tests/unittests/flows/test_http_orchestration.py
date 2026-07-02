@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from intric.flows.runtime.http_orchestration import (
+from eneo.flows.runtime.http_orchestration import (
     deliver_webhook,
     resolve_http_input_source_text,
 )
-from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 
 @dataclass

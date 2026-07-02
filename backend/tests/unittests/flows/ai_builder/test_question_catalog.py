@@ -18,21 +18,21 @@ from typing import get_args
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
+from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     _QUESTION_IMPACT,
 )
-from intric.flows.ai_builder.ai_builder_discovery_families import QUESTION_FAMILY
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
-from intric.flows.ai_builder.ai_builder_discovery_priority import (
+from eneo.flows.ai_builder.ai_builder_discovery_families import QUESTION_FAMILY
+from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
+from eneo.flows.ai_builder.ai_builder_discovery_priority import (
     DISCOVERY_ISSUE_PRIORITY,
 )
-from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
     DiscoveryFamily,
     DiscoveryImpact,
 )
-from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
-from intric.flows.ai_builder.question_catalog import (
+from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
     QUESTION_CATALOG_VERSION,
     QuestionOption,
@@ -1443,7 +1443,7 @@ def _discovery_payload(
     question_id: str,
     locale: DiscoveryLanguage,
 ) -> dict[str, object]:
-    from intric.flows.ai_builder.ai_builder_discovery_questions import (
+    from eneo.flows.ai_builder.ai_builder_discovery_questions import (
         question_suggestion_for_id,
     )
 
@@ -1506,7 +1506,7 @@ class TestSlotBackedDiscoveryQuestionProjection:
         self,
         locale: DiscoveryLanguage,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_discovery_questions import (
+        from eneo.flows.ai_builder.ai_builder_discovery_questions import (
             external_delivery_internal_output_question,
         )
 

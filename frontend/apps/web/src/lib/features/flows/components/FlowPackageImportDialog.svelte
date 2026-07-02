@@ -1,11 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import {
-    IntricError,
-    type FlowPackageDependencyResolution,
-    type Intric
-  } from "@intric/intric-js";
+  import { EneoError, type FlowPackageDependencyResolution, type Eneo } from "@eneo/eneo-js";
   import {
     AlertTriangle,
     CheckCircle2,
@@ -41,11 +37,11 @@
   import { m } from "$lib/paraglide/messages";
 
   let {
-    intric,
+    eneo,
     spaceId,
     spaceRouteId
   }: {
-    intric: Intric;
+    eneo: Eneo;
     spaceId: string;
     spaceRouteId: string;
   } = $props();
@@ -57,7 +53,7 @@
 
   let open = $state(false);
   let selectedFile = $state<File | null>(null);
-  let plan = $state<Awaited<ReturnType<Intric["flows"]["packages"]["createImportPlan"]>> | null>(
+  let plan = $state<Awaited<ReturnType<Eneo["flows"]["packages"]["createImportPlan"]>> | null>(
     null
   );
   let selections = $state<FlowPackageImportSelectionState>({});
@@ -136,7 +132,7 @@
   async function loadImportPlan(file: File, requestId: number, signal: AbortSignal) {
     loadingPlan = true;
     try {
-      const nextPlan = await intric.flows.packages.createImportPlan({ spaceId, file, signal });
+      const nextPlan = await eneo.flows.packages.createImportPlan({ spaceId, file, signal });
       if (!isCurrentPlanLoad(requestId, signal)) return;
       plan = nextPlan;
       selections = createInitialFlowPackageImportSelections(nextPlan);
@@ -144,7 +140,7 @@
       if (!isCurrentPlanLoad(requestId, signal)) return;
       const message =
         mapFlowPackageImportError(error) ??
-        (error instanceof IntricError ? error.getReadableMessage() : String(error));
+        (error instanceof EneoError ? error.getReadableMessage() : String(error));
       loadError = m.flow_package_import_plan_failed({ message });
     } finally {
       if (isCurrentPlanLoad(requestId, signal)) {
@@ -169,7 +165,7 @@
     try {
       const selectedBindings = buildSelectedFlowPackageResourceBindings(plan, selections);
       const packageBase64 = await encodeFlowPackageFileToBase64(selectedFile);
-      const result = await intric.flows.packages.importDraft({
+      const result = await eneo.flows.packages.importDraft({
         spaceId,
         packageBase64,
         selectedBindings
@@ -182,7 +178,7 @@
     } catch (error) {
       const message =
         mapFlowPackageImportError(error) ??
-        (error instanceof IntricError ? error.getReadableMessage() : String(error));
+        (error instanceof EneoError ? error.getReadableMessage() : String(error));
       importError = m.flow_package_import_failed({ message });
     } finally {
       importing = false;

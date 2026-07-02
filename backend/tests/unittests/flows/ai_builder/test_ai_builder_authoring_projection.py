@@ -6,33 +6,33 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
+from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedAddStep as AddStep,
 )
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
+from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedOrderedEditProposal as OrderedEditProposal,
 )
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
+from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     compile_ordered_edit_proposal,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import (
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
 )
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AssistantSpecPatch,
     ModifyExistingStep,
 )
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     OrderedEditProposal as IntentOrderedEditProposal,
 )
-from intric.flows.application.flow_authoring_snapshot import (
+from eneo.flows.application.flow_authoring_snapshot import (
     current_flow_authoring_spec,
     flow_step_to_authoring_spec,
 )
-from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
-from intric.flows.domain.flow import FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -42,8 +42,8 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.main.exceptions import BadRequestException
 
 
 def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:

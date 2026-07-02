@@ -10,14 +10,14 @@ import {
   type Assistant,
   type Conversation,
   type GroupChat,
-  type Intric,
+  type Eneo,
   type Paginated,
   type UploadedFile,
   type ConversationMessage,
-  IntricError,
+  EneoError,
   type ConversationTools,
   type SSE
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 
 export type PendingToolApproval = {
@@ -37,7 +37,7 @@ export class ChatService {
     if ("completion_model" in partner) return this.#partnerEffectiveModel() !== undefined;
     return "tools" in partner && partner.tools?.assistants?.length > 0;
   });
-  #intric: Intric;
+  #eneo: Eneo;
   #toolCallResultCache = new SvelteMap<string, Promise<string | null>>();
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
@@ -55,7 +55,16 @@ export class ChatService {
   // from the last persisted message on conversation load.
   lockedInputTokens = $state<number>(0);
   lockedOutputTokens = $state<number>(0);
-  contextTokens = $derived(this.lockedInputTokens + this.lockedOutputTokens);
+
+  // Assistant baseline applies only before the first turn of a bare assistant
+  // chat. Once a conversation exists, the provider's prompt_tokens for the last
+  // turn already include prompt + persistent attachments.
+  assistantPromptTokens = $state<number>(0);
+  assistantAttachmentTokens = $state<number>(0);
+  assistantBaselineTokens = $derived(this.assistantPromptTokens + this.assistantAttachmentTokens);
+  contextTokens = $derived(
+    this.assistantBaselineTokens + this.lockedInputTokens + this.lockedOutputTokens
+  );
 
   // Cumulative tokens billed over the entire conversation. Each turn re-sends
   // the full prompt (system + RAG + history), so per-message prompt_tokens
@@ -139,6 +148,18 @@ export class ChatService {
     return this.#partnerEffectiveModel()?.name ?? undefined;
   }
 
+  #canRequestAssistantBaseline(
+    partner: ChatPartner | undefined = this.#chatPartner,
+    conversation: Conversation = this.currentConversation
+  ): boolean {
+    if (conversation.id) return false;
+    if (!partner || !("completion_model" in partner)) return false;
+
+    return (
+      selectEffectiveChatModel(partner.completion_model, partner.effective_config) !== undefined
+    );
+  }
+
   #latestMessageTokenLimit(): number | undefined {
     const messages = this.currentConversation?.messages;
     if (!messages?.length) return undefined;
@@ -173,12 +194,12 @@ export class ChatService {
   #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
 
   constructor(data: Parameters<typeof this.init>[0]) {
-    this.#intric = data.intric;
+    this.#eneo = data.eneo;
     this.init(data);
   }
 
   init(data: {
-    intric: Intric;
+    eneo: Eneo;
     chatPartner: ChatPartner;
     initialConversation?: Promise<Conversation | null> | Conversation | null;
     initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
@@ -223,7 +244,7 @@ export class ChatService {
     const cached = this.#toolCallResultCache.get(cacheKey);
     if (cached) return cached;
 
-    const request = this.#intric.conversations
+    const request = this.#eneo.conversations
       .getToolCallResult({ sessionId, toolCallId })
       .then((response) => response.result ?? null)
       .catch((error) => {
@@ -255,11 +276,15 @@ export class ChatService {
     this.lockedOutputTokens = 0;
   }
 
-  #clearPreflight() {
+  #clearPreflight(clearAssistantBaseline = true) {
     this.#preflightGen += 1;
     if (this.#preflightDebounce) {
       clearTimeout(this.#preflightDebounce);
       this.#preflightDebounce = null;
+    }
+    if (clearAssistantBaseline) {
+      this.assistantPromptTokens = 0;
+      this.assistantAttachmentTokens = 0;
     }
     this.pendingInputTokens = 0;
     this.pendingFileTokens = 0;
@@ -277,7 +302,10 @@ export class ChatService {
       clearTimeout(this.#preflightDebounce);
     }
 
-    if (!question && fileIds.length === 0) {
+    const canRequestAssistantBaseline =
+      !tools && this.#canRequestAssistantBaseline(this.#chatPartner, this.currentConversation);
+
+    if (!question && fileIds.length === 0 && !canRequestAssistantBaseline) {
       this.#clearPreflight();
       return;
     }
@@ -288,7 +316,7 @@ export class ChatService {
 
     this.#preflightDebounce = setTimeout(async () => {
       try {
-        const res = await this.#intric.conversations.preflight({
+        const res = await this.#eneo.conversations.preflight({
           chatPartner: partnerAtStart,
           conversation: conversationAtStart.id ? { id: conversationAtStart.id } : undefined,
           question,
@@ -303,11 +331,20 @@ export class ChatService {
 
         this.pendingInputTokens = res.input_tokens;
         this.pendingFileTokens = res.file_tokens;
+        if (this.#canRequestAssistantBaseline(partnerAtStart, conversationAtStart)) {
+          this.assistantPromptTokens = res.prompt_tokens ?? 0;
+          this.assistantAttachmentTokens = res.assistant_attachment_tokens ?? 0;
+        } else {
+          this.assistantPromptTokens = 0;
+          this.assistantAttachmentTokens = 0;
+        }
         this.pendingModelName = res.model_name;
         this.pendingContextWindow = res.context_window;
       } catch {
         // Silent failure — preflight is best-effort, not a blocker
         if (gen === this.#preflightGen) {
+          this.assistantPromptTokens = 0;
+          this.assistantAttachmentTokens = 0;
           this.pendingInputTokens = 0;
           this.pendingFileTokens = 0;
           this.pendingModelName = "";
@@ -391,7 +428,7 @@ export class ChatService {
       if (args?.reset) {
         this.#nextCursor = null;
       }
-      const response = await this.#intric.conversations.list({
+      const response = await this.#eneo.conversations.list({
         chatPartner: this.#chatPartner,
         pagination: {
           limit: args?.limit ?? PAGINATION.PAGE_SIZE,
@@ -423,7 +460,7 @@ export class ChatService {
 
   async deleteConversation(conversation: { id: string }) {
     try {
-      await this.#intric.conversations.delete(conversation);
+      await this.#eneo.conversations.delete(conversation);
       this.loadedConversations = this.loadedConversations.filter(
         ({ id }) => id !== conversation.id
       );
@@ -440,7 +477,7 @@ export class ChatService {
     const trimmed = (name ?? "").trim();
     if (!trimmed) return;
 
-    await this.#intric.conversations.rename(conversation, { name: trimmed });
+    await this.#eneo.conversations.rename(conversation, { name: trimmed });
 
     this.loadedConversations = this.loadedConversations.map((c) =>
       c.id === conversation.id ? { ...c, name: trimmed } : c
@@ -453,7 +490,7 @@ export class ChatService {
 
   async loadConversation(conversation: { id: string }) {
     try {
-      const loaded = await this.#intric.conversations.get(conversation);
+      const loaded = await this.#eneo.conversations.get(conversation);
       this.currentConversation = loaded;
       this.#seedLockedFromHistory();
       this.#clearPreflight();
@@ -498,7 +535,7 @@ export class ChatService {
       disabledMcpServerIds?: string[]
     ) => {
       // Clear preflight estimate — the message is leaving the input
-      this.#clearPreflight();
+      this.#clearPreflight(false);
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
@@ -516,7 +553,7 @@ export class ChatService {
       };
 
       try {
-        await this.#intric.conversations.ask({
+        await this.#eneo.conversations.ask({
           question,
           chatPartner: this.#chatPartner,
           conversation: { id: this.currentConversation.id },
@@ -601,16 +638,16 @@ export class ChatService {
               if (!ensureCurrentSession(image)) return;
               Object.assign(ref, image);
             },
-            onIntricEvent: (event) => {
+            onEneoEvent: (event) => {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
-              if (event.intric_event_type === "generating_image") {
+              if (event.eneo_event_type === "generating_image") {
                 if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              } else if (event.intric_event_type === "token_usage") {
+              } else if (event.eneo_event_type === "token_usage") {
                 // The backend routes token_usage events through the same SSE
-                // channel as intric events. Reflect them on the live message
+                // channel as eneo events. Reflect them on the live message
                 // so reload-from-history matches the in-memory state, then
                 // expose the running context fill for the UI bar.
                 const usage = (
@@ -625,6 +662,8 @@ export class ChatService {
                 }
                 this.lockedInputTokens = usage.prompt_tokens;
                 this.lockedOutputTokens = usage.completion_tokens;
+                this.assistantPromptTokens = 0;
+                this.assistantAttachmentTokens = 0;
               }
             },
             onToolCall: (event) => {
@@ -785,7 +824,7 @@ export class ChatService {
           // so ConversationInput can restore the user's input.
           console.error(error);
           throw error;
-        } else if (error instanceof IntricError && !ref.answer) {
+        } else if (error instanceof EneoError && !ref.answer) {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
           console.error(error);
@@ -793,7 +832,7 @@ export class ChatService {
         } else {
           // Error during streaming — show inline in the conversation
           let message = "We encountered an error processing your request.";
-          if (error instanceof IntricError) {
+          if (error instanceof EneoError) {
             message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
           } else if (error instanceof Object && "message" in error && "name" in error) {
             message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
@@ -834,7 +873,7 @@ export class ChatService {
     }
 
     try {
-      await this.#intric.conversations.approveTools({
+      await this.#eneo.conversations.approveTools({
         approvalId: this.pendingToolApproval.approvalId,
         decisions
       });
@@ -876,7 +915,7 @@ export class ChatService {
     if (!this.pendingToolApproval) return;
 
     // Submit approval for this tool
-    await this.#intric.conversations.approveTools({
+    await this.#eneo.conversations.approveTools({
       approvalId: this.pendingToolApproval.approvalId,
       decisions: [{ tool_call_id: toolCallId, approved: true }]
     });
@@ -903,7 +942,7 @@ export class ChatService {
     if (!this.pendingToolApproval) return;
 
     // Submit denial for this tool
-    await this.#intric.conversations.approveTools({
+    await this.#eneo.conversations.approveTools({
       approvalId: this.pendingToolApproval.approvalId,
       decisions: [{ tool_call_id: toolCallId, approved: false }]
     });
@@ -949,7 +988,9 @@ function partnerRuntimeSignature(partner: ChatPartner | undefined) {
       available_mcp_server_ids:
         effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
       default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
-      prompt_locked: effectiveConfig?.prompt_locked ?? false
+      prompt_locked: effectiveConfig?.prompt_locked ?? false,
+      prompt_tokens: partner.model_info?.prompt_tokens ?? null,
+      attachment_ids: partner.attachments?.map((attachment) => attachment.id) ?? []
     });
   }
 

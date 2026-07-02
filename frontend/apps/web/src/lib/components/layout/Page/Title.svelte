@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { onMount } from "svelte";
   import { quadInOut } from "svelte/easing";
   import { fly } from "svelte/transition";

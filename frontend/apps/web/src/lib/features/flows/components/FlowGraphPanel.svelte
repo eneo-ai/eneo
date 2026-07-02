@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Flow } from "@intric/intric-js";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconRefresh } from "@intric/icons/refresh";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import type { Flow } from "@eneo/eneo-js";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconRefresh } from "@eneo/icons/refresh";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
 

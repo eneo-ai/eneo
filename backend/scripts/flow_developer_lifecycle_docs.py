@@ -10,7 +10,7 @@ BACKEND_SRC = BACKEND_ROOT / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from intric.flows.enums import (  # noqa: E402
+from eneo.flows.enums import (  # noqa: E402
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     ACTIVE_FLOW_STEP_RESULT_STATUSES,
     FLOW_RUN_STATUS_CAPABILITIES,
@@ -21,10 +21,10 @@ from intric.flows.enums import (  # noqa: E402
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
     render_flow_docs_mermaid_block,
 )
-from intric.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
     FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT,
     FlowDocsRelatedNextraCard,
     render_flow_docs_related_nextra_cards,
@@ -60,92 +60,92 @@ class GoldenPath:
 SOURCE_MODULES: tuple[SourceModule, ...] = (
     SourceModule(
         label="Run status vocabulary",
-        path="backend/src/intric/flows/enums.py",
+        path="backend/src/eneo/flows/enums.py",
         owns="run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states",
     ),
     SourceModule(
         label="Run API adapter",
-        path="backend/src/intric/flows/api/flow_run_execution_router.py",
+        path="backend/src/eneo/flows/api/flow_run_execution_router.py",
         owns="HTTP request parsing, authorization, response assembly, and dispatch scheduling",
     ),
     SourceModule(
         label="Run service",
-        path="backend/src/intric/flows/application/flow_run_service.py",
+        path="backend/src/eneo/flows/application/flow_run_service.py",
         owns="run creation and dispatch request construction",
     ),
     SourceModule(
         label="Run repository",
-        path="backend/src/intric/flows/infrastructure/flow_run_repo.py",
+        path="backend/src/eneo/flows/infrastructure/flow_run_repo.py",
         owns="run claim, queued-to-running transition, active step-result closure, and open-attempt closure",
     ),
     SourceModule(
         label="Runtime task",
-        path="backend/src/intric/flows/runtime/tasks.py",
+        path="backend/src/eneo/flows/runtime/tasks.py",
         owns="worker entrypoint, actor resolution, tracing, and executor construction",
     ),
     SourceModule(
         label="Executor",
-        path="backend/src/intric/flows/runtime/executor.py",
+        path="backend/src/eneo/flows/runtime/executor.py",
         owns="step claim, step execution, review pause, rerun attempt linking, and finalization handoff",
     ),
     SourceModule(
         label="Terminalizer",
-        path="backend/src/intric/flows/application/flow_run_terminalization.py",
+        path="backend/src/eneo/flows/application/flow_run_terminalization.py",
         owns="terminal run status writes, run error writes, active checkpoint cancellation, and active rerun closure",
     ),
     SourceModule(
         label="Run outcome",
-        path="backend/src/intric/flows/runtime/run_outcome.py",
+        path="backend/src/eneo/flows/runtime/run_outcome.py",
         owns="final run outcome selection from current step results",
     ),
     SourceModule(
         label="Review checkpoint repository",
-        path="backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py",
+        path="backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py",
         owns="review checkpoint persistence, state transitions, and run await/resume transitions",
     ),
     SourceModule(
         label="Review checkpoint service",
-        path="backend/src/intric/flows/application/flow_run_review_checkpoint_service.py",
+        path="backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py",
         owns="review API use cases and domain-error to API-error translation",
     ),
     SourceModule(
         label="Review expiry reconciler",
-        path="backend/src/intric/flows/application/flow_review_expiry_reconciliation.py",
+        path="backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py",
         owns="expired review checkpoint reconciliation and run cancellation handoff",
     ),
     SourceModule(
         label="Rerun service",
-        path="backend/src/intric/flows/application/flow_run_rerun_service.py",
+        path="backend/src/eneo/flows/application/flow_run_rerun_service.py",
         owns="rerun request normalization, validation, fingerprinting, and command creation",
     ),
     SourceModule(
         label="Rerun graph",
-        path="backend/src/intric/flows/flow_run_rerun_graph.py",
+        path="backend/src/eneo/flows/flow_run_rerun_graph.py",
         owns="downstream invalidation graph construction",
     ),
     SourceModule(
         label="Rerun repository",
-        path="backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py",
+        path="backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py",
         owns="rerun operation persistence, invalidated-step rows, input overrides, and run reset to queued",
     ),
     SourceModule(
         label="Step input validation",
-        path="backend/src/intric/flows/flow_run_step_inputs.py",
+        path="backend/src/eneo/flows/flow_run_step_inputs.py",
         owns="runtime step input normalization, upload access validation, and binding locks",
     ),
     SourceModule(
         label="Runtime file service",
-        path="backend/src/intric/flows/flow_runtime_file_service.py",
+        path="backend/src/eneo/flows/flow_runtime_file_service.py",
         owns="runtime upload validation and reusable upload registration",
     ),
     SourceModule(
         label="Runtime upload repository",
-        path="backend/src/intric/flows/flow_runtime_upload_repo.py",
+        path="backend/src/eneo/flows/flow_runtime_upload_repo.py",
         owns="runtime upload owner, tenant, flow, and step binding checks",
     ),
     SourceModule(
         label="Step input file rows",
-        path="backend/src/intric/flows/infrastructure/flow_run_step_input_file_rows.py",
+        path="backend/src/eneo/flows/infrastructure/flow_run_step_input_file_rows.py",
         owns="relational run step-input file row construction and insertion",
     ),
 )
@@ -475,7 +475,7 @@ def _render_step_failure_and_upload_binding() -> str:
                 "  }",
             ),
             "",
-            "- `backend/src/intric/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.",
+            "- `backend/src/eneo/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.",
             "- Typed failures go through `_handle_typed_step_failure`; generic exceptions go through `_handle_generic_step_failure`.",
             "- Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.",
             "- Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.",
@@ -542,12 +542,12 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
                 "  Executor->>Terminalizer: terminalize completed, failed, or cancelled",
             ),
             owner_notes=(
-                "`backend/src/intric/flows/api/flow_run_execution_router.py` parses the request and schedules dispatch after commit.",
-                "`backend/src/intric/flows/application/flow_run_service.py` creates the run and dispatch request.",
-                "`backend/src/intric/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.",
-                "`backend/src/intric/flows/infrastructure/flow_run_repo.py` writes queued to running through `mark_running_if_claimable`.",
-                "`backend/src/intric/flows/runtime/executor.py` runs steps and hands terminal outcomes to the terminalizer.",
-                "`backend/src/intric/flows/application/flow_run_terminalization.py` writes terminal run state.",
+                "`backend/src/eneo/flows/api/flow_run_execution_router.py` parses the request and schedules dispatch after commit.",
+                "`backend/src/eneo/flows/application/flow_run_service.py` creates the run and dispatch request.",
+                "`backend/src/eneo/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.",
+                "`backend/src/eneo/flows/infrastructure/flow_run_repo.py` writes queued to running through `mark_running_if_claimable`.",
+                "`backend/src/eneo/flows/runtime/executor.py` runs steps and hands terminal outcomes to the terminalizer.",
+                "`backend/src/eneo/flows/application/flow_run_terminalization.py` writes terminal run state.",
             ),
         ),
         GoldenPath(
@@ -565,9 +565,9 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
                 "  Executor->>Outcome: finalize when no active step remains",
             ),
             owner_notes=(
-                "`backend/src/intric/flows/runtime/executor.py` owns the step loop and failure handling.",
-                "`backend/src/intric/flows/runtime/step_execution_runtime.py` owns handler dispatch.",
-                "`backend/src/intric/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.",
+                "`backend/src/eneo/flows/runtime/executor.py` owns the step loop and failure handling.",
+                "`backend/src/eneo/flows/runtime/step_execution_runtime.py` owns handler dispatch.",
+                "`backend/src/eneo/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.",
             ),
         ),
         GoldenPath(
@@ -589,11 +589,11 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
                 "  API->>Terminalizer: terminalize run as cancelled with flow_review_rejected",
             ),
             owner_notes=(
-                "`backend/src/intric/flows/runtime/executor.py` requests checkpoint opening after a reviewed step completes.",
-                "`backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py` writes checkpoint states and run await/resume transitions.",
-                "`backend/src/intric/flows/application/flow_run_review_checkpoint_service.py` validates review API use cases.",
-                "`backend/src/intric/flows/runtime/tasks.py` executes the queued run after resume dispatch.",
-                "`backend/src/intric/flows/application/flow_review_expiry_reconciliation.py` expires active checkpoints and cancels the run through the terminalizer; `runtime/tasks.py` owns the `flows.reconcile_review_expiry` task.",
+                "`backend/src/eneo/flows/runtime/executor.py` requests checkpoint opening after a reviewed step completes.",
+                "`backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` writes checkpoint states and run await/resume transitions.",
+                "`backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` validates review API use cases.",
+                "`backend/src/eneo/flows/runtime/tasks.py` executes the queued run after resume dispatch.",
+                "`backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py` expires active checkpoints and cancels the run through the terminalizer; `runtime/tasks.py` owns the `flows.reconcile_review_expiry` task.",
             ),
         ),
         GoldenPath(
@@ -614,10 +614,10 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
                 "  Executor->>Repo: link new attempts as invalidated steps rerun",
             ),
             owner_notes=(
-                "`backend/src/intric/flows/application/flow_run_rerun_service.py` normalizes request payloads and fingerprinting.",
-                "`backend/src/intric/flows/flow_run_rerun_graph.py` owns downstream invalidation graph construction.",
-                "`backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py` persists rerun operations and resets the run to queued.",
-                "`backend/src/intric/flows/runtime/executor.py` links rerun invalidated steps to new attempts.",
+                "`backend/src/eneo/flows/application/flow_run_rerun_service.py` normalizes request payloads and fingerprinting.",
+                "`backend/src/eneo/flows/flow_run_rerun_graph.py` owns downstream invalidation graph construction.",
+                "`backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py` persists rerun operations and resets the run to queued.",
+                "`backend/src/eneo/flows/runtime/executor.py` links rerun invalidated steps to new attempts.",
             ),
         ),
     )

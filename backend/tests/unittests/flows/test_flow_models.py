@@ -7,9 +7,9 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.api.flow_models import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowCreateRequest,
     FlowFinalOutputContractPublic,
@@ -33,9 +33,9 @@ from intric.flows.api.flow_models import (
     FormFieldPublic,
     StepRunInput,
 )
-from intric.flows.domain.flow import Flow, FlowRunReviewCheckpoint, FlowSparse
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.enums import (
+from eneo.flows.domain.flow import Flow, FlowRunReviewCheckpoint, FlowSparse
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
@@ -43,11 +43,11 @@ from intric.flows.enums import (
     FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_metadata import FlowFormFieldType
-from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.flow_run_error import FlowRunError
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_metadata import FlowFormFieldType
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.main.exceptions import BadRequestException
 
 _MISSING = object()
 

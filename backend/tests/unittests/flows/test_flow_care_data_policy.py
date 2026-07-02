@@ -1,5 +1,5 @@
-from intric.flows.flow_care_data_policy import resolve_flow_care_data_policy
-from intric.flows.flow_metadata import FlowCareDataPolicy
+from eneo.flows.flow_care_data_policy import resolve_flow_care_data_policy
+from eneo.flows.flow_metadata import FlowCareDataPolicy
 
 
 def test_resolve_flow_care_data_policy_reads_supported_fields() -> None:

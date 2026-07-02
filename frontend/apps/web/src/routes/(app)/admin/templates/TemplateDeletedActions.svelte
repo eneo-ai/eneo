@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { components } from "@intric/intric-js";
-  import { Button, Dropdown } from "@intric/ui";
+  import type { components } from "@eneo/eneo-js";
+  import { Button, Dropdown } from "@eneo/ui";
   import { MoreVertical, Undo, Trash2 } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";

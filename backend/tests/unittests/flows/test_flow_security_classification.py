@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from intric.flows.flow_security_classification import (
+from eneo.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _classification(level: int):

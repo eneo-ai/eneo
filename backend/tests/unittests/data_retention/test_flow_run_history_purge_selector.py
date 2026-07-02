@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.data_retention.infrastructure.data_retention_service import (
+from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 

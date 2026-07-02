@@ -1,4 +1,4 @@
-from intric.main.exceptions import QueryException
+from eneo.main.exceptions import QueryException
 
 
 class TestQueryException:

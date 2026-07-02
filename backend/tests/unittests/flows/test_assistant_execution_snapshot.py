@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.flows.assistant_execution_snapshot import (
+from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
 

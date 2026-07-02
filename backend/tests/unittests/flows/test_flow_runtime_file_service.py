@@ -10,18 +10,18 @@ import pytest
 from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_api_exceptions import FlowBadRequestException
-from intric.flows.flow_input_limits import FlowInputLimits
-from intric.flows.flow_run_contract_service import FlowRunContractService
-from intric.flows.flow_runtime_file_service import FlowRuntimeFileService
-from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
-from intric.main.exceptions import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_run_contract_service import FlowRunContractService
+from eneo.flows.flow_runtime_file_service import FlowRuntimeFileService
+from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
     FileNotSupportedException,
@@ -278,7 +278,7 @@ async def test_step_upload_and_run_contract_share_runtime_input_spec(
         headers={"content-type": "audio/mpeg"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "audio/mpeg",
     )
 
@@ -349,7 +349,7 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/pdf",
     )
 
@@ -425,7 +425,7 @@ async def test_upload_runtime_file_rolls_back_when_binding_insert_fails(
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/pdf",
     )
 
@@ -484,7 +484,7 @@ async def test_upload_rejects_mimetype_not_allowed_for_step_type(monkeypatch) ->
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: None,
     )
 
@@ -533,7 +533,7 @@ async def test_upload_without_content_type_is_rejected_with_allowed_types_hint(
         file=BytesIO(b"fake"),
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: None,
     )
 
@@ -583,7 +583,7 @@ async def test_upload_wraps_file_too_large_with_effective_limit_message(
         headers={"content-type": "audio/mpeg"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: None,
     )
 
@@ -629,7 +629,7 @@ async def test_upload_document_input_uses_file_limit_not_audio_limit(
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/pdf",
     )
 
@@ -667,7 +667,7 @@ async def test_upload_accepts_content_type_with_parameters(monkeypatch) -> None:
         headers={"content-type": "audio/mpeg; charset=binary"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "audio/mpeg",
     )
 
@@ -711,11 +711,11 @@ async def test_upload_offloads_file_inspection_to_thread(monkeypatch) -> None:
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service.asyncio.to_thread",
+        "eneo.flows.flow_runtime_file_service.asyncio.to_thread",
         fake_to_thread,
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service.magic.from_buffer",
+        "eneo.flows.flow_runtime_file_service.magic.from_buffer",
         lambda _chunk, mime=True: "audio/mpeg",
     )
 
@@ -754,7 +754,7 @@ async def test_upload_rejects_when_sniffed_content_type_is_not_allowed(
         headers={"content-type": "audio/mpeg"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/pdf",
     )
 
@@ -799,7 +799,7 @@ async def test_upload_rejects_zero_byte_file_with_clear_error(monkeypatch) -> No
         headers={"content-type": "audio/wav"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: None,
     )
 
@@ -842,7 +842,7 @@ async def test_upload_rejects_declared_type_even_if_sniffed_type_is_allowed(
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "audio/mpeg",
     )
 
@@ -884,7 +884,7 @@ async def test_upload_uses_declared_type_when_sniffer_returns_unknown(
         headers={"content-type": "audio/mpeg"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/octet-stream",
     )
 
@@ -921,7 +921,7 @@ async def test_upload_accepts_declared_audio_mp3_alias(monkeypatch) -> None:
         headers={"content-type": "audio/mp3"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "audio/mpeg",
     )
 
@@ -1010,7 +1010,7 @@ async def test_runtime_file_upload_uses_published_input_not_draft_input(
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/pdf",
     )
 
@@ -1063,7 +1063,7 @@ async def test_runtime_file_upload_rejects_when_published_input_rejects_draft_al
         headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
-        "intric.flows.flow_runtime_file_service._sniff_mimetype",
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
         lambda _upload_file: "application/pdf",
     )
 

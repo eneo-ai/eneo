@@ -8,45 +8,45 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep,
     AssistantSpecPatch,
     ModifyExistingStep,
     OrderedEditProposal,
     SemanticStepIntent,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate as AssistantToCreate,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToDelete as AssistantToDelete,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToUpdate as AssistantToUpdate,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftMaterializationStage,
     compile_flow_draft_changeset,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind as StepChangeKind,
 )
-from intric.flows.application.flow_draft_materialization_executor import (
+from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from intric.flows.assistant_authoring_snapshot import (
+from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -56,15 +56,15 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.main.exceptions import BadRequestException
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -434,7 +434,7 @@ class TestCompileCreateFlow:
         }
 
     def test_form_fields_become_metadata_json(self) -> None:
-        from intric.flows.flow_authoring_spec import (
+        from eneo.flows.flow_authoring_spec import (
             FormFieldSpec,
         )
 
@@ -907,7 +907,7 @@ class TestCompileMetadata:
 
     def test_form_fields_override_existing_form_schema(self) -> None:
         """When spec has form_fields, they replace existing form_schema."""
-        from intric.flows.flow_authoring_spec import (
+        from eneo.flows.flow_authoring_spec import (
             FormFieldSpec,
         )
 
@@ -2683,7 +2683,7 @@ def _compiled_step(
     input_bindings: dict | None = None,
     review_policy: FlowStepReviewPolicy | None = None,
 ) -> Any:
-    from intric.flows.application.flow_draft_materialization import (
+    from eneo.flows.application.flow_draft_materialization import (
         FlowDraftCompiledStep as CompiledStep,
     )
 

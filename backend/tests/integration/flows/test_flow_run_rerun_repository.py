@@ -9,10 +9,10 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.authentication.principal_types import PrincipalType
-from intric.database.database import sessionmanager
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.database import sessionmanager
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRuns,
@@ -21,11 +21,11 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.domain.flow import Flow, FlowStep, RerunStepInputOverride
-from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
-from intric.flows.domain.rerun_exceptions import (
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.domain.flow import Flow, FlowStep, RerunStepInputOverride
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunInvalidTransitionError,
     FlowRunRerunMissingCurrentResultsError,
@@ -34,7 +34,7 @@ from intric.flows.domain.rerun_exceptions import (
     FlowRunRerunStepInputsInvalidError,
     FlowRunRerunStepNotFoundError,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
@@ -43,26 +43,26 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.flow_run_input_envelope import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
 )
-from intric.flows.flow_run_rerun_graph import (
+from eneo.flows.flow_run_rerun_graph import (
     RerunInvalidatedStep,
     build_rerun_invalidation_graph,
 )
-from intric.flows.flow_run_rerun_request import (
+from eneo.flows.flow_run_rerun_request import (
     FlowRunRerunRequestFingerprintInput,
     build_rerun_request_fingerprint,
 )
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.principal import FlowPrincipal
-from intric.flows.published_definition import (
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.published_definition import (
     build_published_definition_json,
     parse_published_runtime_steps,
 )

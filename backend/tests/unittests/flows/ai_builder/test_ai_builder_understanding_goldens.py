@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery import analyze_discovery
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.planning_state_builder import (
+from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 

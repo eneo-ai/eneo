@@ -4,15 +4,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
-from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_post_processing_goal,
     is_high_confidence_source_to_source_comparison,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_framework_policy import (
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
     infer_question_answer_from_freeform,
@@ -32,18 +32,18 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     supported_structured_question_ids,
     terminal_output_uncertainty_is_unresolved,
 )
-from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
-from intric.flows.ai_builder.planning_state_builder import (
+from eneo.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
+from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from intric.flows.ai_builder.question_catalog import (
+from eneo.flows.ai_builder.question_catalog import (
     slot_resolving_legacy_question_ids,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 

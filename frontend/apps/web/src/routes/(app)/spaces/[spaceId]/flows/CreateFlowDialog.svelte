@@ -4,8 +4,8 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
-  import { IconWorkflow } from "@intric/icons/workflow";
-  import { IntricError } from "@intric/intric-js";
+  import { IconWorkflow } from "@eneo/icons/workflow";
+  import { EneoError } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -60,7 +60,7 @@
       showDialog = false;
       reset();
     } catch (error) {
-      createError = error instanceof IntricError ? error.getReadableMessage() : String(error);
+      createError = error instanceof EneoError ? error.getReadableMessage() : String(error);
     }
   }
 </script>

@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
     CompletionModelCreate,
     CompletionModelPublic,
@@ -17,16 +17,16 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModelUpdate,
     ModelKwargs,
 )
-from intric.completion_models.domain.completion_model import (
+from eneo.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
 )
-from intric.completion_models.domain.model_kwargs_capabilities import (
+from eneo.completion_models.domain.model_kwargs_capabilities import (
     snapshot_supported_model_kwargs,
 )
-from intric.completion_models.presentation.completion_model_assembler import (
+from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
-from intric.tenants.tenant import TenantInDB
+from eneo.tenants.tenant import TenantInDB
 
 
 def _completion_model_sparse(**overrides: object) -> CompletionModelSparse:
@@ -251,7 +251,7 @@ def test_invalid_stored_capability_metadata_falls_back(
         provider_type=None,
     )
 
-    logger_name = "intric.completion_models.domain.model_kwargs_capabilities"
+    logger_name = "eneo.completion_models.domain.model_kwargs_capabilities"
     logger = logging.getLogger(logger_name)
     was_disabled = logger.disabled
     # Integration logging setup disables existing loggers; keep this assertion order-independent.

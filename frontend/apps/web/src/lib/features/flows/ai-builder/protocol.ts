@@ -12,7 +12,7 @@ import type {
   AIBuilderStepSpec as GeneratedAIBuilderStepSpec,
   components,
   operations
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 import type { StructuredQuestion } from "./structuredQuestionAnswer";
 
 type SendAIBuilderMessageOperation = operations["send_ai_builder_message"];
@@ -147,7 +147,7 @@ export interface AIBuilderError {
   message: string;
   phase: AIBuilderErrorPhase;
   request_id: string | null;
-  intric_error_code?: number | null;
+  eneo_error_code?: number | null;
   diagnostic_context: AIBuilderDiagnosticContext | null;
   details: AIBuilderErrorDetails;
 }

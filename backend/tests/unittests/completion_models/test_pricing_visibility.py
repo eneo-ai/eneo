@@ -8,12 +8,12 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
     CompletionModelSecurityStatus,
 )
-from intric.completion_models.domain.completion_model import CompletionModel
-from intric.completion_models.presentation.completion_model_assembler import (
+from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
 

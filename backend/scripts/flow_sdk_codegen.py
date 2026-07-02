@@ -14,6 +14,10 @@ def object_freeze_string_array(name: str, values: Sequence[str]) -> list[str]:
 
 
 def string_literal_union_lines(name: str, values: Sequence[str]) -> list[str]:
+    union = " | ".join(json.dumps(value) for value in values)
+    if len(f"  {union};") <= 100:
+        return [f"export type {name} =", f"  {union};"]
+
     lines = [f"export type {name} ="]
     for index, value in enumerate(values):
         terminator = ";" if index == len(values) - 1 else ""

@@ -10,7 +10,7 @@ describe("parseAIBuilderError", () => {
       category: "upstream",
       message: "The AI planner failed. Please try again.",
       phase: "planner",
-      intric_error_code: 9024,
+      eneo_error_code: 9024,
       request_id: "req-1",
       diagnostic_context: {
         request_id: "req-1",

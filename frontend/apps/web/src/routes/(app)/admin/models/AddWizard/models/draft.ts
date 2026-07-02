@@ -11,7 +11,7 @@ import type {
   EmbeddingModel,
   SecurityClassification,
   TranscriptionModel
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 import type { WizardModelDraft } from "../wizardState";
 import { PROVIDER_DEFAULT_HOSTING } from "../../modelProviderCapabilities";
 
@@ -69,7 +69,7 @@ const TOKENS_PER_MILLION = 1_000_000;
  * which independently allows < 10^14 USD per minute. We use a single shared
  * cap for all three fields so the form can validate before the DB rejects.
  *
- * Mirror change: `backend/src/intric/database/tables/ai_models_table.py` —
+ * Mirror change: `backend/src/eneo/database/tables/ai_models_table.py` —
  * keep the `Numeric(...)` precisions and this constant in sync.
  */
 export const MAX_COST_INPUT = 99_999_999_999_999;

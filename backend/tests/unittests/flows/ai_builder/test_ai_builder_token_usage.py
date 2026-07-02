@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from intric.flows.ai_builder import ai_builder_token_usage
-from intric.flows.ai_builder.ai_builder_token_usage import (
+from eneo.flows.ai_builder import ai_builder_token_usage
+from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_ESTIMATE,
     TOKEN_USAGE_SOURCE_PROVIDER,
     completion_token_usage_from_response,

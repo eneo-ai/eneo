@@ -3,37 +3,37 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
     compile_create_steps_to_spec,
 )
-from intric.flows.ai_builder.ai_builder_critic_invariants import (
+from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
     CriticContext,
     evaluate_critic_invariants,
 )
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
-from intric.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
-from intric.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
-from intric.flows.ai_builder.ai_builder_new_step_models import (
+from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
+from eneo.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
+from eneo.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
 )
-from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
-from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ModifyExistingStep,
     OrderedEditProposal,
     parse_create_flow_intent_arguments,
 )
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
-from intric.flows.domain.flow import FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
     InputType,

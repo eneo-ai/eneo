@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from intric.flows.enums import FlowOutputType
-from intric.flows.runtime.output_formats import OUTPUT_FORMAT_SPECS, resolve_format_spec
-from intric.flows.runtime.output_formats.base import append_output_format_instructions
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.enums import FlowOutputType
+from eneo.flows.runtime.output_formats import OUTPUT_FORMAT_SPECS, resolve_format_spec
+from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def _prompt_for(

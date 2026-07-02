@@ -1,6 +1,6 @@
-import type { FlowStep, UploadedFile } from "@intric/intric-js";
+import type { FlowStep, UploadedFile } from "@eneo/eneo-js";
 import type { FlowEditor } from "$lib/features/flows/FlowEditor";
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
 import type { Attachment } from "$lib/features/attachments/AttachmentManager";
 import { SvelteSet } from "svelte/reactivity";
@@ -14,7 +14,7 @@ export type LoadedAssistant = NonNullable<Awaited<ReturnType<FlowEditor["loadAss
  */
 export class FlowStepAssistantState {
   #flowEditor: FlowEditor;
-  #intric: Intric;
+  #eneo: Eneo;
   #attachmentRules: Writable<Record<string, unknown>>;
   #newAttachments: Readable<Attachment[]>;
   #clearUploads: () => void;
@@ -35,14 +35,14 @@ export class FlowStepAssistantState {
 
   constructor(opts: {
     flowEditor: FlowEditor;
-    intric: Intric;
+    eneo: Eneo;
     attachmentRules: Writable<Record<string, unknown>>;
     newAttachments: Readable<Attachment[]>;
     clearUploads: () => void;
     getActiveStep: () => FlowStep | null;
   }) {
     this.#flowEditor = opts.flowEditor;
-    this.#intric = opts.intric;
+    this.#eneo = opts.eneo;
     this.#attachmentRules = opts.attachmentRules;
     this.#newAttachments = opts.newAttachments;
     this.#clearUploads = opts.clearUploads;
@@ -125,7 +125,7 @@ export class FlowStepAssistantState {
     );
     if (uploadStillQueued) {
       try {
-        await this.#intric.files.delete({ fileId: file.id });
+        await this.#eneo.files.delete({ fileId: file.id });
       } catch (error) {
         console.error("Failed to delete newly uploaded attachment file", error);
       }

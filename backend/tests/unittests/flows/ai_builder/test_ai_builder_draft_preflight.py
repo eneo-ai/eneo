@@ -9,14 +9,14 @@ invariant fired.
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_draft_preflight import (
+from eneo.flows.ai_builder.ai_builder_draft_preflight import (
     PreflightResult,
     run_draft_preflight,
 )
-from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

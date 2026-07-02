@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 import {
   FLOW_CITATION_MODE_INLINE_INREF_SIDECAR,

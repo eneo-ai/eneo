@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 from sqlalchemy.exc import IntegrityError
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FLOW_RESOURCE_BINDING_SOURCE_VALUES,
     FLOW_RESOURCE_LOCAL_RESOURCE_KIND_VALUES,
     FLOW_RESOURCE_SLOT_KIND_VALUES,
@@ -17,8 +17,8 @@ from intric.database.tables.flow_tables import (
     FlowResourceBindings,
     Flows,
 )
-from intric.database.tables.tenant_table import Tenants
-from intric.flows.flow_resource_bindings import (
+from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.flow_resource_bindings import (
     RESOURCE_SLOT_LOCAL_KIND_PAIRS,
     RESOURCE_SLOT_PATTERN,
     UUID_SHAPED_RESOURCE_REF_PATTERN,

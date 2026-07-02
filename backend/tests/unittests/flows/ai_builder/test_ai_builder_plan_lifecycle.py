@@ -8,8 +8,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     FlowBuilderEditApproval,
@@ -21,41 +21,41 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
-from intric.flows.application.flow_authoring_command import (
+from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowAuthoringPreview,
     FlowAuthoringResult,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftMaterializationStage,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     InputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _make_user() -> MagicMock:
@@ -883,7 +883,7 @@ class TestAIBuilderPlanLifecycle:
         flow_service.list_flows.assert_not_awaited()
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("eneo.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     async def test_apply_plan_logs_compile_runtime_failure(
         self,
         mock_log_apply_failed,
@@ -937,8 +937,9 @@ class TestAIBuilderPlanLifecycle:
         )
         assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is None
         assert mock_log_apply_failed.call_args.kwargs["materializer_progress"] is None
+
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("eneo.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     async def test_apply_plan_logs_compile_bad_request_code(
         self,
         mock_log_apply_failed,
@@ -983,7 +984,7 @@ class TestAIBuilderPlanLifecycle:
         assert exception.code == "invalid_compiled_spec"
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("eneo.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     async def test_apply_plan_logs_execute_runtime_failure_with_progress(
         self,
         mock_log_apply_failed,
@@ -1083,8 +1084,9 @@ class TestAIBuilderPlanLifecycle:
             flow_created=False,
             flow_updated=False,
         )
+
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("eneo.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     async def test_apply_plan_logs_execute_bad_request_code(
         self,
         mock_log_apply_failed,
@@ -1210,7 +1212,7 @@ class TestAIBuilderPlanLifecycle:
         )
         with patch(
             (
-                "intric.flows.ai_builder.ai_builder_plan_lifecycle."
+                "eneo.flows.ai_builder.ai_builder_plan_lifecycle."
                 "collect_flow_spec_resource_bindings"
             ),
             side_effect=AssertionError("apply must not re-derive bindings"),

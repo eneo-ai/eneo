@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { EmbeddingModel, ModelProviderPublic } from "@intric/intric-js";
+  import type { EmbeddingModel, ModelProviderPublic } from "@eneo/eneo-js";
   import ProviderGroupedModelTable from "./components/ProviderGroupedModelTable.svelte";
 
   export let embeddingModels: EmbeddingModel[];

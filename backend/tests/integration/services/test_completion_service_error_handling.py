@@ -18,10 +18,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import CompletionModel
-from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.database.tables.model_providers_table import ModelProviders
-from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
+from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 
 
 @pytest.fixture

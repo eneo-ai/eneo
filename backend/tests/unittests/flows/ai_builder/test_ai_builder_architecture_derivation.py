@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder import ai_builder_architecture_derivation
-from intric.flows.ai_builder.ai_builder_architecture_derivation import (
+from eneo.flows.ai_builder import ai_builder_architecture_derivation
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
-from intric.flows.ai_builder.planning_state_builder import (
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 

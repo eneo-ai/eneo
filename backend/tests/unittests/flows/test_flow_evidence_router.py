@@ -17,32 +17,32 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import intric.flows.api.flow_trace_audit as flow_trace_audit_module
-from intric.actors.actors.space_actor import SpaceRole
-from intric.audit.domain.action_types import ActionType
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.authentication.signed_urls import verify_signed_token
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api.flow_run_evidence_router import (
+import eneo.flows.api.flow_trace_audit as flow_trace_audit_module
+from eneo.actors.actors.space_actor import SpaceRole
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.authentication.signed_urls import verify_signed_token
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api.flow_run_evidence_router import (
     export_flow_run_evidence,
     get_flow_run_evidence,
 )
-from intric.flows.api.flow_run_steps_router import (
+from eneo.flows.api.flow_run_steps_router import (
     generate_flow_run_artifact_signed_url,
     list_flow_run_steps,
 )
-from intric.flows.application.flow_run_service import FlowRunStepResultWithFiles
-from intric.flows.domain.flow import FlowStepResult
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.main.exceptions import (
+from eneo.flows.application.flow_run_service import FlowRunStepResultWithFiles
+from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
     ErrorCodes,
     UnauthorizedException,
 )
-from intric.main.models import GeneralError
-from intric.roles.permissions import Permission
-from intric.server.exception_handlers import add_exception_handlers
+from eneo.main.models import GeneralError
+from eneo.roles.permissions import Permission
+from eneo.server.exception_handlers import add_exception_handlers
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _evidence_export_payload,
@@ -98,7 +98,7 @@ def test_flow_evidence_raw_reason_error_response_includes_request_id():
     assert (
         error.message == "Raw evidence export requires an explicit non-default reason."
     )
-    assert error.intric_error_code == ErrorCodes.BAD_REQUEST
+    assert error.eneo_error_code == ErrorCodes.BAD_REQUEST
     assert error.code == FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value
     assert error.context == {
         "detail": "raw",
@@ -121,7 +121,7 @@ def test_flow_evidence_audit_failure_error_response_includes_request_id():
     payload = response["payload"]
     error = GeneralError.model_validate(payload)
     assert error.message == "Evidence audit logging is unavailable."
-    assert error.intric_error_code == ErrorCodes.INTERNAL_SERVER_ERROR
+    assert error.eneo_error_code == ErrorCodes.INTERNAL_SERVER_ERROR
     assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
     assert error.context == {"audit_required": True}
     assert error.request_id == "evidence-audit-failure-test"
@@ -766,7 +766,7 @@ async def test_list_flow_run_steps_projects_typed_diagnostics_and_logs_drops(
     monkeypatch,
     caplog,
 ):
-    caplog.set_level(logging.WARNING, logger="intric.flows.api.flow_assembler")
+    caplog.set_level(logging.WARNING, logger="eneo.flows.api.flow_assembler")
     container = MagicMock()
     flow_id = uuid4()
     run_id = uuid4()
@@ -985,7 +985,7 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     )
     _enable_space_access(container)
 
-    from intric.files.file_models import SignedURLRequest
+    from eneo.files.file_models import SignedURLRequest
 
     signed_req = SignedURLRequest(expires_in=300)
 

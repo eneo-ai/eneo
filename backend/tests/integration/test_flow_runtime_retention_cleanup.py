@@ -8,19 +8,19 @@ import pytest
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.data_retention.infrastructure import (
+from eneo.data_retention.infrastructure import (
     data_retention_service as data_retention_service_module,
 )
-from intric.data_retention.infrastructure.data_retention_service import (
+from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_classification_retention_policy_table import (
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_classification_retention_policy_table import (
     FlowClassificationRetentionPolicies,
 )
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunRerunOperations,
@@ -37,16 +37,16 @@ from intric.database.tables.flow_tables import (
     FlowTemplateAssets,
     FlowVersions,
 )
-from intric.database.tables.security_classifications_table import SecurityClassification
-from intric.database.tables.spaces_table import Spaces
-from intric.database.tables.tenant_table import Tenants
-from intric.flows.domain.flow import FlowPersistedJsonObject
-from intric.flows.enums import (
+from eneo.database.tables.security_classifications_table import SecurityClassification
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.enums import (
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
 )
-from intric.flows.flow_retention_tombstone import (
+from eneo.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
     FlowAttemptRetentionMarker,
     RunDebugAttemptRetentionCounts,
@@ -1914,7 +1914,7 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_uses_retention_batche
     flow_retention_service: DataRetentionService,
 ):
     monkeypatch.setattr(
-        "intric.data_retention.infrastructure.data_retention_service.RETENTION_BATCH_SIZE",
+        "eneo.data_retention.infrastructure.data_retention_service.RETENTION_BATCH_SIZE",
         2,
     )
     outbox_ids = []

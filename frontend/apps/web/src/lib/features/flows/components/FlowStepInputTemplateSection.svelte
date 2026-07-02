@@ -1,11 +1,11 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { IconQuestionMark } from "@intric/icons/question-mark";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { slide } from "svelte/transition";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import { INPUT_SOURCE_LABELS } from "./flowStepEditHelpers";

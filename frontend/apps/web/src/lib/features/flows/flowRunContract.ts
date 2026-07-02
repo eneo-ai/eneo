@@ -1,4 +1,4 @@
-import type { FlowRunContractTemplateReadiness, FlowRunStepInputs } from "@intric/intric-js";
+import type { FlowRunContractTemplateReadiness, FlowRunStepInputs } from "@eneo/eneo-js";
 import {
   getFlowFormFieldRuntimeKey,
   type NormalizedFlowFormField

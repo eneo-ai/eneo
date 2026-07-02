@@ -66,7 +66,7 @@ function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderE
     message: "Plan changed",
     phase: "router",
     request_id: "req-test",
-    intric_error_code: 9007,
+    eneo_error_code: 9007,
     diagnostic_context: null,
     details: {},
     ...overrides
@@ -105,7 +105,7 @@ describe("FlowAIBuilderService", () => {
       message: "Something failed",
       phase: "client",
       request_id: null,
-      intric_error_code: null
+      eneo_error_code: null
     });
     const applyResult: ApplyResult = {
       flow_id: "flow-1",

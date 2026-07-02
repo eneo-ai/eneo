@@ -1,12 +1,12 @@
 from unittest.mock import patch
 
-from intric.model_providers.domain.model_defaults import lookup_model_defaults
-from intric.model_providers.presentation.model_provider_router import get_model_defaults
+from eneo.model_providers.domain.model_defaults import lookup_model_defaults
+from eneo.model_providers.presentation.model_provider_router import get_model_defaults
 
 
 def test_lookup_model_defaults_exact_match():
     with patch(
-        "intric.model_providers.domain.model_defaults._get_model_cost",
+        "eneo.model_providers.domain.model_defaults._get_model_cost",
         {
             "gpt-5.4": {
                 "max_input_tokens": 1_050_000,
@@ -27,7 +27,7 @@ def test_lookup_model_defaults_exact_match():
 
 def test_lookup_model_defaults_prefixed_match():
     with patch(
-        "intric.model_providers.domain.model_defaults._get_model_cost",
+        "eneo.model_providers.domain.model_defaults._get_model_cost",
         {
             "azure/gpt-4o": {
                 "max_input_tokens": 128_000,
@@ -47,7 +47,7 @@ def test_lookup_model_defaults_prefixed_match():
 
 async def test_get_model_defaults_endpoint_returns_found_payload():
     with patch(
-        "intric.model_providers.domain.model_defaults._get_model_cost",
+        "eneo.model_providers.domain.model_defaults._get_model_cost",
         {
             "gpt-5.2": {
                 "max_input_tokens": 272_000,

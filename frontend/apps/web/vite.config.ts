@@ -6,21 +6,22 @@ import { paraglideVitePlugin } from "@inlang/paraglide-js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { intricIcons } from "@intric/ui/icons/vite-plugin-intric-icons";
+import { eneoIcons } from "@eneo/ui/icons/vite-plugin-eneo-icons";
 
 const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
 const pkg = JSON.parse(json);
+const browserTarget = "es2022";
 
 export default defineConfig(({ mode }) => ({
   cacheDir: process.env.VITEST ? "node_modules/.vitest" : "node_modules/.vite-web",
   build: {
-    target: "es2022",
+    target: browserTarget,
     reportCompressedSize: false
   },
   optimizeDeps: {
     esbuildOptions: {
-      target: "es2022"
+      target: browserTarget
     }
   },
   resolve:
@@ -36,7 +37,7 @@ export default defineConfig(({ mode }) => ({
       strategy: ["url", "cookie", "baseLocale"]
     }) as PluginOption,
     tailwindcss() as PluginOption,
-    intricIcons() as PluginOption,
+    eneoIcons() as PluginOption,
     sveltekit() as PluginOption
   ],
   test: {
@@ -97,7 +98,7 @@ export default defineConfig(({ mode }) => ({
     strictPort: true,
     fs: {
       // Allow the dev server to serve files from the monorepo root so workspace
-      // packages like @intric/ui (icons in packages/ui/src/icons/svg) load
+      // packages like @eneo/ui (icons in packages/ui/src/icons/svg) load
       // without "outside of Vite serving allow list" errors.
       allow: [searchForWorkspaceRoot(process.cwd())]
     },
@@ -123,7 +124,7 @@ export default defineConfig(({ mode }) => ({
   // crashes at startup with ERR_MODULE_NOT_FOUND on the first SSR render that
   // needs it. marked + dompurify were added to apps/web/dependencies for the
   // Prompt Guide markdown component; without `noExternal` here they would be
-  // externalized, and the chat page (which renders messages via @intric/ui's
+  // externalized, and the chat page (which renders messages via @eneo/ui's
   // Markdown, also using marked) would 500 on hard refresh.
   ssr: {
     noExternal: ["@xyflow/svelte", "@xyflow/system", "marked", "dompurify"],

@@ -6,22 +6,22 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.application.flow_run_terminalization import (
+from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationResult,
     FlowRunTerminalizer,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime.run_outcome import (
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.run_outcome import (
     determine_run_outcome,
     finalize_run_from_current_results,
 )

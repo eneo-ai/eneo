@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from intric.flows.flow_variable_definitions import flow_variable_definition_manifest
+from eneo.flows.flow_variable_definitions import flow_variable_definition_manifest
 
 
 def test_frontend_flow_variable_manifest_matches_backend_owner() -> None:

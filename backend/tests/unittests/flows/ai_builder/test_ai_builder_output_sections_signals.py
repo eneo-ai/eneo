@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,
 )
 
@@ -87,7 +87,9 @@ from intric.flows.ai_builder.ai_builder_output_sections_signals import (
         ),
     ],
 )
-def test_extracts_requested_output_sections(text: str, expected: tuple[str, ...]) -> None:
+def test_extracts_requested_output_sections(
+    text: str, expected: tuple[str, ...]
+) -> None:
     result = extract_requested_output_sections(text)
 
     assert result.high_confidence

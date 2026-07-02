@@ -1,13 +1,13 @@
 import { PAGINATION } from "$lib/core/constants";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-import { getIntric } from "$lib/core/Intric";
-import type { Intric, UserSparse } from "@intric/intric-js";
+import { getEneo } from "$lib/core/Eneo";
+import type { Eneo, UserSparse } from "@eneo/eneo-js";
 import { onMount } from "svelte";
 
 const DEBOUNCE_DURATION_MILLISECONDS = 250;
 
 export class UserList {
-  #intric: Intric;
+  #eneo: Eneo;
   #cursor: string | undefined = undefined;
   #limit = PAGINATION.PAGE_SIZE;
   #filter = "";
@@ -16,13 +16,13 @@ export class UserList {
   totalCount = $state(0);
   filteredUsers = $state<UserSparse[]>([]);
 
-  constructor(options?: { intric?: Intric }) {
-    this.#intric = options?.intric ?? getIntric();
+  constructor(options?: { eneo?: Eneo }) {
+    this.#eneo = options?.eneo ?? getEneo();
     onMount(this.loadUsers);
   }
 
   loadUsers = createAsyncState(async (append = false) => {
-    const res = await this.#intric.users.list({
+    const res = await this.#eneo.users.list({
       filter: this.#filter,
       limit: this.#limit,
       cursor: append ? this.#cursor : undefined

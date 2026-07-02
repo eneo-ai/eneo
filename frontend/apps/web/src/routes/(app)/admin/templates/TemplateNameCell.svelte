@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { getTemplateIconComponent } from "$lib/features/templates/templateIconRegistry";
 
   interface Props {

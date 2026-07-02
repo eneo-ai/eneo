@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { getAppContext } from "$lib/core/AppContext.js";
-  import { getIntric } from "$lib/core/Intric";
-  import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import ApiKeyTable from "./ApiKeyTable.svelte";
@@ -26,7 +26,7 @@
     tenant,
     state: { userInfo }
   } = getAppContext();
-  const intric = getIntric();
+  const eneo = getEneo();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
   const canCreateApiKeys = user.hasPermission("api_keys");
 
@@ -67,7 +67,7 @@
     loading = true;
     errorMessage = null;
     try {
-      const response = await intric.apiKeys.list({
+      const response = await eneo.apiKeys.list({
         limit: 100,
         state: stateFilter || null
       });
@@ -85,7 +85,7 @@
     if (!nextCursor || loadingMore) return;
     loadingMore = true;
     try {
-      const response = await intric.apiKeys.list({
+      const response = await eneo.apiKeys.list({
         limit: 100,
         cursor: nextCursor,
         state: stateFilter || null
@@ -121,7 +121,7 @@
   async function revokeLegacyKey() {
     revoking = true;
     try {
-      await intric.users.revokeLegacyApiKey();
+      await eneo.users.revokeLegacyApiKey();
       legacySuffix = null;
       showRevokeDialog = false;
     } catch (error: unknown) {
@@ -135,12 +135,12 @@
     try {
       let listedSpaces: SpaceSparse[] = [];
       try {
-        listedSpaces = await intric.spaces.list({
+        listedSpaces = await eneo.spaces.list({
           include_personal: true,
           include_applications: true
         });
       } catch {
-        listedSpaces = await intric.spaces.list();
+        listedSpaces = await eneo.spaces.list();
       }
 
       const resources: ResourceOption[] = listedSpaces.map((s) => ({ id: s.id, name: s.name }));
@@ -148,7 +148,7 @@
       const applicationsBySpace = await Promise.all(
         listedSpaces.map(async (space) => {
           try {
-            const applications = await intric.spaces.listApplications({ id: space.id });
+            const applications = await eneo.spaces.listApplications({ id: space.id });
             return { space, applications };
           } catch {
             return { space, applications: space.applications ?? null };

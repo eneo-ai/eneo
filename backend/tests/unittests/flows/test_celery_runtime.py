@@ -12,8 +12,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_run_dispatch_request import (
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_run_dispatch_request import (
     FlowRunDispatchMalformedPayload,
     FlowRunDispatchMalformedReason,
     FlowRunDispatchMissingPrincipal,
@@ -22,7 +22,7 @@ from intric.flows.flow_run_dispatch_request import (
     flow_run_dispatch_task_kwargs,
     parse_flow_run_dispatch_task_kwargs,
 )
-from intric.flows.runtime.celery_execution_backend import (
+from eneo.flows.runtime.celery_execution_backend import (
     FLOW_EXECUTE_TASK_NAME,
     CeleryFlowExecutionBackend,
 )
@@ -195,7 +195,7 @@ def test_flow_run_dispatch_parser_reports_first_malformed_field():
 
 
 def test_flow_run_dispatch_parser_has_no_logger():
-    dispatch_module = importlib.import_module("intric.flows.flow_run_dispatch_request")
+    dispatch_module = importlib.import_module("eneo.flows.flow_run_dispatch_request")
 
     assert not hasattr(dispatch_module, "logger")
 
@@ -203,7 +203,7 @@ def test_flow_run_dispatch_parser_has_no_logger():
 @pytest.mark.asyncio
 async def test_celery_execution_backend_dispatches_task(monkeypatch):
     execution_module = importlib.import_module(
-        "intric.flows.runtime.celery_execution_backend"
+        "eneo.flows.runtime.celery_execution_backend"
     )
     logger = MagicMock()
     monkeypatch.setattr(execution_module, "logger", logger)
@@ -245,7 +245,7 @@ async def test_celery_execution_backend_dispatches_task(monkeypatch):
 @pytest.mark.asyncio
 async def test_celery_execution_backend_dispatches_service_key_principal(monkeypatch):
     execution_module = importlib.import_module(
-        "intric.flows.runtime.celery_execution_backend"
+        "eneo.flows.runtime.celery_execution_backend"
     )
     logger = MagicMock()
     monkeypatch.setattr(execution_module, "logger", logger)
@@ -287,7 +287,7 @@ async def test_celery_execution_backend_dispatches_service_key_principal(monkeyp
 @pytest.mark.asyncio
 async def test_celery_execution_backend_uses_default_queue(monkeypatch):
     execution_module = importlib.import_module(
-        "intric.flows.runtime.celery_execution_backend"
+        "eneo.flows.runtime.celery_execution_backend"
     )
     monkeypatch.setattr(
         execution_module,
@@ -333,8 +333,8 @@ async def test_celery_execution_backend_dispatch_propagates_send_task_failure():
 
 
 def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
-    celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
-    shared_celery_app_module = importlib.import_module("intric.worker.celery.app")
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    shared_celery_app_module = importlib.import_module("eneo.worker.celery.app")
     settings = SimpleNamespace(
         redis_host="redis",
         redis_port=6379,
@@ -382,11 +382,11 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
 
 
 def test_flow_worker_cli_app_path_loads_registered_flow_tasks():
-    cli_module = importlib.import_module("intric.flows.runtime.cli")
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
     app_module_name, _, app_attr = cli_module.FLOW_CELERY_APP.partition(":")
     celery_app = getattr(importlib.import_module(app_module_name), app_attr)
 
-    importlib.import_module("intric.flows.runtime.tasks")
+    importlib.import_module("eneo.flows.runtime.tasks")
 
     assert EXPECTED_FLOW_CELERY_TASKS <= set(celery_app.tasks)
 
@@ -394,7 +394,7 @@ def test_flow_worker_cli_app_path_loads_registered_flow_tasks():
 def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    cli_module = importlib.import_module("intric.flows.runtime.cli")
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
     calls: list[str | tuple[str, str, list[str]]] = []
     monkeypatch.setattr(
         cli_module,
@@ -424,7 +424,7 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
         [
             "celery",
             "-A",
-            "intric.flows.runtime.celery_app:celery_app",
+            "eneo.flows.runtime.celery_app:celery_app",
             "worker",
             "--loglevel",
             "DEBUG",
@@ -437,7 +437,7 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
 def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    cli_module = importlib.import_module("intric.flows.runtime.cli")
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 30)
     monkeypatch.setenv("CELERYBEAT_SCHEDULE_FILE", "/var/run/flows/celerybeat")
     exec_calls: list[tuple[str, list[str]]] = []
@@ -457,7 +457,7 @@ def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
             [
                 "celery",
                 "-A",
-                "intric.flows.runtime.celery_app:celery_app",
+                "eneo.flows.runtime.celery_app:celery_app",
                 "beat",
                 "--loglevel",
                 "WARNING",
@@ -469,7 +469,7 @@ def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
 
 
 def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     monkeypatch.setattr(
         tasks_module,
@@ -512,7 +512,7 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
 
 
 def test_execute_flow_run_marks_failed_when_service_key_id_is_missing(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     monkeypatch.setattr(
         tasks_module,
@@ -576,7 +576,7 @@ def test_execute_flow_run_marks_failed_when_service_key_id_is_missing(monkeypatc
 def test_execute_flow_run_rejects_malformed_dispatch_payload_without_runtime(
     monkeypatch, payload, expected_reason
 ):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     execute_async = AsyncMock()
     logger = MagicMock()
@@ -619,7 +619,7 @@ def test_execute_flow_run_rejects_malformed_dispatch_payload_without_runtime(
 def test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization(
     monkeypatch, trigger
 ):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     loop = asyncio.new_event_loop()
     loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
     loop_thread.start()
@@ -707,7 +707,7 @@ def test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminaliza
 def test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalization(
     monkeypatch,
 ):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     pending_future: concurrent.futures.Future[dict[str, str]] | None = None
     terminalize_saw_cancelled: list[bool] = []
     terminal_sources: list[FlowRunLifecycleSource] = []
@@ -813,7 +813,7 @@ def test_execute_flow_run_returns_failed_when_task_terminalization_fails(
     expected_result,
     expected_source,
 ):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     execute_async = AsyncMock()
     logger = MagicMock()
@@ -872,7 +872,7 @@ def test_execute_flow_run_returns_failed_when_task_terminalization_fails(
 
 
 def test_execute_flow_run_handles_generic_exception(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     monkeypatch.setattr(
         tasks_module,
@@ -932,7 +932,7 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
 
 
 def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant_one = SimpleNamespace(id=uuid4())
     tenant_two = SimpleNamespace(id=uuid4())
     repo = MagicMock()
@@ -998,7 +998,7 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
 
 
 def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     stale_run = SimpleNamespace(id=uuid4(), tenant_id=tenant.id)
     repo = MagicMock()
@@ -1054,7 +1054,7 @@ def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch)
 
 
 def test_reconcile_review_expiry_task_processes_all_tenants(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant_one = SimpleNamespace(id=uuid4())
     tenant_two = SimpleNamespace(id=uuid4())
     tenant_repo = MagicMock()
@@ -1107,7 +1107,7 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
     task is the only automatic recovery — `cancel_run` only flips DB
     status, and `reconcile-stale-running` handles RUNNING, not QUEUED.
     """
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant_one = SimpleNamespace(id=uuid4())
     tenant_two = SimpleNamespace(id=uuid4())
     user_run_user_id = uuid4()
@@ -1194,7 +1194,7 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
     must not be redispatched twice; the atomic claim is the
     cross-process serialization point.
     """
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     stale_run = SimpleNamespace(
         id=uuid4(),
@@ -1247,7 +1247,7 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
 
 
 def test_redispatch_stale_queued_continues_after_dispatch_failure(monkeypatch):
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     failed_run = SimpleNamespace(
         id=uuid4(),
@@ -1311,7 +1311,7 @@ def test_redispatch_stale_queued_continues_after_dispatch_failure(monkeypatch):
 def test_flow_worker_process_init_initializes_observability_db_and_http_client(
     monkeypatch,
 ):
-    celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     events: list[str] = []
 
     def init_observability():
@@ -1339,7 +1339,7 @@ def test_flow_worker_process_init_initializes_observability_db_and_http_client(
 
 
 def test_flow_worker_process_shutdown_closes_resources(monkeypatch):
-    celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     close_mock = MagicMock()
     monkeypatch.setattr(celery_app_module, "_close_flow_worker_resources", close_mock)
 
@@ -1349,7 +1349,7 @@ def test_flow_worker_process_shutdown_closes_resources(monkeypatch):
 
 
 def test_enable_autobegin_for_flow_task_session():
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     sync_session = SimpleNamespace(autobegin=False)
     async_session = SimpleNamespace(sync_session=sync_session)
 
@@ -1359,8 +1359,8 @@ def test_enable_autobegin_for_flow_task_session():
 
 
 def test_flow_run_logging_context_sets_flow_trace_attributes_and_clears():
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
-    request_context_module = importlib.import_module("intric.main.request_context")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    request_context_module = importlib.import_module("eneo.main.request_context")
     run_id = uuid4()
     flow_id = uuid4()
     tenant_id = uuid4()
@@ -1394,7 +1394,7 @@ def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):
     Otherwise the claim either raises (no transaction is open) or is
     not yet visible to the worker that picks up the dispatched run.
     """
-    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     stale_run = SimpleNamespace(
         id=uuid4(),

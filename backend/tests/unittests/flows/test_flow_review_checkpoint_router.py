@@ -9,27 +9,27 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api import flow_run_execution_router as router_module
-from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.api.flow_models import (
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api import flow_run_execution_router as router_module
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointApproveRequest,
     FlowRunReviewCheckpointEditRequest,
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
 )
-from intric.flows.api.flow_run_execution_router import (
+from eneo.flows.api.flow_run_execution_router import (
     approve_flow_run_review_checkpoint,
     edit_flow_run_review_checkpoint,
     reject_flow_run_review_checkpoint,
     resume_flow_run_review_checkpoint,
 )
-from intric.flows.application.flow_dispatch import (
+from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
-from intric.flows.domain.flow import FlowRunStatus
-from intric.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
+from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
 from tests.unittests.flows.test_flow_router import (
     _disable_flow_scope_filter,
     _enable_explicit_transaction,

@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     BUILDER_PLAN_STATUS_VALUES,
     FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_STATUS_VALUES,
@@ -18,16 +18,16 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_RESULT_STATUS_VALUES,
     FLOW_TEMPLATE_ASSET_STATUS_VALUES,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import PlanStatus
-from intric.flows.api.flow_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus
+from eneo.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
 )
-from intric.flows.domain.flow import FlowStep
-from intric.flows.enums import (
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
@@ -35,7 +35,7 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,
@@ -75,13 +75,13 @@ def test_ai_builder_plan_status_enum_matches_table_constant() -> None:
 
 
 def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
-    assert FlowInputSource.__module__ == "intric.flows.enums"
-    assert FlowInputType.__module__ == "intric.flows.enums"
-    assert FlowOutputMode.__module__ == "intric.flows.enums"
-    assert FlowOutputType.__module__ == "intric.flows.enums"
-    assert FlowMcpPolicy.__module__ == "intric.flows.enums"
-    assert InputSource.__module__ == "intric.flows.enums"
-    assert InputType.__module__ == "intric.flows.enums"
+    assert FlowInputSource.__module__ == "eneo.flows.enums"
+    assert FlowInputType.__module__ == "eneo.flows.enums"
+    assert FlowOutputMode.__module__ == "eneo.flows.enums"
+    assert FlowOutputType.__module__ == "eneo.flows.enums"
+    assert FlowMcpPolicy.__module__ == "eneo.flows.enums"
+    assert InputSource.__module__ == "eneo.flows.enums"
+    assert InputType.__module__ == "eneo.flows.enums"
 
 
 def test_review_expiry_reconciles_only_unresolved_review_states() -> None:

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
-  import { IconUpload } from "@intric/icons/upload";
-  import type { App } from "@intric/intric-js";
+  import { IconUpload } from "@eneo/icons/upload";
+  import type { App } from "@eneo/eneo-js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
   import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
@@ -50,7 +50,7 @@
   }
 
   // Map MIME types to human-friendly labels
-  // Based on backend: intric/files/text.py, audio.py, image.py
+  // Based on backend: eneo/files/text.py, audio.py, image.py
   const mimeToFriendly: Record<string, string> = {
     // Text types (from TextMimeTypes)
     "text/plain": "TXT",
@@ -152,7 +152,7 @@
 <FileSizeValidationPanel errors={validationErrors} />
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   /* Upload target with dashed border pattern */
   .upload-target {

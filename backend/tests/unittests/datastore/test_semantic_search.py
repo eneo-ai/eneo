@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.embedding_models.infrastructure.datastore import Datastore
-from intric.files.chunk_embedding_list import ChunkEmbeddingList
-from intric.info_blobs.info_blob import InfoBlobInDB
+from eneo.embedding_models.infrastructure.datastore import Datastore
+from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.info_blobs.info_blob import InfoBlobInDB
 from tests.fixtures import TEST_COLLECTION
 
 
@@ -21,7 +21,7 @@ def datastore_with_mocks():
 
 async def test_semantic_search(datastore: Datastore):
     with patch(
-        "intric.embedding_models.infrastructure.datastore.autocut",
+        "eneo.embedding_models.infrastructure.datastore.autocut",
     ) as autocut_mock:
         await datastore.semantic_search(
             search_string="giraffe",

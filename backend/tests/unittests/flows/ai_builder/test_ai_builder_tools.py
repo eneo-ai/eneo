@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder import ai_builder_tool_names, ai_builder_tools
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder import ai_builder_tool_names, ai_builder_tools
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_tool_parsing import (
+from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
 )
-from intric.flows.ai_builder.ai_builder_tools import (
+from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
     build_propose_flow_tool_schema,
     extract_assumptions,
@@ -49,7 +49,9 @@ class TestBuildToolSchema:
 
     def test_obsolete_question_and_confirm_tool_schemas_are_not_exported(self) -> None:
         assert not hasattr(ai_builder_tools, "build_all_tool_schemas")
-        assert not hasattr(ai_builder_tools, "build_ask_structured_question_tool_schema")
+        assert not hasattr(
+            ai_builder_tools, "build_ask_structured_question_tool_schema"
+        )
         assert not hasattr(ai_builder_tools, "build_confirm_requirements_tool_schema")
         assert not hasattr(ai_builder_tools, "build_discovery_complete_tool_schemas")
         assert not hasattr(ai_builder_tools, "build_free_discovery_tool_schemas")

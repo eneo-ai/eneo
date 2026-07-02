@@ -8,30 +8,31 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
 )
-from intric.flows.api.flow_run_status_capability_models import (
+from eneo.flows.api.flow_run_status_capability_models import (
     flow_run_status_capabilities_public,
 )
-from intric.flows.api.flow_runtime_endpoint_registry import (
+from eneo.flows.api.flow_runtime_endpoint_registry import (
     flow_runtime_endpoint_operation_ids,
     flow_runtime_path_field_operations,
 )
-from intric.flows.api.flow_runtime_paths import (
+from eneo.flows.api.flow_runtime_paths import (
     FlowReviewCheckpointRuntimePathsPublic,
     FlowRuntimePathsPublic,
     build_flow_runtime_paths,
 )
-from intric.flows.enums import RerunDependencyKind
-from intric.flows.flow_api_error_code import (
+from eneo.flows.enums import RerunDependencyKind
+from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
 )
-from intric.flows.flow_metadata import FlowFormFieldType
-from intric.main.exceptions import ErrorCodes
-from intric.server.main import get_application
-from intric.settings.setting_service import FLOW_SETTINGS_INVALID_PAYLOAD_CODE
+from eneo.flows.flow_metadata import FlowFormFieldType
+from eneo.main.exceptions import ErrorCodes
+from eneo.server.main import get_application
+from eneo.settings.setting_service import FLOW_SETTINGS_INVALID_PAYLOAD_CODE
+from tests.unit.api_key_test_utils import flatten_routes
 
 FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
 
@@ -54,8 +55,8 @@ def openapi_spec() -> dict:
 def flow_route_operations() -> dict[tuple[str, str], str]:
     app = get_application()
     operations: dict[tuple[str, str], str] = {}
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    for route in flatten_routes(list(app.routes)):
+        if not isinstance(route.route, APIRoute):
             continue
         if not _is_non_ai_builder_flow_related_path(route.path):
             continue
@@ -2870,7 +2871,7 @@ def test_openapi_flow_error_responses_include_general_error_examples(
                     isinstance(example.get("message"), str)
                     and example["message"].strip()
                 )
-                assert "intric_error_code" in example
+                assert "eneo_error_code" in example
                 assert isinstance(example.get("code"), str) and example["code"].strip()
 
 
@@ -2951,7 +2952,7 @@ def test_openapi_runtime_file_delete_contract_is_machine_readable(
         .get("application/json", {})
         .get("example", {})
     )
-    assert conflict_example.get("intric_error_code") == int(ErrorCodes.CONFLICT)
+    assert conflict_example.get("eneo_error_code") == int(ErrorCodes.CONFLICT)
     assert conflict_example.get("code") == "flow_runtime_file_attached"
 
 
@@ -2974,7 +2975,7 @@ def test_openapi_template_file_delete_contract_is_machine_readable(
         .get("application/json", {})
         .get("example", {})
     )
-    assert conflict_example.get("intric_error_code") == int(ErrorCodes.CONFLICT)
+    assert conflict_example.get("eneo_error_code") == int(ErrorCodes.CONFLICT)
     assert conflict_example.get("code") == FlowApiErrorCode.TEMPLATE_IN_USE.value
 
     parameters = operation.get("parameters", [])
@@ -3120,7 +3121,7 @@ def test_openapi_get_flow_service_key_admin_required_points_to_published_runtime
     context = service_key_example["context"]
     hint = context["runtime_endpoint_hint"]
 
-    assert service_key_example["intric_error_code"] == 9001
+    assert service_key_example["eneo_error_code"] == 9001
     assert (
         service_key_example["code"] == FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED.value
     )

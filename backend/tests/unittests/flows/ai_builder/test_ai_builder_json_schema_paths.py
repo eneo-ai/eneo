@@ -1,4 +1,4 @@
-from intric.flows.ai_builder.ai_builder_json_schema_paths import (
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
     schema_property_names,
     top_level_schema_property_names,
@@ -114,7 +114,9 @@ def test_top_level_schema_property_names_preserves_declaration_order() -> None:
     ]
 
 
-def test_top_level_schema_property_names_ignores_composite_and_nested_properties() -> None:
+def test_top_level_schema_property_names_ignores_composite_and_nested_properties() -> (
+    None
+):
     schema = {
         "allOf": [
             {"type": "object", "properties": {"summary": {"type": "string"}}},

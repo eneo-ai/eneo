@@ -6,19 +6,19 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.enums import FlowRunStatus
-from intric.flows.flow_factory import FlowFactory
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.runtime.flow_runtime_health import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import FlowRunStatus
+from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthFlag,
     FlowRuntimeHealthPolicy,
     FlowRuntimeHealthStatus,

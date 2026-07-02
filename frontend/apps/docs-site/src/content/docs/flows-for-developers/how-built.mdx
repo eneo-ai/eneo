@@ -28,15 +28,15 @@ This map is a target ownership model, not a promise that every module already li
 
 Import-linter enforces package dependency boundaries. Runtime policies enforce tenant and principal access before data leaves the backend.
 
-| Contract                                                 | Type        | Source                                  | Forbidden                                                                                                                                  | Ignored edges                                                               |
-| -------------------------------------------------------- | ----------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| `Flows engine must not import AI Builder`                | `forbidden` | 79 Flow engine root entries             | `intric.flows.ai_builder`                                                                                                                  | `intric.flows.api.flow_router -> intric.flows.ai_builder.ai_builder_router` |
-| `FCM must not import AI Builder`                         | `forbidden` | `intric.flows.flow_capability_manifest` | `intric.flows.ai_builder`                                                                                                                  | none                                                                        |
-| `Flow package application must not import AI Builder`    | `forbidden` | `intric.flow_packages.application`      | `intric.flows.ai_builder`                                                                                                                  | none                                                                        |
-| `Flow package domain must not import AI Builder`         | `forbidden` | `intric.flow_packages.domain`           | `intric.flows.ai_builder`                                                                                                                  | none                                                                        |
-| `Flow package domain must not import infrastructure`     | `forbidden` | `intric.flow_packages.domain`           | `intric.flow_packages.infrastructure`                                                                                                      | none                                                                        |
-| `Flow package infrastructure must not import AI Builder` | `forbidden` | `intric.flow_packages.infrastructure`   | `intric.flows.ai_builder`                                                                                                                  | none                                                                        |
-| `AI Builder must not import MCP execution surfaces`      | `forbidden` | `intric.flows.ai_builder`               | `intric.mcp_servers.infrastructure.proxy`, `intric.mcp_servers.infrastructure.client`, `intric.mcp_servers.application.mcp_server_service` | none                                                                        |
+| Contract                                                 | Type        | Source                                | Forbidden                                                                                                                            | Ignored edges                                                           |
+| -------------------------------------------------------- | ----------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `Flows engine must not import AI Builder`                | `forbidden` | 79 Flow engine root entries           | `eneo.flows.ai_builder`                                                                                                              | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
+| `FCM must not import AI Builder`                         | `forbidden` | `eneo.flows.flow_capability_manifest` | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
+| `Flow package application must not import AI Builder`    | `forbidden` | `eneo.flow_packages.application`      | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
+| `Flow package domain must not import AI Builder`         | `forbidden` | `eneo.flow_packages.domain`           | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
+| `Flow package domain must not import infrastructure`     | `forbidden` | `eneo.flow_packages.domain`           | `eneo.flow_packages.infrastructure`                                                                                                  | none                                                                    |
+| `Flow package infrastructure must not import AI Builder` | `forbidden` | `eneo.flow_packages.infrastructure`   | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
+| `AI Builder must not import MCP execution surfaces`      | `forbidden` | `eneo.flows.ai_builder`               | `eneo.mcp_servers.infrastructure.proxy`, `eneo.mcp_servers.infrastructure.client`, `eneo.mcp_servers.application.mcp_server_service` | none                                                                    |
 
 ## Runtime access enforcement
 
@@ -223,12 +223,12 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 
 ## Source guards
 
-| Guarded source                                                   | Guard                                                                                                  |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `docs/flows/package-layout.md`                                   | `test_flow_package_layout.py::test_flow_root_layout_decision_matches_filesystem`                       |
-| `backend/.importlinter` source modules                           | `test_importlinter_boundary.py::test_source_modules_cover_every_flows_sibling`                         |
-| this generated docs-site page                                    | `test_flow_docs_site_contract.py::test_flow_developer_docs_how_built_is_generated_from_layout_sources` |
-| `backend/src/intric/flows/application/flow_run_access_policy.py` | Runtime access text names the canonical tenant and principal enforcement owner.                        |
+| Guarded source                                                 | Guard                                                                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `docs/flows/package-layout.md`                                 | `test_flow_package_layout.py::test_flow_root_layout_decision_matches_filesystem`                       |
+| `backend/.importlinter` source modules                         | `test_importlinter_boundary.py::test_source_modules_cover_every_flows_sibling`                         |
+| this generated docs-site page                                  | `test_flow_docs_site_contract.py::test_flow_developer_docs_how_built_is_generated_from_layout_sources` |
+| `backend/src/eneo/flows/application/flow_run_access_policy.py` | Runtime access text names the canonical tenant and principal enforcement owner.                        |
 
 ## Related
 

@@ -13,9 +13,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import NotFoundException
-from intric.main.models import ModelId
-from intric.security_classifications.tenant_validation import (
+from eneo.main.exceptions import NotFoundException
+from eneo.main.models import ModelId
+from eneo.security_classifications.tenant_validation import (
     resolve_tenant_security_classification,
 )
 

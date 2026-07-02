@@ -35,12 +35,12 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.group_chats_table import GroupChatsTable
-from intric.database.tables.questions_table import Questions
-from intric.database.tables.sessions_table import Sessions
-from intric.database.tables.spaces_table import Spaces
-from intric.help_assistants.domain.helper_kind import HelperKind
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
+from eneo.help_assistants.domain.helper_kind import HelperKind
 
 
 async def _get_org_space(

@@ -2,23 +2,23 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     PlanStatus,
 )
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
-from intric.flows.ai_builder.ai_builder_proposal_policy import (
+from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     format_contextual_quality_feedback,
     format_validation_feedback,
     terminal_output_type_for_conversation,
 )
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationError
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationError
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,

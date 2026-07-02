@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
     FlowRuntimeInvariantError,
 )

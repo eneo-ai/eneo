@@ -10,9 +10,9 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
-from intric.authentication.principal_types import PrincipalType
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
@@ -22,32 +22,32 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.database.tables.roles_table import Roles
-from intric.database.tables.users_table import users_roles_table
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.enums import (
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.users_table import users_roles_table
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     RerunDependencyKind,
 )
-from intric.flows.flow_retention_tombstone import (
+from eneo.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
     FlowAttemptRetentionMarker,
     FlowRetentionTombstone,
     RunDebugAttemptRetentionCounts,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.flow_run_provenance import (
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
 )
-from intric.main.container.container import Container
-from intric.roles.permissions import Permission
-from intric.spaces.api.space_models import SpaceRoleValue
-from intric.users.user import UserAdd, UserInDB, UserState
+from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.users.user import UserAdd, UserInDB, UserState
 
 
 def _build_flow(

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 import {
   buildFlowStepReviewPolicyPatch,
@@ -32,12 +32,8 @@ function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
 
 describe("flow step review policy", () => {
   test("reads the configured review mode", () => {
-    expect(getFlowStepReviewModeChoice(makeStep({ review_policy: { mode: "view" } }))).toBe(
-      "view"
-    );
-    expect(getFlowStepReviewModeChoice(makeStep({ review_policy: { mode: "edit" } }))).toBe(
-      "edit"
-    );
+    expect(getFlowStepReviewModeChoice(makeStep({ review_policy: { mode: "view" } }))).toBe("view");
+    expect(getFlowStepReviewModeChoice(makeStep({ review_policy: { mode: "edit" } }))).toBe("edit");
   });
 
   test("treats missing review policy as disabled", () => {

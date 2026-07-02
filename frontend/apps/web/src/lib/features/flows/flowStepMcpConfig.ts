@@ -1,4 +1,4 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 type MCPToolLike = {
   id?: string;

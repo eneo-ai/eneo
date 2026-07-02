@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { IconCheck } from "@intric/icons/check";
-  import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
   import { goto } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { createSelect } from "@melt-ui/svelte";
@@ -75,7 +75,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   div[data-highlighted] {
     @apply bg-hover-default;
   }

@@ -14,10 +14,10 @@ import pytest
 from docx import Document
 from fastapi import UploadFile
 
-from intric.files import file_protocol as file_protocol_module
-from intric.files.file_models import FileType
-from intric.files.file_protocol import FileProtocol
-from intric.main.exceptions import FileTooLargeException
+from eneo.files import file_protocol as file_protocol_module
+from eneo.files.file_models import FileType
+from eneo.files.file_protocol import FileProtocol
+from eneo.main.exceptions import FileTooLargeException
 
 # ── Fake settings ────────────────────────────────────────────────────────
 

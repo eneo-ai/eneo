@@ -1,5 +1,5 @@
 """
-Fixtures for completion models (mirrors src/intric/completion_models/).
+Fixtures for completion models (mirrors src/eneo/completion_models/).
 
 These fixtures create completion models with settings stored directly on the model.
 """
@@ -7,8 +7,8 @@ These fixtures create completion models with settings stored directly on the mod
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.model_providers_table import ModelProviders
 
 
 @pytest.fixture

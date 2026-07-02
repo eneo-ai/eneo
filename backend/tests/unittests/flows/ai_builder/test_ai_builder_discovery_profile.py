@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
     expresses_task_intent,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_edit_scope import has_change_semantics
-from intric.flows.domain.flow import Flow, FlowStep
+from eneo.flows.ai_builder.ai_builder_edit_scope import has_change_semantics
+from eneo.flows.domain.flow import Flow, FlowStep
 
 
 def _make_flow_step(

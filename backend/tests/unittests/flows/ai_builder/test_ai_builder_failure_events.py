@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
-from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from intric.flows.ai_builder.ai_builder_planner_failure_events import (
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_planner_failure_events import (
     build_planner_upstream_error_event,
     build_session_send_lease_lost_event,
 )

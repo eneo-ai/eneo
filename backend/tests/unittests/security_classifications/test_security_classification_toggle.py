@@ -2,11 +2,11 @@ import uuid
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from intric.spaces.space import Space
-from intric.security_classifications.presentation.security_classification_models import (
+from eneo.spaces.space import Space
+from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
-from intric.security_classifications.domain.entities.security_classification import (
+from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
 

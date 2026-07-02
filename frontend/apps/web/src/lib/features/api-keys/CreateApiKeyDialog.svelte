@@ -12,14 +12,14 @@
     ResourcePermissionLevel,
     ResourcePermissions,
     SpaceSparse
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import { toast } from "svelte-sonner";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getAppContext } from "$lib/core/AppContext";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { m } from "$lib/paraglide/messages";
@@ -54,7 +54,7 @@
   import ExpirationPicker from "$lib/features/api-keys/ExpirationPicker.svelte";
   import { apiKeysMessage } from "$lib/features/api-keys/apiKeysMessage";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const { user } = getAppContext();
   const isAdmin = user.hasPermission("admin");
   const canCreateApiKeys = user.hasPermission("api_keys");
@@ -522,7 +522,7 @@
       let listedSpaces: SpaceSparse[] = [];
 
       try {
-        listedSpaces = await intric.spaces.list({
+        listedSpaces = await eneo.spaces.list({
           include_personal: true,
           include_applications: true
         });
@@ -532,7 +532,7 @@
 
       if (listedSpaces.length === 0) {
         try {
-          listedSpaces = await intric.spaces.list();
+          listedSpaces = await eneo.spaces.list();
         } catch (error) {
           console.error(error);
         }
@@ -544,7 +544,7 @@
       }
 
       try {
-        const personalSpace = await intric.spaces.getPersonalSpace();
+        const personalSpace = await eneo.spaces.getPersonalSpace();
         if (personalSpace && !spaceById.has(personalSpace.id)) {
           spaceById.set(personalSpace.id, personalSpace);
         }
@@ -553,7 +553,7 @@
       }
 
       try {
-        const orgSpace = await intric.spaces.getOrganizationSpace();
+        const orgSpace = await eneo.spaces.getOrganizationSpace();
         if (orgSpace && !spaceById.has(orgSpace.id)) {
           spaceById.set(orgSpace.id, orgSpace);
         }
@@ -566,7 +566,7 @@
       const applicationsBySpace = await Promise.all(
         spaces.map(async (space) => {
           try {
-            const applications = await intric.spaces.listApplications({ id: space.id });
+            const applications = await eneo.spaces.listApplications({ id: space.id });
             return { space, applications };
           } catch (error) {
             console.error(error);
@@ -592,7 +592,7 @@
       );
 
       if (assistantOptions.length === 0) {
-        const assistants = await intric.assistants.list();
+        const assistants = await eneo.assistants.list();
         assistantOptions = assistants.map((assistant) => ({
           id: assistant.id,
           name: assistant.name
@@ -607,7 +607,7 @@
 
   async function loadCreationConstraints() {
     try {
-      const constraints = await intric.apiKeys.getPolicyConstraints();
+      const constraints = await eneo.apiKeys.getPolicyConstraints();
       requireExpiration = constraints.require_expiration ?? false;
       maxExpirationDays = constraints.max_expiration_days ?? null;
       maxRateLimit = constraints.max_rate_limit ?? null;
@@ -769,7 +769,7 @@
     };
 
     try {
-      const response = await intric.apiKeys.create(request);
+      const response = await eneo.apiKeys.create(request);
       createdSecret = response.secret;
       createdResponse = response;
       secretCopied = false;
@@ -838,9 +838,9 @@
 
     try {
       if (scope === "admin") {
-        await intric.apiKeys.admin.update({ id: apiKey.id, update: updates });
+        await eneo.apiKeys.admin.update({ id: apiKey.id, update: updates });
       } else {
-        await intric.apiKeys.update({ id: apiKey.id, update: updates });
+        await eneo.apiKeys.update({ id: apiKey.id, update: updates });
       }
       onChanged?.();
       showDialog = false;

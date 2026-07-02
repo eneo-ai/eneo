@@ -6,15 +6,15 @@ from collections.abc import Iterator
 import pytest
 from pydantic import BaseModel, TypeAdapter
 
-from intric.flow_packages.api.flow_package_models import (
+from eneo.flow_packages.api.flow_package_models import (
     FlowPackageExportRequest,
     FlowPackageImportPublic,
     FlowPackageImportRequest,
     FlowPackageValidationPublic,
 )
-from intric.flow_packages.domain.flow_package_errors import FlowPackageExportErrorCode
-from intric.main.models import GeneralError
-from intric.server.main import get_application
+from eneo.flow_packages.domain.flow_package_errors import FlowPackageExportErrorCode
+from eneo.main.models import GeneralError
+from eneo.server.main import get_application
 
 FLOW_PACKAGE_OPERATIONS: dict[tuple[str, str], str] = {
     ("/api/v1/flow-packages/validate/", "post"): "validate_flow_package",

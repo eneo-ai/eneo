@@ -7,8 +7,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-import intric.flows.runtime.flow_runtime_trace as flow_runtime_trace
-from intric.flows.runtime.flow_runtime_trace import (
+import eneo.flows.runtime.flow_runtime_trace as flow_runtime_trace
+from eneo.flows.runtime.flow_runtime_trace import (
     FLOW_RUN_EXECUTE_SPAN_NAME,
     FLOW_RUN_SPAN_ATTRIBUTE_KEYS,
     FLOW_STEP_EXECUTE_SPAN_NAME,

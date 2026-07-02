@@ -10,10 +10,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.sharepoint_subscription import (
+from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
-from intric.integration.infrastructure.sharepoint_subscription_service import (
+from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
 
@@ -77,7 +77,7 @@ def expired_subscription():
 def service(mock_subscription_repo, mock_oauth_token_service):
     """Create SharePointSubscriptionService with mocked dependencies."""
     with patch(
-        "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+        "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
     ) as mock_settings:
         settings = MagicMock()
         settings.sharepoint_webhook_notification_url = "https://example.com/webhook/"
@@ -158,7 +158,7 @@ class TestEnsureSubscriptionForSite:
     ):
         """Returns None if webhook notification URL is not configured."""
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+            "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = None
@@ -525,7 +525,7 @@ class TestGraphApiInteractions:
     ):
         """Must fail fast if SHAREPOINT_WEBHOOK_CLIENT_STATE is not configured."""
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+            "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = (

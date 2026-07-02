@@ -14,7 +14,7 @@ The implementation lane should be docs/catalog coverage plus one guard test, not
 
 | Evidence | Source |
 |---|---|
-| Runtime endpoint registry lists every public runtime contract | `backend/src/intric/flows/api/flow_runtime_endpoint_registry.py:76` |
+| Runtime endpoint registry lists every public runtime contract | `backend/src/eneo/flows/api/flow_runtime_endpoint_registry.py:76` |
 | Registry-to-live-route/status/operation-id tests exist | `backend/tests/unittests/flows/test_flow_docs_site_contract.py:2613` |
 | Runtime path projection drift test exists | `backend/tests/unittests/flows/test_flow_docs_site_contract.py:2625` |
 | OpenAPI runtime path example matches operation paths | `backend/tests/unit/test_flow_openapi_contract.py:1511` |

@@ -1,8 +1,0 @@
-<svg viewBox="0 0 24 24">
-  <path stroke="none" fill="currentColor" d="M14 9h-3v13h3V9Z" />
-  <path
-    stroke="none"
-    fill="currentColor"
-    d="M11 9H8.01V6.01h2.41c.32 0 .59-.26.59-.59v-1.1c0-.85.56-1.63 1.39-1.79 1.26-.25 2.34.83 2.09 2.09-.17.83-.95 1.39-1.79 1.39h-.96c-.46 0-.72.26-.72.59v2.41Z"
-  />
-</svg>

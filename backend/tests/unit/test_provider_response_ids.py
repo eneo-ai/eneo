@@ -3,19 +3,23 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.completion_models.infrastructure.get_response_claude import (
+from eneo.completion_models.infrastructure.get_response_claude import (
     get_response as get_claude_response,
 )
-from intric.completion_models.infrastructure.get_response_open_ai import (
+from eneo.completion_models.infrastructure.get_response_open_ai import (
     get_response as get_openai_response,
 )
-from intric.completion_models.infrastructure.provider_response_ids import (
+from eneo.completion_models.infrastructure.provider_response_ids import (
     extract_provider_response_id,
 )
 
 
-def test_extract_provider_response_id_reads_string_ids_from_objects_and_mappings() -> None:
-    assert extract_provider_response_id(SimpleNamespace(id="resp-object")) == "resp-object"
+def test_extract_provider_response_id_reads_string_ids_from_objects_and_mappings() -> (
+    None
+):
+    assert (
+        extract_provider_response_id(SimpleNamespace(id="resp-object")) == "resp-object"
+    )
     assert extract_provider_response_id({"id": "resp-mapping"}) == "resp-mapping"
     assert extract_provider_response_id(SimpleNamespace(id="  ")) is None
     assert extract_provider_response_id({"id": None}) is None

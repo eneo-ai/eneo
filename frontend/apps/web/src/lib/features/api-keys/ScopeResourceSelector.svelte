@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SpaceSparse } from "@intric/intric-js";
+  import type { SpaceSparse } from "@eneo/eneo-js";
   import { Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
@@ -52,27 +52,25 @@
   const resources = $derived.by((): Resource[] => {
     switch (scopeType) {
       case "space":
-        return spaces.map(
-          (s: SpaceSparse): Resource => ({ id: s.id, name: s.name, type: "space" as const })
-        );
+        return spaces.map((s: SpaceSparse): Resource => ({
+          id: s.id,
+          name: s.name,
+          type: "space" as const
+        }));
       case "assistant":
-        return assistants.map(
-          (a: ResourceOption): Resource => ({
-            id: a.id,
-            name: a.name,
-            type: "assistant" as const,
-            spaceName: a.spaceName
-          })
-        );
+        return assistants.map((a: ResourceOption): Resource => ({
+          id: a.id,
+          name: a.name,
+          type: "assistant" as const,
+          spaceName: a.spaceName
+        }));
       case "app":
-        return apps.map(
-          (a: ResourceOption): Resource => ({
-            id: a.id,
-            name: a.name,
-            type: "app" as const,
-            spaceName: a.spaceName
-          })
-        );
+        return apps.map((a: ResourceOption): Resource => ({
+          id: a.id,
+          name: a.name,
+          type: "app" as const,
+          spaceName: a.spaceName
+        }));
       default:
         return [];
     }

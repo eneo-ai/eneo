@@ -7,24 +7,24 @@ from uuid import UUID
 
 import pytest
 
-from intric.collections.domain.collection import Collection
-from intric.completion_models.domain.completion_model import CompletionModel
-from intric.flow_packages.application.flow_package_candidate_loader import (
+from eneo.collections.domain.collection import Collection
+from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.flow_packages.application.flow_package_candidate_loader import (
     build_flow_package_import_planner_candidates,
     build_flow_package_import_planner_candidates_for_space,
 )
-from intric.flow_packages.application.flow_package_import_planner import (
+from eneo.flow_packages.application.flow_package_import_planner import (
     build_flow_package_import_plan,
 )
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
-from intric.flow_packages.domain.flow_package_import_plan import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlanStatus,
     FlowPackageModelDependencyResolution,
 )
-from intric.flow_packages.domain.flow_package_manifest import FlowPackageManifest
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelIdentity,
     FlowPackageModelKind,
     FlowPackageModelMatchingPreferences,
@@ -32,32 +32,32 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementEntry,
     FlowPackageRequirementSet,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.integration.domain.entities.integration_knowledge import (
+from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
-from intric.security_classifications.domain.entities.security_classification import (
+from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from intric.spaces.space import Space
-from intric.transcription_models.domain.transcription_model import TranscriptionModel
-from intric.websites.domain.crawl_run import CrawlType
-from intric.websites.domain.website import UpdateInterval, Website
+from eneo.spaces.space import Space
+from eneo.transcription_models.domain.transcription_model import TranscriptionModel
+from eneo.websites.domain.crawl_run import CrawlType
+from eneo.websites.domain.website import UpdateInterval, Website
 
 if TYPE_CHECKING:
-    from intric.embedding_models.domain.embedding_model import EmbeddingModel
-    from intric.integration.domain.entities.user_integration import UserIntegration
-    from intric.users.user import UserInDB
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
+    from eneo.integration.domain.entities.user_integration import UserIntegration
+    from eneo.users.user import UserInDB
 
 _NOW = datetime(2026, 5, 18, tzinfo=timezone.utc)
 _TENANT_ID = UUID("00000000-0000-4000-8000-000000000001")

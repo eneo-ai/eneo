@@ -72,15 +72,15 @@ The branch already has a Flow-specific capability owner. That is why a new green
 
 | Evidence | File |
 | --- | --- |
-| Flow Capability Manifest has a versioned capability surface. | `backend/src/intric/flows/flow_capability_manifest.py:43` |
-| `FlowCapability` declares ids, labels, tuple legality, required config, invariants, exposure, and channel/runtime input details. | `backend/src/intric/flows/flow_capability_manifest.py:73` |
-| `CAPABILITY_REGISTRY` is the current Flow capability registry. | `backend/src/intric/flows/flow_capability_manifest.py:454` |
-| Critic invariants are rendered deterministically from the capability registry. | `backend/src/intric/flows/flow_capability_manifest.py:816` |
-| Coverage diagnostics walk the enum product and surface capability drift. | `backend/src/intric/flows/flow_capability_manifest.py:838` |
-| Builder prompt reference is generated from schema values plus the Flow Capability Manifest. | `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:19` |
-| Builder proposal context is generated at the proposal boundary from server-owned state plus FCM/pattern facts; the old Builder-local capability projection module has been deleted. | `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` |
-| Flow authoring has one typed command union for create/edit. | `backend/src/intric/flows/application/flow_authoring_command.py:58` |
-| `FlowAuthoringCommandService` owns preview, prepare, apply, and transaction assertion through the existing Flow services. | `backend/src/intric/flows/application/flow_authoring_command.py:127` |
+| Flow Capability Manifest has a versioned capability surface. | `backend/src/eneo/flows/flow_capability_manifest.py:43` |
+| `FlowCapability` declares ids, labels, tuple legality, required config, invariants, exposure, and channel/runtime input details. | `backend/src/eneo/flows/flow_capability_manifest.py:73` |
+| `CAPABILITY_REGISTRY` is the current Flow capability registry. | `backend/src/eneo/flows/flow_capability_manifest.py:454` |
+| Critic invariants are rendered deterministically from the capability registry. | `backend/src/eneo/flows/flow_capability_manifest.py:816` |
+| Coverage diagnostics walk the enum product and surface capability drift. | `backend/src/eneo/flows/flow_capability_manifest.py:838` |
+| Builder prompt reference is generated from schema values plus the Flow Capability Manifest. | `backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py:19` |
+| Builder proposal context is generated at the proposal boundary from server-owned state plus FCM/pattern facts; the old Builder-local capability projection module has been deleted. | `backend/src/eneo/flows/ai_builder/ai_builder_plan_proposal_task.py` |
+| Flow authoring has one typed command union for create/edit. | `backend/src/eneo/flows/application/flow_authoring_command.py:58` |
+| `FlowAuthoringCommandService` owns preview, prepare, apply, and transaction assertion through the existing Flow services. | `backend/src/eneo/flows/application/flow_authoring_command.py:127` |
 
 ## The Clean Architecture Shape
 

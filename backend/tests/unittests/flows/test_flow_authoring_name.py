@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.flow_authoring_name import (
+from eneo.flows.flow_authoring_name import (
     MAX_FLOW_NAME_LENGTH,
     normalize_flow_name,
     normalize_optional_flow_name,

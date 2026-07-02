@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 
-from intric.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
+from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_events import (
     build_done_event,
     build_question_event,
     build_requirements_summary_event,

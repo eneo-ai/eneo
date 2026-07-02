@@ -1,7 +1,7 @@
 import pytest
 from dependency_injector import providers
 
-from intric.main.container.container import Container
+from eneo.main.container.container import Container
 
 
 @pytest.mark.integration

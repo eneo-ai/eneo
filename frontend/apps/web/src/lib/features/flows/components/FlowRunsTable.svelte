@@ -1,19 +1,19 @@
 <script lang="ts">
   import {
-    IntricError,
+    EneoError,
     type Flow,
     type FlowRun,
     type FlowRunResultFile,
-    type Intric
-  } from "@intric/intric-js";
+    type Eneo
+  } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
   import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
@@ -74,7 +74,7 @@
   }: {
     flow: Flow;
     careDataPolicy?: FlowCareDataPolicy;
-    eneo: Intric;
+    eneo: Eneo;
     visible?: boolean;
     optimisticRuns?: FlowRun[];
     reloadTrigger?: number;
@@ -152,7 +152,7 @@
       flowId: flow?.id,
       listRuns: async (flowId) => eneo.flows.runs.list({ flowId }),
       getErrorMessage: (error) =>
-        error instanceof IntricError
+        error instanceof EneoError
           ? getFlowRuntimeErrorMessage(error, error.getReadableMessage())
           : error instanceof Error
             ? error.message

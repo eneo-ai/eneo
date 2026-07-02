@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconPlay } from "@intric/icons/play";
-  import { Button, Tooltip } from "@intric/ui";
+  import { IconPlay } from "@eneo/icons/play";
+  import { Button, Tooltip } from "@eneo/ui";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { getIntric } from "$lib/core/Intric";
-  import { type App, type AppRunInput } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import { type App, type AppRunInput } from "@eneo/eneo-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { getAppAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
@@ -18,7 +18,7 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -31,7 +31,7 @@
   const app = derived(page, ($page) => $page.data.app) as Readable<App>;
 
   const { clearUploads } = initAttachmentManager({
-    intric,
+    eneo,
     options: { rules: getAppAttachmentRulesStore(app) }
   });
 
@@ -58,7 +58,7 @@
 
     try {
       isSubmitting = true;
-      const result = await intric.apps.runs.create({
+      const result = await eneo.apps.runs.create({
         app: $app,
         inputs: {
           files: inputs.files.map(({ id }) => {

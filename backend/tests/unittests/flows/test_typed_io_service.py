@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.application.flow_service import FlowService
-from intric.flows.domain.flow import FlowStep
-from intric.main.exceptions import BadRequestException
+from eneo.flows.application.flow_service import FlowService
+from eneo.flows.domain.flow import FlowStep
+from eneo.main.exceptions import BadRequestException
 
 
 def _step(

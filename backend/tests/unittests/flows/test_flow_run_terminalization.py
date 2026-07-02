@@ -5,14 +5,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.application.flow_run_terminalization import (
+from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationInvariantError,
     FlowRunTerminalizer,
 )
-from intric.flows.domain.flow import FlowRunStatus
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
+from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
 
 
 @pytest.mark.asyncio

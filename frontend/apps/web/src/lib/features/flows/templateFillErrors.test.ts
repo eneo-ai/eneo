@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { IntricError } from "@intric/intric-js";
+import { EneoError } from "@eneo/eneo-js";
 
 import { getTemplateFillErrorMessage } from "./templateFillErrors";
 
 describe("templateFillErrors", () => {
   it("maps backend template error code to Swedish copy", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "raw backend",
       "RESPONSE",
       400,
@@ -20,7 +20,7 @@ describe("templateFillErrors", () => {
   });
 
   it("maps missing file content errors to localized message fallback", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Selected template file has no binary content.",
       "RESPONSE",
       400,
@@ -34,8 +34,8 @@ describe("templateFillErrors", () => {
     );
   });
 
-  it("passes through unrelated Intric errors", () => {
-    const error = new IntricError(
+  it("passes through unrelated Eneo errors", () => {
+    const error = new EneoError(
       "Some other template error",
       "RESPONSE",
       400,

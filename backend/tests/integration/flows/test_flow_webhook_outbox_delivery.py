@@ -10,50 +10,50 @@ import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy.exc import IntegrityError
 
-from intric.audit.domain.outcome import Outcome
-from intric.database.database import sessionmanager
-from intric.database.tables.flow_tables import (
+from eneo.audit.domain.outcome import Outcome
+from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRuns,
     FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.application.flow_webhook_delivery_policy import (
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     Flow,
     FlowRunStatus,
     FlowStep,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowStepAttemptStatus
-from intric.flows.flow_factory import FlowFactory
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
+from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.published_definition import build_published_definition_json
-from intric.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
-from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper
-from intric.flows.runtime.step_execution_result import (
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.published_definition import build_published_definition_json
+from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.runtime.step_execution_result import (
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
-from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.container.container import Container
+from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.container.container import Container
 
 
 def _build_flow(

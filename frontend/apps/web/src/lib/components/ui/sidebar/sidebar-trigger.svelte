@@ -32,6 +32,6 @@
   {...restProps}
 >
   <PanelLeftIcon />
-  <!-- eslint-disable-next-line intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
+  <!-- eslint-disable-next-line eneo/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
   <span class="sr-only">Toggle Sidebar</span>
 </Button>

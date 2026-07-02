@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { IconQuestionMark } from "@intric/icons/question-mark";
-  import { Input, Tooltip } from "@intric/ui";
-  import type { ModelKwargs } from "@intric/intric-js";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
+  import { Input, Tooltip } from "@eneo/ui";
+  import type { ModelKwargs } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
     getModelKwargCapability,

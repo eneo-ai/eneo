@@ -7,9 +7,9 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { makeEditable } from "$lib/core/editable";
-  import { getIntric } from "$lib/core/Intric";
-  import type { UserGroup } from "@intric/intric-js";
-  import { Dialog, Button, Input } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { UserGroup } from "@eneo/eneo-js";
+  import { Dialog, Button, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
@@ -18,7 +18,7 @@
     name: ""
   };
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   export let mode: "update" | "create" = "create";
   export let userGroup: UserGroup = emptyUserGroup;
@@ -41,7 +41,7 @@
   async function edit() {
     isProcessing = true;
     try {
-      const updated = await intric.userGroups.update({
+      const updated = await eneo.userGroups.update({
         userGroup: { id: userGroup.id },
         update: editableUserGroup.getEdits()
       });
@@ -58,7 +58,7 @@
   async function create() {
     isProcessing = true;
     try {
-      await intric.userGroups.create(editableUserGroup);
+      await eneo.userGroups.create(editableUserGroup);
       invalidate("admin:user-groups:load");
       $showDialog = false;
       editableUserGroup.updateWithValue(emptyUserGroup);

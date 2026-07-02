@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FlowRunStepInputFiles,
     FlowRuntimeUploadedFiles,
 )
@@ -55,9 +55,8 @@ def test_step_input_files_enforce_positive_attempt_projection() -> None:
 
 
 def test_step_input_files_require_runtime_upload_binding() -> None:
-    assert (
-        "fk_flow_run_step_input_files_runtime_upload"
-        in _foreign_key_names(FlowRunStepInputFiles)
+    assert "fk_flow_run_step_input_files_runtime_upload" in _foreign_key_names(
+        FlowRunStepInputFiles
     )
 
 
@@ -66,7 +65,6 @@ def test_runtime_uploaded_files_expose_composite_fk_target() -> None:
         "uq_flow_runtime_uploaded_files_file_flow_tenant"
         in _unique_constraint_names(FlowRuntimeUploadedFiles)
     )
-    assert (
-        "fk_flow_runtime_uploaded_files_flow_tenant"
-        in _foreign_key_names(FlowRuntimeUploadedFiles)
+    assert "fk_flow_runtime_uploaded_files_flow_tenant" in _foreign_key_names(
+        FlowRuntimeUploadedFiles
     )

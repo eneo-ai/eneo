@@ -6,10 +6,10 @@
     FlowRunContractStepInput,
     FlowRunContractTemplateReadiness,
     FlowRuntimeUploadTimeoutEvent,
-    Intric,
+    Eneo,
     UploadedFile
-  } from "@intric/intric-js";
-  import { createFlowRuntimeUploadTimeoutController } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
+  import { createFlowRuntimeUploadTimeoutController } from "@eneo/eneo-js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -17,8 +17,8 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { IntricError } from "@intric/intric-js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { EneoError } from "@eneo/eneo-js";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -67,7 +67,7 @@
     getFlowRuntimeErrorMessage,
     getFlowRuntimeErrorMessageByCode
   } from "$lib/features/flows/flowRuntimeErrorMapping";
-  import { IconXMark } from "@intric/icons/x-mark";
+  import { IconXMark } from "@eneo/icons/x-mark";
   import { getFlowRunDialogLabels } from "./flowRunDialogLabels";
   import FlowRunDialogForm from "./FlowRunDialogForm.svelte";
   import FlowRunDialogRuntimeStep from "./FlowRunDialogRuntimeStep.svelte";
@@ -80,14 +80,14 @@
     open = $bindable(false),
     flow,
     careDataPolicy = undefined,
-    intric,
+    eneo,
     lastInputPayload,
     onRunCreated
   }: {
     open: boolean;
     flow: Flow;
     careDataPolicy?: FlowCareDataPolicy;
-    intric: Intric;
+    eneo: Eneo;
     lastInputPayload: Record<string, unknown> | null;
     onRunCreated?: (detail: { run: FlowRun }) => void;
   } = $props();
@@ -298,12 +298,12 @@
   async function loadRunContract(flowId: string) {
     try {
       runContractError = null;
-      runContract = await intric.flows.runContract.get({ id: flowId });
+      runContract = await eneo.flows.runContract.get({ id: flowId });
     } catch (error) {
       runContract = null;
       runContractError = getFlowRuntimeErrorMessage(
         error,
-        error instanceof IntricError ? error.getReadableMessage() : String(error)
+        error instanceof EneoError ? error.getReadableMessage() : String(error)
       );
     }
   }
@@ -525,7 +525,7 @@
     });
 
     try {
-      const uploadPromise = intric.flows.steps.runtimeFiles.upload({
+      const uploadPromise = eneo.flows.steps.runtimeFiles.upload({
         id: flow.id,
         stepId: step.step_id,
         file,
@@ -758,7 +758,7 @@
     const sessionId = fileInputState.sessionIdsByStepIdSnapshot[stepId];
     fileInputState.discardStepRecording(stepId);
     if (flow?.id && sessionId) {
-      await purgeSession({ intric, flowId: flow.id, stepId, sessionId });
+      await purgeSession({ eneo, flowId: flow.id, stepId, sessionId });
     }
     disposeRecordingSession(stepId);
   }
@@ -863,7 +863,7 @@
 
   async function downloadUploadedFile(file: UploadedFile) {
     try {
-      const { url } = await intric.files.generateSignedUrl({
+      const { url } = await eneo.files.generateSignedUrl({
         fileId: file.id,
         contentDisposition: "attachment"
       });
@@ -1006,7 +1006,7 @@
   async function discardResumedSession(stepId: string, hint: SessionRecoveryHint) {
     if (!flow?.id || !fileInputState.beginResumeAction(stepId)) return;
     try {
-      await purgeSession({ intric, flowId: flow.id, stepId, sessionId: hint.sessionId });
+      await purgeSession({ eneo, flowId: flow.id, stepId, sessionId: hint.sessionId });
       fileInputState.discardRecoveredSession(stepId);
     } finally {
       fileInputState.finishResumeAction();
@@ -1050,13 +1050,13 @@
         inputPayloadJson: payload,
         stepInputs
       });
-      const idempotencyKey = await intric.flows.runs.deriveUploadIntentIdempotencyKey({
+      const idempotencyKey = await eneo.flows.runs.deriveUploadIntentIdempotencyKey({
         flowId: flow.id,
         expectedFlowVersion: runIntent.expected_flow_version,
         input_payload_json: runIntent.input_payload_json,
         ...(runIntent.step_inputs ? { step_inputs: runIntent.step_inputs } : {})
       });
-      const createdRun = await intric.flows.runs.create({
+      const createdRun = await eneo.flows.runs.create({
         flow: { id: flow.id },
         ...runIntent,
         idempotencyKey
@@ -1079,7 +1079,7 @@
       toast.error(
         getFlowRuntimeErrorMessage(
           error,
-          error instanceof IntricError ? error.getReadableMessage() : String(error)
+          error instanceof EneoError ? error.getReadableMessage() : String(error)
         )
       );
     } finally {

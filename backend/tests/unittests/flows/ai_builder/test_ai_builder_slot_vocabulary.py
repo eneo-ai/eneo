@@ -13,11 +13,11 @@ import ast
 import pathlib
 from typing import get_args
 
-import intric.flows.ai_builder.ai_builder_slot_vocabulary as slot_vocabulary
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+import eneo.flows.ai_builder.ai_builder_slot_vocabulary as slot_vocabulary
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     LLMResolvableSlotName,
 )
-from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
     LLM_RESOLVABLE_SLOT_NAMES,
     NON_LLM_RESOLVABLE_SLOT_NAMES,
@@ -101,24 +101,24 @@ class TestLeafPurity:
                 )
                 module = node.module or ""
                 is_ai_builder_sub_or_pkg = (
-                    module == "intric.flows.ai_builder"
-                    or module.startswith("intric.flows.ai_builder.")
+                    module == "eneo.flows.ai_builder"
+                    or module.startswith("eneo.flows.ai_builder.")
                 )
                 assert not is_ai_builder_sub_or_pkg, (
                     f"Leaf module must not import from ai_builder siblings; "
                     f"found 'from {module} import ...'"
                 )
-                if module == "intric.flows":
+                if module == "eneo.flows":
                     for alias in node.names:
                         assert alias.name != "ai_builder", (
                             f"Leaf module must not import the ai_builder package; "
-                            f"found 'from intric.flows import {alias.name}'"
+                            f"found 'from eneo.flows import {alias.name}'"
                         )
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     is_ai_builder = (
-                        alias.name == "intric.flows.ai_builder"
-                        or alias.name.startswith("intric.flows.ai_builder.")
+                        alias.name == "eneo.flows.ai_builder"
+                        or alias.name.startswith("eneo.flows.ai_builder.")
                     )
                     assert not is_ai_builder, (
                         f"Leaf module must not import ai_builder siblings; "

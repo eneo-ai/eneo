@@ -14,14 +14,14 @@
   } from "@xyflow/svelte";
   import "@xyflow/svelte/dist/style.css";
   import dagre from "dagre";
-  import type { Flow, FlowStep } from "@intric/intric-js";
+  import type { Flow, FlowStep } from "@eneo/eneo-js";
   import FlowNodeLlm from "./FlowNodeLlm.svelte";
   import FlowNodeIO from "./FlowNodeIO.svelte";
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
-  import { IconDownload } from "@intric/icons/download";
+  import { IconDownload } from "@eneo/icons/download";
   import { onMount, tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";

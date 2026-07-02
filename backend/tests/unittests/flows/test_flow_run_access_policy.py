@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -19,15 +19,15 @@ from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.application.flow_run_access_policy import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
 )
-from intric.flows.domain.flow import FlowRun, FlowRunStatus
-from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
-from intric.main.exceptions import NotFoundException, UnauthorizedException
-from intric.roles.permissions import Permission
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.roles.permissions import Permission
 
 
 def _run(user, flow_id) -> FlowRun:

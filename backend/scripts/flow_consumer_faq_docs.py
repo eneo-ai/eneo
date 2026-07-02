@@ -22,7 +22,7 @@ from flow_consumer_guide_support import (
     write_page,
 )
 
-from intric.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 
 CONSUMER_GUIDE_PAGE_SLUG = "flows-faq"
 FLOW_CONSUMER_GUIDE_DOCS_OUTPUT_PATH = output_path_for(CONSUMER_GUIDE_PAGE_SLUG)

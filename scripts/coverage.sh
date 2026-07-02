@@ -53,14 +53,14 @@ if [ "$DO_BE" = 1 ]; then
     # Integration tests use testcontainers → need root + the Docker socket.
     docker exec -u root -i "$CONTAINER" bash -c \
       "$ENV_PREFIX TESTCONTAINERS_RYUK_DISABLED=true DOCKER_HOST=unix:///var/run/docker.sock && cd /workspace/backend && \
-       uv run pytest -n 2 -m 'not integration' --cov=src/intric --cov-report= tests/ && \
-       uv run pytest -n 2 -m integration --cov=src/intric --cov-append \
+       uv run pytest -n 2 -m 'not integration' --cov=src/eneo --cov-report= tests/ && \
+       uv run pytest -n 2 -m integration --cov=src/eneo --cov-append \
          --cov-report=term-missing:skip-covered --cov-report=html --cov-report=json tests/integration/"
   else
     echo "▶ Backend coverage (pytest: unit only) …"
     docker exec -u vscode -i "$CONTAINER" bash -c \
       "$ENV_PREFIX && cd /workspace/backend && \
-       uv run pytest -n 2 -m 'not integration' --cov=src/intric \
+       uv run pytest -n 2 -m 'not integration' --cov=src/eneo \
          --cov-report=term-missing:skip-covered --cov-report=html --cov-report=json tests/"
   fi
 fi

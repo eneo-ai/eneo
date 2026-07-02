@@ -6,11 +6,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.domain.flow_classification_retention_policy import (
+from eneo.flows.domain.flow_classification_retention_policy import (
     FlowClassificationRetentionPolicy,
 )
-from intric.roles.permissions import Permission
-from intric.settings.settings import (
+from eneo.roles.permissions import Permission
+from eneo.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
     FlowClassificationRetentionPolicyUpdate,
@@ -25,7 +25,7 @@ from intric.settings.settings import (
     FlowRuntimePolicyPublic,
     FlowRuntimePolicyUpdate,
 )
-from intric.settings.settings_router import (
+from eneo.settings.settings_router import (
     delete_flow_classification_retention_policy,
     get_ai_builder_budget_settings,
     get_flow_document_render_limits,

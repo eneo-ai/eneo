@@ -1,5 +1,5 @@
-import { FLOW_RUN_STATUS_CAPABILITIES, FLOW_RUN_STATUS_FILTER_ORDER } from "@intric/intric-js";
-import type { FlowRun, FlowRunStatusCapability } from "@intric/intric-js";
+import { FLOW_RUN_STATUS_CAPABILITIES, FLOW_RUN_STATUS_FILTER_ORDER } from "@eneo/eneo-js";
+import type { FlowRun, FlowRunStatusCapability } from "@eneo/eneo-js";
 
 export type FlowRunStatus = FlowRun["status"];
 export type FlowRunStatusFilter = FlowRunStatus | null;

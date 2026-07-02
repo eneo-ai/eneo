@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { Flow } from "@intric/intric-js";
+  import type { Flow } from "@eneo/eneo-js";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getTemplateFillDryRunIssues } from "$lib/features/flows/templateFillConfig";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { IconPlay } from "@intric/icons/play";
+  import { IconPlay } from "@eneo/icons/play";
   import { m } from "$lib/paraglide/messages";
   import * as Card from "$lib/components/ui/card/index.js";
   import { CheckCircle2, AlertCircle, Loader2 } from "lucide-svelte";

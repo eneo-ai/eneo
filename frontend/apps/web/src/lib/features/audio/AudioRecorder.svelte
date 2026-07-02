@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { IconMicrophone } from "@intric/icons/microphone";
-  import { IconStop } from "@intric/icons/stop";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconPlay } from "@intric/icons/play";
+  import { IconMicrophone } from "@eneo/icons/microphone";
+  import { IconStop } from "@eneo/icons/stop";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconPlay } from "@eneo/icons/play";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { onDestroy, onMount } from "svelte";
@@ -1116,7 +1116,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   @keyframes breathe-ring {
     0%,

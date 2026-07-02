@@ -5,17 +5,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.assistant_execution_snapshot import stable_hash
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.assistant_execution_snapshot import stable_hash
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from intric.flows.flow_metadata import FlowFormFieldType, serialize_flow_metadata
-from intric.flows.flow_review_policy import (
+from eneo.flows.flow_metadata import FlowFormFieldType, serialize_flow_metadata
+from eneo.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_INVALID,
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
 )
-from intric.flows.published_definition import (
+from eneo.flows.published_definition import (
     FLOW_DEFINITION_FLOW_ID_INVALID,
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_DEFINITION_SCHEMA_VERSION_MISSING,
@@ -27,7 +27,7 @@ from intric.flows.published_definition import (
     parse_published_runtime_steps,
     published_definition_checksum,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _step(*, order: object = 1):

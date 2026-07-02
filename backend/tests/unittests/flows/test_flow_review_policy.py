@@ -4,15 +4,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.api.flow_models import FlowStepCreateRequest, FlowStepUpdateRequest
-from intric.flows.domain.flow import FlowStep
-from intric.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
-from intric.flows.flow_review_expiry_policy import (
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_models import FlowStepCreateRequest, FlowStepUpdateRequest
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
+from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_MAX_SECONDS,
     FLOW_REVIEW_EXPIRY_MIN_SECONDS,
 )
-from intric.flows.flow_review_policy import (
+from eneo.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_INVALID,
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
@@ -20,7 +20,7 @@ from intric.flows.flow_review_policy import (
     dump_flow_step_review_policy,
     parse_flow_step_review_policy,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def test_parse_flow_step_review_policy_accepts_view_and_edit_modes() -> None:

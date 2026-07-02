@@ -15,10 +15,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.files.file_models import File, FileType
-from intric.files.file_service import FileService
-from intric.main.exceptions import NotFoundException
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import File, FileType
+from eneo.files.file_service import FileService
+from eneo.main.exceptions import NotFoundException
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -150,7 +150,7 @@ class TestDeleteByOwnerRepo:
     @pytest.mark.asyncio
     async def test_delete_by_owner_principal_returns_none_when_no_match(self):
         """When DELETE RETURNING yields no row, returns None (not exception)."""
-        from intric.files.file_repo import FileRepository
+        from eneo.files.file_repo import FileRepository
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -171,7 +171,7 @@ class TestDeleteByOwnerRepo:
     @pytest.mark.asyncio
     async def test_delete_by_owner_principal_returns_file_when_match(self):
         """When DELETE RETURNING yields a row, returns a validated File model."""
-        from intric.files.file_repo import FileRepository
+        from eneo.files.file_repo import FileRepository
 
         user_id = uuid4()
         file_id = uuid4()
@@ -226,7 +226,7 @@ class TestDeleteByOwnerRepo:
         This verifies the atomic pattern — ownership is checked in SQL, not
         in a separate Python check that could race.
         """
-        from intric.files.file_repo import FileRepository
+        from eneo.files.file_repo import FileRepository
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -263,7 +263,7 @@ class TestGetByIdRepo:
     @pytest.mark.asyncio
     async def test_get_by_id_missing_raises_not_found(self):
         """Missing file should raise NotFoundException (not validation error)."""
-        from intric.files.file_repo import FileRepository
+        from eneo.files.file_repo import FileRepository
 
         mock_session = AsyncMock()
         repo = FileRepository(session=mock_session)
@@ -275,7 +275,7 @@ class TestGetByIdRepo:
     @pytest.mark.asyncio
     async def test_get_by_id_returns_validated_file(self):
         """Existing file should be validated and returned as File model."""
-        from intric.files.file_repo import FileRepository
+        from eneo.files.file_repo import FileRepository
 
         owner_id = uuid4()
         file_id = uuid4()

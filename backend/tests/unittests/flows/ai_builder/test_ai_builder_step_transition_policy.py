@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
     supports_inline_inref_citation,
 )
-from intric.flows.ai_builder.ai_builder_underlag_policy import is_source_surfacing_text
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.ai_builder_underlag_policy import is_source_surfacing_text
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -15,8 +15,8 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.input_binding_contract_rules import question_binding
-from intric.flows.template_reference_analyzer import (
+from eneo.flows.input_binding_contract_rules import question_binding
+from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
 )

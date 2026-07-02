@@ -37,7 +37,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .tile-bg {
     background: linear-gradient(183deg, var(--dynamic-dimmer) 0%, var(--background-primary) 50%);
   }

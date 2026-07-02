@@ -41,7 +41,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject new step-input JSON side channels that duplicate relational file rows.
 - Keep rerun override intent explicit with `root_step_input_override_requested`.
 
-**Source refs.** Step input rows: `backend/src/intric/database/tables/flow_tables.py`, Rerun operation rows: `backend/src/intric/database/tables/flow_tables.py`, Rerun accept path: `backend/src/intric/flows/application/flow_run_rerun_service.py`.
+**Source refs.** Step input rows: `backend/src/eneo/database/tables/flow_tables.py`, Rerun operation rows: `backend/src/eneo/database/tables/flow_tables.py`, Rerun accept path: `backend/src/eneo/flows/application/flow_run_rerun_service.py`.
 
 ### 2. Typed lifecycle exceptions over HTTP-shaped lower layers
 
@@ -54,7 +54,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Translate failures to Flow API errors only in application or router adapters.
 - Reject `BadRequestException` leaks from repositories and runtime invariants.
 
-**Source refs.** Review checkpoint exceptions: `backend/src/intric/flows/domain/review_checkpoint_exceptions.py`, Rerun service translation: `backend/src/intric/flows/application/flow_run_rerun_service.py`.
+**Source refs.** Review checkpoint exceptions: `backend/src/eneo/flows/domain/review_checkpoint_exceptions.py`, Rerun service translation: `backend/src/eneo/flows/application/flow_run_rerun_service.py`.
 
 ### 3. Explicit Flow principals over synthetic runtime users
 
@@ -68,7 +68,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Tenant-scoped repositories should receive tenant and principal fields explicitly.
 - Review tenant filters and cross-principal denial tests together.
 
-**Source refs.** Flow principal: `backend/src/intric/flows/principal.py`, Runtime actor: `backend/src/intric/flows/runtime/flow_run_actor.py`, Run access policy: `backend/src/intric/flows/application/flow_run_access_policy.py`.
+**Source refs.** Flow principal: `backend/src/eneo/flows/principal.py`, Runtime actor: `backend/src/eneo/flows/runtime/flow_run_actor.py`, Run access policy: `backend/src/eneo/flows/application/flow_run_access_policy.py`.
 
 ### 4. Authored HTTP config only
 
@@ -81,7 +81,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject fallback reads for `body_template`, `body_json`, or flat auth fields.
 - Keep secrets and request previews behind the authored config model.
 
-**Source refs.** HTTP validator: `backend/src/intric/flows/flow_validators_http.py`, HTTP transport package: `backend/src/intric/flows/http_transport/__init__.py`, HTTP runtime: `backend/src/intric/flows/runtime/http_runtime.py`.
+**Source refs.** HTTP validator: `backend/src/eneo/flows/flow_validators_http.py`, HTTP transport package: `backend/src/eneo/flows/http_transport/__init__.py`, HTTP runtime: `backend/src/eneo/flows/runtime/http_runtime.py`.
 
 ### 5. One persistence owner for review checkpoint state
 
@@ -94,7 +94,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject checkpoint state writes through `FlowRunRepository` or ad hoc SQL.
 - Keep run await and resume transitions in the same transaction owner.
 
-**Source refs.** Checkpoint repository: `backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py`, Checkpoint service: `backend/src/intric/flows/application/flow_run_review_checkpoint_service.py`.
+**Source refs.** Checkpoint repository: `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py`, Checkpoint service: `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py`.
 
 ### 6. Bounded JSONB policy
 
@@ -107,7 +107,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject new Flow JSONB columns without ownership metadata and tests.
 - Move relational candidates out of JSON when queryability or integrity requires it.
 
-**Source refs.** JSONB owner registry: `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`, Schema docs exporter: `backend/src/intric/flows/infrastructure/flow_schema_docs_exporter.py`, Data schema docs: `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`.
+**Source refs.** JSONB owner registry: `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py`, Schema docs exporter: `backend/src/eneo/flows/infrastructure/flow_schema_docs_exporter.py`, Data schema docs: `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`.
 
 ### 7. One public Flow API error-code vocabulary
 
@@ -120,7 +120,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject uncataloged Flow API codes and internal invariant strings in public responses.
 - Update the failure taxonomy page when a public Flow code changes.
 
-**Source refs.** Error-code enum: `backend/src/intric/flows/flow_api_error_code.py`, Failure taxonomy: `backend/src/intric/flows/flow_error_taxonomy.py`, Developer failure page: `frontend/apps/docs-site/src/content/docs/flows-for-developers/when-things-fail.mdx`.
+**Source refs.** Error-code enum: `backend/src/eneo/flows/flow_api_error_code.py`, Failure taxonomy: `backend/src/eneo/flows/flow_error_taxonomy.py`, Developer failure page: `frontend/apps/docs-site/src/content/docs/flows-for-developers/when-things-fail.mdx`.
 
 ### 8. Import boundaries and Flow AI Builder isolation
 
@@ -146,7 +146,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject modeling review edits as run-status transitions.
 - Keep resume idempotency tied to checkpoint revision and decision state.
 
-**Source refs.** Checkpoint states: `backend/src/intric/flows/enums.py`, Checkpoint table: `backend/src/intric/database/tables/flow_tables.py`, Lifecycle docs: `frontend/apps/docs-site/src/content/docs/flows-for-developers/run-lifecycle.mdx`.
+**Source refs.** Checkpoint states: `backend/src/eneo/flows/enums.py`, Checkpoint table: `backend/src/eneo/database/tables/flow_tables.py`, Lifecycle docs: `frontend/apps/docs-site/src/content/docs/flows-for-developers/run-lifecycle.mdx`.
 
 ### 10. Rerun lineage and invalidation ownership
 
@@ -159,7 +159,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 - Reject direct executor writes that bypass rerun operation lineage.
 - Preserve root attempt numbers, invalidated-step rows, and request fingerprints together.
 
-**Source refs.** Rerun service: `backend/src/intric/flows/application/flow_run_rerun_service.py`, Rerun repository: `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py`, Rerun graph: `backend/src/intric/flows/flow_run_rerun_graph.py`.
+**Source refs.** Rerun service: `backend/src/eneo/flows/application/flow_run_rerun_service.py`, Rerun repository: `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py`, Rerun graph: `backend/src/eneo/flows/flow_run_rerun_graph.py`.
 
 ## Source guards
 

@@ -6,14 +6,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_tool_turn_persistence import persist_tool_turn
+from eneo.flows.ai_builder.ai_builder_tool_turn_persistence import persist_tool_turn
 
 
 @pytest.mark.asyncio

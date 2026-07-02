@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_events import (
     build_question_event,
     encode_ai_builder_stream_event,
 )
-from intric.flows.ai_builder.ai_builder_mcp_intent import (
+from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     build_mcp_resource_selection_question,
     explicit_mcp_name_groups,
@@ -21,10 +21,10 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_selection_answer_allows_planning,
     mcp_selection_policy_feedback,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,

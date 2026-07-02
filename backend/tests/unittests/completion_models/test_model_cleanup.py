@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from intric.completion_models.infrastructure.model_cleanup_worker import (
+from eneo.completion_models.infrastructure.model_cleanup_worker import (
     _find_removable_models,
     _has_active_entity_references,
     cleanup_orphaned_models,
@@ -100,7 +100,7 @@ class TestActiveReferenceSemantics:
 
         repo_cls = MagicMock(return_value=repo)
         monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker.CompletionModelsRepository",
+            "eneo.completion_models.infrastructure.model_cleanup_worker.CompletionModelsRepository",
             repo_cls,
         )
 
@@ -141,7 +141,7 @@ class TestCleanupWorker:
         container = _make_container(mock_session)
 
         monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
+            "eneo.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
             AsyncMock(
                 return_value=[
                     {
@@ -154,7 +154,7 @@ class TestCleanupWorker:
             ),
         )
         monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker._has_active_entity_references",
+            "eneo.completion_models.infrastructure.model_cleanup_worker._has_active_entity_references",
             AsyncMock(return_value=False),
         )
 
@@ -174,7 +174,7 @@ class TestCleanupWorker:
         container = _make_container(mock_session)
 
         monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
+            "eneo.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
             AsyncMock(
                 return_value=[
                     {
@@ -187,7 +187,7 @@ class TestCleanupWorker:
             ),
         )
         monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker._has_active_entity_references",
+            "eneo.completion_models.infrastructure.model_cleanup_worker._has_active_entity_references",
             AsyncMock(return_value=True),
         )
 
@@ -219,7 +219,7 @@ class TestCleanupWorker:
 
         find_mock = AsyncMock(return_value=[])
         monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
+            "eneo.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
             find_mock,
         )
 
@@ -234,7 +234,7 @@ class TestCleanupSafetyInvariants:
     """Document critical FK-based invariants for historical attribution."""
 
     def test_restrict_fk_prevents_accidental_question_loss(self):
-        from intric.database.tables.questions_table import Questions
+        from eneo.database.tables.questions_table import Questions
 
         fk_col = Questions.__table__.c.completion_model_id
         foreign_keys = list(fk_col.foreign_keys)
@@ -243,7 +243,7 @@ class TestCleanupSafetyInvariants:
         assert foreign_keys[0].ondelete == "RESTRICT"
 
     def test_migrated_to_model_id_fk_prevents_target_deletion(self):
-        from intric.database.tables.ai_models_table import CompletionModels
+        from eneo.database.tables.ai_models_table import CompletionModels
 
         fk_col = CompletionModels.__table__.c.migrated_to_model_id
         foreign_keys = list(fk_col.foreign_keys)

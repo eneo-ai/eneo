@@ -3,11 +3,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.security_classifications.domain.entities.security_classification import (
+from eneo.main.exceptions import BadRequestException
+from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from intric.spaces.space import Space
+from eneo.spaces.space import Space
 
 
 def test_update_space_with_high_sc():

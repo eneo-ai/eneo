@@ -4,13 +4,13 @@ from copy import deepcopy
 
 import pytest
 
-from intric.flows.flow_metadata import (
+from eneo.flows.flow_metadata import (
     FlowMetadata,
     FlowMetadataParseMode,
     parse_flow_metadata,
 )
-from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
+from eneo.main.exceptions import BadRequestException
 
 
 def _metadata(fields: list[dict[str, object]]) -> FlowMetadata:

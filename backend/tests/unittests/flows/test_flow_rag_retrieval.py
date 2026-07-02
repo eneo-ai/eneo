@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
+from eneo.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
 
 
 def _assistant(*, has_knowledge: bool) -> SimpleNamespace:
@@ -75,8 +75,12 @@ async def test_retrieve_rag_chunks_returns_error_diagnostic_on_exception():
 async def test_retrieve_rag_chunks_happy_path_builds_reference_metadata():
     source_a = uuid4()
     source_b = uuid4()
-    chunk_a = SimpleNamespace(info_blob_id=source_a, info_blob_title="alpha", text="alpha")
-    chunk_b = SimpleNamespace(info_blob_id=source_b, info_blob_title="beta", text="beta")
+    chunk_a = SimpleNamespace(
+        info_blob_id=source_a, info_blob_title="alpha", text="alpha"
+    )
+    chunk_b = SimpleNamespace(
+        info_blob_id=source_b, info_blob_title="beta", text="beta"
+    )
     datastore_result = SimpleNamespace(
         chunks=[chunk_a, chunk_b],
         no_duplicate_chunks=[chunk_a, chunk_b],
@@ -125,12 +129,14 @@ async def test_retrieve_rag_chunks_happy_path_builds_reference_metadata():
 
 
 @pytest.mark.asyncio
-async def test_retrieve_rag_chunks_timeout_sets_timeout_metadata_and_diagnostic(monkeypatch):
+async def test_retrieve_rag_chunks_timeout_sets_timeout_metadata_and_diagnostic(
+    monkeypatch,
+):
     references_service = MagicMock()
     references_service.get_references = MagicMock(return_value=object())
     logger = MagicMock()
     wait_for = AsyncMock(side_effect=asyncio.TimeoutError)
-    monkeypatch.setattr("intric.flows.runtime.rag_retrieval.asyncio.wait_for", wait_for)
+    monkeypatch.setattr("eneo.flows.runtime.rag_retrieval.asyncio.wait_for", wait_for)
 
     chunks, metadata, diagnostics = await retrieve_rag_chunks(
         assistant=_assistant(has_knowledge=True),

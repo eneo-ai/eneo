@@ -9,20 +9,20 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from intric.flows.application.flow_run_service import FlowRunService
-from intric.flows.domain.flow import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_service import FlowRunService
+from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunStatus,
     FlowStep,
     FlowVersion,
 )
-from intric.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
-from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
-from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.main.exceptions import BadRequestException
 
 
 def _flow_repo() -> AsyncMock:

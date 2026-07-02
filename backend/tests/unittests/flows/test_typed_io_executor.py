@@ -16,32 +16,32 @@ from uuid import uuid4
 import httpx
 import pytest
 
-import intric.flows.runtime.executor as executor_module
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.outcome import Outcome
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.domain.flow import (
+import eneo.flows.runtime.executor as executor_module
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
     RerunStepInputOverride,
 )
-from intric.flows.flow_run_input_envelope import (
+from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
 )
-from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
-from intric.flows.runtime.executor import (
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.executor import (
     FlowRunExecutor,
     RunExecutionState,
     RuntimeStep,
     StepInputValue,
 )
-from intric.flows.runtime.flow_run_actor import FlowRunActor
-from intric.flows.runtime.output_formats import resolve_format_spec
-from intric.flows.runtime.output_formats.base import append_output_format_instructions
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.output_formats import resolve_format_spec
+from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
@@ -1526,7 +1526,7 @@ async def test_document_previous_step_rejected_with_specific_code(user):
         step_order=2, input_source="previous_step", input_type="document"
     )
     # Build state with one completed previous result.
-    from intric.flows.runtime.executor import RunExecutionState
+    from eneo.flows.runtime.executor import RunExecutionState
 
     prev = _completed_step_result(
         run_id=run.id,

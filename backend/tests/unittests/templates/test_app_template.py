@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.spaces.api.space_models import TemplateCreate
-from intric.templates.app_template.api.app_template_models import AppTemplateWizard
-from intric.templates.app_template.app_template import AppTemplate
+from eneo.main.exceptions import BadRequestException
+from eneo.spaces.api.space_models import TemplateCreate
+from eneo.templates.app_template.api.app_template_models import AppTemplateWizard
+from eneo.templates.app_template.app_template import AppTemplate
 
 template1 = AppTemplate(
     id=uuid4(),
@@ -101,6 +101,6 @@ async def test_app_template_valid_attachments_data():
 
 
 async def test_organization():
-    assert template1.is_from_intric()
+    assert template1.is_from_eneo()
     template1.organization = "Other organization"
-    assert not template1.is_from_intric()
+    assert not template1.is_from_eneo()

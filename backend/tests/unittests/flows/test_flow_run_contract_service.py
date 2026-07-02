@@ -7,23 +7,23 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.api.flow_models import FlowOutputDelivery
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.api.flow_models import FlowOutputDelivery
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_api_exceptions import FlowBadRequestException
-from intric.flows.flow_input_limits import FlowInputLimits
-from intric.flows.flow_metadata import FlowFormFieldType
-from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
-from intric.flows.flow_run_contract_service import FlowRunContractService
-from intric.flows.published_definition import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_metadata import FlowFormFieldType
+from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+from eneo.flows.flow_run_contract_service import FlowRunContractService
+from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
 )
-from intric.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 
 
 def _flow(*, step: FlowStep) -> Flow:

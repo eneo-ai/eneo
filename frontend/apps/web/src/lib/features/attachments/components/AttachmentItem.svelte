@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { Attachment } from "../AttachmentManager";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { Button, ProgressBar } from "@intric/ui";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { Button, ProgressBar } from "@eneo/ui";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
-  import { IconTrash } from "@intric/icons/trash";
+  import { IconTrash } from "@eneo/icons/trash";
   import UploadedFileIcon from "./UploadedFileIcon.svelte";
   import { fly, fade, scale } from "svelte/transition";
 
@@ -62,7 +62,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .attachment-row {
     @apply border-default hover:bg-hover-dimmer flex h-16 items-center gap-4 border-b px-4;

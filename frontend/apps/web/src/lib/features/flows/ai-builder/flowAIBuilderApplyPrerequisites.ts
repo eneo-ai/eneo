@@ -1,6 +1,6 @@
 import type { StepSpec, TargetKind } from "./protocol";
 import { hasAccessibleTranscriptionModel } from "$lib/features/spaces/spaceModelAvailability";
-import type { TranscriptionModel } from "@intric/intric-js";
+import type { TranscriptionModel } from "@eneo/eneo-js";
 
 export type AIBuilderApplyBlockerCode = "transcription_model_required";
 

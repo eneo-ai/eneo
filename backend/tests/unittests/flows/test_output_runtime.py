@@ -8,16 +8,16 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.files.file_models import FileType
-from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
-from intric.flows.runtime.output_runtime import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileType
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
     TypedOutputProcessingResult,
     process_typed_output,
 )
-from intric.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import TypedIOValidationException
 
 
 @dataclass

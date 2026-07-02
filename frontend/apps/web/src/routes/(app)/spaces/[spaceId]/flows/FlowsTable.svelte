@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { FlowSparse } from "@intric/intric-js";
-  import { IconWorkflow } from "@intric/icons/workflow";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import type { FlowSparse } from "@eneo/eneo-js";
+  import { IconWorkflow } from "@eneo/icons/workflow";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import * as Table from "$lib/components/ui/table/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

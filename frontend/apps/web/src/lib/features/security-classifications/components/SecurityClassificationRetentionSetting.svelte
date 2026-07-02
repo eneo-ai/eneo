@@ -7,11 +7,11 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { toast } from "$lib/components/toast";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
-  import type { FlowClassificationRetentionPolicies } from "@intric/intric-js";
+  import { Button } from "@eneo/ui";
+  import type { FlowClassificationRetentionPolicies } from "@eneo/eneo-js";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import {
     buildFlowClassificationRetentionRows,
@@ -31,7 +31,7 @@
   };
 
   let { initialPolicies }: Props = $props();
-  const intric = getIntric();
+  const eneo = getEneo();
   const security = getSecurityClassificationService();
 
   let drafts = $state<FlowClassificationRetentionDrafts>({});
@@ -92,7 +92,7 @@
 
     savingById = setBusy(savingById, row.id, true);
     try {
-      const policy = await intric.settings.putFlowClassificationRetentionPolicy(row.id, {
+      const policy = await eneo.settings.putFlowClassificationRetentionPolicy(row.id, {
         data_retention_days: parsed.days
       });
       drafts = setFlowClassificationRetentionPolicyDraft(drafts, policy);
@@ -109,7 +109,7 @@
 
     clearingById = setBusy(clearingById, row.id, true);
     try {
-      await intric.settings.deleteFlowClassificationRetentionPolicy(row.id);
+      await eneo.settings.deleteFlowClassificationRetentionPolicy(row.id);
       drafts = clearFlowClassificationRetentionPolicyDraft(drafts, row.id);
       toast.success(m.saved_successfully());
     } catch (error) {

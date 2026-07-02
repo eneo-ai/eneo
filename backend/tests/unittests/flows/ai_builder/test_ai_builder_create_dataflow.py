@@ -1,25 +1,25 @@
-from intric.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_steps_to_spec,
 )
-from intric.flows.ai_builder.ai_builder_create_dataflow import (
+from eneo.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import (
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
 )
-from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
-from intric.flows.ai_builder.planning_state import AggregationIntent
-from intric.flows.flow_authoring_spec import FormFieldSpec
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.flow_authoring_spec import FormFieldSpec
 
 
 def test_create_dataflow_does_not_import_critic_invariants() -> None:
     from pathlib import Path
 
-    import intric.flows.ai_builder.ai_builder_create_dataflow as create_dataflow
+    import eneo.flows.ai_builder.ai_builder_create_dataflow as create_dataflow
 
     source = Path(create_dataflow.__file__).read_text(encoding="utf-8")
 
@@ -275,15 +275,15 @@ def test_normalize_create_step_mechanics_detects_source_after_input_source_norma
 def test_normalize_create_step_mechanics_and_critic_share_targeted_underlag_policy() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
         evaluate_critic_invariants,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 
@@ -502,15 +502,15 @@ def test_normalize_create_step_mechanics_preserves_final_assembler_field_refs() 
 def test_normalize_create_step_mechanics_rewrites_final_assembler_for_aggregate_intent() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
         evaluate_critic_invariants,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 

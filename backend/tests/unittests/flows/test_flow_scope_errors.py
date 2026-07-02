@@ -14,40 +14,40 @@ from uuid import uuid4
 import pytest
 from fastapi import BackgroundTasks
 
-from intric.actors.actors.space_actor import SpaceRole
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api.flow_authoring_router import (
+from eneo.actors.actors.space_actor import SpaceRole
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api.flow_authoring_router import (
     create_flow,
     get_published_flow_runtime,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     delete_flow as definition_delete_flow,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     get_flow as definition_get_flow,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     list_flows as definition_list_flows,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     publish_flow as definition_publish_flow,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     unpublish_flow as definition_unpublish_flow,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     update_flow as definition_update_flow,
 )
-from intric.flows.api.flow_models import (
+from eneo.flows.api.flow_models import (
     FlowCreateRequest,
     FlowRunCreateRequest,
     FlowRunStepRerunRequest,
     FlowStepCreateRequest,
     FlowUpdateRequest,
 )
-from intric.flows.api.flow_run_evidence_router import get_flow_run_evidence
-from intric.flows.api.flow_run_execution_router import (
+from eneo.flows.api.flow_run_evidence_router import get_flow_run_evidence
+from eneo.flows.api.flow_run_execution_router import (
     cancel_flow_run,
     create_flow_run,
     get_flow_run,
@@ -55,13 +55,13 @@ from intric.flows.api.flow_run_execution_router import (
     redispatch_flow_run,
     rerun_flow_run_step,
 )
-from intric.flows.api.flow_run_steps_router import get_flow_graph
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.main.exceptions import (
+from eneo.flows.api.flow_run_steps_router import get_flow_graph
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
 from tests.unittests.flows.test_flow_router import (
     _assert_scope_mismatch,
     _enable_explicit_transaction,
@@ -597,7 +597,7 @@ async def test_update_flow_rejects_viewer():
     container.flow_service.return_value = flow_service
     _enable_space_access(container, can_edit=False)
 
-    from intric.flows.api.flow_models import FlowUpdateRequest
+    from eneo.flows.api.flow_models import FlowUpdateRequest
 
     update_req = FlowUpdateRequest(name="New Name")
 

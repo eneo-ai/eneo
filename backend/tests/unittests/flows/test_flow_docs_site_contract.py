@@ -15,18 +15,18 @@ import pytest
 import sqlalchemy as sa
 from fastapi.routing import APIRoute
 
-from intric.files.file_models import (
+from eneo.files.file_models import (
     FILE_PUBLIC_EXAMPLE,
     SIGNED_URL_RESPONSE_EXAMPLE,
     FilePublic,
     SignedURLRequest,
     SignedURLResponse,
 )
-from intric.flows.api import flow_runtime_paths as flow_runtime_path_constants
-from intric.flows.api.flow_api_error_metadata import (
+from eneo.flows.api import flow_runtime_paths as flow_runtime_path_constants
+from eneo.flows.api.flow_api_error_metadata import (
     render_flow_error_taxonomy_docs_page,
 )
-from intric.flows.api.flow_models import (
+from eneo.flows.api.flow_models import (
     FLOW_RUN_PUBLIC_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE,
@@ -40,26 +40,26 @@ from intric.flows.api.flow_models import (
     FlowRunReviewCheckpointResumeResponse,
     FlowRunStepPublic,
 )
-from intric.flows.api.flow_router import router as flow_router
-from intric.flows.api.flow_runtime_endpoint_registry import (
+from eneo.flows.api.flow_router import router as flow_router
+from eneo.flows.api.flow_runtime_endpoint_registry import (
     FLOW_RUNTIME_ENDPOINT_CONTRACTS,
     FlowRuntimeEndpointContract,
     FlowRuntimePathFieldProjection,
     flow_runtime_endpoint_by_operation_id,
 )
-from intric.flows.api.flow_runtime_paths import (
+from eneo.flows.api.flow_runtime_paths import (
     FLOW_ROOT_PATH,
     FlowReviewCheckpointRuntimePathsPublic,
     FlowRuntimePathsPublic,
     build_flow_endpoint_template,
     build_flow_runtime_public_example,
 )
-from intric.flows.application.flow_run_lifecycle_events import (
+from eneo.flows.application.flow_run_lifecycle_events import (
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
     FLOW_RUN_LIFECYCLE_LOG_MESSAGE,
     FLOW_RUN_TERMINALIZATION_OPERATION,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FLOW_RUN_STATUS_CAPABILITIES,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
@@ -67,23 +67,23 @@ from intric.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.flow_api_error_code import (
+from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FLOW_TYPED_IO_ERROR_CODES,
     FlowApiErrorCode,
 )
-from intric.flows.flow_capability_manifest import (
+from eneo.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
 )
-from intric.flows.flow_error_taxonomy import (
+from eneo.flows.flow_error_taxonomy import (
     FLOW_ERROR_CATEGORY_ORDER,
     FLOW_ERROR_TAXONOMY,
     FlowErrorSurface,
     FlowErrorTaxonomyEntry,
     validate_flow_error_taxonomy,
 )
-from intric.flows.flow_run_contract_models import (
+from eneo.flows.flow_run_contract_models import (
     FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
     FlowFinalOutputContractPublic,
     FlowReviewStepContractPublic,
@@ -92,20 +92,21 @@ from intric.flows.flow_run_contract_models import (
     FlowRuntimeUploadPolicyPublic,
     FormFieldPublic,
 )
-from intric.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
-from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
-from intric.flows.infrastructure.flow_docs_mermaid import (
+from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.infrastructure.flow_docs_mermaid import (
     FLOW_DOCS_MERMAID_FIGURE_CLASS,
     FLOW_DOCS_MERMAID_INIT_DIRECTIVE,
     render_flow_docs_mermaid_block,
 )
-from intric.flows.runtime.flow_runtime_trace import (
+from eneo.flows.runtime.flow_runtime_trace import (
     FLOW_RUN_EXECUTE_SPAN_NAME,
     FLOW_RUN_SPAN_ATTRIBUTE_KEYS,
     FLOW_STEP_EXECUTE_SPAN_NAME,
     FLOW_STEP_SPAN_ATTRIBUTE_KEYS,
 )
-from intric.flows.type_policies import INPUT_TYPE_POLICIES
+from eneo.flows.type_policies import INPUT_TYPE_POLICIES
+from tests.unit.api_key_test_utils import flatten_routes
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 REPO_ROOT = BACKEND_ROOT.parent
@@ -207,23 +208,18 @@ FLOW_DEVELOPER_REVIEWER_GUIDE_DOCS_GENERATOR = (
     BACKEND_ROOT / "scripts" / "flow_developer_reviewer_guide_docs.py"
 )
 FLOW_DEVELOPER_ERROR_TAXONOMY_DOCS_CATALOG = (
-    BACKEND_ROOT / "src" / "intric" / "flows" / "api" / "flow_api_error_metadata.py"
+    BACKEND_ROOT / "src" / "eneo" / "flows" / "api" / "flow_api_error_metadata.py"
 )
 FLOW_DEVELOPER_SCHEMA_DOCS_GENERATOR = (
     BACKEND_ROOT
     / "src"
-    / "intric"
+    / "eneo"
     / "flows"
     / "infrastructure"
     / "flow_schema_docs_exporter.py"
 )
 FLOW_DOCS_MERMAID_HELPER = (
-    BACKEND_ROOT
-    / "src"
-    / "intric"
-    / "flows"
-    / "infrastructure"
-    / "flow_docs_mermaid.py"
+    BACKEND_ROOT / "src" / "eneo" / "flows" / "infrastructure" / "flow_docs_mermaid.py"
 )
 FLOW_DOCS_MERMAID_GENERATOR_SOURCES = (
     FLOW_DEVELOPER_ARCHITECTURE_DOCS_GENERATOR,
@@ -961,8 +957,8 @@ def _live_flow_runtime_route_contracts() -> dict[tuple[str, str], tuple[str, int
     runtime_route_paths = _flow_runtime_endpoint_route_paths()
     live_routes: dict[tuple[str, str], tuple[str, int]] = {}
 
-    for route in flow_router.routes:
-        if not isinstance(route, APIRoute):
+    for route in flatten_routes(list(flow_router.routes)):
+        if not isinstance(route.route, APIRoute):
             continue
         if route.path not in runtime_route_paths:
             continue
@@ -1187,7 +1183,7 @@ def test_flow_developer_docs_orientation_contract() -> None:
 
 
 def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() -> None:
-    from intric.flows.infrastructure.flow_schema_docs_exporter import (
+    from eneo.flows.infrastructure.flow_schema_docs_exporter import (
         _AGGREGATE_DESCRIPTIONS,
         FLOW_SCHEMA_MODEL_REGISTRY,
         FlowSchemaAggregate,
@@ -1337,11 +1333,11 @@ def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() ->
 
 
 def test_flow_schema_docs_registry_covers_flow_schema_models() -> None:
-    from intric.database.tables import (
+    from eneo.database.tables import (
         flow_classification_retention_policy_table,
         flow_tables,
     )
-    from intric.flows.infrastructure.flow_schema_docs_exporter import (
+    from eneo.flows.infrastructure.flow_schema_docs_exporter import (
         FLOW_SCHEMA_MODEL_REGISTRY,
     )
 
@@ -1366,7 +1362,7 @@ def test_flow_schema_docs_registry_covers_flow_schema_models() -> None:
 
 
 def test_flow_schema_docs_boundary_allowlist_covers_external_fks() -> None:
-    from intric.flows.infrastructure.flow_schema_docs_exporter import (
+    from eneo.flows.infrastructure.flow_schema_docs_exporter import (
         FLOW_SCHEMA_BOUNDARY_TABLE_NAMES,
         FLOW_SCHEMA_MODEL_REGISTRY,
     )
@@ -1385,7 +1381,7 @@ def test_flow_schema_docs_boundary_allowlist_covers_external_fks() -> None:
 
 
 def test_flow_schema_docs_relationship_labels_derive_fk_semantics() -> None:
-    from intric.flows.infrastructure.flow_schema_docs_exporter import (
+    from eneo.flows.infrastructure.flow_schema_docs_exporter import (
         _flow_schema_relationship_from_constraint,
     )
 
@@ -1468,7 +1464,7 @@ def test_flow_schema_docs_relationship_labels_derive_fk_semantics() -> None:
 
 
 def test_flow_docs_nextra_card_renderers_validate_link_scope() -> None:
-    from intric.flows.infrastructure.flow_docs_related_cards import (
+    from eneo.flows.infrastructure.flow_docs_related_cards import (
         FlowDocsNextraCard,
         render_flow_docs_anchor_shortcut_cards,
         render_flow_docs_related_nextra_cards,
@@ -1504,7 +1500,7 @@ def test_flow_docs_nextra_card_renderers_validate_link_scope() -> None:
 
 
 def test_flow_developer_docs_how_built_is_generated_from_layout_sources() -> None:
-    from intric.flows.infrastructure.flow_docs_related_cards import (
+    from eneo.flows.infrastructure.flow_docs_related_cards import (
         FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT,
         FlowDocsRelatedNextraCard,
         render_flow_docs_related_nextra_cards,
@@ -1903,7 +1899,7 @@ def test_flow_developer_key_decision_catalog_rejects_drift() -> None:
         (
             generator.FlowDecisionSourceRef(
                 first_source.label,
-                "backend/src/intric/flows/does_not_exist.py",
+                "backend/src/eneo/flows/does_not_exist.py",
             ),
         ),
     )
@@ -1928,7 +1924,7 @@ def test_flow_developer_key_decision_catalog_rejects_drift() -> None:
 
 
 def test_flow_developer_docs_reviewer_guide_is_generated_from_review_catalog() -> None:
-    from intric.flows.infrastructure.flow_docs_related_cards import (
+    from eneo.flows.infrastructure.flow_docs_related_cards import (
         FlowDocsRelatedNextraCard,
         render_flow_docs_related_nextra_cards,
     )
@@ -2233,7 +2229,7 @@ def test_flow_developer_reviewer_guide_catalog_rejects_drift() -> None:
         (
             generator.ReviewerGuideSourceRef(
                 "Missing source",
-                "backend/src/intric/flows/does_not_exist.py",
+                "backend/src/eneo/flows/does_not_exist.py",
             ),
         ),
     )
@@ -2268,7 +2264,7 @@ def test_flow_developer_reviewer_guide_catalog_rejects_drift() -> None:
         (
             generator.ReviewerGuideSourceRef(
                 "Missing route source",
-                "backend/src/intric/flows/no_route_owner.py",
+                "backend/src/eneo/flows/no_route_owner.py",
             ),
         ),
     )
@@ -2453,7 +2449,7 @@ def test_flow_developer_reviewer_guide_catalog_rejects_drift() -> None:
 
 
 def test_flow_schema_docs_exporter_rejects_missing_table_docstring() -> None:
-    from intric.flows.infrastructure.flow_schema_docs_exporter import (
+    from eneo.flows.infrastructure.flow_schema_docs_exporter import (
         parse_flow_schema_model_docstring,
     )
 

@@ -1,13 +1,13 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   const getFlowRuntimePolicy =
-    intric.settings.getFlowRuntimePolicy ??
+    eneo.settings.getFlowRuntimePolicy ??
     (() =>
-      intric.client.fetch("/api/v1/settings/flow-runtime-policy", {
+      eneo.client.fetch("/api/v1/settings/flow-runtime-policy", {
         method: "get"
       }));
   const [flowInputLimits, flowRuntimePolicy] = await Promise.all([
-    intric.settings.getFlowInputLimits(),
+    eneo.settings.getFlowInputLimits(),
     getFlowRuntimePolicy()
   ]);
   return { flowInputLimits, flowRuntimePolicy };

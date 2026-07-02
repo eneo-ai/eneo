@@ -16,10 +16,10 @@ These tests lock in:
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.ai_models_table import TranscriptionModels
-from intric.database.tables.app_table import Apps
-from intric.database.tables.spaces_table import SpacesTranscriptionModels
-from intric.main.exceptions import ValidationException
+from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.spaces_table import SpacesTranscriptionModels
+from eneo.main.exceptions import ValidationException
 
 
 @pytest.mark.integration

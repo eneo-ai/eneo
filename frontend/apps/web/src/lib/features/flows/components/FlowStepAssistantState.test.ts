@@ -1,11 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { writable } from "svelte/store";
 
-import {
-  FlowStepAssistantState,
-  type LoadedAssistant
-} from "./FlowStepAssistantState.svelte.ts";
-import type { FlowStep, Intric } from "@intric/intric-js";
+import { FlowStepAssistantState, type LoadedAssistant } from "./FlowStepAssistantState.svelte.ts";
+import type { FlowStep, Eneo } from "@eneo/eneo-js";
 import type { FlowEditor } from "../FlowEditor";
 
 function makeStep(assistantId: string): FlowStep {
@@ -31,7 +28,7 @@ function makeState(activeStep: { current: FlowStep | null }) {
   };
   const state = new FlowStepAssistantState({
     flowEditor: flowEditor as unknown as FlowEditor,
-    intric: { files: { delete: vi.fn() } } as unknown as Intric,
+    eneo: { files: { delete: vi.fn() } } as unknown as Eneo,
     attachmentRules: writable({}),
     newAttachments: writable([]),
     clearUploads: vi.fn(),

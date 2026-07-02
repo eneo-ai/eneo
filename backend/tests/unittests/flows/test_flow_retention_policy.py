@@ -1,6 +1,6 @@
 import pytest
 
-from intric.flows.flow_retention_policy import (
+from eneo.flows.flow_retention_policy import (
     FLOW_RETENTION_POLICY_STORAGE_VERSION,
     FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
     FlowRetentionPolicy,

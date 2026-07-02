@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.flow_validators_http import validate_authored_http_config
-from intric.flows.http_transport.authored_config import (
+from eneo.flows.flow_validators_http import validate_authored_http_config
+from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
@@ -14,9 +14,9 @@ from intric.flows.http_transport.authored_config import (
     HttpBody,
     HttpBodyMode,
 )
-from intric.flows.http_transport.errors import HttpTransportError
-from intric.flows.http_transport.validator import validate_authored_config
-from intric.main.exceptions import BadRequestException
+from eneo.flows.http_transport.errors import HttpTransportError
+from eneo.flows.http_transport.validator import validate_authored_config
+from eneo.main.exceptions import BadRequestException
 
 
 def _config(

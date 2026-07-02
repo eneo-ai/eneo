@@ -1,6 +1,6 @@
 // FlowRunDialog helpers for segment filenames, persistence, and resume recovery.
 
-import type { FlowRunContractStepInput, Intric, UploadedFile } from "@intric/intric-js";
+import type { FlowRunContractStepInput, Eneo, UploadedFile } from "@eneo/eneo-js";
 
 import type { RecordingStopReason } from "./recordedAudioFile";
 import {
@@ -220,7 +220,7 @@ export async function scanRecoverableSessionsForSteps(args: {
 // not abort — the orphan janitor sweeps any survivors within 24 h, so
 // individual delete failures are not load-bearing.
 export async function purgeSession(args: {
-  intric: Intric;
+  eneo: Eneo;
   flowId: string;
   stepId: string;
   sessionId: string;
@@ -234,7 +234,7 @@ export async function purgeSession(args: {
     for (const record of records) {
       if (record.uploadedFileId) {
         try {
-          await args.intric.files.delete({ fileId: record.uploadedFileId });
+          await args.eneo.files.delete({ fileId: record.uploadedFileId });
         } catch (error) {
           console.warn("flowRunRecordingSession.purgeSession: server file delete failed", {
             fileId: record.uploadedFileId,

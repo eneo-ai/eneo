@@ -14,14 +14,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 
 if TYPE_CHECKING:
-    from intric.collections.domain.collection import Collection
-    from intric.integration.domain.entities.integration_knowledge import (
+    from eneo.collections.domain.collection import Collection
+    from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
-    from intric.websites.domain.website import Website
+    from eneo.websites.domain.website import Website
 
 
 @dataclass
@@ -94,7 +94,7 @@ def _build_assistant(
 
 
 def test_protocols_are_exported() -> None:
-    from intric.flows.runtime.protocols import (
+    from eneo.flows.runtime.protocols import (
         RuntimeAssistantProtocol,
         RuntimeCompletionModelProtocol,
     )
@@ -104,7 +104,7 @@ def test_protocols_are_exported() -> None:
 
 
 def test_effective_model_parameters_accepts_protocol_implementer() -> None:
-    from intric.flows.runtime.step_execution_runtime import effective_model_parameters
+    from eneo.flows.runtime.step_execution_runtime import effective_model_parameters
 
     params = effective_model_parameters(_build_assistant())
     assert params["model_name"] == "gpt-test"
@@ -124,7 +124,7 @@ def test_json_mode_cache_key_handles_empty_model_name() -> None:
     cases) must not produce a divergent cache key, otherwise capability
     learned for the same model is silently invalidated.
     """
-    from intric.flows.runtime.step_execution_runtime import json_mode_cache_key
+    from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
 
     assistant = _build_assistant(model_name="")
     parts = json_mode_cache_key(assistant).split(":")
@@ -132,7 +132,7 @@ def test_json_mode_cache_key_handles_empty_model_name() -> None:
 
 
 def test_json_mode_cache_key_handles_missing_completion_model() -> None:
-    from intric.flows.runtime.step_execution_runtime import json_mode_cache_key
+    from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
 
     assistant = _FakeAssistant(
         completion_model=None,
@@ -143,19 +143,19 @@ def test_json_mode_cache_key_handles_missing_completion_model() -> None:
 
 def test_requested_model_name_returns_none_for_empty_name() -> None:
     """Empty string name must collapse to None for downstream callers."""
-    from intric.flows.runtime.step_execution_runtime import requested_model_name
+    from eneo.flows.runtime.step_execution_runtime import requested_model_name
 
     assert requested_model_name(_build_assistant(model_name="")) is None
 
 
 def test_requested_model_name_returns_name_when_present() -> None:
-    from intric.flows.runtime.step_execution_runtime import requested_model_name
+    from eneo.flows.runtime.step_execution_runtime import requested_model_name
 
     assert requested_model_name(_build_assistant(model_name="gpt-4o")) == "gpt-4o"
 
 
 def test_requested_model_name_returns_none_without_completion_model() -> None:
-    from intric.flows.runtime.step_execution_runtime import requested_model_name
+    from eneo.flows.runtime.step_execution_runtime import requested_model_name
 
     assistant = _FakeAssistant(
         completion_model=None,
@@ -165,7 +165,7 @@ def test_requested_model_name_returns_none_without_completion_model() -> None:
 
 
 def test_resolve_litellm_model_name_prefers_explicit() -> None:
-    from intric.flows.runtime.step_execution_runtime import (
+    from eneo.flows.runtime.step_execution_runtime import (
         _resolve_litellm_model_name,
     )
 
@@ -174,7 +174,7 @@ def test_resolve_litellm_model_name_prefers_explicit() -> None:
 
 
 def test_resolve_litellm_model_name_falls_back_to_provider_and_name() -> None:
-    from intric.flows.runtime.step_execution_runtime import (
+    from eneo.flows.runtime.step_execution_runtime import (
         _resolve_litellm_model_name,
     )
 
@@ -185,7 +185,7 @@ def test_resolve_litellm_model_name_falls_back_to_provider_and_name() -> None:
 
 
 def test_resolve_litellm_model_name_returns_none_without_completion_model() -> None:
-    from intric.flows.runtime.step_execution_runtime import (
+    from eneo.flows.runtime.step_execution_runtime import (
         _resolve_litellm_model_name,
     )
 

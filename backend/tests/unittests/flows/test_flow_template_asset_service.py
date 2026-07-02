@@ -11,13 +11,13 @@ import pytest
 from docx import Document
 from fastapi import UploadFile
 
-from intric.files.file_models import File, FileCreate, FileType
-from intric.files.file_protocol import FileProtocol
-from intric.files.file_service import FileService
-from intric.flows.domain.flow import Flow, FlowTemplateAsset
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.flow_template_asset_service import FlowTemplateAssetService
-from intric.main.exceptions import (
+from eneo.files.file_models import File, FileCreate, FileType
+from eneo.files.file_protocol import FileProtocol
+from eneo.files.file_service import FileService
+from eneo.flows.domain.flow import Flow, FlowTemplateAsset
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
     FileTooLargeException,

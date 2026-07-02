@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.services.output_parsing.output_parser import PydanticOutputParser
+from eneo.services.output_parsing.output_parser import PydanticOutputParser
 
 
 def test_pydantic_output_parser_builds_and_parses_object_schema():

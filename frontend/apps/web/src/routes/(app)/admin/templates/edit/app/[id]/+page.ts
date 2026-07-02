@@ -2,10 +2,10 @@ import { error } from "@sveltejs/kit";
 
 export const load = async (event) => {
   // Permissions are checked in parent layout (+layout.ts)
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   // Fetch the template data
-  const templates = await intric.templates.admin.listApps();
+  const templates = await eneo.templates.admin.listApps();
   const template = templates.items?.find((t: Record<string, unknown>) => t.id === event.params.id);
 
   if (!template) {
@@ -13,10 +13,10 @@ export const load = async (event) => {
   }
 
   // Load available models (tenant-wide, no space required)
-  const models = await intric.models.list();
+  const models = await eneo.models.list();
 
   return {
-    intric,
+    eneo,
     template,
     completionModels: models.completionModels || []
   };

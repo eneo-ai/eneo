@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.model_providers.infrastructure import tenant_model_credential_resolver
-from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
+from eneo.model_providers.infrastructure import tenant_model_credential_resolver
+from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
 

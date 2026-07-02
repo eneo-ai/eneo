@@ -4,32 +4,32 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_architecture_errors import (
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_critic_invariants import (
+from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
     enforce_architecture_critic_invariants,
     evaluate_critic_invariants,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
-from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
     build_quality_feedback_from_critic_context,
 )
-from intric.flows.ai_builder.ai_builder_requirements_state import (
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -41,11 +41,11 @@ from intric.flows.flow_authoring_spec import (
 )
 
 if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_critic_invariants import CriticContext
-    from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticContext
+    from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
         PrimaryRuntimeInput,
     )
-    from intric.flows.ai_builder.planning_state import AggregationIntent
+    from eneo.flows.ai_builder.planning_state import AggregationIntent
 
 
 EXPECTED_CRITIC_INVARIANT_KINDS = {
@@ -1421,7 +1421,7 @@ def test_direct_text_transform_restraint_ignores_form_field_driven_transform() -
 def test_direct_text_transform_restraint_applies_in_edit_context() -> None:
     from uuid import uuid4
 
-    from intric.flows.domain.flow import Flow, FlowStep
+    from eneo.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -1481,7 +1481,7 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
 ):
     from uuid import uuid4
 
-    from intric.flows.domain.flow import Flow, FlowStep
+    from eneo.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -1560,7 +1560,7 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
 def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> None:
     from uuid import uuid4
 
-    from intric.flows.domain.flow import Flow, FlowStep
+    from eneo.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -2024,7 +2024,7 @@ def test_quality_feedback_prefers_confirmed_docx_output_over_pdf_input_mentions(
 def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
     from uuid import uuid4
 
-    from intric.flows.domain.flow import Flow, FlowStep
+    from eneo.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -2123,7 +2123,7 @@ class TestCriticInvariantLoop:
     """
 
     def test_pdf_terminal_alignment_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -2146,14 +2146,14 @@ class TestCriticInvariantLoop:
         """The loop runs the pdf-terminal-alignment evidence and returns its
         remediation when the user chose PDF but the terminal step does not
         output PDF."""
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2182,14 +2182,14 @@ class TestCriticInvariantLoop:
 
     def test_render_critic_issues_stays_silent_when_terminal_matches(self) -> None:
         """The invariant must not fire when the terminal step already produces PDF."""
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2221,14 +2221,14 @@ class TestCriticInvariantLoop:
 
     def test_render_critic_issues_stays_silent_without_pdf_intent(self) -> None:
         """The invariant requires explicit PDF intent; absent it, no issue fires."""
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2261,7 +2261,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
     """
 
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -2281,14 +2281,14 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
     def test_render_critic_issues_fires_on_json_all_previous_steps_combo(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2335,14 +2335,14 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
     ) -> None:
         """`input_type=json` with `input_source=previous_step` is the sanctioned
         alternative and must not trigger the invariant."""
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2389,14 +2389,14 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
         composition. The targeted-underlag invariant in
         `TestPreferTargetedUnderlagInvariant` only fires when prior steps
         emit structured JSON the final step could reference instead."""
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2459,7 +2459,7 @@ class TestPreferTargetedUnderlagInvariant:
     """
 
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -2479,14 +2479,14 @@ class TestPreferTargetedUnderlagInvariant:
     def test_render_critic_issues_fires_on_text_terminal_after_structured_priors(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2549,14 +2549,14 @@ class TestPreferTargetedUnderlagInvariant:
         structured fields to reference. `all_previous_steps` is the
         only composition path and the invariant must not fire."""
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2613,14 +2613,14 @@ class TestPreferTargetedUnderlagInvariant:
         true compare case. The targeted-underlag rule must defer rather
         than contradict."""
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2673,14 +2673,14 @@ class TestPreferTargetedUnderlagInvariant:
     ) -> None:
         # Pins 78bf7994: JSON priors do not count against the text-prior cap.
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2747,14 +2747,14 @@ class TestPreferTargetedUnderlagInvariant:
     ) -> None:
         # Pins 78bf7994: many JSON priors still trigger targeted-underlag.
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2824,14 +2824,14 @@ class TestPreferTargetedUnderlagInvariant:
         composer behind it can still be over-fanning into all_previous_steps.
         """
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -2918,13 +2918,13 @@ class TestPreferTargetedUnderlagInvariant:
         compositional step misses the C2 live-eval shape.
         """
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -3022,14 +3022,14 @@ class TestPreferTargetedUnderlagInvariant:
         the prompt is narrow — nudging the planner to switch source would
         produce no real change. The rule stays silent."""
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -3110,14 +3110,14 @@ class TestPreferTargetedUnderlagInvariant:
         quote form the planner produces inside serialized tool calls — the
         canonical template parser covers both shapes."""
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -3198,14 +3198,14 @@ class TestPreferTargetedUnderlagInvariant:
         references, malformed selectors, and plain text do not qualify and
         must let the nudge fire."""
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -3264,14 +3264,14 @@ class TestPreferTargetedUnderlagInvariant:
         that references prior structured fields. The invariant is the
         nudge toward this; once adopted it must stay silent."""
 
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -3344,13 +3344,13 @@ def _final_text_step_critic_context(
     terminal_output: str | None = None,
     text: str = "",
 ) -> "CriticContext":
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CriticContext,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 
@@ -3435,7 +3435,7 @@ def _quality_chain_with_redundant_terminal_json_tail(
 
 class TestSectionTextStepsReferenceSourceJsonFields:
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -3787,7 +3787,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
 class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -4037,7 +4037,7 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
     def test_redundant_terminal_json_tail_fires_in_edit_context(self) -> None:
         from uuid import uuid4
 
-        from intric.flows.domain.flow import Flow, FlowStep
+        from eneo.flows.domain.flow import Flow, FlowStep
 
         flow = Flow(
             id=uuid4(),
@@ -4099,7 +4099,7 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
 
 class TestFinalAssemblerReferencesExplicitSectionOutputs:
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -4389,7 +4389,7 @@ class TestFinalAssemblerReferencesExplicitSectionOutputs:
 
 class TestTerminalRendererConsumesPreviousComposer:
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -4769,7 +4769,7 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
     """
 
     def test_invariant_is_registered(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticInvariant,
         )
@@ -5328,13 +5328,13 @@ class TestStandaloneAudioInvariant:
         mixed_audio_doc_input: bool = False,
         text: str = "",
     ) -> "CriticContext":
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -5528,7 +5528,7 @@ class TestStandaloneAudioInvariant:
         spell out the four required fields, the position (first step),
         and how downstream steps should consume the transcript.
         """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
         )
 
@@ -5566,7 +5566,7 @@ class TestCriticInvariantRegistry:
         """Full flat-registry ordering lockdown. Any intentional reorder must
         update this list and justify the shift in the commit message.
         """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
         )
 
@@ -5610,15 +5610,15 @@ class TestCriticInvariantRegistry:
         `invariants=`; callers can build their own subset without relying on
         pre-defined cluster tuples.
         """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
             CriticContext,
             render_critic_issues,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -5671,7 +5671,7 @@ class TestCriticInvariantRegistry:
         """`has_json_contract_step` stays public because external callers can
         reuse the same semantics when composing their own invariants.
         """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             has_json_contract_step,
         )
 
@@ -5706,13 +5706,13 @@ class TestRichWorkflowInvariants:
         prefers_structured_intermediate: bool = False,
         prefers_quality_step: bool = False,
     ) -> CriticContext:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
         )
-        from intric.flows.ai_builder.ai_builder_framework_policy import (
+        from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
         )
-        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
             PlannerPatternSignals,
         )
 
@@ -5737,7 +5737,7 @@ class TestRichWorkflowInvariants:
     def test_rich_workflow_requires_form_fields_fires_when_form_fields_missing(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 
@@ -5761,7 +5761,7 @@ class TestRichWorkflowInvariants:
     def test_rich_workflow_requires_form_fields_silent_when_form_fields_declared(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 
@@ -5851,7 +5851,7 @@ class TestRichWorkflowInvariants:
     def test_rich_workflow_requires_json_contract_step_fires_when_missing(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 
@@ -6009,7 +6009,7 @@ class TestRichWorkflowInvariants:
         document-in/document-out workflow, planner obliged, no
         downstream reuse was ever requested.
         """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 
@@ -6037,7 +6037,7 @@ class TestRichWorkflowInvariants:
     def test_rich_workflow_requires_multiple_steps_fires_below_three_steps(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 
@@ -6069,7 +6069,7 @@ class TestRichWorkflowInvariants:
     def test_rich_workflow_requires_multiple_steps_silent_when_three_steps_present(
         self,
     ) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 
@@ -6117,7 +6117,7 @@ class TestRichWorkflowInvariants:
         a stray quality keyword on a non-document flow) re-triggers the
         nags.
         """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             render_critic_issues,
         )
 

@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from intric.completion_models.infrastructure.tenant_model_capabilities import (
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
     StructuredOutputDecisionSource,
     StructuredOutputMode,
@@ -14,11 +14,11 @@ from intric.completion_models.infrastructure.tenant_model_capabilities import (
 def test_schema_support_selects_strict_json_schema() -> None:
     with (
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
             return_value=True,
         ) as schema_support,
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
             return_value=("response_format",),
         ) as supported_params,
     ):
@@ -44,11 +44,11 @@ def test_schema_support_selects_strict_json_schema() -> None:
 def test_response_format_without_schema_selects_json_object() -> None:
     with (
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
             return_value=False,
         ),
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
             return_value=("temperature", "response_format"),
         ),
     ):
@@ -66,11 +66,11 @@ def test_response_format_without_schema_selects_json_object() -> None:
 def test_no_provider_support_selects_prompt_validation() -> None:
     with (
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
             return_value=False,
         ),
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
             return_value=("temperature",),
         ),
     ):
@@ -88,11 +88,11 @@ def test_no_provider_support_selects_prompt_validation() -> None:
 def test_support_check_failures_fall_back_to_prompt_validation() -> None:
     with (
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
             side_effect=RuntimeError("schema metadata failed"),
         ),
         patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
             side_effect=RuntimeError("param metadata failed"),
         ),
     ):

@@ -8,11 +8,19 @@ to prevent regression.
 import ast
 import importlib
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
-from intric.authentication.auth_dependencies import FILES_READ_OVERRIDES
-
+from eneo.authentication.auth_dependencies import FILES_READ_OVERRIDES
+from tests.unit.api_key_test_utils import (
+    route_dependency_closures,
+    runtime_app_routes,
+    runtime_router_routes,
+)
+from tests.unit.api_key_test_utils import (
+    route_has_dependency_named as _route_has_dependency_named_from_route,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,15 +28,11 @@ from intric.authentication.auth_dependencies import FILES_READ_OVERRIDES
 
 
 def _get_router():
-    from intric.server.routers import router
-
-    return router
+    return SimpleNamespace(routes=runtime_router_routes())
 
 
 def _get_app():
-    from intric.server.main import app
-
-    return app
+    return SimpleNamespace(routes=runtime_app_routes())
 
 
 def _find_route_by_path_and_method(router, path_prefix: str, method: str = None):
@@ -48,12 +52,7 @@ def _find_route_by_path_and_method(router, path_prefix: str, method: str = None)
 
 def _route_has_dependency_named(route, dep_name: str) -> bool:
     """Check if a route has a dependency with a specific __name__."""
-    deps = getattr(route, "dependencies", [])
-    for dep in deps:
-        if hasattr(dep, "dependency"):
-            if getattr(dep.dependency, "__name__", "") == dep_name:
-                return True
-    return False
+    return _route_has_dependency_named_from_route(route, dep_name)
 
 
 def _endpoint_has_dependency_named(endpoint_fn, dep_name: str) -> bool:
@@ -67,15 +66,15 @@ def _endpoint_has_dependency_named(endpoint_fn, dep_name: str) -> bool:
     return False
 
 
-def _get_intric_src_path():
-    spec = importlib.util.find_spec("intric")
+def _get_eneo_src_path():
+    spec = importlib.util.find_spec("eneo")
     if spec and spec.submodule_search_locations:
         import pathlib
 
         return pathlib.Path(spec.submodule_search_locations[0])
     import pathlib
 
-    return pathlib.Path(__file__).parent.parent.parent / "src" / "intric"
+    return pathlib.Path(__file__).parent.parent.parent / "src" / "eneo"
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +91,8 @@ class TestUserAdminEndpointGuards:
 
     def test_admin_endpoints_have_validate_permission_guard(self):
         """invite_user, update_user, delete_user all call validate_permission in their body."""
-        intric_src = _get_intric_src_path()
-        source = (intric_src / "users" / "user_router.py").read_text()
+        eneo_src = _get_eneo_src_path()
+        source = (eneo_src / "users" / "user_router.py").read_text()
         tree = ast.parse(source)
 
         # Find the three endpoint function definitions and check for validate_permission call in body
@@ -146,8 +145,8 @@ class TestModelRouterAdminChecks:
     @pytest.mark.parametrize("rel_path,expected_count", _ROUTER_FILES)
     def test_mutation_endpoints_have_admin_check(self, rel_path, expected_count):
         """Each model router file must have validate_permission(user, Permission.ADMIN) calls."""
-        intric_src = _get_intric_src_path()
-        full_path = intric_src / rel_path
+        eneo_src = _get_eneo_src_path()
+        full_path = eneo_src / rel_path
 
         source = full_path.read_text()
         tree = ast.parse(source)
@@ -246,22 +245,12 @@ class TestSignedUrlReadOverride:
             if not path.startswith("/files"):
                 continue
             if _route_has_dependency_named(route, "_resource_permission_dep"):
-                # Verify it has a frozenset in closure (read overrides)
-                deps = getattr(route, "dependencies", [])
-                for dep in deps:
-                    fn = getattr(dep, "dependency", None)
-                    if fn and getattr(fn, "__name__", "") == "_resource_permission_dep":
-                        if hasattr(fn, "__closure__") and fn.__closure__:
-                            for cell in fn.__closure__:
-                                try:
-                                    val = cell.cell_contents
-                                except ValueError:
-                                    continue
-                                if (
-                                    isinstance(val, frozenset)
-                                    and "generate_signed_url" in val
-                                ):
-                                    return  # Found it
+                for closure in route_dependency_closures(
+                    route, "_resource_permission_dep"
+                ):
+                    val = closure.get("read_override_endpoints")
+                    if isinstance(val, frozenset) and "generate_signed_url" in val:
+                        return  # Found it
                 pytest.fail(
                     "/files route has resource guard but no generate_signed_url override"
                 )
@@ -282,13 +271,9 @@ class TestVersionEndpointPublic:
         for route in app.routes:
             path = getattr(route, "path", "")
             if path == "/version":
-                deps = getattr(route, "dependencies", [])
-                for dep in deps:
-                    dep_fn = getattr(dep, "dependency", None)
-                    dep_name = getattr(dep_fn, "__name__", "") if dep_fn else ""
-                    assert dep_name != "get_current_active_user", (
-                        "/version should not require auth (get_current_active_user found)"
-                    )
+                assert not _route_has_dependency_named(
+                    route, "get_current_active_user"
+                ), "/version should not require auth (get_current_active_user found)"
                 return
         pytest.fail("/version endpoint not found in app routes")
 
@@ -303,8 +288,8 @@ class TestScopeErrorCodeConsistency:
 
     def test_scope_errors_use_correct_code(self):
         """_require_api_key_scope_for_assistant should use 'insufficient_scope'."""
-        intric_src = _get_intric_src_path()
-        user_service_path = intric_src / "users" / "user_service.py"
+        eneo_src = _get_eneo_src_path()
+        user_service_path = eneo_src / "users" / "user_service.py"
         source = user_service_path.read_text()
 
         # Find _require_api_key_scope_for_assistant function
@@ -349,7 +334,7 @@ class TestLimitsRouterAuth:
 
     def test_limits_requires_user_context(self):
         """get_limits should use get_container(with_user=True)."""
-        from intric.limits.limit_router import get_limits
+        from eneo.limits.limit_router import get_limits
 
         sig = inspect.signature(get_limits)
         container_param = sig.parameters.get("container")
@@ -358,8 +343,8 @@ class TestLimitsRouterAuth:
         # The default should be Depends(get_container(with_user=True))
         # We can't easily inspect the with_user=True arg directly, but
         # we can verify it's using get_container by checking the source
-        intric_src = _get_intric_src_path()
-        source = (intric_src / "limits" / "limit_router.py").read_text()
+        eneo_src = _get_eneo_src_path()
+        source = (eneo_src / "limits" / "limit_router.py").read_text()
         assert "get_container(with_user=True)" in source, (
             "limit_router.py should use get_container(with_user=True)"
         )

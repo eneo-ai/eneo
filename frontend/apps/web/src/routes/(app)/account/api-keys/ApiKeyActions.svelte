@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
   import ApiKeyActionMenu from "$lib/features/api-keys/ApiKeyActionMenu.svelte";
   import ApiKeyDialog from "$lib/features/api-keys/ApiKeyDialog.svelte";
 

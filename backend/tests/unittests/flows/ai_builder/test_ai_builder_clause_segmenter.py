@@ -1,4 +1,4 @@
-from intric.flows.ai_builder.ai_builder_clause_segmenter import (
+from eneo.flows.ai_builder.ai_builder_clause_segmenter import (
     build_role_scoped_text,
 )
 

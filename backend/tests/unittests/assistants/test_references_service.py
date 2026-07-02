@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.assistants.references import ReferencesService
-from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.assistants.references import ReferencesService
+from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from tests.fixtures import TEST_UUID
 
 

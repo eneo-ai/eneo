@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_form_field_usage import (
+from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

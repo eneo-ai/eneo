@@ -6,13 +6,13 @@ from uuid import UUID
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from intric.flow_packages.application.flow_package_import_planner import (
+from eneo.flow_packages.application.flow_package_import_planner import (
     FlowPackageImportPlannerCandidates,
     build_flow_package_import_plan,
 )
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
-from intric.flow_packages.domain.flow_package_import_plan import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_import_plan import (
     MAX_IMPORT_PLAN_SUGGESTIONS,
     FlowPackageDependencyResolutionEntry,
     FlowPackageImportPlanStatus,
@@ -22,9 +22,9 @@ from intric.flow_packages.domain.flow_package_import_plan import (
     FlowPackageModelDependencyResolution,
     FlowPackageModelMatchIssue,
 )
-from intric.flow_packages.domain.flow_package_manifest import FlowPackageManifest
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
     FlowPackageMcpToolRequirement,
     FlowPackageModelGuidance,
@@ -37,13 +37,13 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
     FlowPackageTemplateAssetRequirement,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,

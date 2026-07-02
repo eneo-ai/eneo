@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { Markdown } from "@intric/ui";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { Markdown } from "@eneo/ui";
   import { slide, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from intric.flows.flow_api_error_code import (
+from eneo.flows.flow_api_error_code import (
     FLOW_API_ERROR_CODES,
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FLOW_TYPED_IO_ERROR_CODES,
@@ -23,14 +23,14 @@ SDK_ERROR_CODES_JS = (
     REPO_ROOT
     / "frontend"
     / "packages"
-    / "intric-js"
+    / "eneo-js"
     / "src"
     / "flows"
     / "flow-api-error-codes.js"
 )
 SDK_ERROR_CODES_DTS = SDK_ERROR_CODES_JS.with_suffix(".d.ts")
 WEB_MESSAGES_DIR = REPO_ROOT / "frontend" / "apps" / "web" / "messages"
-FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
+FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 FLOW_API_SOURCE_ROOT = FLOW_SOURCE_ROOT / "api"
 CATALOG_MODULE_PATH = FLOW_SOURCE_ROOT / "flow_api_error_code.py"
 DOCS_FLOW_API_GUIDE = (
@@ -64,13 +64,13 @@ TERMINAL_RUN_ERROR_CODE_CALL_KEYWORDS = {
 }
 DOCUMENTED_DYNAMIC_TERMINAL_RUN_ERROR_CODE_PRODUCERS = {
     (
-        "src/intric/flows/application/flow_run_terminalization.py",
+        "src/eneo/flows/application/flow_run_terminalization.py",
         "close_open_step_attempts_for_terminal_run",
         "error_code",
         "effective_error_code",
     ),
     (
-        "src/intric/flows/application/flow_run_terminalization.py",
+        "src/eneo/flows/application/flow_run_terminalization.py",
         "close_active_rerun_operations_for_terminal_run",
         "error_code",
         "effective_error_code",

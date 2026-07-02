@@ -2,12 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  IntricError,
-  type FlowRunReviewCheckpoint,
-  type FlowRun,
-  type Intric
-} from "@intric/intric-js";
+import { EneoError, type FlowRunReviewCheckpoint, type FlowRun, type Eneo } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
@@ -118,7 +113,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: null });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_no_active_checkpoint());
@@ -132,7 +127,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: null, active });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_load_failed());
@@ -143,7 +138,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
   });
 
   it("shows stale edit errors from the checkpoint revision contract", async () => {
-    const staleError = new IntricError(
+    const staleError = new EneoError(
       "Review checkpoint revision is stale.",
       "RESPONSE",
       400,
@@ -157,7 +152,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), edit });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
@@ -177,7 +172,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
   });
 
   it("shows expired review errors from the shared Flow API error contract", async () => {
-    const expiredError = new IntricError(
+    const expiredError = new EneoError(
       "Review checkpoint has expired.",
       "RESPONSE",
       400,
@@ -198,7 +193,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), approve });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
@@ -208,7 +203,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
   });
 
   it("shows typed contract edit errors from the shared Flow API error contract", async () => {
-    const contractError = new IntricError(
+    const contractError = new EneoError(
       "backend readable fallback",
       "RESPONSE",
       400,
@@ -230,7 +225,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), edit });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
@@ -248,7 +243,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), edit });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
@@ -284,7 +279,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric, onChanged }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo, onChanged }
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
@@ -320,7 +315,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: expiredCheckpoint, edit, approve, reject });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_deadline_expired());
@@ -345,7 +340,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("expired", 2) });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_state_expired());
@@ -371,7 +366,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: checkpointWithoutDeadline });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
@@ -392,7 +387,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: approvedCheckpoint, resume });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_deadline_approved());
@@ -406,7 +401,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), reject });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
@@ -448,7 +443,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("resumed", 3) });
 
     render(FlowRunReviewCheckpointPanel, {
-      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
     await screen.findByText(m.flow_run_review_state_resumed());

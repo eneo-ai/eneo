@@ -1,15 +1,15 @@
 import pytest
 
-from intric.flows.flow_document_limits import (
+from eneo.flows.flow_document_limits import (
     FLOW_DOCUMENT_RENDER_HARD_LIMITS,
     apply_flow_document_render_limits_patch,
     resolve_flow_document_render_limits,
     validate_flow_document_render_limits_object,
 )
-from intric.flows.runtime.document_rendering.limits import (
+from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def test_resolve_defaults_when_tenant_settings_missing() -> None:

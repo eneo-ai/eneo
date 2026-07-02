@@ -1,12 +1,12 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import { slide } from "svelte/transition";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconMicrophone } from "@intric/icons/microphone";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconMicrophone } from "@eneo/icons/microphone";
   import {
     getInputSourceOptionLabel,
     getInputTypeOptionLabel,
@@ -236,8 +236,7 @@
               value={runtimeInputConfig.description}
               disabled={isPublished}
               oninput={(event) =>
-                updateRuntimeInputSettings({ description: event.currentTarget.value })}
-            ></textarea>
+                updateRuntimeInputSettings({ description: event.currentTarget.value })}></textarea>
             <p class="text-muted text-xs leading-relaxed">
               {m.flow_runtime_input_instruction_hint()}
             </p>

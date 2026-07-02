@@ -8,29 +8,29 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.flow_tables import (
     FlowResourceBindings,
     FlowRuns,
     Flows,
     FlowStepResults,
     FlowSteps,
 )
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.domain.flow import (
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.domain.flow import (
     Flow,
     FlowStep,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import NotFoundException
+from eneo.main.exceptions import NotFoundException
 
 
 def _build_flow(

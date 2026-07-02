@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Table
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES,
     FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES,
     FlowOutboxDeliveryStatus,
@@ -27,13 +27,13 @@ from intric.database.tables.flow_tables import (
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
+FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
 FLOW_API_PACKAGES = {"api", "ai_builder"}
 OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
-DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
+DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "eneo" / "data_retention"
 PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
     r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
 )
@@ -798,7 +798,7 @@ def _assert_local_json_alias_definitions_are_allowed(
     )
     stale = allowed - found_exceptions
     guidance = (
-        "intric.json_types is the canonical owner for strict Json* aliases in "
+        "eneo.json_types is the canonical owner for strict Json* aliases in "
         "Flow code. Import the platform alias, rename domain-specific aliases "
         "outside the Json* namespace, or add a narrow documented exception."
     )
@@ -812,7 +812,7 @@ def _assert_local_json_alias_definitions_are_allowed(
         "Remove stale entries instead of keeping compatibility exceptions."
     )
     assert len(allowed) <= MAX_LOCAL_JSON_ALIAS_ALLOWLIST_SIZE, (
-        "Prefer moving aliases to intric.json_types instead of growing the allowlist."
+        "Prefer moving aliases to eneo.json_types instead of growing the allowlist."
     )
 
 
@@ -878,15 +878,15 @@ def _imports_platform_exception_module(
     lines: list[int] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import) and any(
-            alias.name == "intric.main.exceptions"
-            or alias.name.startswith("intric.main.exceptions.")
+            alias.name == "eneo.main.exceptions"
+            or alias.name.startswith("eneo.main.exceptions.")
             for alias in node.names
         ):
             lines.append(node.lineno)
         elif isinstance(node, ast.ImportFrom):
-            if node.module == "intric.main.exceptions":
+            if node.module == "eneo.main.exceptions":
                 lines.append(node.lineno)
-            elif node.module == "intric.main" and any(
+            elif node.module == "eneo.main" and any(
                 alias.name == "exceptions" for alias in node.names
             ):
                 lines.append(node.lineno)
@@ -989,13 +989,13 @@ def test_flow_non_api_modules_do_not_raise_fastapi_http_exception():
 
 def test_platform_exception_module_import_scanner_detects_banned_import_forms():
     tree = ast.parse(
-        "import intric.main.exceptions\n"
-        "import intric.main.exceptions as platform_exceptions\n"
-        "from intric.main import exceptions\n"
-        "from intric.main import exceptions as exc\n"
-        "from intric.main.exceptions import NotFoundException\n"
-        "from intric.main.exceptions import BadRequestException as BadRequest\n"
-        "from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError\n"
+        "import eneo.main.exceptions\n"
+        "import eneo.main.exceptions as platform_exceptions\n"
+        "from eneo.main import exceptions\n"
+        "from eneo.main import exceptions as exc\n"
+        "from eneo.main.exceptions import NotFoundException\n"
+        "from eneo.main.exceptions import BadRequestException as BadRequest\n"
+        "from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError\n"
     )
 
     assert _imports_platform_exception_module(tree) == [1, 2, 3, 4, 5, 6]

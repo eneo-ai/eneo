@@ -1,4 +1,4 @@
-import type { FlowRunDebugRagReference, FlowRunDebugRagReferenceChunk } from "@intric/intric-js";
+import type { FlowRunDebugRagReference, FlowRunDebugRagReferenceChunk } from "@eneo/eneo-js";
 
 type DisplayableKnowledgeChunk = FlowRunDebugRagReferenceChunk & { snippet: string };
 

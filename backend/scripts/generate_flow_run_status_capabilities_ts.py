@@ -14,7 +14,7 @@ sys.path.insert(0, str(BACKEND_SRC))
 
 from flow_sdk_codegen import object_freeze_string_array  # noqa: E402
 
-from intric.flows.enums import (  # noqa: E402
+from eneo.flows.enums import (  # noqa: E402
     FLOW_RUN_STATUS_CAPABILITIES,
     FLOW_RUN_STATUS_FILTER_ORDER,
 )
@@ -23,7 +23,7 @@ TARGET_JS = (
     REPO_ROOT
     / "frontend"
     / "packages"
-    / "intric-js"
+    / "eneo-js"
     / "src"
     / "flows"
     / "flow-run-status-capabilities.js"
@@ -78,7 +78,7 @@ def main() -> None:
     TARGET_JS.write_text(
         "\n".join(
             [
-                "// Generated from backend/src/intric/flows/enums.py. Do not edit by hand.",
+                "// Generated from backend/src/eneo/flows/enums.py. Do not edit by hand.",
                 f"const capabilities = {_capabilities_literal(capabilities)};",
                 "",
                 "export const FLOW_RUN_STATUS_CAPABILITIES = Object.freeze(",
@@ -95,7 +95,7 @@ def main() -> None:
     TARGET_DTS.write_text(
         "\n".join(
             [
-                "// Generated from backend/src/intric/flows/enums.py. Do not edit by hand.",
+                "// Generated from backend/src/eneo/flows/enums.py. Do not edit by hand.",
                 'import type { components } from "../types/schema";',
                 "",
                 'export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];',

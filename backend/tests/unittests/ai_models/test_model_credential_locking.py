@@ -10,8 +10,8 @@ Runtime credential validation still occurs when models are actually used.
 from datetime import datetime
 from uuid import uuid4
 
-from intric.completion_models.domain.completion_model import CompletionModel
-from intric.tenants.tenant import TenantInDB
+from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.tenants.tenant import TenantInDB
 
 
 class MockSettings:
@@ -43,7 +43,7 @@ class TestModelCredentialLocking:
         settings = MockSettings(tenant_credentials_enabled=True)
         tenant = _tenant(api_credentials={})
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             tenant=tenant,
@@ -83,7 +83,7 @@ class TestModelCredentialLocking:
         settings = MockSettings(tenant_credentials_enabled=True)
         tenant = _tenant(api_credentials={"openai": {"api_key": "sk-test-key"}})
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             tenant=tenant,
@@ -123,7 +123,7 @@ class TestModelCredentialLocking:
         settings = MockSettings(tenant_credentials_enabled=True)
         tenant = _tenant(api_credentials={})
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             tenant=tenant,
@@ -169,7 +169,7 @@ class TestModelCredentialLocking:
         settings = MockSettings(tenant_credentials_enabled=False)
         tenant = _tenant(api_credentials={})
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             tenant=tenant,
@@ -210,7 +210,7 @@ class TestModelCredentialLocking:
             api_credentials={"openai": {"api_key": "sk-test"}}  # Has OpenAI, not Azure
         )
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             tenant=tenant,
@@ -269,7 +269,7 @@ class TestModelCredentialLocking:
             ("ovhcloud", "ovhcloud"),
         ]
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         for family, expected_provider in test_cases:
             # Model without credentials - should show credential warning

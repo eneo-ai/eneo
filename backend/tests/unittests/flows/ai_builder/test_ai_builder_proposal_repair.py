@@ -11,25 +11,25 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder import (
+from eneo.flows.ai_builder import (
     ai_builder_proposal_telemetry as proposal_telemetry_module,
 )
-from intric.flows.ai_builder.ai_builder_architecture_errors import (
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
-from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
-from intric.flows.ai_builder.ai_builder_proposal_repair import (
+from eneo.flows.ai_builder.ai_builder_proposal_repair import (
     MAX_SELF_CORRECTION_RETRIES,
     ForcedToolAfterTextRequest,
     ForcedToolRetryOutcome,
@@ -39,22 +39,22 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionFn,
     ProposalCompletionRequest,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
     expected_root_assumption_strings,
     expected_step_assumption_strings,

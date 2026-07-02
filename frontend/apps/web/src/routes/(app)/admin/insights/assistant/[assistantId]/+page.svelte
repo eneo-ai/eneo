@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   import ChatView from "./ChatView.svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
@@ -80,7 +80,7 @@
     <Page.Tab id="questions">
       <QuestionTable
         assistantId={$page.params.assistantId ?? ""}
-        intric={data.intric}
+        eneo={data.eneo}
         {includeFollowups}
         {timeframe}
         active={activeTab === "questions"}

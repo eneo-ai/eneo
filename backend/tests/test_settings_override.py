@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from intric.main.config import Settings, get_settings, reset_settings, set_settings
+from eneo.main.config import Settings, get_settings, reset_settings, set_settings
 
 
 def test_settings_lazy_initialization():

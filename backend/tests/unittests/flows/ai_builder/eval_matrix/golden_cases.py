@@ -19,9 +19,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from intric.flows.ai_builder.planning_state import AggregationIntent
-from intric.flows.enums import FlowInputSource, FlowOutputMode
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AssistantSparse } from "@intric/intric-js";
+  import type { AssistantSparse } from "@eneo/eneo-js";
   import { dynamicColour } from "$lib/core/colours";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { m } from "$lib/paraglide/messages";

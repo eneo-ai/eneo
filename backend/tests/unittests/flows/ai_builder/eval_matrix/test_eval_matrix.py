@@ -20,13 +20,13 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
-from intric.flows.enums import (
+from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from eneo.flows.enums import (
     AIBuilderInputSource,
     AIBuilderOutputMode,
     FlowOutputType,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_form_intake_signals import (
+from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     detect_form_intake_pattern,
     extract_form_intake_recipe_signals,
 )

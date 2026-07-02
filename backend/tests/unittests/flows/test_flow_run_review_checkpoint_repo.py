@@ -6,18 +6,18 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows import FlowFactory
-from intric.flows.domain.flow_run_exceptions import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows import FlowFactory
+from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
-from intric.flows.enums import FlowOutputType
-from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.enums import FlowOutputType
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.principal import FlowPrincipal
+from eneo.flows.principal import FlowPrincipal
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import redis.exceptions
 from fastapi import HTTPException
 
-from intric.audit.infrastructure.audit_session_service import AuditSessionService
+from eneo.audit.infrastructure.audit_session_service import AuditSessionService
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def mock_redis():
 def session_service(mock_redis):
     """Create AuditSessionService with mocked Redis."""
     with patch(
-        "intric.audit.infrastructure.audit_session_service.get_redis",
+        "eneo.audit.infrastructure.audit_session_service.get_redis",
         return_value=mock_redis,
     ):
         service = AuditSessionService()
@@ -322,7 +322,7 @@ class TestValidateSession:
 
         # Patch secrets.compare_digest to verify it's being called
         with patch(
-            "intric.audit.infrastructure.audit_session_service.secrets.compare_digest"
+            "eneo.audit.infrastructure.audit_session_service.secrets.compare_digest"
         ) as mock_compare:
             mock_compare.return_value = True
 

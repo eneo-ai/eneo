@@ -7,14 +7,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.auth_models import ApiKeyPermission
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.application.flow_run_review_checkpoint_service import (
+from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
 )
-from intric.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
-from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
-from intric.flows.domain.review_checkpoint_exceptions import (
+from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointAlreadyResumedError,
     FlowReviewCheckpointCancelledError,
     FlowReviewCheckpointExpiredError,
@@ -28,16 +28,16 @@ from intric.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointResumeResult,
 )
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     TypedIOValidationException,

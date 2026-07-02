@@ -67,7 +67,7 @@ export function buildSegmentFilenameBase(
   segmentIndex: number,
   capturedAt: number
 ): string {
-  // Keep aligned with backend/src/intric/flows/runtime/transcription.py::_SEGMENT_FILENAME_RE.
+  // Keep aligned with backend/src/eneo/flows/runtime/transcription.py::_SEGMENT_FILENAME_RE.
   const iso = new Date(capturedAt).toISOString().replace(/[:.]/g, "-");
   const seg = segmentIndex.toString().padStart(2, "0");
   return `${RECORDING_FILENAME_PREFIX}${sessionId}-seg${seg}-${iso}`;

@@ -14,7 +14,7 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const aiBuilderService = untrack(() => initAIBuilderService(data.intric, $currentSpace.id, null));
+  const aiBuilderService = untrack(() => initAIBuilderService(data.eneo, $currentSpace.id, null));
 
   onDestroy(() => {
     aiBuilderService.destroy();

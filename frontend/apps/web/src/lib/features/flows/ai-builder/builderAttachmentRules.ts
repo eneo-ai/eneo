@@ -1,4 +1,4 @@
-import type { Limits } from "@intric/intric-js";
+import type { Limits } from "@eneo/eneo-js";
 import type { AttachmentRules } from "$lib/features/attachments/AttachmentManager";
 
 const AI_BUILDER_SUPPORTED_MIMETYPES = new Set([

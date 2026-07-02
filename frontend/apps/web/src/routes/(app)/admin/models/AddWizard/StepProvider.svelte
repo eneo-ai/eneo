@@ -18,9 +18,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Search, Star } from "lucide-svelte";
-  import type { ModelProviderPublic } from "@intric/intric-js";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
 
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -47,7 +47,7 @@
     onSelect: (detail: { providerId: string | null; isNew: boolean; providerType: string }) => void;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Tabs --------------------------------------------------------------
 
@@ -113,7 +113,7 @@
     const previous = localFavorites;
     localFavorites = next;
     try {
-      await intric.modelProviders.setFavorites(next);
+      await eneo.modelProviders.setFavorites(next);
     } catch {
       localFavorites = previous;
     }

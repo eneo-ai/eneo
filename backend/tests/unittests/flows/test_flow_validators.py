@@ -4,22 +4,22 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.domain.flow import FlowStep
-from intric.flows.domain.flow_step_validation import FlowStepValidationError
-from intric.flows.enums import FlowOutputMode, FlowOutputType
-from intric.flows.flow_metadata import normalize_flow_metadata_for_write
-from intric.flows.flow_review_policy import (
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.enums import FlowOutputMode, FlowOutputType
+from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
+from eneo.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
     FlowStepReviewPolicy,
 )
-from intric.flows.flow_validators import (
+from eneo.flows.flow_validators import (
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
     validate_form_schema,
     validate_steps,
 )
-from intric.flows.flow_validators_form import validate_variable_alias_collisions
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_validators_form import validate_variable_alias_collisions
+from eneo.main.exceptions import BadRequestException
 
 
 def _step(step_order: int = 1, **updates) -> FlowStep:

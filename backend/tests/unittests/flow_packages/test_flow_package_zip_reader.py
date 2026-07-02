@@ -11,33 +11,33 @@ from typing import cast
 
 import pytest
 
-from intric.flow_packages.domain.flow_package_checksum import (
+from eneo.flow_packages.domain.flow_package_checksum import (
     compose_content_checksum,
     hash_json_value,
 )
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_errors import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
     FlowPackageZipUnsafeReason,
 )
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifest,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelRequirement,
     FlowPackageRequirementSet,
 )
-from intric.flow_packages.infrastructure import flow_package_zip_reader as reader
-from intric.flows.flow_authoring_spec import (
+from eneo.flow_packages.infrastructure import flow_package_zip_reader as reader
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
-from intric.json_types import JsonObject
+from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
+from eneo.json_types import JsonObject
 
 
 def test_valid_package_parses_to_typed_envelope() -> None:

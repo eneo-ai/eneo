@@ -9,26 +9,26 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
-from intric.authentication.principal_types import PrincipalType
-from intric.database.database import sessionmanager
-from intric.database.tables.flow_tables import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepResults,
 )
-from intric.database.tables.service_principals_table import ServicePrincipals
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.application.flow_review_expiry_reconciliation import (
+from eneo.database.tables.service_principals_table import ServicePrincipals
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
-from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowStep
-from intric.flows.domain.rerun_exceptions import FlowRunRerunInvalidTransitionError
-from intric.flows.domain.review_checkpoint_exceptions import (
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowStep
+from eneo.flows.domain.rerun_exceptions import FlowRunRerunInvalidTransitionError
+from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointAlreadyResumedError,
     FlowReviewCheckpointExpiredError,
     FlowReviewCheckpointNotActiveError,
@@ -42,7 +42,7 @@ from intric.flows.domain.review_checkpoint_exceptions import (
     FlowReviewOpenBlockedByActiveCheckpointError,
     FlowReviewRunNotAwaitingReviewError,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
@@ -50,21 +50,21 @@ from intric.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_review_expiry_policy import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRED,
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.flow_run_input_envelope import RerunInputOverride
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import RerunInputOverride
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime import tasks as flow_runtime_tasks
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime import tasks as flow_runtime_tasks
 
 
 @dataclass(frozen=True, slots=True)

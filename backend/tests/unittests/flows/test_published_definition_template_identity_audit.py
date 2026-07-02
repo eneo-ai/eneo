@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.published_definition import (
+from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     PublishedTemplateIdentityAuditResult,
     PublishedTemplateIdentityAuditSnapshot,

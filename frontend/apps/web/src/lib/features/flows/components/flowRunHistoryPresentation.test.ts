@@ -1,4 +1,4 @@
-import type { FlowRun } from "@intric/intric-js";
+import type { FlowRun } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FLOW_RUN_HISTORY_SORT,

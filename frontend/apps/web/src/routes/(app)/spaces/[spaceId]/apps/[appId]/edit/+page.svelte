@@ -2,7 +2,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import AppSettingsInput from "./AppSettingsInput.svelte";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
@@ -39,7 +39,7 @@
   } = untrack(() =>
     initAppEditor({
       app: data.app,
-      intric: data.intric,
+      eneo: data.eneo,
       onUpdateDone() {
         refreshCurrentSpace("applications");
       }
@@ -67,7 +67,7 @@
   let iconError = $state<string | null>(null);
 
   function getIconUrl(id: string | null): string | null {
-    return id ? data.intric.icons.url({ id }) : null;
+    return id ? data.eneo.icons.url({ id }) : null;
   }
 
   let iconUrl = $derived(getIconUrl(currentIconId));
@@ -77,8 +77,8 @@
     iconUploading = true;
     iconError = null;
     try {
-      const newIcon = await data.intric.icons.upload({ file });
-      await data.intric.apps.update({
+      const newIcon = await data.eneo.icons.upload({ file });
+      await data.eneo.apps.update({
         app: { id: $resource.id },
         update: { icon_id: newIcon.id }
       });
@@ -96,9 +96,9 @@
     iconError = null;
     try {
       if (currentIconId) {
-        await data.intric.icons.delete({ id: currentIconId });
+        await data.eneo.icons.delete({ id: currentIconId });
       }
-      await data.intric.apps.update({
+      await data.eneo.apps.update({
         app: { id: $resource.id },
         update: { icon_id: null }
       });
@@ -228,7 +228,7 @@
         {#if data.app.permissions?.includes("publish")}
           <Settings.Row title={m.status()} description={m.publishing_description()}>
             <PublishingSetting
-              endpoints={data.intric.apps}
+              endpoints={data.eneo.apps}
               resource={data.app}
               hasUnsavedChanges={$currentChanges.hasUnsavedChanges}
             />
@@ -255,7 +255,7 @@
             <PromptVersionDialog
               title={m.prompt_history_for({ name: $resource.name })}
               loadPromptVersionHistory={() => {
-                return data.intric.apps.listPrompts({ id: data.app.id });
+                return data.eneo.apps.listPrompts({ id: data.app.id });
               }}
               onPromptSelected={(prompt) => {
                 const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");

@@ -17,13 +17,13 @@ from flow_sdk_codegen import (  # noqa: E402
     string_literal_union_lines,
 )
 
-FLOW_API_ERROR_CODE_SOURCE = BACKEND_SRC / "intric" / "flows" / "flow_api_error_code.py"
+FLOW_API_ERROR_CODE_SOURCE = BACKEND_SRC / "eneo" / "flows" / "flow_api_error_code.py"
 
 TARGET_JS = (
     REPO_ROOT
     / "frontend"
     / "packages"
-    / "intric-js"
+    / "eneo-js"
     / "src"
     / "flows"
     / "flow-api-error-codes.js"
@@ -75,7 +75,7 @@ def main() -> None:
     TARGET_JS.write_text(
         "\n".join(
             [
-                "// Generated from backend/src/intric/flows/flow_api_error_code.py. Do not edit by hand.",
+                "// Generated from backend/src/eneo/flows/flow_api_error_code.py. Do not edit by hand.",
                 *constant_lines,
                 *object_freeze_string_array("FLOW_API_ERROR_CODES", error_code_values),
                 "",
@@ -86,7 +86,7 @@ def main() -> None:
     TARGET_DTS.write_text(
         "\n".join(
             [
-                "// Generated from backend/src/intric/flows/flow_api_error_code.py. Do not edit by hand.",
+                "// Generated from backend/src/eneo/flows/flow_api_error_code.py. Do not edit by hand.",
                 *constant_type_lines,
                 *string_literal_union_lines("FlowApiErrorCode", error_code_values),
                 "export declare const FLOW_API_ERROR_CODES: readonly FlowApiErrorCode[];",

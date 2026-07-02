@@ -7,19 +7,19 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_api_exceptions import FlowBadRequestException
-from intric.flows.flow_input_limits import FlowInputLimits
-from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
-from intric.flows.published_runtime import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.published_runtime import (
     FlowRuntimePublicationIntent,
     load_published_flow_runtime,
     load_published_runtime_inputs,
 )
-from intric.main.exceptions import ErrorCodes
-from intric.main.models import GeneralError
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 
 
 def _step(*, input_type: str = "document") -> FlowStep:
@@ -189,7 +189,7 @@ def test_flow_bad_request_exception_code_serializes_to_public_string() -> None:
 
     payload = GeneralError(
         message=str(exc),
-        intric_error_code=ErrorCodes.BAD_REQUEST,
+        eneo_error_code=ErrorCodes.BAD_REQUEST,
         code=exc.code,
     ).model_dump(mode="json")
 

@@ -11,16 +11,16 @@ BACKEND_SRC = BACKEND_ROOT / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from intric.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
     render_flow_docs_mermaid_block,
 )
-from intric.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
     FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT,
     FlowDocsRelatedNextraCard,
     render_flow_docs_related_nextra_cards,
 )
 
-FLOW_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
+FLOW_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 PACKAGE_LAYOUT_DOC = REPO_ROOT / "docs" / "flows" / "package-layout.md"
 IMPORTLINTER_CONFIG = BACKEND_ROOT / ".importlinter"
 FLOW_DEVELOPER_ARCHITECTURE_DOCS_OUTPUT_PATH = (
@@ -468,7 +468,7 @@ def _render_source_guard_table() -> str:
                 "`test_flow_docs_site_contract.py::test_flow_developer_docs_how_built_is_generated_from_layout_sources`",
             ),
             (
-                "`backend/src/intric/flows/application/flow_run_access_policy.py`",
+                "`backend/src/eneo/flows/application/flow_run_access_policy.py`",
                 "Runtime access text names the canonical tenant and principal enforcement owner.",
             ),
         ],

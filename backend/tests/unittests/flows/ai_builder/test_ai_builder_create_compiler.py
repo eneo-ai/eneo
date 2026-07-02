@@ -7,37 +7,37 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_architecture_commit import (
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
-from intric.flows.ai_builder.ai_builder_architecture_errors import (
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     RuntimeInputFieldHintSource,
     compile_create_intent_to_spec,
     compile_create_steps_to_spec,
     create_compile_context_from_planning_state,
 )
-from intric.flows.ai_builder.ai_builder_create_dataflow import (
+from eneo.flows.ai_builder.ai_builder_create_dataflow import (
     auto_bind_targeted_underlag_for_text_composer as _auto_bind_targeted_underlag_for_text_composer,
 )
-from intric.flows.ai_builder.ai_builder_create_dataflow import (
+from eneo.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
     builder_output_type_values,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import (
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
 )
-from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS,
     MAX_PROPOSAL_STEPS,
     ProposalIntentArgumentError,
@@ -45,38 +45,38 @@ from intric.flows.ai_builder.ai_builder_proposal_intent import (
     build_create_flow_tool_schema,
     parse_create_flow_intent_arguments,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
     canonicalize_flow_spec_resources,
 )
-from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     DETAILED_CASE_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
     extract_runtime_input_field_hints,
 )
-from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
-from intric.flows.ai_builder.pattern_registry import (
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.ai_builder.pattern_registry import (
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
     PATTERN_REGISTRY,
     STRUCTURED_EXTRACTION_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommitDraft,
     PlanningState,
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
@@ -84,7 +84,7 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
     expected_root_assumption_strings,
     expected_step_assumption_strings,
@@ -94,8 +94,8 @@ from tests.unittests.flows.ai_builder.authoring_command_assertions import (
     assert_create_spec_prepares_through_authoring_command,
 )
 
-PROPOSAL_INTENT_LOGGER = "intric.flows.ai_builder.ai_builder_proposal_intent"
-CREATE_COMPILER_LOGGER = "intric.flows.ai_builder.ai_builder_create_compiler"
+PROPOSAL_INTENT_LOGGER = "eneo.flows.ai_builder.ai_builder_proposal_intent"
+CREATE_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_create_compiler"
 
 
 def _normalize_create_steps(
@@ -1255,7 +1255,9 @@ def test_parse_create_flow_intent_arguments_strips_input_field_type_before_valid
     assert outline.input_fields[0].field_type == "text"
 
 
-def test_parse_create_flow_intent_arguments_rejects_flow_layer_field_type_coercion() -> None:
+def test_parse_create_flow_intent_arguments_rejects_flow_layer_field_type_coercion() -> (
+    None
+):
     with pytest.raises(ProposalIntentArgumentError, match="field_type"):
         parse_create_flow_intent_arguments(
             {
@@ -1975,7 +1977,9 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
     ]
-    leaked_backend_keys = sorted(set(step_props) & _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS)
+    leaked_backend_keys = sorted(
+        set(step_props) & _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
+    )
 
     assert leaked_backend_keys == []
     assert "uses_form_fields" in step_props
@@ -2467,7 +2471,9 @@ def test_parse_outline_flow_accepts_create_resource_refs() -> None:
 
 
 def test_parse_outline_flow_rejects_knowledge_and_mcp_on_same_step() -> None:
-    with pytest.raises(ProposalIntentArgumentError, match="knowledge_refs with MCP refs"):
+    with pytest.raises(
+        ProposalIntentArgumentError, match="knowledge_refs with MCP refs"
+    ):
         parse_create_flow_intent_arguments(
             {
                 "flow_name": "Ogiltigt",
@@ -2930,7 +2936,7 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
     spuriously — the planner asked for a flow with no input fields and
     that is what they get.
     """
-    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    from eneo.flows.ai_builder.ai_builder_form_field_usage import (
         find_unused_form_fields,
     )
 
@@ -2972,7 +2978,7 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_for
     the field into the step's underlag automatically — the planner
     needs only to mention the name once.
     """
-    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    from eneo.flows.ai_builder.ai_builder_form_field_usage import (
         find_unused_form_fields,
     )
 
@@ -3011,7 +3017,7 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_for
 
 
 def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
-    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    from eneo.flows.ai_builder.ai_builder_form_field_usage import (
         find_unused_form_fields,
     )
 
@@ -3127,7 +3133,7 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
     compiled = draft
     validation = validate_spec(compiled)
 
-    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    from eneo.flows.ai_builder.ai_builder_form_field_usage import (
         find_unused_form_fields,
     )
 
@@ -3148,7 +3154,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
     win and the field appears exactly once in form_fields. The hint
     completes nothing because the declaration is already there.
     """
-    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    from eneo.flows.ai_builder.ai_builder_form_field_usage import (
         find_unused_form_fields,
     )
 
@@ -3204,7 +3210,7 @@ def test_compile_outline_flow_orphan_uses_form_fields_reference_is_dropped_silen
     reference is silently dropped. The compiled spec is valid (no
     orphan template variable, no exception).
     """
-    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    from eneo.flows.ai_builder.ai_builder_form_field_usage import (
         find_unused_form_fields,
     )
 
@@ -4578,7 +4584,7 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
 def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+    from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
         build_conversation_aware_quality_feedback,
     )
 
@@ -4828,15 +4834,15 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     `prefer_targeted_underlag_over_all_previous_steps` semantic invariant
     does not fire and the LLM is not stuck in a repair loop it cannot fix.
     """
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
         evaluate_critic_invariants,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 
@@ -5034,7 +5040,7 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
 
 def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() -> None:
     # Pins 78bf7994: the soft cap counts text priors, not JSON priors.
-    from intric.flows.ai_builder.ai_builder_underlag_policy import (
+    from eneo.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
 
@@ -5079,7 +5085,7 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     None
 ):
     # Pins 78bf7994: many JSON priors should still auto-bind targeted refs.
-    from intric.flows.ai_builder.ai_builder_underlag_policy import (
+    from eneo.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
 
@@ -5313,15 +5319,15 @@ def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() ->
 
 
 def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() -> None:
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
         evaluate_critic_invariants,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 
@@ -5484,7 +5490,7 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
 def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> None:
     from collections import Counter
 
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP,
         TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
     )
@@ -5571,15 +5577,15 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
         flow_name="Fältbegränsad rapport",
         steps=result,
     )
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
         evaluate_critic_invariants,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 
@@ -5607,7 +5613,7 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
 def test_normalize_create_step_mechanics_treats_prebound_targeted_text_composer_as_text_input() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+    from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 
     steps = [
         NewStepDraft(
@@ -5662,7 +5668,7 @@ def test_normalize_create_step_mechanics_treats_prebound_targeted_text_composer_
 def test_normalize_create_step_mechanics_treats_previous_output_text_composer_as_text_input() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
+    from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
 
     steps = [
         NewStepDraft(
@@ -6328,10 +6334,10 @@ def test_compile_create_steps_to_spec_underlag_matching_handles_swedish_inflecti
 def test_targeted_underlag_predicate_binds_single_json_prior_with_primary_source_ref() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
+    from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
 
     source_ref = PreviousOutputRef(from_step=1, label="Källmaterial")
     steps = [
@@ -6376,7 +6382,7 @@ def test_targeted_underlag_predicate_binds_single_json_prior_with_primary_source
 def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_source_ref() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
 
@@ -6412,10 +6418,10 @@ def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_sou
 
 
 def test_targeted_underlag_predicate_skips_single_json_prior_after_text_step() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
+    from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
 
     source_ref = PreviousOutputRef(from_step=1, label="Källmaterial")
     steps = [
@@ -6467,10 +6473,10 @@ def test_targeted_underlag_predicate_skips_single_json_prior_after_text_step() -
 def test_targeted_underlag_predicate_skips_single_json_prior_non_material_report() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
+    from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
 
     source_ref = PreviousOutputRef(from_step=1, label="Källmaterial")
     steps = [
@@ -6513,7 +6519,7 @@ def test_targeted_underlag_predicate_skips_single_json_prior_non_material_report
 
 
 def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
 
@@ -6557,10 +6563,10 @@ def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() 
 
 
 def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+    from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 
     steps = [
         NewStepDraft(
@@ -6605,7 +6611,7 @@ def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
 
 
 def test_targeted_underlag_predicate_skips_renderer() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
 
@@ -6648,7 +6654,7 @@ def test_targeted_underlag_predicate_handles_aggregation_intents(
     intent: AggregationIntent,
     expected_mode: str,
 ) -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
 
@@ -7608,7 +7614,7 @@ def test_compile_outline_wraps_skeleton_materialization_failure(
         raise ValueError("invalid skeleton tuple")
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
         _raise_value_error,
     )
 
@@ -7631,7 +7637,10 @@ def test_compile_outline_flow_audio_artifact_aggregate_keeps_synthesis_before_te
             "plan_rationale": "Aggregate several analyses into one PDF.",
             "steps": [
                 {"name": "Extract themes", "instructions": "Extract main themes."},
-                {"name": "Assess risks", "instructions": "Assess risks in the recording."},
+                {
+                    "name": "Assess risks",
+                    "instructions": "Assess risks in the recording.",
+                },
                 {"name": "Synthesize", "instructions": "Synthesize all prior work."},
             ],
         }
@@ -8185,14 +8194,14 @@ def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
 
 
 def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> None:
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CriticContext,
         evaluate_critic_invariants,
     )
-    from intric.flows.ai_builder.ai_builder_framework_policy import (
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
 

@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Flow, Intric } from "@intric/intric-js";
+import type { Flow, Eneo } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 import FlowPackageExportDialog from "./FlowPackageExportDialog.svelte";
@@ -25,7 +25,7 @@ describe("FlowPackageExportDialog", () => {
   it("does not duplicate backend package-id validation in the submit gate", async () => {
     render(FlowPackageExportDialog, {
       flow: flow(),
-      intric: intric()
+      eneo: eneo()
     });
 
     await fireEvent.click(screen.getByRole("button", { name: m.flow_package_export_button() }));
@@ -51,12 +51,12 @@ function flow(): Flow {
   } as unknown as Flow;
 }
 
-function intric(): Intric {
+function eneo(): Eneo {
   return {
     flows: {
       packages: {
         export: vi.fn()
       }
     }
-  } as unknown as Intric;
+  } as unknown as Eneo;
 }

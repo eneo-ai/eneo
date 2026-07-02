@@ -11,10 +11,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.sharepoint_subscription import (
+from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
-from intric.integration.infrastructure.sharepoint_subscription_worker import (
+from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES,
     SHAREPOINT_SYNC_TASKS,
     cleanup_orphaned_subscriptions,
@@ -267,12 +267,12 @@ class TestCleanupOrphanedSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await cleanup_orphaned_subscriptions({})
@@ -325,12 +325,12 @@ class TestCleanupOrphanedSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await cleanup_orphaned_subscriptions({})
@@ -386,12 +386,12 @@ class TestRenewExpiringSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions({})
@@ -409,12 +409,12 @@ class TestRenewExpiringSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions({})
@@ -449,12 +449,12 @@ class TestRenewExpiringSubscriptions:
         )
 
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions({})
@@ -507,12 +507,12 @@ class TestRenewExpiringSubscriptions:
         )
 
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions({})
@@ -589,12 +589,12 @@ class TestRenewExpiringSubscriptions:
         )
 
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions({})
@@ -616,12 +616,12 @@ class TestFailStaleSharePointSyncJobs:
         mock_container.job_repo = MagicMock(return_value=job_repo)
 
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await fail_stale_sharepoint_sync_jobs({})
@@ -645,12 +645,12 @@ class TestFailStaleSharePointSyncJobs:
         mock_container.job_repo = MagicMock(return_value=job_repo)
 
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await fail_stale_sharepoint_sync_jobs({})

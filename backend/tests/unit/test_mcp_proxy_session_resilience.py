@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-import intric.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
-from intric.main.exceptions import MCPClientError
-from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-from intric.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
+from eneo.main.exceptions import MCPClientError
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
 
 
 def _make_server(name: str = "server") -> MCPServer:

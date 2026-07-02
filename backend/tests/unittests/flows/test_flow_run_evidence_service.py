@@ -14,12 +14,12 @@ from test_flow_run_service import (
     _version,
 )
 
-from intric.files.file_models import FileType
-from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
-from intric.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.main.exceptions import UnauthorizedException
+from eneo.files.file_models import FileType
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.main.exceptions import UnauthorizedException
 
 
 def _flow_run_rerun_repo() -> AsyncMock:

@@ -16,18 +16,18 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select, delete
 
-from intric.completion_models.infrastructure.model_cleanup_worker import (
+from eneo.completion_models.infrastructure.model_cleanup_worker import (
     cleanup_orphaned_models,
 )
-from intric.database.tables.app_template_table import AppTemplates
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.completion_model_migration_history_table import (
+from eneo.database.tables.app_template_table import AppTemplates
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.completion_model_migration_history_table import (
     CompletionModelMigrationHistory,
 )
-from intric.database.tables.questions_table import Questions
-from intric.database.tables.sessions_table import Sessions
-from intric.database.tables.assistant_template_table import AssistantTemplates
-from intric.main.exceptions import ValidationException
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.assistant_template_table import AssistantTemplates
+from eneo.main.exceptions import ValidationException
 
 
 @pytest.mark.integration

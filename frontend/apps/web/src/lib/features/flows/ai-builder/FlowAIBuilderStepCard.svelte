@@ -446,7 +446,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   /* Subtle staggered entrance. No bounce; eased out like Linear's list reveals. */
   .step-card-enter {

@@ -6,39 +6,39 @@ from io import BytesIO
 
 import pytest
 
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_envelope import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_envelope import (
     MANIFEST_PATH,
     PACKAGE_DOCUMENT_PATHS,
     FlowPackageEnvelope,
 )
-from intric.flow_packages.domain.flow_package_errors import (
+from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
 )
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifest,
     FlowPackageManifestMetadata,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
     FlowPackageModelRequirement,
     FlowPackageRequirementSet,
 )
-from intric.flow_packages.infrastructure.flow_package_zip_reader import (
+from eneo.flow_packages.infrastructure.flow_package_zip_reader import (
     read_flow_package,
 )
-from intric.flow_packages.infrastructure.flow_package_zip_writer import (
+from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
     write_flow_package,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
+from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
 
 
 def test_write_flow_package_round_trips_through_reader_with_utf8_text() -> None:

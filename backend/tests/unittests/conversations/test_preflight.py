@@ -3,13 +3,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.completion_models.infrastructure.context_builder import (
+from eneo.completion_models.infrastructure.context_builder import (
     build_files_string,
     count_tokens,
 )
-from intric.conversations.application.conversation_service import ConversationService
-from intric.files.file_models import FileType
-from intric.main.exceptions import BadRequestException
+from eneo.conversations.application.conversation_service import ConversationService
+from eneo.files.file_models import FileType
+from eneo.main.exceptions import BadRequestException
 
 
 def _make_service(
@@ -27,6 +27,9 @@ def _make_service(
         assistant_service.get_effective_completion_model = AsyncMock(
             return_value=assistant.completion_model
         )
+        # Default: no persistent prompt/attachments. Baseline-specific tests
+        # override this. Without it the AsyncMock returns a non-iterable.
+        assistant_service.get_preflight_baseline = AsyncMock(return_value=(None, []))
 
     group_chat_service = AsyncMock()
     if group_chat is not None:
@@ -308,6 +311,133 @@ async def test_preflight_counts_file_header_for_textless_documents():
     assert result.file_tokens == expected_tokens
     assert result.file_tokens > 0
     assert result.excluded_file_count == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_assistant_preflight_includes_assistant_baseline():
+    """A bare assistant target reports the persistent baseline: the system
+    prompt and the attachments sent on every question, in their own fields."""
+    attachment = MagicMock()
+    attachment.file_type = FileType.TEXT
+    attachment.text = "persistent knowledge base content"
+    attachment.name = "kb.txt"
+
+    service = _make_service(assistant=_make_assistant())
+    service.assistant_service.get_preflight_baseline = AsyncMock(
+        return_value=("You are a helpful assistant.", [attachment])
+    )
+
+    result = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+    )
+
+    assert result.input_tokens == 0
+    assert result.prompt_tokens == count_tokens(
+        "You are a helpful assistant.", "gpt-4o"
+    )
+    assert result.assistant_attachment_tokens == count_tokens(
+        build_files_string([attachment]), "gpt-4o"
+    )
+    assert result.assistant_attachment_tokens > 0
+
+
+@pytest.mark.asyncio
+async def test_empty_assistant_preflight_uses_unsaved_assistant_prompt_override():
+    service = _make_service(assistant=_make_assistant())
+    service.assistant_service.get_preflight_baseline = AsyncMock(
+        return_value=("saved prompt", [])
+    )
+
+    result = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+        assistant_prompt="unsaved prompt with extra context",
+    )
+
+    assert result.prompt_tokens == count_tokens(
+        "unsaved prompt with extra context", "gpt-4o"
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_assistant_preflight_baseline_includes_derived_images():
+    """Persistent document attachments carry derived vision images too, matching
+    the config meter's live-file path and the real request."""
+    pdf_file = MagicMock()
+    pdf_file.id = uuid4()
+    pdf_file.file_type = FileType.TEXT
+    pdf_file.text = "persistent report body"
+    pdf_file.name = "report.pdf"
+
+    derived_image = MagicMock()
+    derived_image.id = uuid4()
+    derived_image.file_type = FileType.IMAGE
+    derived_image.parent_file_id = pdf_file.id
+    derived_image.blob = _PNG_1PX
+    derived_image.mimetype = "image/png"
+
+    service = _make_service(assistant=_make_assistant(vision=True))
+    service.assistant_service.get_preflight_baseline = AsyncMock(
+        return_value=(None, [pdf_file])
+    )
+    service.file_service.get_derived_images = AsyncMock(return_value=[derived_image])
+
+    result = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+    )
+
+    text_only_tokens = count_tokens(build_files_string([pdf_file]), "gpt-4o")
+    assert result.assistant_attachment_tokens >= text_only_tokens + 85
+    service.file_service.get_derived_images.assert_awaited_once_with(
+        parent_ids=[pdf_file.id]
+    )
+
+
+@pytest.mark.asyncio
+async def test_preflight_baseline_zero_for_session_target():
+    """An existing session already carries the prompt + attachments in its
+    history, so the baseline fields stay 0 and the baseline is not fetched."""
+    session = MagicMock()
+    session.group_chat_id = None
+    session.assistant = MagicMock()
+    session.assistant.id = uuid4()
+
+    service = _make_service(session=session, assistant=_make_assistant())
+
+    result = await service.preflight_tokens(
+        question="hi",
+        file_ids=[],
+        session_id=uuid4(),
+    )
+
+    assert result.assistant_attachment_tokens == 0
+    assert result.prompt_tokens == 0
+    service.assistant_service.get_preflight_baseline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preflight_baseline_zero_for_group_chat_target():
+    """Group-chat targets have no single persistent baseline; fields stay 0."""
+    member = MagicMock()
+    member.assistant.completion_model = _make_completion_model("gpt-4o")
+    group_chat = MagicMock()
+    group_chat.assistants = [member]
+
+    service = _make_service(group_chat=group_chat)
+
+    result = await service.preflight_tokens(
+        question="hi",
+        file_ids=[],
+        group_chat_id=uuid4(),
+    )
+
+    assert result.assistant_attachment_tokens == 0
+    assert result.prompt_tokens == 0
 
 
 @pytest.mark.asyncio

@@ -45,7 +45,7 @@ function makeRecord(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
 
 async function clearDb(): Promise<void> {
   await new Promise<void>((resolve) => {
-    const req = indexedDB.deleteDatabase("intric-recording-sessions");
+    const req = indexedDB.deleteDatabase("eneo-recording-sessions");
     req.onsuccess = () => resolve();
     req.onerror = () => resolve();
     req.onblocked = () => resolve();

@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
-from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
+from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
@@ -306,7 +306,9 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
     assert "- post_processing_goal: action_followup" in prompt
     assert "- Decisions" in prompt
     assert "- Owners" in prompt
-    assert "Mark missing owners, deadlines, and responsibilities as unspecified" in prompt
+    assert (
+        "Mark missing owners, deadlines, and responsibilities as unspecified" in prompt
+    )
     assert "final document step should render completed content" in prompt
 
 

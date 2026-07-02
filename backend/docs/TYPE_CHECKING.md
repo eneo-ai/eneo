@@ -6,19 +6,19 @@ Pyright is the source of truth for backend type checking. We do not run `mypy` i
 
 - Global config uses `strict` mode from `backend/pyrightconfig.json`.
 - The backend policy is `0 errors, 0 warnings` for a full `uv run pyright` run.
-- There is no longer a split between globally-checked modules and a stricter allowlist. The full backend under `src/intric` is held to the same strict standard.
+- There is no longer a split between globally-checked modules and a stricter allowlist. The full backend under `src/eneo` is held to the same strict standard.
 - Changed-file scripts are local convenience only; they are not the gate.
 
 ## What It Checks
 
-- Scope: `backend/src/intric/**/*.py` only.
+- Scope: `backend/src/eneo/**/*.py` only.
 - CI and pre-commit both run `uv run pyright` from `backend/`.
 - The gate is the full backend in strict mode.
 - `tests` and `alembic` are excluded by config.
 
 ## What It Does Not Check
 
-- Frontend or non-`src/intric` Python code.
+- Frontend or non-`src/eneo` Python code.
 - Tests and migrations.
 
 ## Local Commands
@@ -54,7 +54,7 @@ bash backend/scripts/run_pyright_in_devcontainer.sh --stats
 
 ```bash
 cd backend
-uv run pyright src/intric/files/file_router.py
+uv run pyright src/eneo/files/file_router.py
 ```
 
 ## Editor Support

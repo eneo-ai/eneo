@@ -4,15 +4,15 @@ import pytest
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
-from intric.templates.assistant_template.assistant_template_service import (
+from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from intric.templates.assistant_template.api.assistant_template_models import (
+from eneo.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateCreate,
     AssistantTemplateUpdate,
     AssistantTemplateWizard,
 )
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     NotFoundException,
     BadRequestException,
     NameCollisionException,

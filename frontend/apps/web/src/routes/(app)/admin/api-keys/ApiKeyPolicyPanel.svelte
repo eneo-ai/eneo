@@ -6,9 +6,9 @@
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import type { ApiKeyPolicy } from "@intric/intric-js";
+  import type { ApiKeyPolicy } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import {
     Calendar,
@@ -22,7 +22,7 @@
   } from "lucide-svelte";
   import { fly } from "svelte/transition";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let loading = $state(false);
   let saving = $state(false);
@@ -79,7 +79,7 @@
     loading = true;
     errorMessage = null;
     try {
-      const policy = await intric.apiKeys.admin.getPolicy();
+      const policy = await eneo.apiKeys.admin.getPolicy();
       originalPolicy = policy;
       syncFromPolicy(policy);
     } catch (error) {
@@ -121,7 +121,7 @@
 
     saving = true;
     try {
-      const policy = await intric.apiKeys.admin.updatePolicy(updates);
+      const policy = await eneo.apiKeys.admin.updatePolicy(updates);
       originalPolicy = policy;
       syncFromPolicy(policy);
       successMessage = m.api_keys_admin_policy_updated();

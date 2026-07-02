@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 import {
   formatAdvancedJson,
   getStepKeyForAdvancedJson,
@@ -71,9 +71,7 @@ describe("getStepKeyForAdvancedJson", () => {
   });
 
   test("uses 'new' for step without id", () => {
-    expect(getStepKeyForAdvancedJson(makeStep({ id: undefined, step_order: 1 }))).toBe(
-      "new:1"
-    );
+    expect(getStepKeyForAdvancedJson(makeStep({ id: undefined, step_order: 1 }))).toBe("new:1");
   });
 });
 

@@ -5,36 +5,36 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flow_packages.application.flow_package_export_service import (
+from eneo.flow_packages.application.flow_package_export_service import (
     MAX_PACKAGE_EXPORT_BYTES,
     FlowPackageExportService,
     build_flow_package_export_envelope,
 )
-from intric.flow_packages.domain.flow_package_errors import (
+from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageExportError,
     FlowPackageExportErrorCode,
 )
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelKind,
     FlowPackageModelRequirement,
 )
-from intric.flow_packages.infrastructure.flow_package_zip_reader import (
+from eneo.flow_packages.infrastructure.flow_package_zip_reader import (
     read_flow_package,
 )
-from intric.flow_packages.infrastructure.flow_package_zip_writer import (
+from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
     write_flow_package,
 )
-from intric.flows.assistant_authoring_snapshot import (
+from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
-from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,

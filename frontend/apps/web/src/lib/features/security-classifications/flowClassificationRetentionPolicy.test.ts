@@ -8,7 +8,7 @@ import {
   setFlowClassificationRetentionPolicyDraft,
   updateFlowClassificationRetentionDraft
 } from "./flowClassificationRetentionPolicy";
-import type { FlowClassificationRetentionPolicy, SecurityClassification } from "@intric/intric-js";
+import type { FlowClassificationRetentionPolicy, SecurityClassification } from "@eneo/eneo-js";
 
 function classification(
   overrides: Partial<SecurityClassification> & Pick<SecurityClassification, "id" | "name">

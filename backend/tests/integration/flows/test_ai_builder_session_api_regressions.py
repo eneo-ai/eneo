@@ -12,17 +12,17 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
-from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.database.tables.ai_models_table import TranscriptionModels
-from intric.database.tables.flow_tables import BuilderPlans, BuilderSessions, Flows
-from intric.database.tables.model_providers_table import ModelProviders
-from intric.database.tables.spaces_table import (
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.flow_tables import BuilderPlans, BuilderSessions, Flows
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.spaces_table import (
     Spaces,
     SpacesCompletionModels,
     SpacesTranscriptionModels,
 )
-from intric.database.tables.tenant_table import Tenants
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderEditApproval,
     FlowBuilderProposal,
@@ -31,22 +31,22 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
-from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
@@ -55,9 +55,9 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.application.flow_authoring_command import FlowAuthoringCommandService
-from intric.flows.domain.flow import FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.application.flow_authoring_command import FlowAuthoringCommandService
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -67,12 +67,12 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.main.exceptions import BadRequestException, NotFoundException
-from intric.main.models import ModelId
-from intric.prompts.api.prompt_models import PromptCreate
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleCreate
-from intric.users.user import UserUpdate
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import ModelId
+from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
+from eneo.users.user import UserUpdate
 
 
 @pytest.fixture
@@ -494,7 +494,7 @@ async def _create_proposed_ai_builder_plan(
     db_container,
     space_id: str,
 ) -> tuple[UUID, UUID, UUID, SessionSendLease]:
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -1034,7 +1034,7 @@ async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=AsyncMock(
             return_value=_make_llm_response(
                 content="Jag kan använda referensmaterialet."
@@ -1042,7 +1042,7 @@ async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
         ),
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
@@ -1347,8 +1347,8 @@ async def test_send_message_status_jump_under_lock_uses_lease(
     db_container,
 ):
     """The AWAITING_APPROVAL -> CHATTING send-message transition must be lease-guarded."""
-    from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
-    from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+    from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 
     space_id = await _create_space_with_planner_model(
         client=client,
@@ -1960,11 +1960,11 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
     (`requirements_summary`) lands in one savepoint and the persisted
     `PlanningState` stays coherent with the persisted conversation.
     """
-    from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
         make_persisted_assistant_tool_call,
         requirements_summary_to_metadata,
     )
-    from intric.flows.ai_builder.ai_builder_tool_turn_persistence import (
+    from eneo.flows.ai_builder.ai_builder_tool_turn_persistence import (
         persist_tool_turn,
     )
 
@@ -2095,7 +2095,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
         )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
+            "eneo.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
             return_value=drifted,
         ):
             with pytest.raises(Exception):
@@ -2302,7 +2302,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
         )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
+            "eneo.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
             return_value=drifted,
         ):
             with pytest.raises(ValidationError):
@@ -2479,7 +2479,7 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
     db_container,
 ):
     """A stale proposal save must fail CAS and leave the savepoint untouched."""
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -2575,7 +2575,7 @@ async def test_store_plan_and_update_conversation_rejects_lost_session_send_leas
     db_container,
 ):
     """Proposal storage must not create a plan if the active send lease is lost."""
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -2654,11 +2654,11 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
     db_container,
 ):
     """Server-owned requirements persistence must reject a stale active-turn lease."""
-    from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
         ServerDecisionDispatchRequest,
         dispatch_server_decision,
     )
-    from intric.flows.ai_builder.ai_builder_turn_controller import (
+    from eneo.flows.ai_builder.ai_builder_turn_controller import (
         ConfirmRequirements,
     )
 
@@ -2741,11 +2741,11 @@ async def test_server_question_with_lost_lease_rolls_back(
     db_container,
 ):
     """Server-owned backend questions must reject a stale active-turn lease."""
-    from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
         ServerDecisionDispatchRequest,
         dispatch_server_decision,
     )
-    from intric.flows.ai_builder.ai_builder_turn_controller import (
+    from eneo.flows.ai_builder.ai_builder_turn_controller import (
         AskCanonicalQuestion,
     )
 
@@ -2826,10 +2826,10 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     admin_user,
 ):
     """Edit proposal storage must roll back if the active send lease is stale."""
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
+    from eneo.flows.ai_builder.ai_builder_proposal_processor import (
         AIBuilderProposalProcessor,
     )
-    from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         build_ai_builder_resource_catalog,
     )
 
@@ -2955,7 +2955,7 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
     completion_model_factory,
     db_container,
 ):
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -3034,7 +3034,7 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
     must carry the persisted architecture_commit forward. Otherwise
     the proposal save erases the commit that gated it.
     """
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -3137,7 +3137,7 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
     writes succeed, there must be no orphaned plan row and the session
     must remain in its pre-turn state.
     """
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -3218,7 +3218,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
     """The plan-proposal path must save a fresh PlanningState snapshot
     alongside the plan writes so the next turn reads a coherent state.
     """
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -3299,7 +3299,7 @@ async def test_store_plan_and_update_conversation_updates_latest_plan_pointer(
     `latest_plan_id` is the canonical plan identity; PlanningState does
     not duplicate plan lifecycle.
     """
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -3369,10 +3369,10 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
     PlanningState must still be derived from the compacted, persisted
     conversation that the next turn reads.
     """
-    from intric.flows.ai_builder.ai_builder_conversation_compaction import (
+    from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
         MAX_SESSION_MESSAGES,
     )
-    from intric.flows.ai_builder.ai_builder_plan_store import (
+    from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
     )
 
@@ -3617,7 +3617,7 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion"
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion"
     ) as mock_completion:
         mock_completion = AsyncMock(
             side_effect=[
@@ -3628,11 +3628,11 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
         )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
             new=mock_completion,
         ):
             with patch(
-                "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+                "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
                 new=AsyncMock(
                     return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})
                 ),
@@ -3741,11 +3741,11 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=mock_completion,
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
@@ -3791,7 +3791,7 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+        "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
         new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
     ):
         session_id = await _create_ai_builder_session(
@@ -3970,11 +3970,11 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=mock_completion,
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
@@ -4118,11 +4118,11 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
     mock_completion = AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow]))
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=mock_completion,
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
@@ -4264,7 +4264,7 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
     assert apply_response.status_code == 400, apply_response.text
     payload = apply_response.json()
     assert payload["code"] == "invalid_existing_step_ref"
-    assert payload["intric_error_code"] == 9007
+    assert payload["eneo_error_code"] == 9007
 
 
 @pytest.mark.asyncio
@@ -4352,11 +4352,11 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
     mock_completion = AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow]))
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=mock_completion,
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
@@ -4475,11 +4475,11 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=mock_completion,
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
@@ -4584,7 +4584,7 @@ async def test_ai_builder_api_create_mode_invalid_existing_step_ref_returns_type
     assert apply_response.status_code == 400, apply_response.text
     payload = apply_response.json()
     assert payload["code"] == "invalid_existing_step_ref"
-    assert payload["intric_error_code"] == 9007
+    assert payload["eneo_error_code"] == 9007
 
 
 @pytest.mark.asyncio
@@ -4621,13 +4621,13 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_w
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=AsyncMock(
             return_value=_make_llm_response(tool_calls=[requirements_summary])
         ),
     ):
         with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
             new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(

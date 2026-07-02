@@ -21,9 +21,9 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.users_table import Users
-from intric.main.exceptions import SystemUserProtected
-from intric.users.user_repo import UsersRepository
+from eneo.database.tables.users_table import Users
+from eneo.main.exceptions import SystemUserProtected
+from eneo.users.user_repo import UsersRepository
 
 
 def _make_repo() -> UsersRepository:

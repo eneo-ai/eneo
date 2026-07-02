@@ -9,11 +9,11 @@ Covers:
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_discovery import (
+from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 

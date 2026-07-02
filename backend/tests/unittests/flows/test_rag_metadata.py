@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.flows.runtime.rag_metadata import build_chunk_snippet, build_rag_references
+from eneo.flows.runtime.rag_metadata import build_chunk_snippet, build_rag_references
 
 
 def test_build_chunk_snippet_uses_interior_slice_for_long_text():

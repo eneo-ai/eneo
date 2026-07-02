@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from intric.files.image_processing import (
+from eneo.files.image_processing import (
     MAX_IMAGE_DIMENSION,
     _page_has_visual_content,
     downscale_image,

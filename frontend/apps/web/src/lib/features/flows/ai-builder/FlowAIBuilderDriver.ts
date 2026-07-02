@@ -1,6 +1,6 @@
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
-import type { IntricFetchFunction, IntricStreamFunction } from "@intric/intric-js";
+import type { EneoFetchFunction, EneoStreamFunction } from "@eneo/eneo-js";
 import type {
   PersistedStructuredQuestionAnswerMetadata,
   StructuredQuestion,
@@ -35,8 +35,8 @@ import type {
 } from "./protocol";
 
 export interface AIBuilderClientTransport {
-  fetch: IntricFetchFunction;
-  stream: IntricStreamFunction;
+  fetch: EneoFetchFunction;
+  stream: EneoStreamFunction;
 }
 
 const FLOW_AI_BUILDER_ROUTES = {

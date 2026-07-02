@@ -7,9 +7,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from intric.database.database import sessionmanager
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import (
+from eneo.database.database import sessionmanager
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
@@ -17,9 +17,9 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.domain.flow import (
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.domain.flow import (
     Flow,
     FlowRunStatus,
     FlowStep,
@@ -27,16 +27,16 @@ from intric.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 
 
 def _flow(

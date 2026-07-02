@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import type { TokenUsageSummary } from "@intric/intric-js";
+  import type { TokenUsageSummary } from "@eneo/eneo-js";
   import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@intric/ui";
+  import { Button, Table } from "@eneo/ui";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";

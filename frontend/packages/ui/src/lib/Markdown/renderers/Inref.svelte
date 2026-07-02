@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { IntricInrefToken } from "../CustomComponents";
+  import type { EneoInrefToken } from "../CustomComponents";
   import { getReferenceContext } from "../ReferenceContext.js";
 
-  type Props = { token: IntricInrefToken };
+  type Props = { token: EneoInrefToken };
   const { token }: Props = $props();
 
   const {

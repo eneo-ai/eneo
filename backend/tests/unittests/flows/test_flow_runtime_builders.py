@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
-from intric.flows.runtime.execution_state_builder import build_run_execution_state
-from intric.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
-from intric.flows.runtime.step_result_builder import (
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.runtime.execution_state_builder import build_run_execution_state
+from eneo.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
+from eneo.flows.runtime.step_result_builder import (
     build_completed_step_result,
     build_default_failed_input_payload,
     build_failed_step_result,

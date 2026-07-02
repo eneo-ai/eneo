@@ -3,7 +3,7 @@ import js from "@eslint/js";
 import svelte from "eslint-plugin-svelte";
 import globals from "globals";
 import ts from "typescript-eslint";
-import intric from "@intric/eslint-plugin";
+import eneo from "@eneo/eslint-plugin";
 
 export default ts.config(
   js.configs.recommended,
@@ -11,7 +11,7 @@ export default ts.config(
   ...svelte.configs["flat/recommended"],
   prettier,
   ...svelte.configs["flat/prettier"],
-  ...intric.configs.recommended,
+  ...eneo.configs.recommended,
   {
     languageOptions: {
       globals: {
@@ -35,7 +35,7 @@ export default ts.config(
   {
     files: ["src/**/*.{svelte,js,ts}"],
     rules: {
-      "intric/no-raw-color": "error"
+      "eneo/no-raw-color": "error"
     }
   },
   {

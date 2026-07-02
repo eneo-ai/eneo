@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from intric.ai_models.deprecation_lookup import (
+from eneo.ai_models.deprecation_lookup import (
     get_litellm_deprecation_date,
     is_model_deprecated,
     is_model_effectively_deprecated,

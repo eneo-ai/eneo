@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { IntricError, type FlowStep, type UploadedFile } from "@intric/intric-js";
+  import { EneoError, type FlowStep, type UploadedFile } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { writable } from "svelte/store";
-  import { IconWorkflow } from "@intric/icons/workflow";
+  import { IconWorkflow } from "@eneo/icons/workflow";
   import { MousePointerClick } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
@@ -157,13 +157,13 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
-  const intric = getIntric();
+  const eneo = getEneo();
   const attachmentRules = writable({});
   const {
     state: { attachments: newAttachments },
     clearUploads
   } = initAttachmentManager({
-    intric,
+    eneo,
     options: {
       rules: attachmentRules,
       onFileUploaded: (newFile: UploadedFile) => assistantState.onFileUploaded(newFile)
@@ -172,14 +172,14 @@
 
   const assistantState = new FlowStepAssistantState({
     flowEditor,
-    intric,
+    eneo,
     attachmentRules,
     newAttachments,
     clearUploads,
     getActiveStep: () => activeStep
   });
 
-  const templateState = new FlowTemplateState({ intric, flowEditor });
+  const templateState = new FlowTemplateState({ eneo, flowEditor });
   let assistantsById = new SvelteMap<string, unknown>();
   let lastLoadedRevisionByAssistant = new SvelteMap<string, number>();
   const loadingAssistantIds = new SvelteSet<string>();
@@ -364,7 +364,7 @@
       });
     } catch (error) {
       const message =
-        error instanceof IntricError
+        error instanceof EneoError
           ? error.getReadableMessage()
           : "Failed to rewrite downstream variable references.";
       toast.error(message);
@@ -493,19 +493,19 @@
   const hasKnowledgeSelections = $derived(
     Boolean(
       assistantState.assistant &&
-        ((Array.isArray(assistantState.assistant.websites) &&
-          assistantState.assistant.websites.length > 0) ||
-          (Array.isArray(assistantState.assistant.groups) &&
-            assistantState.assistant.groups.length > 0) ||
-          (Array.isArray(assistantState.assistant.integration_knowledge_list) &&
-            assistantState.assistant.integration_knowledge_list.length > 0))
+      ((Array.isArray(assistantState.assistant.websites) &&
+        assistantState.assistant.websites.length > 0) ||
+        (Array.isArray(assistantState.assistant.groups) &&
+          assistantState.assistant.groups.length > 0) ||
+        (Array.isArray(assistantState.assistant.integration_knowledge_list) &&
+          assistantState.assistant.integration_knowledge_list.length > 0))
     )
   );
   const hasAttachmentSelections = $derived(
     Boolean(
       assistantState.assistant &&
-        Array.isArray(assistantState.assistant.attachments) &&
-        assistantState.assistant.attachments.length > 0
+      Array.isArray(assistantState.assistant.attachments) &&
+      assistantState.assistant.attachments.length > 0
     )
   );
   const mcpSummary = $derived(summarizeAssistantMcp(assistantState.assistant));

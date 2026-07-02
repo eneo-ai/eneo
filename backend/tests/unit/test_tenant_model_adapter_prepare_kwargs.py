@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
 
@@ -41,7 +41,7 @@ class TestPrepareKwargsMaxTokens:
         """Non-Anthropic provider with reasoning_effort → still inject max_tokens."""
         adapter = _make_adapter("openai", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
@@ -51,7 +51,7 @@ class TestPrepareKwargsMaxTokens:
         """Anthropic + reasoning_effort → defer to LiteLLM (no max_tokens injected)."""
         adapter = _make_adapter("anthropic", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
@@ -61,7 +61,7 @@ class TestPrepareKwargsMaxTokens:
         """Anthropic + reasoning_effort=low → also defer to LiteLLM."""
         adapter = _make_adapter("anthropic", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "low"})
@@ -71,7 +71,7 @@ class TestPrepareKwargsMaxTokens:
         """Anthropic + reasoning + explicit max_tokens → pass through unchanged."""
         adapter = _make_adapter("anthropic", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(
@@ -83,7 +83,7 @@ class TestPrepareKwargsMaxTokens:
         """Anthropic + reasoning + explicit max_completion_tokens → pass through."""
         adapter = _make_adapter("anthropic", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(
@@ -96,7 +96,7 @@ class TestPrepareKwargsMaxTokens:
         """Anthropic model that doesn't support reasoning → inject default max_tokens."""
         adapter = _make_adapter("anthropic", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = []
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
@@ -108,7 +108,7 @@ class TestPrepareKwargsMaxTokens:
         """Anthropic + empty reasoning_effort → guard removes it, inject max_tokens."""
         adapter = _make_adapter("anthropic", token_limit=64000)
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": ""})
@@ -146,7 +146,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
     def test_openai_translates_none_reasoning_effort_to_low(self):
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
@@ -155,7 +155,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
     def test_openai_translates_empty_reasoning_effort_to_low(self):
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": ""})
@@ -164,7 +164,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
     def test_openai_translates_none_object_reasoning_effort_to_low(self):
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": None})
@@ -173,7 +173,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
     def test_openai_preserves_explicit_reasoning_effort(self):
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
@@ -184,7 +184,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
         capability-present-but-explicit-off case only."""
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = []
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
@@ -195,7 +195,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
         'no thinking' is best expressed by absence, not 'low'."""
         adapter = _make_adapter("anthropic")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
@@ -213,11 +213,11 @@ class TestPrepareKwargsReasoningEffortTranslation:
         the runtime silently defaults to medium/high effort and we
         regain the multi-minute first-token latency we set out to fix.
         """
-        from intric.ai_models.completion_models.completion_model import ModelKwargs
+        from eneo.ai_models.completion_models.completion_model import ModelKwargs
 
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(
@@ -230,11 +230,11 @@ class TestPrepareKwargsReasoningEffortTranslation:
         Anthropic — there, absence is the correct 'no thinking' signal
         and a synthesized value would force extended-thinking on every
         call."""
-        from intric.ai_models.completion_models.completion_model import ModelKwargs
+        from eneo.ai_models.completion_models.completion_model import ModelKwargs
 
         adapter = _make_adapter("anthropic")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(
@@ -245,11 +245,11 @@ class TestPrepareKwargsReasoningEffortTranslation:
     def test_openai_non_reasoning_model_pydantic_none_does_not_inject(self):
         """Models that don't support reasoning_effort must not have it
         injected by the Pydantic-None floor."""
-        from intric.ai_models.completion_models.completion_model import ModelKwargs
+        from eneo.ai_models.completion_models.completion_model import ModelKwargs
 
         adapter = _make_adapter("openai")
         with patch(
-            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = []
             result = adapter._prepare_kwargs(

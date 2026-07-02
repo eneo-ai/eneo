@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
 )
-from intric.server.main import get_application
+from eneo.server.main import get_application
 
 
 @pytest.fixture(scope="module")

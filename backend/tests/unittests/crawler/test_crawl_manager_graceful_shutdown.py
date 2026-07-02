@@ -20,12 +20,12 @@ import pytest
 # Setup crochet BEFORE importing Crawler
 crochet.setup()
 
-from intric.crawler.crawler import (
+from eneo.crawler.crawler import (
     Crawler,
     CrawlManager,
     CrawlShutdownError,
 )
-from intric.main.exceptions import CrawlTimeoutError
+from eneo.main.exceptions import CrawlTimeoutError
 
 
 class TestCrawlManagerLifecycle:
@@ -157,7 +157,7 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
                 wait_for_completion_called.set()
                 return True  # Simulate successful shutdown
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             with pytest.raises(CrawlTimeoutError):
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
@@ -194,7 +194,7 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
             def wait_for_completion(self, timeout=10.0):
                 return False  # Simulate shutdown failure
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             with pytest.raises(CrawlShutdownError) as exc_info:
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
@@ -240,7 +240,7 @@ class TestHeartbeatDuringCrawl:
             def wait_for_completion(self, timeout=10.0):
                 return True
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
                 download_files=False,
@@ -283,7 +283,7 @@ class TestHeartbeatDuringCrawl:
             def wait_for_completion(self, timeout=10.0):
                 return True
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             await Crawler._run_crawl_with_timeout(
                 url="https://example.com",
                 download_files=False,
@@ -330,7 +330,7 @@ class TestHeartbeatDuringCrawl:
             def wait_for_completion(self, timeout=10.0):
                 return True
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             with pytest.raises(CrawlTimeoutError):
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",
@@ -378,7 +378,7 @@ class TestHeartbeatCallbackParameter:
             captured_interval = heartbeat_interval
             yield MagicMock()
 
-        with patch("intric.crawler.crawler.get_crawler_setting", return_value=60):
+        with patch("eneo.crawler.crawler.get_crawler_setting", return_value=60):
             crawler = Crawler()
             crawler._crawl = capture_crawl
 
@@ -412,7 +412,7 @@ class TestHeartbeatCallbackParameter:
             captured_heartbeat = heartbeat_callback
             yield MagicMock()
 
-        with patch("intric.crawler.crawler.get_crawler_setting", return_value=60):
+        with patch("eneo.crawler.crawler.get_crawler_setting", return_value=60):
             crawler = Crawler()
             crawler._crawl = capture_crawl
 
@@ -451,7 +451,7 @@ class TestSitemapCrawlGracefulShutdown:
             def wait_for_completion(self, timeout=10.0):
                 return True
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             with pytest.raises(CrawlTimeoutError):
                 await Crawler._run_sitemap_crawl_with_timeout(
                     sitemap_url="https://example.com/sitemap.xml",
@@ -496,7 +496,7 @@ class TestNoResourceLeakOnTimeout:
                 completion_waited.set()
                 return True
 
-        with patch("intric.crawler.crawler.CrawlManager", MockCrawlManager):
+        with patch("eneo.crawler.crawler.CrawlManager", MockCrawlManager):
             with pytest.raises(CrawlTimeoutError):
                 await Crawler._run_crawl_with_timeout(
                     url="https://example.com",

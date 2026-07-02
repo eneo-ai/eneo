@@ -15,18 +15,18 @@ from pathlib import Path
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
 )
-from intric.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
-from intric.flows.enums import (
+from eneo.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
+from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
 )
-from intric.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
-from intric.flows.flow_capability_manifest import (
+from eneo.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
+from eneo.flows.flow_capability_manifest import (
     _TEMPORARY_REASON_MARKER,
     ALLOWED_MCP_POLICIES,
     CAPABILITY_REGISTRY,
@@ -47,15 +47,15 @@ from intric.flows.flow_capability_manifest import (
     resolve_document_generation_mode,
     supports_step_io_tuple,
 )
-from intric.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
-from intric.flows.type_policies import INPUT_TYPE_POLICIES
+from eneo.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
+from eneo.flows.type_policies import INPUT_TYPE_POLICIES
 
 
 def _flow_capability_manifest_source() -> Path:
     return (
         Path(__file__).resolve().parents[3]
         / "src"
-        / "intric"
+        / "eneo"
         / "flows"
         / "flow_capability_manifest.py"
     )
@@ -173,7 +173,7 @@ def test_builder_exposure_rejects_spurious_reason() -> None:
 def test_capability_registry_is_immutable() -> None:
     """`CAPABILITY_REGISTRY` is a `MappingProxyType`; mutation at runtime
     must fail. The manifest is canonical — consumers must not patch it."""
-    from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
+    from eneo.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 
     with pytest.raises(TypeError):
         CAPABILITY_REGISTRY["input_new"] = CAPABILITY_REGISTRY["input_text"]  # type: ignore[index]
@@ -802,9 +802,9 @@ def test_mcp_policy_allowed_values_parity_with_legacy() -> None:
     narrowing to a subset, and (2) FCM ever moving off the tautological
     `frozenset(FlowMcpPolicy)` to an explicit enumeration that misses a
     member."""
-    from intric.database.tables.flow_tables import FLOW_STEP_MCP_POLICY_VALUES
-    from intric.flows.enums import FlowMcpPolicy
-    from intric.flows.flow_capability_manifest import ALLOWED_MCP_POLICIES
+    from eneo.database.tables.flow_tables import FLOW_STEP_MCP_POLICY_VALUES
+    from eneo.flows.enums import FlowMcpPolicy
+    from eneo.flows.flow_capability_manifest import ALLOWED_MCP_POLICIES
 
     assert isinstance(ALLOWED_MCP_POLICIES, frozenset)
     for member in ALLOWED_MCP_POLICIES:

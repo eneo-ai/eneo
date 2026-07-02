@@ -7,13 +7,13 @@ from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConst
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex
 
-from intric.database.tables.flow_classification_retention_policy_table import (
+from eneo.database.tables.flow_classification_retention_policy_table import (
     FlowClassificationRetentionPolicies,
 )
-from intric.database.tables.flow_tables import FlowRuns, Flows
-from intric.database.tables.security_classifications_table import SecurityClassification
-from intric.database.tables.spaces_table import Spaces
-from intric.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
+from eneo.database.tables.flow_tables import FlowRuns, Flows
+from eneo.database.tables.security_classifications_table import SecurityClassification
+from eneo.database.tables.spaces_table import Spaces
+from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 
 FLOW_RETENTION_CONSTRAINT_NAME = "ck_flows_data_retention_days_range"
 SPACE_RETENTION_CONSTRAINT_NAME = "ck_spaces_data_retention_days_range"

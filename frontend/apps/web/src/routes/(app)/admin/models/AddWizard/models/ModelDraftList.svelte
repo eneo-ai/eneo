@@ -10,7 +10,7 @@
   import { Loader2, CircleCheck, CircleX, Zap, Trash2 } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import type { WizardModelDraft } from "../wizardState";
   import type { ModelType } from "./draft";
 
@@ -24,7 +24,7 @@
     modelType: ModelType;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   type ValidationStatus = "idle" | "testing" | "success" | "error";
   type ValidationState = { status: ValidationStatus; message?: string };
@@ -42,7 +42,7 @@
 
     validationStates = { ...validationStates, [index]: { status: "testing" } };
     try {
-      const result = await intric.modelProviders.validateModel(
+      const result = await eneo.modelProviders.validateModel(
         { id: providerId },
         { model_name: model.name, model_type: modelType }
       );

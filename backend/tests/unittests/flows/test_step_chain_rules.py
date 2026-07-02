@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from intric.flows.step_chain_rules import find_first_step_chain_violation
+from eneo.flows.step_chain_rules import find_first_step_chain_violation
 
 
 @dataclass(frozen=True)
@@ -23,4 +23,3 @@ def test_rejects_missing_previous_step_for_previous_step_source() -> None:
 
     assert violation is not None
     assert violation.code == "typed_io_missing_previous_step"
-

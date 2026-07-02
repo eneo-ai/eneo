@@ -6,16 +6,16 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.assistants.api.assistant_models import AssistantUpdatePublic
-from intric.assistants.api.assistant_update_adapter import (
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic
+from eneo.assistants.api.assistant_update_adapter import (
     to_flow_assistant_update_command,
     to_standalone_assistant_update_command,
 )
-from intric.assistants.assistant_update import (
+from eneo.assistants.assistant_update import (
     AssistantUpdateCommand,
     AssistantUpdateField,
 )
-from intric.main.models import NOT_PROVIDED, ModelId
+from eneo.main.models import NOT_PROVIDED, ModelId
 
 
 def test_assistant_update_field_type_matches_model_fields() -> None:

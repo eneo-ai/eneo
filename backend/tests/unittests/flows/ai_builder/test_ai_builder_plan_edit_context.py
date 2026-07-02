@@ -6,15 +6,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     slot_classification_metadata_from_result,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     _DOWNSTREAM_INPUT_REPAIR_FIELDS,
     AIBuilderPlanEditContext,
     ScopedStepNotice,
@@ -23,18 +23,18 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     resolve_scoped_step_revision_if_requested,
     validate_scoped_plan_revision,
 )
-from intric.flows.ai_builder.ai_builder_proposal_policy import (
+from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     terminal_output_type_for_conversation,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

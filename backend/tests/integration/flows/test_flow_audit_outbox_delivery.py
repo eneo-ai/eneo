@@ -7,26 +7,26 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.database.tables.flow_tables import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
 )
-from intric.flows.application.flow_run_audit_outbox_delivery import (
+from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.enums import FlowRunLifecycleSource, FlowRunStatus
-from intric.flows.flow_factory import FlowFactory
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import FlowRunLifecycleSource, FlowRunStatus
+from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 
 
 def _build_flow(
@@ -81,7 +81,7 @@ async def _create_flow_and_run(
     space_factory,
     assistant_factory,
 ):
-    model = await completion_model_factory(session, "gpt-4o-mini")
+    model = await completion_model_factory(session, f"gpt-4o-mini-{uuid4().hex}")
     space = await space_factory(session, "Audit outbox delivery space", [model.id])
     assistant = await assistant_factory(
         session,

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconCopy } from "@intric/icons/copy";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconCopy } from "@eneo/icons/copy";
   import { Button, type ButtonSize, type ButtonVariant } from "$lib/components/ui/button/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";

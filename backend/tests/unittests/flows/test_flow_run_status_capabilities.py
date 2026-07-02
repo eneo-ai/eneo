@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.api.flow_run_status_capability_models import (
+from eneo.flows.api.flow_run_status_capability_models import (
     FlowRunStatusCapabilitiesPublic,
     FlowRunStatusCapabilityPublic,
     flow_run_status_capabilities_public,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
     ACTIVE_FLOW_STEP_RESULT_STATUSES,
@@ -43,7 +43,7 @@ SDK_STATUS_CAPABILITIES_JS = (
     / ".."
     / "frontend"
     / "packages"
-    / "intric-js"
+    / "eneo-js"
     / "src"
     / "flows"
     / "flow-run-status-capabilities.js"
@@ -114,7 +114,7 @@ def test_flow_step_open_work_status_constants_are_explicit() -> None:
 
 
 def test_retried_step_attempt_status_has_no_runtime_writer() -> None:
-    source_root = BACKEND_ROOT / "src" / "intric" / "flows"
+    source_root = BACKEND_ROOT / "src" / "eneo" / "flows"
     references = [
         path.relative_to(source_root).as_posix()
         for path in source_root.rglob("*.py")

@@ -7,17 +7,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows import FlowFactory
-from intric.flows.assistant_authoring_snapshot import (
+from eneo.flows import FlowFactory
+from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
-from intric.flows.domain.flow import Flow, FlowStepResult
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.enums import FlowStepResultStatus
-from intric.flows.flow_resource_bindings import LocalResourceKind
-from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
-from intric.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.domain.flow import Flow, FlowStepResult
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.enums import FlowStepResultStatus
+from eneo.flows.flow_resource_bindings import LocalResourceKind
+from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
+from eneo.flows.infrastructure.flow_repo import FlowRepository
 
 
 class _RowsResult:

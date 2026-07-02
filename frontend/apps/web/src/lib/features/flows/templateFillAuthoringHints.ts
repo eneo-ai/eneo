@@ -1,4 +1,4 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 export function shouldShowTemplateBodyTextHint(params: {
   steps: FlowStep[];

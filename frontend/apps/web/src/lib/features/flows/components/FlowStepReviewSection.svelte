@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -39,10 +39,7 @@
 </script>
 
 <Settings.Group title={m.flow_step_review_section()}>
-  <Settings.Row
-    title={m.flow_step_review_policy()}
-    description={m.flow_step_review_policy_desc()}
-  >
+  <Settings.Row title={m.flow_step_review_policy()} description={m.flow_step_review_policy_desc()}>
     <div class="flex flex-col gap-2">
       <Select.Root
         type="single"

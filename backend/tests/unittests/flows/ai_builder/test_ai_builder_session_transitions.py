@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
-from intric.flows.ai_builder.ai_builder_session_transitions import (
+from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
+from eneo.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 @pytest.mark.parametrize(
     ("current", "next_status"),
-        [
-            (SessionStatus.CHATTING, SessionStatus.AWAITING_APPROVAL),
-            (SessionStatus.AWAITING_APPROVAL, SessionStatus.CHATTING),
-            (SessionStatus.AWAITING_APPROVAL, SessionStatus.APPLIED),
-            (SessionStatus.CANCELLED, SessionStatus.CANCELLED),
-        ],
+    [
+        (SessionStatus.CHATTING, SessionStatus.AWAITING_APPROVAL),
+        (SessionStatus.AWAITING_APPROVAL, SessionStatus.CHATTING),
+        (SessionStatus.AWAITING_APPROVAL, SessionStatus.APPLIED),
+        (SessionStatus.CANCELLED, SessionStatus.CANCELLED),
+    ],
 )
 def test_valid_transitions_are_allowed(
     current: SessionStatus, next_status: SessionStatus

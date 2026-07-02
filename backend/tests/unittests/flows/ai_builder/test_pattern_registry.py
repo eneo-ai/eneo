@@ -18,13 +18,13 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
-from intric.flows.ai_builder.ai_builder_step_skeleton import (
+from eneo.flows.ai_builder.ai_builder_step_skeleton import (
     materialized_compiled_pattern_ids,
 )
-from intric.flows.ai_builder.pattern_registry import (
+from eneo.flows.ai_builder.pattern_registry import (
     CHAIN_STEP_DESCRIPTORS,
     COMPILED_CHAIN_PATTERN_IDS,
     PATTERN_REGISTRY,
@@ -34,12 +34,12 @@ from intric.flows.ai_builder.pattern_registry import (
     find_pattern_candidates,
     question_template_ids_for_slot,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
 )
-from intric.flows.flow_capability_manifest import (
+from eneo.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     supports_step_io_tuple,
 )

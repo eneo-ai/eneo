@@ -2,7 +2,7 @@
 
 import type { RecordingStopReason } from "./recordedAudioFile";
 
-const DB_NAME = "intric-recording-sessions";
+const DB_NAME = "eneo-recording-sessions";
 const DB_VERSION = 1;
 const STORE_NAME = "segments";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;

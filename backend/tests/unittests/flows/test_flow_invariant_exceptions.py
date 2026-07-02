@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import is_dataclass
 from uuid import uuid4
 
-from intric.flows.domain.flow_invariant_exceptions import (
+from eneo.flows.domain.flow_invariant_exceptions import (
     FlowInvariantError,
     FlowPersistedIdMissingError,
     FlowPublishedDefinitionInvalidError,
 )
-from intric.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
-from intric.main.exceptions import BadRequestException
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
+from eneo.main.exceptions import BadRequestException
 
 
 def test_persisted_flow_id_missing_error_is_non_runtime_flow_invariant() -> None:

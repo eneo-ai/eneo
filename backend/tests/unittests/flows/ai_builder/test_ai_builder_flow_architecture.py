@@ -10,7 +10,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_flow_architecture import (
+from eneo.flows.ai_builder.ai_builder_flow_architecture import (
     FLOW_ARCHITECTURE_SECTIONS,
     FlowArchitectureSection,
     render_flow_architecture,

@@ -14,7 +14,7 @@ PREFERRED_BRANCH_RE = re.compile(
     r"^(feature|feat|fix|hotfix|security|chore|deps|docs|test|refactor|remove|ci)/"
 )
 PROTECTED_BRANCHES = {"main", "master", "develop"}
-SCHEMA_PATH = Path("frontend/packages/intric-js/src/types/schema.d.ts")
+SCHEMA_PATH = Path("frontend/packages/eneo-js/src/types/schema.d.ts")
 # Mirror CI's schema-drift env so local OpenAPI dumps use the same placeholder settings.
 SCHEMA_DRIFT_ENV = {
     "POSTGRES_USER": "placeholder",
@@ -136,7 +136,7 @@ def run_schema_drift_check(repo: Path) -> None:
                 "-c",
                 (
                     "import json; "
-                    "from intric.server.main import app; "
+                    "from eneo.server.main import app; "
                     f"json.dump(app.openapi(), open({str(openapi_path)!r}, 'w'))"
                 ),
             ],
@@ -158,7 +158,7 @@ def run_schema_drift_check(repo: Path) -> None:
                 str(generated_schema),
                 "--default-non-nullable=false",
             ],
-            cwd=repo / "frontend" / "packages" / "intric-js",
+            cwd=repo / "frontend" / "packages" / "eneo-js",
             text=True,
             check=False,
         )
@@ -171,11 +171,11 @@ def run_schema_drift_check(repo: Path) -> None:
                 "x",
                 "prettier",
                 "--config",
-                str(repo / "frontend" / "packages" / "intric-js" / ".prettierrc"),
+                str(repo / "frontend" / "packages" / "eneo-js" / ".prettierrc"),
                 "--write",
                 str(generated_schema),
             ],
-            cwd=repo / "frontend" / "packages" / "intric-js",
+            cwd=repo / "frontend" / "packages" / "eneo-js",
             text=True,
             check=False,
         )

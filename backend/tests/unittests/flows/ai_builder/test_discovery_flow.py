@@ -8,53 +8,53 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery import (
+from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
     build_discovery_followup,
     build_discovery_followup_text,
 )
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_runtime_discovery_context,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
-from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
-from intric.flows.ai_builder.ai_builder_prompts import (
+from eneo.flows.ai_builder.ai_builder_prompts import (
     has_confirmed_requirements,
 )
-from intric.flows.ai_builder.ai_builder_requirements_state import (
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
-from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     dispatch_server_decision,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.ai_builder_tool_names import (
+from eneo.flows.ai_builder.ai_builder_tool_names import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
-from intric.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
-from intric.flows.ai_builder.planning_state_builder import (
+from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
+from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from intric.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow import Flow, FlowStep
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1432,7 +1432,7 @@ class TestExtendedClarificationHints:
             )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
             side_effect=fake_classify_slots,
         ):
             context = await build_runtime_discovery_context(
@@ -1486,7 +1486,7 @@ class TestExtendedClarificationHints:
             )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
             side_effect=fake_classify_slots,
         ):
             context = await build_runtime_discovery_context(
@@ -1785,7 +1785,7 @@ class TestExtendedClarificationHints:
             )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
             side_effect=fake_classify_slots,
         ):
             context = await build_runtime_discovery_context(
@@ -1832,7 +1832,7 @@ class TestExtendedClarificationHints:
             )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
             side_effect=fake_classify_slots,
         ):
             context = await build_runtime_discovery_context(
@@ -1895,7 +1895,7 @@ class TestExtendedClarificationHints:
             )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
             side_effect=fake_classify_slots,
         ):
             context = await build_runtime_discovery_context(
@@ -2779,6 +2779,7 @@ class TestExtendedClarificationHints:
         assert "final_pdf_type" not in question_ids
         assert "pdf_generation_mode" not in question_ids
 
+
 class TestPlannerConversationEncoding:
     def test_structured_answer_metadata_is_included_for_llm_context(self) -> None:
         payload = conversation_message_to_llm_message(
@@ -2800,7 +2801,9 @@ class TestPlannerConversationEncoding:
         assert "input_material_mode" in payload["content"]
 
     def test_unexpected_conversation_role_fails_loud_for_llm_context(self) -> None:
-        with pytest.raises(ValueError, match="Unsupported AI Builder conversation role"):
+        with pytest.raises(
+            ValueError, match="Unsupported AI Builder conversation role"
+        ):
             conversation_message_to_llm_message(
                 ConversationMessage(role="invalid", content="Bad role")
             )
@@ -2876,7 +2879,7 @@ class TestPlannerDiscoveryQuestionDispatch:
 
         events: list[dict[str, str]] = []
         with patch(
-            "intric.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
+            "eneo.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
             return_value=MagicMock(max_input_tokens=128000),
         ):
             async for event in planner.send_message(
@@ -2922,7 +2925,7 @@ class TestPlannerDiscoveryQuestionDispatch:
 
         events: list[dict[str, str]] = []
         with patch(
-            "intric.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
+            "eneo.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
             return_value=MagicMock(max_input_tokens=128000),
         ):
             async for event in planner.send_message(
@@ -2951,10 +2954,10 @@ def test_output_reader_followup_text_mentions_reader_not_output_format() -> None
     raised as a blocking issue. Verify that the followup text for an
     output_reader issue (when manually constructed) mentions 'reader'.
     """
-    from intric.flows.ai_builder.ai_builder_discovery_models import (
+    from eneo.flows.ai_builder.ai_builder_discovery_models import (
         DiscoveryIssue,
     )
-    from intric.flows.ai_builder.ai_builder_discovery_questions import (
+    from eneo.flows.ai_builder.ai_builder_discovery_questions import (
         output_reader_question,
     )
 

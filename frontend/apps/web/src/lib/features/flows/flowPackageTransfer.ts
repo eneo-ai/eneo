@@ -5,9 +5,9 @@ import type {
   FlowPackageLocalCandidate,
   FlowPackageModelCandidate,
   FlowPackageResourceSlotRef,
-  IntricBinaryResponse
-} from "@intric/intric-js";
-import { IntricError } from "@intric/intric-js";
+  EneoBinaryResponse
+} from "@eneo/eneo-js";
+import { EneoError } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 export type FlowPackageImportSelectionState = Record<string, string | null>;
@@ -249,7 +249,7 @@ export async function encodeFlowPackageFileToBase64(file: File): Promise<string>
 }
 
 export function downloadFlowPackageFile(
-  response: IntricBinaryResponse,
+  response: EneoBinaryResponse,
   fallbackFilename: string,
   deps: {
     document?: Pick<Document, "body" | "createElement">;
@@ -358,7 +358,7 @@ function isFlowPackageExportErrorCode(code: string): code is FlowPackageExportEr
 }
 
 function getFlowPackageResponseCode(error: unknown): string | null {
-  if (!(error instanceof IntricError)) return null;
+  if (!(error instanceof EneoError)) return null;
   if (isObject(error.response) && typeof error.response.code === "string") {
     return error.response.code;
   }

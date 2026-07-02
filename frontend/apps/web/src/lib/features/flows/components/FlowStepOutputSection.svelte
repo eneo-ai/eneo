@@ -8,7 +8,7 @@
     supportsFlowCitationMode,
     type FlowCitationMode
   } from "$lib/features/flows/flowCitationMode";
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { getOutputHintText } from "./flowStepEditHelpers";

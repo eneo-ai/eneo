@@ -1,10 +1,10 @@
 import {
   FLOW_API_ERROR_CODE,
   FLOW_API_ERROR_CODES,
-  IntricError,
+  EneoError,
   type FlowApiErrorCode
-} from "@intric/intric-js";
-import type { FlowRunError as FlowRunErrorContract } from "@intric/intric-js";
+} from "@eneo/eneo-js";
+import type { FlowRunError as FlowRunErrorContract } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 export { FLOW_API_ERROR_CODE, FLOW_API_ERROR_CODES };
@@ -131,14 +131,14 @@ function isFlowApiErrorCode(code: string): code is FlowApiErrorCode {
   return FLOW_API_ERROR_CODE_SET.has(code as FlowApiErrorCode);
 }
 
-function getResponseCode(error: IntricError): string | null {
+function getResponseCode(error: EneoError): string | null {
   if (isObject(error.response) && typeof error.response.code === "string") {
     return error.response.code;
   }
   return typeof error.code === "string" ? error.code : null;
 }
 
-function responseContext(error: IntricError): FlowApiErrorContext {
+function responseContext(error: EneoError): FlowApiErrorContext {
   if (!isObject(error.response)) return {};
   return extractFlowApiErrorContext(error.response.context);
 }
@@ -223,7 +223,7 @@ export function extractFlowApiError(error: unknown): {
   code: FlowApiErrorCode;
   context: FlowApiErrorContext;
 } | null {
-  if (!(error instanceof IntricError)) return null;
+  if (!(error instanceof EneoError)) return null;
 
   const code = getResponseCode(error);
   if (!code || !isFlowApiErrorCode(code)) return null;
@@ -257,18 +257,19 @@ function descriptorForCode(
   };
 }
 
-export function describeFlowRunError(
-  error: FlowRunError | null | undefined
-): FlowApiErrorDescriptor | null {
-  if (!error) return null;
+export function describeFlowRunError(error: unknown): FlowApiErrorDescriptor | null {
+  if (!isObject(error)) return null;
 
   const context: FlowApiErrorContext = {};
-  if (typeof error.step_id === "string") context.step_id = error.step_id;
-  if (typeof error.step_order === "number" && Number.isFinite(error.step_order)) {
-    context.step_order = error.step_order;
+  const stepId = readOptionalString(error.step_id);
+  if (stepId) context.step_id = stepId;
+
+  const stepOrder = readOptionalNumber(error.step_order);
+  if (stepOrder !== undefined) {
+    context.step_order = stepOrder;
   }
 
-  return descriptorForCode(error.code, context);
+  return descriptorForCode(readOptionalString(error.code), context);
 }
 
 function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string {
@@ -281,7 +282,7 @@ function matchesMissingTemplateContentError(readableMessage: string): boolean {
 }
 
 export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: string): string {
-  if (!(error instanceof IntricError)) {
+  if (!(error instanceof EneoError)) {
     return fallbackMessage;
   }
 

@@ -947,7 +947,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .plan-card-enter {
     animation: plan-card-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1);

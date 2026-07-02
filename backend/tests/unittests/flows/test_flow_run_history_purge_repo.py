@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import intric.database.tables  # noqa: F401
-from intric.database.tables.base_class import Base
-from intric.database.tables.files_table import Files
-from intric.flows.infrastructure.flow_run_history_purge_repo import (
+import eneo.database.tables  # noqa: F401
+from eneo.database.tables.base_class import Base
+from eneo.database.tables.files_table import Files
+from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FLOW_RUN_HISTORY_PURGE_FILE_REFERENCE_TABLE_NAMES,
 )
 

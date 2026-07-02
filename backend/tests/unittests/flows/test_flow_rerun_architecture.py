@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import intric.flows.flow_run_rerun_graph as flow_run_rerun_graph
-from intric.flows.enums import RerunDependencyKind
+import eneo.flows.flow_run_rerun_graph as flow_run_rerun_graph
+from eneo.flows.enums import RerunDependencyKind
 
 
 def test_rerun_dependency_kinds_are_pinned():

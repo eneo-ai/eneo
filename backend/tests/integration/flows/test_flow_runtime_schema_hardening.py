@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FlowRuns,
     Flows,
     FlowStepAttempts,
@@ -14,7 +14,7 @@ from intric.database.tables.flow_tables import (
     FlowSteps,
     FlowVersions,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,

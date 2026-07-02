@@ -7,31 +7,31 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.assistant import Assistant, AssistantOrigin
-from intric.assistants.assistant_update import (
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant import Assistant, AssistantOrigin
+from eneo.assistants.assistant_update import (
     AssistantUpdateCaller,
     AssistantUpdateCommand,
 )
-from intric.flows.application.flow_service import FlowService
-from intric.flows.assistant_execution_snapshot import stable_hash
-from intric.flows.domain.flow import Flow, FlowStep, FlowVersion
-from intric.flows.domain.flow_invariant_exceptions import (
+from eneo.flows.application.flow_service import FlowService
+from eneo.flows.assistant_execution_snapshot import stable_hash
+from eneo.flows.domain.flow import Flow, FlowStep, FlowVersion
+from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPersistedIdMissingError,
     FlowPublishedDefinitionInvalidError,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.flows.http_transport import SECRET_SENTINEL
-from intric.main.exceptions import BadRequestException, NotFoundException
-from intric.main.models import NOT_PROVIDED
-from intric.prompts.api.prompt_models import PromptCreate
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import NOT_PROVIDED
+from eneo.prompts.api.prompt_models import PromptCreate
 
 
 class _FakeEncryptionService:

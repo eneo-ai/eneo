@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { IntricError, type FlowPackageImportPlan } from "@intric/intric-js";
+import { EneoError, type FlowPackageImportPlan } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 import {
@@ -197,7 +197,7 @@ describe("flowPackageTransfer", () => {
 
   it("maps public import error codes to package-specific copy", () => {
     for (const code of FLOW_PACKAGE_IMPORT_ERROR_CODES) {
-      const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+      const error = new EneoError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
 
       expect(mapFlowPackageImportError(error)).toBe(expectedFlowPackageErrorMessage(code));
     }
@@ -205,14 +205,14 @@ describe("flowPackageTransfer", () => {
 
   it("maps public export error codes to package-specific copy", () => {
     for (const code of FLOW_PACKAGE_EXPORT_ERROR_CODES) {
-      const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+      const error = new EneoError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
 
       expect(mapFlowPackageExportError(error)).toBe(expectedFlowPackageErrorMessage(code));
     }
   });
 
   it("maps package error codes from legacy client code fields when response codes are absent", () => {
-    const importError = new IntricError(
+    const importError = new EneoError(
       "missing binding",
       "RESPONSE",
       400,
@@ -228,7 +228,7 @@ describe("flowPackageTransfer", () => {
       expectedFlowPackageErrorMessage("flow_package_import_missing_required_resource_binding")
     );
 
-    const exportError = new IntricError("mcp unsupported", "RESPONSE", 400, 0, undefined, {
+    const exportError = new EneoError("mcp unsupported", "RESPONSE", 400, 0, undefined, {
       endpoint: "POST@test"
     });
     Object.defineProperty(exportError, "code", {
@@ -241,7 +241,7 @@ describe("flowPackageTransfer", () => {
   });
 
   it("ignores unknown package error codes so dialogs can fall back to server text", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "unknown",
       "RESPONSE",
       400,

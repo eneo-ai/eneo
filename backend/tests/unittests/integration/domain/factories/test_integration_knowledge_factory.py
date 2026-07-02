@@ -3,10 +3,10 @@ from datetime import datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.integration.domain.entities.integration_knowledge import (
+from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
-from intric.integration.domain.factories.integration_knowledge_factory import (
+from eneo.integration.domain.factories.integration_knowledge_factory import (
     IntegrationKnowledgeFactory,
 )
 

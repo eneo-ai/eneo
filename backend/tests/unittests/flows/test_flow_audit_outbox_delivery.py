@@ -5,18 +5,18 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
-from intric.flows.application.flow_run_audit_outbox_delivery import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.flows.application.flow_run_audit_outbox_delivery import (
     build_audit_log_from_outbox,
 )
-from intric.flows.application.flow_run_audit_outbox_policy import (
+from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_MAX_ATTEMPTS,
     flow_audit_outbox_retry_delay_seconds,
 )
-from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxDeliveryRow,
 )
 

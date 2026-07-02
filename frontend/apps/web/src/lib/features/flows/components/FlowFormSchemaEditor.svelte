@@ -16,15 +16,15 @@
     type NormalizedFlowFormField,
     type NormalizedFlowFormFieldType
   } from "$lib/features/flows/flowFormSchema";
-  import { IconPlus } from "@intric/icons/plus";
-  import { IconTrash } from "@intric/icons/trash";
+  import { IconPlus } from "@eneo/icons/plus";
+  import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { IntricError } from "@intric/intric-js";
+  import { EneoError } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
@@ -313,7 +313,7 @@
       await flowEditor.rewriteInputFieldVariableReferences(oldName, newName);
     } catch (error) {
       const message =
-        error instanceof IntricError
+        error instanceof EneoError
           ? error.getReadableMessage()
           : "Failed to rewrite variable references after field rename.";
       toast.error(message);

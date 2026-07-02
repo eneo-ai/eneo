@@ -51,18 +51,18 @@ MCP never becomes the owner.
 
 | Finding | Evidence |
 | --- | --- |
-| Proposal completion already has a current provider boundary. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` defines `call_proposal_completion`. |
-| The first Phase 4 slice was dependency inversion, not deletion of the executor. | `call_proposal_completion` survives at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94`; active submission still calls it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261`; the usage-tracked factory wraps it at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:143`. |
-| `ProposalTurnContext.completion_request(...)` is the existing typed request builder. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144`. |
-| Active proposal generation exposes only the `propose_flow` schema. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:160` builds the active schema list; `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:71` owns forced `propose_flow` tool-choice construction. |
+| Proposal completion already has a current provider boundary. | `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:94` defines `call_proposal_completion`. |
+| The first Phase 4 slice was dependency inversion, not deletion of the executor. | `call_proposal_completion` survives at `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:94`; active submission still calls it at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:261`; the usage-tracked factory wraps it at `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:143`. |
+| `ProposalTurnContext.completion_request(...)` is the existing typed request builder. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144`. |
+| Active proposal generation exposes only the `propose_flow` schema. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:160` builds the active schema list; `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:71` owns forced `propose_flow` tool-choice construction. |
 | Obsolete ask/confirm model-visible tool runtime is deleted. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:89` lists the deleted runtime paths and `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` enforces they stay absent. |
-| Flow Capability Manifest already owns engine feature truth. | `backend/src/intric/flows/flow_capability_manifest.py:121` defines the runtime-input mapping, `backend/src/intric/flows/flow_capability_manifest.py:496` defines final-output artifact mapping, and `backend/src/intric/flows/flow_capability_manifest.py:511` onward owns step I/O, document generation, and citation predicates. |
-| Builder now consumes FCM facts directly instead of a Builder-local mirror. | `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:17` imports FCM constants/functions, and `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:101` stores typed Flow enums in the discovery signature. |
-| Flow authoring already has the command shape we want to reuse, not generalize. | `backend/src/intric/flows/application/flow_authoring_command.py:127` owns preview/prepare/apply through `FlowAuthoringCommandService`. |
-| Flow-managed Assistant mutation is already blocked outside Flow. | `backend/src/intric/assistants/assistant_service.py:117` rejects direct Flow-managed assistant mutation. |
-| Standalone Assistant update is production-risky and broad. | `backend/src/intric/assistants/assistant_service.py:489` starts a large optional-argument update path with permission, governance, resource, prompt, and persistence behavior. |
-| Assistant prompt clearing already had a tri-state bug class. | `backend/src/intric/assistants/assistant_service.py:601` documents the empty-string prompt clear regression. |
-| Governance and knowledge/MCP exclusivity live in Assistant update today. | `backend/src/intric/assistants/assistant_service.py:731` and `backend/src/intric/assistants/assistant_service.py:761`. |
+| Flow Capability Manifest already owns engine feature truth. | `backend/src/eneo/flows/flow_capability_manifest.py:121` defines the runtime-input mapping, `backend/src/eneo/flows/flow_capability_manifest.py:496` defines final-output artifact mapping, and `backend/src/eneo/flows/flow_capability_manifest.py:511` onward owns step I/O, document generation, and citation predicates. |
+| Builder now consumes FCM facts directly instead of a Builder-local mirror. | `backend/src/eneo/flows/ai_builder/ai_builder_discovery_flow_defaults.py:17` imports FCM constants/functions, and `backend/src/eneo/flows/ai_builder/ai_builder_discovery_flow_defaults.py:101` stores typed Flow enums in the discovery signature. |
+| Flow authoring already has the command shape we want to reuse, not generalize. | `backend/src/eneo/flows/application/flow_authoring_command.py:127` owns preview/prepare/apply through `FlowAuthoringCommandService`. |
+| Flow-managed Assistant mutation is already blocked outside Flow. | `backend/src/eneo/assistants/assistant_service.py:117` rejects direct Flow-managed assistant mutation. |
+| Standalone Assistant update is production-risky and broad. | `backend/src/eneo/assistants/assistant_service.py:489` starts a large optional-argument update path with permission, governance, resource, prompt, and persistence behavior. |
+| Assistant prompt clearing already had a tri-state bug class. | `backend/src/eneo/assistants/assistant_service.py:601` documents the empty-string prompt clear regression. |
+| Governance and knowledge/MCP exclusivity live in Assistant update today. | `backend/src/eneo/assistants/assistant_service.py:731` and `backend/src/eneo/assistants/assistant_service.py:761`. |
 | PR #480 is available locally as source material. | Git refs `github-pr/480/base` and `github-pr/480/head` exist locally. |
 
 ## Accepted Long-Term Direction
@@ -242,7 +242,7 @@ a new capability abstraction:
 
 | Gate | Result |
 | --- | --- |
-| Duplicate owner deleted | Deleted `backend/src/intric/flows/ai_builder/ai_builder_step_capabilities.py`. |
+| Duplicate owner deleted | Deleted `backend/src/eneo/flows/ai_builder/ai_builder_step_capabilities.py`. |
 | No compatibility shim | No replacement re-export or permissive string helper remains. |
 | Canonical owner | `flow_capability_manifest.py` owns runtime input mode, final artifact, document generation, step I/O, and citation capability facts. |
 | Adapters translated only | Builder discovery and transition policy consume FCM constants/functions and keep enum conversion local to Builder boundaries. |

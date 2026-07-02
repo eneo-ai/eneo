@@ -1,4 +1,4 @@
-import type { FlowRun } from "@intric/intric-js";
+import type { FlowRun } from "@eneo/eneo-js";
 
 export interface FlowRunHistoryState {
   runs: FlowRun[];

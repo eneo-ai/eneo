@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_repo import _planning_state_for_storage
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.ai_builder_repo import _planning_state_for_storage
+from eneo.flows.ai_builder.planning_state import (
     ARCHITECTURE_HASH_HEX_LENGTH,
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,

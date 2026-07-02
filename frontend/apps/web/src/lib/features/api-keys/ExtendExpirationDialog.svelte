@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyV2 } from "@eneo/eneo-js";
   import { AlertCircle, Calendar, Infinity as InfinityIcon } from "lucide-svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
@@ -11,7 +11,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import ExpirationPicker from "$lib/features/api-keys/ExpirationPicker.svelte";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let {
     apiKey,
@@ -44,7 +44,7 @@
 
   async function loadConstraints() {
     try {
-      const constraints = await intric.apiKeys.getPolicyConstraints();
+      const constraints = await eneo.apiKeys.getPolicyConstraints();
       maxDays = constraints.max_expiration_days ?? null;
       requireExpiration = constraints.require_expiration ?? false;
     } catch (error) {
@@ -75,9 +75,9 @@
     try {
       const params = { id: apiKey.id, expires_at: pickerValue };
       if (mode === "admin") {
-        await intric.apiKeys.admin.extend(params);
+        await eneo.apiKeys.admin.extend(params);
       } else {
-        await intric.apiKeys.extend(params);
+        await eneo.apiKeys.extend(params);
       }
       onChanged();
       open = false;

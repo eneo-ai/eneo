@@ -6,19 +6,19 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
-from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.flows.application.flow_authoring_command import (
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.application.flow_authoring_command import (
     AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
     FlowAuthoringCommandService,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftCompiledStep,
     FlowDraftStepChangeKind,
 )
-from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from intric.flows.flow_authoring_spec import FlowDraftSpecCore
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
 )

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
 
   let {
     step,

@@ -1,7 +1,5 @@
-@import "@intric/ui/styles";
 @import "@eneo/ui/styles";
 @source "../../../packages/ui/src/";
-@source "../../../packages/eneo-ui/src/";
 
 @custom-variant dark (&:is(.dark *));
 

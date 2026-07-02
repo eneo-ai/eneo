@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from intric.files.audio import AudioMimeTypes
-from intric.files.image import ImageMimeTypes
-from intric.files.mime_support import (
+from eneo.files.audio import AudioMimeTypes
+from eneo.files.image import ImageMimeTypes
+from eneo.files.mime_support import (
     MimeSupport,
     canonicalize_mime,
     classify_mime,
@@ -30,7 +30,7 @@ from intric.files.mime_support import (
     supported_mimes,
     supported_text_mimes,
 )
-from intric.files.text import TextMimeTypes
+from eneo.files.text import TextMimeTypes
 
 
 class TestCanonicalize:

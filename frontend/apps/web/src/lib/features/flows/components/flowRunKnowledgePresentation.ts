@@ -1,4 +1,4 @@
-import type { FlowRunDebugRagReference } from "@intric/intric-js";
+import type { FlowRunDebugRagReference } from "@eneo/eneo-js";
 
 export type KnowledgeRelevanceLevel = "high" | "moderate" | "low";
 

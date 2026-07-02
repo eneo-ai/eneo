@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
+from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     implies_single_case,
     looks_like_case_document_family,
 )
-from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
+from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
 )
 

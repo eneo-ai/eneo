@@ -10,7 +10,7 @@ from fastapi.routing import APIRoute
 
 
 def test_server_main_imports_cleanly() -> None:
-    module = importlib.import_module("intric.server.main")
+    module = importlib.import_module("eneo.server.main")
 
     assert module is not None
 
@@ -25,7 +25,7 @@ def test_server_main_imports_in_fresh_python_process() -> None:
     )
 
     result = subprocess.run(
-        [sys.executable, "-c", "import intric.server.main"],
+        [sys.executable, "-c", "import eneo.server.main"],
         cwd=backend_root,
         env=env,
         capture_output=True,
@@ -36,30 +36,30 @@ def test_server_main_imports_in_fresh_python_process() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_intric_flows_package_does_not_import_services_as_side_effect() -> None:
-    sys.modules.pop("intric.flows", None)
-    sys.modules.pop("intric.flows.application.flow_service", None)
-    sys.modules.pop("intric.flows.application.flow_run_service", None)
+def test_eneo_flows_package_does_not_import_services_as_side_effect() -> None:
+    sys.modules.pop("eneo.flows", None)
+    sys.modules.pop("eneo.flows.application.flow_service", None)
+    sys.modules.pop("eneo.flows.application.flow_run_service", None)
 
-    importlib.import_module("intric.flows")
+    importlib.import_module("eneo.flows")
 
-    assert "intric.flows.application.flow_service" not in sys.modules
-    assert "intric.flows.application.flow_run_service" not in sys.modules
+    assert "eneo.flows.application.flow_service" not in sys.modules
+    assert "eneo.flows.application.flow_run_service" not in sys.modules
 
 
-def test_intric_flows_runtime_package_does_not_import_celery_as_side_effect() -> None:
-    sys.modules.pop("intric.flows.runtime", None)
-    sys.modules.pop("intric.flows.runtime.celery_app", None)
-    sys.modules.pop("intric.flows.runtime.celery_execution_backend", None)
+def test_eneo_flows_runtime_package_does_not_import_celery_as_side_effect() -> None:
+    sys.modules.pop("eneo.flows.runtime", None)
+    sys.modules.pop("eneo.flows.runtime.celery_app", None)
+    sys.modules.pop("eneo.flows.runtime.celery_execution_backend", None)
 
-    importlib.import_module("intric.flows.runtime")
+    importlib.import_module("eneo.flows.runtime")
 
-    assert "intric.flows.runtime.celery_app" not in sys.modules
-    assert "intric.flows.runtime.celery_execution_backend" not in sys.modules
+    assert "eneo.flows.runtime.celery_app" not in sys.modules
+    assert "eneo.flows.runtime.celery_execution_backend" not in sys.modules
 
 
 def test_flow_api_router_modules_export_only_router() -> None:
-    api_package = importlib.import_module("intric.flows.api")
+    api_package = importlib.import_module("eneo.flows.api")
     router_module_names = sorted(
         module_info.name
         for module_info in pkgutil.iter_modules(
@@ -69,11 +69,11 @@ def test_flow_api_router_modules_export_only_router() -> None:
         if module_info.name.endswith("_router")
     )
     expected_sentinels = {
-        "intric.flows.api.flow_authoring_router",
-        "intric.flows.api.flow_definition_router",
-        "intric.flows.api.flow_router",
-        "intric.flows.api.flow_run_execution_router",
-        "intric.flows.api.flow_upload_router",
+        "eneo.flows.api.flow_authoring_router",
+        "eneo.flows.api.flow_definition_router",
+        "eneo.flows.api.flow_router",
+        "eneo.flows.api.flow_run_execution_router",
+        "eneo.flows.api.flow_upload_router",
     }
     assert expected_sentinels <= set(router_module_names)
 
@@ -87,7 +87,7 @@ def test_flow_api_router_modules_export_only_router() -> None:
 
 
 def test_flow_definition_router_exports_only_aggregate_router() -> None:
-    module = importlib.import_module("intric.flows.api.flow_definition_router")
+    module = importlib.import_module("eneo.flows.api.flow_definition_router")
 
     public_coroutine_names = [
         name
@@ -101,21 +101,21 @@ def test_flow_definition_router_exports_only_aggregate_router() -> None:
 
 
 def test_flow_canonical_layer_imports_are_available() -> None:
-    domain = importlib.import_module("intric.flows.domain")
-    application = importlib.import_module("intric.flows.application")
-    infrastructure = importlib.import_module("intric.flows.infrastructure")
-    flow_service = importlib.import_module("intric.flows.application.flow_service")
+    domain = importlib.import_module("eneo.flows.domain")
+    application = importlib.import_module("eneo.flows.application")
+    infrastructure = importlib.import_module("eneo.flows.infrastructure")
+    flow_service = importlib.import_module("eneo.flows.application.flow_service")
     flow_run_service = importlib.import_module(
-        "intric.flows.application.flow_run_service"
+        "eneo.flows.application.flow_run_service"
     )
-    flow_repo = importlib.import_module("intric.flows.infrastructure.flow_repo")
-    flow_run_repo = importlib.import_module("intric.flows.infrastructure.flow_run_repo")
+    flow_repo = importlib.import_module("eneo.flows.infrastructure.flow_repo")
+    flow_run_repo = importlib.import_module("eneo.flows.infrastructure.flow_run_repo")
     flow_version_repo = importlib.import_module(
-        "intric.flows.infrastructure.flow_version_repo"
+        "eneo.flows.infrastructure.flow_version_repo"
     )
-    flow_dispatch = importlib.import_module("intric.flows.application.flow_dispatch")
+    flow_dispatch = importlib.import_module("eneo.flows.application.flow_dispatch")
 
-    assert domain.Flow.__module__ == "intric.flows.domain.flow"
+    assert domain.Flow.__module__ == "eneo.flows.domain.flow"
     assert application.FlowService is flow_service.FlowService
     assert application.FlowRunService is flow_run_service.FlowRunService
     assert infrastructure.FlowRepository is flow_repo.FlowRepository
@@ -130,7 +130,7 @@ def test_flow_canonical_layer_imports_are_available() -> None:
 
 
 def test_flow_and_ai_builder_routes_have_unique_contracts_and_docs() -> None:
-    module = importlib.import_module("intric.server.main")
+    module = importlib.import_module("eneo.server.main")
     app = module.app
 
     flow_routes = [
@@ -168,12 +168,12 @@ def test_flow_and_ai_builder_routes_have_unique_contracts_and_docs() -> None:
 
 
 def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
-    flow_models = importlib.import_module("intric.flows.api.flow_models")
+    flow_models = importlib.import_module("eneo.flows.api.flow_models")
     ai_builder_api_models = importlib.import_module(
-        "intric.flows.ai_builder.ai_builder_api_models"
+        "eneo.flows.ai_builder.ai_builder_api_models"
     )
-    file_models = importlib.import_module("intric.files.file_models")
-    assistant_models = importlib.import_module("intric.assistants.api.assistant_models")
+    file_models = importlib.import_module("eneo.files.file_models")
+    assistant_models = importlib.import_module("eneo.assistants.api.assistant_models")
 
     models_with_examples = [
         flow_models.FlowCreateRequest,
@@ -194,13 +194,13 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
 
 
 def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
-    flow_models = importlib.import_module("intric.flows.api.flow_models")
-    flow_graph = importlib.import_module("intric.flows.api.flow_graph")
+    flow_models = importlib.import_module("eneo.flows.api.flow_models")
+    flow_graph = importlib.import_module("eneo.flows.api.flow_graph")
     flow_template_asset_models = importlib.import_module(
-        "intric.flows.api.flow_template_asset_models"
+        "eneo.flows.api.flow_template_asset_models"
     )
     ai_builder_api_models = importlib.import_module(
-        "intric.flows.ai_builder.ai_builder_api_models"
+        "eneo.flows.ai_builder.ai_builder_api_models"
     )
 
     models_with_examples = [
@@ -232,7 +232,7 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
 
 
 def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -> None:
-    module = importlib.import_module("intric.server.main")
+    module = importlib.import_module("eneo.server.main")
     schema = module.app.openapi()
     tags = {tag["name"]: tag for tag in schema.get("tags", [])}
 

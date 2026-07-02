@@ -14,23 +14,23 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from intric.flows.ai_builder.ai_builder_draft_preflight import run_draft_preflight
-from intric.flows.ai_builder.ai_builder_form_field_usage import (
+from eneo.flows.ai_builder.ai_builder_draft_preflight import run_draft_preflight
+from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
 )
-from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
 )
-from intric.flows.ai_builder.planning_state import AggregationIntent
-from intric.flows.enums import (
+from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
 )
-from intric.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
-from intric.flows.flow_capability_manifest import resolve_capability_for_tuple
-from intric.flows.template_reference_analyzer import (
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
+from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
+from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
     referenced_form_fields,

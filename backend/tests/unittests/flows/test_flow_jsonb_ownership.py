@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql.sqltypes import JSON
 
-from intric.database.tables import flow_tables
-from intric.flows.infrastructure.flow_jsonb_ownership import (
+from eneo.database.tables import flow_tables
+from eneo.flows.infrastructure.flow_jsonb_ownership import (
     FLOW_JSONB_COLUMN_OWNERS,
     FlowJsonbCorruptionBehavior,
     FlowJsonbSchemaVersionPolicy,
@@ -34,7 +34,7 @@ def _is_executable_owner_symbol(symbol: object) -> bool:
 
 
 def _flow_tables_json_columns() -> set[JsonbColumnKey]:
-    import_module("intric.database.tables")
+    import_module("eneo.database.tables")
 
     keys: set[JsonbColumnKey] = set()
     for model in vars(flow_tables).values():
@@ -101,7 +101,7 @@ def test_flow_jsonb_owner_registry_has_no_deferred_inventory_escape_hatch() -> N
 def test_builder_plan_proposal_json_has_typed_owner() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("builder_plans", "proposal_json")]
 
-    assert owner.owner_module == "intric.flows.ai_builder.ai_builder_domain_models"
+    assert owner.owner_module == "eneo.flows.ai_builder.ai_builder_domain_models"
     assert owner.envelope_name == "FlowBuilderProposal"
     assert owner.storage_category is FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT
     assert (
@@ -114,7 +114,7 @@ def test_builder_plan_proposal_json_has_typed_owner() -> None:
 def test_builder_session_conversation_has_typed_owner() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "conversation")]
 
-    assert owner.owner_module == "intric.flows.ai_builder.ai_builder_domain_models"
+    assert owner.owner_module == "eneo.flows.ai_builder.ai_builder_domain_models"
     assert owner.envelope_name == "ConversationMessage"
     assert owner.storage_category is FlowJsonbStorageCategory.BUILDER_SESSION_STATE
     assert (
@@ -127,7 +127,7 @@ def test_builder_session_conversation_has_typed_owner() -> None:
 def test_builder_session_planning_state_has_typed_owner() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "planning_state_jsonb")]
 
-    assert owner.owner_module == "intric.flows.ai_builder.planning_state"
+    assert owner.owner_module == "eneo.flows.ai_builder.planning_state"
     assert owner.envelope_name == "PlanningState"
     assert owner.storage_category is FlowJsonbStorageCategory.BUILDER_SESSION_STATE
     assert (

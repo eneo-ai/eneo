@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_context import (
+from eneo.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
     serialize_space_mcps,
     serialize_space_models,

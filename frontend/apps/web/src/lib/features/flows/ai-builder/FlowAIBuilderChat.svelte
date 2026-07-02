@@ -325,7 +325,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .empty-welcome {
     opacity: 0;

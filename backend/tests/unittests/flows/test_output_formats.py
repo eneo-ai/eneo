@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.domain.flow import FlowPersistedJsonObject
-from intric.flows.enums import FlowOutputType
-from intric.flows.output_processing import StructuredOutputValue
-from intric.flows.runtime.output_formats.base import (
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.enums import FlowOutputType
+from eneo.flows.output_processing import StructuredOutputValue
+from eneo.flows.runtime.output_formats.base import (
     EnsureSourceWithinLimitsFn,
     OutputFormatProcessingContext,
     OutputFormatSpec,
@@ -14,10 +14,10 @@ from intric.flows.runtime.output_formats.base import (
     RenderStructuredDocumentFn,
     ValidateAgainstContractFn,
 )
-from intric.flows.runtime.output_formats.docx import DocxOutputFormatSpec
-from intric.flows.runtime.output_formats.json import JsonOutputFormatSpec
-from intric.flows.runtime.output_formats.pdf import PdfOutputFormatSpec
-from intric.flows.runtime.output_formats.text import TextOutputFormatSpec
+from eneo.flows.runtime.output_formats.docx import DocxOutputFormatSpec
+from eneo.flows.runtime.output_formats.json import JsonOutputFormatSpec
+from eneo.flows.runtime.output_formats.pdf import PdfOutputFormatSpec
+from eneo.flows.runtime.output_formats.text import TextOutputFormatSpec
 
 
 def _context(

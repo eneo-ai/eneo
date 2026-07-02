@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from intric.flows.ai_builder.ai_builder_turn_controller import (
+from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
     ConfirmRequirements,
     resolve_turn_control,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
@@ -76,9 +76,7 @@ def test_server_commit_for_text_docx_has_resolvable_pattern() -> None:
     decision = _decision(state=state, ui_language="sv")
 
     assert isinstance(decision, CommitArchitecture)
-    assert decision.architecture_commit.chosen_patterns == [
-        "text_to_artifact_report"
-    ]
+    assert decision.architecture_commit.chosen_patterns == ["text_to_artifact_report"]
 
 
 def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:

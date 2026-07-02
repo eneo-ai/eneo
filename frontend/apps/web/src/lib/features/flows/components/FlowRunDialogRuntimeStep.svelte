@@ -1,12 +1,12 @@
 <script lang="ts">
-  import type { FlowRunContractStepInput, UploadedFile } from "@intric/intric-js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconUploadCloud } from "@intric/icons/upload-cloud";
-  import { IconXMark } from "@intric/icons/x-mark";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconRefresh } from "@intric/icons/refresh";
-  import { IconTrash } from "@intric/icons/trash";
+  import type { FlowRunContractStepInput, UploadedFile } from "@eneo/eneo-js";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconUploadCloud } from "@eneo/icons/upload-cloud";
+  import { IconXMark } from "@eneo/icons/x-mark";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconRefresh } from "@eneo/icons/refresh";
+  import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { m } from "$lib/paraglide/messages";

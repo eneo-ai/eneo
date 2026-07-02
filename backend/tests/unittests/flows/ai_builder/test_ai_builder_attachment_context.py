@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.files.file_models import File, FileType
-from intric.flows.ai_builder.ai_builder_attachment_context import (
+from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
     build_ai_builder_attachment_context,
 )

@@ -1,4 +1,4 @@
-import type { AppTemplate, AssistantTemplate, Intric, JSONRequestBody } from "@intric/intric-js";
+import type { AppTemplate, AssistantTemplate, Eneo, JSONRequestBody } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import {
   appTemplateCategories,
@@ -41,18 +41,18 @@ export type TemplateAdapter = {
 };
 
 export function createAssistantTemplateAdapter(params: {
-  intric: Intric;
+  eneo: Eneo;
   currentSpaceId: string;
 }): TemplateAdapter {
-  const { intric, currentSpaceId } = params;
+  const { eneo, currentSpaceId } = params;
 
   return {
     type: "assistants",
     async getTemplates() {
-      return await intric.templates.list({ filter: "assistants" });
+      return await eneo.templates.list({ filter: "assistants" });
     },
     async createNew({ from_template, name }: TemplateCreateRequest) {
-      return await intric.assistants.create({ spaceId: currentSpaceId, name, from_template });
+      return await eneo.assistants.create({ spaceId: currentSpaceId, name, from_template });
     },
     getResourceName() {
       const resourceName = m.resource_assistant();
@@ -86,18 +86,18 @@ export function createAssistantTemplateAdapter(params: {
 }
 
 export function createAppTemplateAdapter(params: {
-  intric: Intric;
+  eneo: Eneo;
   currentSpaceId: string;
 }): TemplateAdapter {
-  const { intric, currentSpaceId } = params;
+  const { eneo, currentSpaceId } = params;
 
   return {
     type: "apps",
     async getTemplates() {
-      return await intric.templates.list({ filter: "apps" });
+      return await eneo.templates.list({ filter: "apps" });
     },
     async createNew({ from_template, name }: TemplateCreateRequest) {
-      return await intric.apps.create({ spaceId: currentSpaceId, name, from_template });
+      return await eneo.apps.create({ spaceId: currentSpaceId, name, from_template });
     },
     getResourceName() {
       const resourceName = m.resource_app();

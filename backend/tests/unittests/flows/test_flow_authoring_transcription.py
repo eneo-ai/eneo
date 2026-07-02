@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     InputType,
     StepSpec,
 )
-from intric.flows.flow_authoring_transcription import (
+from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
 )
 
@@ -122,7 +122,9 @@ class TestTranscriptionCleanup:
 
         result = apply_audio_transcription_defaults(
             metadata=existing_metadata,
-            spec=_spec(_step(input_type=InputType.TEXT, input_source=InputSource.PREVIOUS_STEP)),
+            spec=_spec(
+                _step(input_type=InputType.TEXT, input_source=InputSource.PREVIOUS_STEP)
+            ),
             default_transcription_model_id=None,
         )
 

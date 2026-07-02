@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
+from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     compute_question_budget,
     has_explicit_step_plan,
 )

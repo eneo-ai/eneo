@@ -82,7 +82,7 @@
 </nav>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .phase-bar {
     width: 100%;

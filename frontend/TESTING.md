@@ -1,6 +1,6 @@
 # Frontend testing guide
 
-This document describes how the `@intric/web` app is tested, where each kind of
+This document describes how the `@eneo/web` app is tested, where each kind of
 test lives, how to run and write them, and how to lean on AI tooling while doing
 so. The stack is the de-facto SvelteKit standard — **Vitest + Playwright** — split
 into three layers.
@@ -41,10 +41,10 @@ broken out for when you want to run just one layer.
 
 ```bash
 # Unit + component (both Vitest projects), one-shot — what CI runs
-bun run --filter @intric/web test:unit
+bun run --filter @eneo/web test:unit
 
 # Same, but watch mode for local development
-bun run --filter @intric/web test:unit:watch
+bun run --filter @eneo/web test:unit:watch
 
 # Only one project
 cd apps/web && bun run vitest run --project server   # unit only
@@ -243,7 +243,7 @@ CSS paths (brittle).
 Two jobs in `.github/workflows/ci.yml` run on every PR:
 
 - **`Frontend`** runs the **unit + component** layer: installs the Chromium
-  browser, then runs `bun run --filter @intric/web test:coverage` (tests +
+  browser, then runs `bun run --filter @eneo/web test:coverage` (tests +
   coverage). This job **is** part of the aggregate `CI` gate, so a failure blocks
   the PR.
 - **`Frontend E2E`** stands up the isolated stack (`docker-compose.e2e.ci.yml`,
@@ -317,7 +317,7 @@ commit a small summary, not the HTML.
 
 > Note: `diff-cover` matches coverage paths against git paths, which are
 > repo-root-relative. The reports use package-relative paths (`src/…` for lcov,
-> `src/intric/…` in the cobertura xml), so the `Coverage diff` job rewrites them to
+> `src/eneo/…` in the cobertura xml), so the `Coverage diff` job rewrites them to
 > repo-root-relative before running. If you move the coverage output, keep that
 > rewrite in sync or patch coverage silently reports "no lines".
 

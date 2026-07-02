@@ -4,10 +4,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.signed_urls import verify_signed_token
-from intric.files import file_router
-from intric.files.file_models import SignedURLRequest
-from intric.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.authentication.signed_urls import verify_signed_token
+from eneo.files import file_router
+from eneo.files.file_models import SignedURLRequest
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 
 
 async def test_generate_signed_url_uses_file_tenant_for_token():

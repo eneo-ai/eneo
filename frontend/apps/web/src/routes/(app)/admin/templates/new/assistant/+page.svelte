@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
@@ -21,7 +21,7 @@
 
   let { data } = $props();
 
-  const intric = $derived(data.intric);
+  const eneo = $derived(data.eneo);
 
   // Template state
   let name = $state("");
@@ -82,7 +82,7 @@
         icon_name: iconName || undefined // Include icon if selected
       };
 
-      await intric.templates.admin.createAssistant(templateData);
+      await eneo.templates.admin.createAssistant(templateData);
       goto(resolve("/admin/templates?success=template_created"));
     } catch (error) {
       console.error("Failed to create template:", error);

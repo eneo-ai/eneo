@@ -11,7 +11,7 @@
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "src.intric.server.main:app",
+                "src.eneo.server.main:app",
                 "--reload",
                 "--host",
                 "0.0.0.0",
@@ -27,7 +27,7 @@
             "request": "launch",
             "module": "arq",
             "args": [
-                "src.intric.worker.arq.WorkerSettings"
+                "src.eneo.worker.arq.WorkerSettings"
             ],
             "env": {
                 "LOGLEVEL": "DEBUG"
@@ -42,7 +42,7 @@
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "src.intric.server.main:app",
+                "src.eneo.server.main:app",
                 "--reload",
                 "--host",
                 "0.0.0.0",

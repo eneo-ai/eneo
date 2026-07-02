@@ -141,7 +141,7 @@ Eneo implements DDD patterns with clear domain boundaries and consistent archite
 ### Domain Organization
 
 ```
-backend/src/intric/
+backend/src/eneo/
 ├── assistants/           # AI Assistant Management Domain
 ├── spaces/              # Collaborative Workspaces Domain
 ├── users/               # User Management Domain
@@ -206,7 +206,7 @@ graph LR
         ROUTES[File-based Routing<br/>src/routes/]
         COMPONENTS[Reusable Components<br/>src/lib/components/]
         STORES[State Management<br/>Svelte Stores]
-        SERVICES[API Services<br/>@intric/intric-js]
+        SERVICES[API Services<br/>@eneo/eneo-js]
         I18N[Internationalization<br/>Paraglide-JS]
     end
 
@@ -244,9 +244,9 @@ graph LR
 
 - **Framework**: SvelteKit with TypeScript
 - **Package Manager**: bun with workspace support
-- **UI Components**: Custom component library (@intric/ui)
+- **UI Components**: Custom component library (@eneo/ui)
 - **Styling**: Tailwind CSS v4
-- **API Client**: Type-safe client (@intric/intric-js)
+- **API Client**: Type-safe client (@eneo/eneo-js)
 - **State Management**: Svelte stores with reactive updates
 - **Internationalization**: Paraglide-JS for Swedish/English
 - **Build Tool**: Vite for development and production builds

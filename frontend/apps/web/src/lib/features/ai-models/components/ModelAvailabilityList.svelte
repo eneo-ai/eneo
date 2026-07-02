@@ -7,8 +7,8 @@
 -->
 
 <script lang="ts" generics="T extends CompletionModel | EmbeddingModel | TranscriptionModel">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Input, Tooltip } from "@intric/ui";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { Input, Tooltip } from "@eneo/ui";
   import { ChevronRight, Loader2, ShieldAlert } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
 

@@ -7,19 +7,19 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.flow_tables import (
     FlowPackageImports,
     FlowRuns,
     Flows,
     FlowSteps,
     FlowVersions,
 )
-from intric.database.tables.spaces_table import Spaces
-from intric.database.tables.users_table import Users
-from intric.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
-from intric.users.user import UserState
-from intric.users.user_repo import UsersRepository
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import Users
+from eneo.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
+from eneo.users.user import UserState
+from eneo.users.user_repo import UsersRepository
 
 
 async def _create_user(

@@ -10,25 +10,25 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from intric.authentication.principal_types import PrincipalType
-from intric.files.file_models import FileType
-from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
-from intric.flows.application.flow_run_service import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileType
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+from eneo.flows.application.flow_run_service import (
     FlowRunPageWithResultFilesAndTokenUsage,
     FlowRunService,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndTokenUsage,
 )
-from intric.flows.application.stale_queued_redispatch import (
+from eneo.flows.application.stale_queued_redispatch import (
     StaleQueuedRedispatchDispatchError,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunRerunInvalidatedStep,
@@ -40,15 +40,15 @@ from intric.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
-from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
-from intric.flows.domain.run_step_input_exceptions import (
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
@@ -56,35 +56,35 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_dispatch_request import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_dispatch_request import (
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
 )
-from intric.flows.flow_run_input_envelope import build_initial_run_input_envelope
-from intric.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
-from intric.flows.flow_run_step_inputs import (
+from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
+from eneo.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
     normalize_step_inputs_payload,
 )
-from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
-from intric.flows.infrastructure.flow_run_rerun_repo import (
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
     FlowRunRerunRepository,
 )
-from intric.flows.principal import FlowPrincipal
-from intric.flows.published_definition import (
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     build_published_definition_json,
 )
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     ResourceGoneException,
     UnauthorizedException,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
 
 
 def _flow_repo() -> AsyncMock:

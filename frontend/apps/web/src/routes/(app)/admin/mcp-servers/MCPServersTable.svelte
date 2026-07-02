@@ -5,15 +5,15 @@
 -->
 
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { ChevronRight } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";
   import MCPServerEnabledSwitch from "./MCPServerEnabledSwitch.svelte";
   import MCPServerActions from "./MCPServerActions.svelte";
   import MCPToolsPanel from "./MCPToolsPanel.svelte";
-  import { getIntric } from "$lib/core/Intric";
-  import type { components } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { components } from "@eneo/eneo-js";
 
   type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
 
@@ -23,7 +23,7 @@
 
   const { mcpServers }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Track which server has tools expanded (only one at a time)
   let expandedServerId = $state<string | null>(null);
@@ -146,7 +146,7 @@
                   mcpServerId={server.mcp_server_id}
                   serverName={server.name}
                   tools={server.tools || []}
-                  intricClient={intric}
+                  eneoClient={eneo}
                 />
               </td>
             </tr>

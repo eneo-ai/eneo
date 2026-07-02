@@ -7,7 +7,7 @@ in.
 
 `allow_indirect_imports = true` scopes the check to direct, textual imports:
 lazy in-function imports that transitively reach `ai_builder` via
-`intric.tenants.tenant` (see `tenant.py:301`) are intentionally out of scope
+`eneo.tenants.tenant` (see `tenant.py:301`) are intentionally out of scope
 here. They are legitimate sibling reuse, not an engine-layer coupling.
 """
 
@@ -32,19 +32,19 @@ def _lint_imports_command() -> list[str]:
 
 
 def _expected_source_modules() -> set[str]:
-    """Enumerate everything under `intric/flows/` except `ai_builder/` and
+    """Enumerate everything under `eneo/flows/` except `ai_builder/` and
     dunder/cache artefacts. Returns the set of dotted module names we
     expect to appear in `.importlinter`'s `source_modules` list.
     """
-    flows_dir = _backend_root() / "src" / "intric" / "flows"
+    flows_dir = _backend_root() / "src" / "eneo" / "flows"
     expected: set[str] = set()
     for entry in flows_dir.iterdir():
         if entry.name in {"ai_builder", "__pycache__"}:
             continue
         if entry.is_dir():
-            expected.add(f"intric.flows.{entry.name}")
+            expected.add(f"eneo.flows.{entry.name}")
         elif entry.suffix == ".py" and entry.name != "__init__.py":
-            expected.add(f"intric.flows.{entry.stem}")
+            expected.add(f"eneo.flows.{entry.stem}")
     return expected
 
 
@@ -62,9 +62,9 @@ def _configured_source_modules() -> set[str]:
 
 def test_source_modules_cover_every_flows_sibling() -> None:
     """Drift guard. `import-linter`'s `forbidden` contract cannot express
-    'all of `intric.flows` except `intric.flows.ai_builder`' natively, so
+    'all of `eneo.flows` except `eneo.flows.ai_builder`' natively, so
     `.importlinter` enumerates every sibling. If someone adds a new
-    top-level module/package under `intric/flows/` without updating the
+    top-level module/package under `eneo/flows/` without updating the
     config, that module would silently fall outside the boundary rule —
     fail here instead of discovering it in production.
     """
@@ -81,28 +81,28 @@ def test_source_modules_cover_every_flows_sibling() -> None:
 
 def test_flow_validators_is_not_coupled_to_ai_builder() -> None:
     """`flow_validators.py` is pure engine code and must not reach into
-    `intric.flows.ai_builder.*`. FCM's `is_citation_capable_step` is the
+    `eneo.flows.ai_builder.*`. FCM's `is_citation_capable_step` is the
     engine-side primitive. This test
     AST-scans the module so a regression fails at unit test time, not via
     the slower lint-imports subprocess.
     """
-    module_path = _backend_root() / "src" / "intric" / "flows" / "flow_validators.py"
+    module_path = _backend_root() / "src" / "eneo" / "flows" / "flow_validators.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
     offenders: list[str] = []
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if module.startswith("intric.flows.ai_builder"):
+            if module.startswith("eneo.flows.ai_builder"):
                 names = ", ".join(alias.name for alias in node.names)
                 offenders.append(f"from {module} import {names}")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith("intric.flows.ai_builder"):
+                if alias.name.startswith("eneo.flows.ai_builder"):
                     offenders.append(f"import {alias.name}")
 
     assert not offenders, (
-        "flow_validators.py must not import from intric.flows.ai_builder.*. "
+        "flow_validators.py must not import from eneo.flows.ai_builder.*. "
         "Use FCM primitives instead (see flow_capability_manifest.py).\n"
         f"Offending imports: {offenders}"
     )

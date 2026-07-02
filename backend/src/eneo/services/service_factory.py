@@ -1,0 +1,35 @@
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import Depends, Path
+
+from eneo.groups_legacy.api.group_models import Group
+from eneo.main.container.container import Container
+from eneo.server.dependencies.container import get_container
+from eneo.services.output_parsing.output_parser_factory import OutputParserFactory
+from eneo.services.service import Service
+
+
+async def get_runner_from_service(
+    id: Annotated[UUID, Path()],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service, _permissions = await container.service_service().get_service(id)
+
+    return get_service_runner(container=container, service=service)
+
+
+def get_service_runner(
+    container: Container,
+    service: Service,
+    with_groups: list[Group] | None = None,
+):
+    if with_groups is not None:
+        service.groups = with_groups  # type: ignore[assignment]
+
+    output_parser = OutputParserFactory.create(service)
+    prompt = f"{service.prompt}\n{output_parser.get_format_instructions()}"
+
+    return container.service_runner(
+        service=service, output_parser=output_parser, prompt=prompt
+    )

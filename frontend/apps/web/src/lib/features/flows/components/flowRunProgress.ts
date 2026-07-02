@@ -4,7 +4,7 @@ import type {
   FlowRunOutputPayload,
   FlowRunResultFile,
   FlowRunStep
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 
 export type FlowRunProgressStep = {
   stepOrder: number;

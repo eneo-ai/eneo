@@ -1,6 +1,6 @@
 <script lang="ts">
   import { BaseEdge, EdgeLabel, getBezierPath, type Position } from "@xyflow/svelte";
-  import { IconPlus } from "@intric/icons/plus";
+  import { IconPlus } from "@eneo/icons/plus";
   import { m } from "$lib/paraglide/messages";
 
   let {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/svelte";
-import type { Space } from "@intric/intric-js";
+import type { Space } from "@eneo/eneo-js";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { m } from "$lib/paraglide/messages";

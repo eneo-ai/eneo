@@ -7,7 +7,7 @@ from typing import Protocol, cast
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 REPO_ROOT = BACKEND_ROOT.parent
-FLOW_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
+FLOW_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 PACKAGE_LAYOUT_DOC = REPO_ROOT / "docs" / "flows" / "package-layout.md"
 FLOW_DEVELOPER_ARCHITECTURE_DOCS_GENERATOR = (
     BACKEND_ROOT / "scripts" / "flow_developer_architecture_docs.py"

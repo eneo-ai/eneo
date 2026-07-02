@@ -7,8 +7,8 @@ from typing import cast
 
 import pytest
 
-from intric.data_retention.infrastructure import data_retention_worker
-from intric.data_retention.infrastructure.data_retention_service import (
+from eneo.data_retention.infrastructure import data_retention_worker
+from eneo.data_retention.infrastructure.data_retention_service import (
     RETENTION_BATCH_SIZE,
     FlowDebugRedactionCounts,
     FlowRunHistoryPurgeBlockedCounts,

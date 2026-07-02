@@ -4,7 +4,7 @@ import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
 import { shouldSerializeBackendResponseHeader } from "$lib/core/serializedBackendResponseHeaders";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
-import { IntricError, type IntricErrorCode } from "@intric/intric-js";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
 import {
   getEnvironmentConfig,
@@ -78,9 +78,9 @@ const headerFilterHandle: Handle = async ({ event, resolve }) => {
 export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
-  let code: IntricErrorCode = 0;
+  let code: EneoErrorCode = 0;
   let traceId: string | undefined;
-  if (error instanceof IntricError) {
+  if (error instanceof EneoError) {
     status = error.status;
     message = error.getReadableMessage();
     code = error.code;

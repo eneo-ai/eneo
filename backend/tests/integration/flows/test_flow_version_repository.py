@@ -6,14 +6,14 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import FlowTemplateAssets
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from intric.flows.infrastructure.flow_version_repo import (
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import FlowTemplateAssets
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.infrastructure.flow_version_repo import (
     audit_flow_version_template_identity_readiness,
 )
-from intric.flows.published_definition import (
+from eneo.flows.published_definition import (
     PublishedTemplateIdentityBlockerReason,
     build_published_definition_json,
     published_definition_checksum,

@@ -6,12 +6,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.application.flow_review_expiry_reconciliation import (
+from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
-from intric.flows.domain.flow import FlowRunStatus
-from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
-from intric.flows.enums import FlowRunLifecycleSource
+from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.enums import FlowRunLifecycleSource
 
 
 @pytest.mark.asyncio

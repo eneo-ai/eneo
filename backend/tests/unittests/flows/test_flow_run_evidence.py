@@ -9,9 +9,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.files.file_models import FileType
-from intric.flows.domain.flow import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileType
+from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
@@ -21,7 +21,7 @@ from intric.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
@@ -30,7 +30,7 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow_retention_tombstone import (
+from eneo.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
     FLOW_RETENTION_TOMBSTONES_KEY,
     FlowAttemptRetentionMarker,
@@ -38,31 +38,31 @@ from intric.flows.flow_retention_tombstone import (
     GeneratedArtifactRetentionCounts,
     RunDebugAttemptRetentionCounts,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.flow_run_evidence import (
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_evidence import (
     build_debug_export,
     normalize_debug_step,
     parse_step_order,
 )
-from intric.flows.flow_run_evidence_bundle import (
+from eneo.flows.flow_run_evidence_bundle import (
     build_evidence_bundle,
     redact_evidence_bundle,
 )
-from intric.flows.flow_run_evidence_export_manifest import (
+from eneo.flows.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
     EvidenceExportContext,
     EvidenceExportManifest,
 )
-from intric.flows.flow_run_export_json import render_evidence_json_export
-from intric.flows.flow_run_provenance import (
+from eneo.flows.flow_run_export_json import render_evidence_json_export
+from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     normalize_attempt_provenance,
     normalize_rag_payload,
     parse_attempt_provenance,
 )
-from intric.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
-from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 
 def _redacted_export_context() -> EvidenceExportContext:

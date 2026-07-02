@@ -37,17 +37,17 @@ export UV_LINK_MODE=copy
 
 # The backend .venv is on a named Docker volume (see docker-compose.yml).
 # Docker creates named volume mount points as root:root, but post-create.sh
-# runs as vscode. The recursive repair handles volumes reused after root-owned
-# package installs from older containers or sibling services.
+# runs as vscode. The volume also persists across rebuilds, so fix ownership
+# recursively in case a previous container left root-owned installed files.
 sudo mkdir -p /workspace/backend/.venv
-sudo chown -R vscode:vscode /workspace/backend/.venv
+sudo chown -R -h vscode:vscode /workspace/backend/.venv
 sudo chmod -R u+rwX /workspace/backend/.venv
 
 # Install Python dependencies
 # Use --reinstall-package to ensure the project entry points are up-to-date
 # even when the .venv volume persists across container rebuilds
 cd /workspace/backend
-uv sync --reinstall-package intric
+uv sync --reinstall-package eneo
 
 # Install pre-commit globally and setup hooks
 cd /workspace

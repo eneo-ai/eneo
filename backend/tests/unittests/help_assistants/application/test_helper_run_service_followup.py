@@ -25,27 +25,27 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelResponse,
 )
-from intric.help_assistants.application.helper_run_service import HelperRunService
-from intric.help_assistants.domain.factory import HelperAssistantsFactory
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.help_assistants.domain.helper_run import HelperRun
-from intric.help_assistants.domain.helper_run_status import HelperRunStatus
-from intric.help_assistants.domain.role_assignment import RoleAssignment
-from intric.main.exceptions import (
+from eneo.help_assistants.application.helper_run_service import HelperRunService
+from eneo.help_assistants.domain.factory import HelperAssistantsFactory
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.help_assistants.domain.helper_run import HelperRun
+from eneo.help_assistants.domain.helper_run_status import HelperRunStatus
+from eneo.help_assistants.domain.role_assignment import RoleAssignment
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB
-from intric.services.service import DatastoreResult
-from intric.sessions.session import SessionInDB
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
+from eneo.services.service import DatastoreResult
+from eneo.sessions.session import SessionInDB
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 _TENANT = TenantInDB(id=uuid4(), name="acme", quota_limit=1024**3)
 

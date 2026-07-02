@@ -29,8 +29,8 @@ from unittest.mock import patch
 
 import pytest
 
-from intric.main.container.container import Container
-from intric.settings.encryption_service import EncryptionService
+from eneo.main.container.container import Container
+from eneo.settings.encryption_service import EncryptionService
 
 
 class TestEncryptionServiceInitialization:
@@ -50,7 +50,7 @@ class TestEncryptionServiceInitialization:
             clear=False,  # Keep other env vars
         ):
             # Need to reload settings module to pick up new env vars
-            from intric.main import config
+            from eneo.main import config
             from importlib import reload
 
             reload(config)
@@ -101,8 +101,8 @@ __test_metadata__ = {
     "root_cause": "Container used unpopulated provider chain (config.settings.encryption_key)",
     "fix": "Changed to direct value (get_settings().encryption_key)",
     "related_files": [
-        "backend/src/intric/main/container/container.py",
-        "backend/src/intric/settings/encryption_service.py",
-        "backend/src/intric/tenants/tenant_repo.py",
+        "backend/src/eneo/main/container/container.py",
+        "backend/src/eneo/settings/encryption_service.py",
+        "backend/src/eneo/tenants/tenant_repo.py",
     ],
 }

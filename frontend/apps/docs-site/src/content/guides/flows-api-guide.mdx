@@ -478,7 +478,7 @@ Run creation supports caller-supplied idempotency. Reusing the same key with the
 
 This is especially useful for browser retries, webhook retries, and unreliable networks.
 
-If you use `@intric/intric-js` (`frontend/packages/intric-js`), the Flow client accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus the uploaded runtime file bindings you submit in `step_inputs`. It also exports `FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS` and `FlowRunReservedInputPayloadKey` for custom form validation. Use the same per-step file order for the key and the run creation request.
+If you use `@eneo/eneo-js` (`frontend/packages/eneo-js`), the Flow client accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus the uploaded runtime file bindings you submit in `step_inputs`. It also exports `FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS` and `FlowRunReservedInputPayloadKey` for custom form validation. Use the same per-step file order for the key and the run creation request.
 
 Example:
 
@@ -911,7 +911,7 @@ Flow endpoints use the platform's standard JSON error shape:
 ```json
 {
   "message": "Flow must be published before creating runs.",
-  "intric_error_code": 4000,
+  "eneo_error_code": 4000,
   "code": "flow_not_published",
   "context": null,
   "request_id": null,
@@ -919,7 +919,7 @@ Flow endpoints use the platform's standard JSON error shape:
 }
 ```
 
-The exact `intric_error_code` depends on the endpoint, but the envelope shape stays the same.
+The exact `eneo_error_code` depends on the endpoint, but the envelope shape stays the same.
 
 ### Service-key authorization errors
 

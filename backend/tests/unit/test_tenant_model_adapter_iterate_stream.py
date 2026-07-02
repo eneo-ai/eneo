@@ -8,16 +8,16 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ResponseType
-from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+from eneo.ai_models.completion_models.completion_model import ResponseType
+from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     PROVIDER_UNAVAILABLE_CODE,
     PROVIDER_UNAVAILABLE_MESSAGE,
     PreparedModelStream,
     TenantModelAdapter,
     _build_tool_result_with_references,
 )
-from intric.main.exceptions import OpenAIException
-from intric.mcp_servers.infrastructure.tool_approval import (
+from eneo.main.exceptions import OpenAIException
+from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
 )
@@ -276,13 +276,13 @@ async def test_provider_connectivity_failure_returns_clear_unavailable_error(
 
     with (
         patch(
-            "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
             AsyncMock(
                 side_effect=httpx.ConnectError("Temporary failure in name resolution")
             ),
         ),
         patch(
-            "intric.completion_models.infrastructure.adapters.tenant_model_adapter.trace.get_current_span",
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.trace.get_current_span",
             return_value=span,
         ),
     ):
@@ -317,7 +317,7 @@ async def test_wrapped_provider_failure_returns_clear_unavailable_error():
     outer_error.__cause__ = httpx.ConnectError("Temporary failure in name resolution")
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=outer_error),
     ):
         with pytest.raises(OpenAIException) as exc_info:
@@ -334,7 +334,7 @@ async def test_text_only_provider_failure_returns_clear_unavailable_error():
     adapter = _make_completion_adapter()
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=RuntimeError("Connection refused by upstream")),
     ):
         with pytest.raises(OpenAIException) as exc_info:
@@ -351,7 +351,7 @@ async def test_unknown_stream_preparation_error_remains_unexpected():
     adapter = _make_completion_adapter()
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=RuntimeError("boom")),
     ):
         with pytest.raises(OpenAIException) as exc_info:
@@ -368,7 +368,7 @@ async def test_generic_timeout_word_remains_unexpected():
     adapter = _make_completion_adapter()
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=RuntimeError("provider timeout budget exceeded")),
     ):
         with pytest.raises(OpenAIException) as exc_info:
@@ -386,7 +386,7 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
     raw_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(return_value=raw_stream),
     ):
         prepared = await adapter.prepare_streaming(
@@ -417,7 +417,7 @@ async def test_non_streaming_supports_multiple_tool_rounds():
     ]
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=responses),
     ) as completion_call:
         completion = await adapter.get_response(
@@ -470,11 +470,11 @@ async def test_mid_stream_provider_failure_yields_unavailable_event():
 
     with (
         patch(
-            "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
             AsyncMock(side_effect=httpx.ConnectError("Connection refused")),
         ),
         patch(
-            "intric.completion_models.infrastructure.adapters.tenant_model_adapter.trace.get_current_span",
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.trace.get_current_span",
             return_value=span,
         ),
     ):
@@ -525,7 +525,7 @@ async def test_iterate_stream_emits_pending_event_before_arguments_complete():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -584,7 +584,7 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -664,7 +664,7 @@ async def test_iterate_stream_stops_at_max_rounds():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -704,7 +704,7 @@ async def test_iterate_stream_yields_approval_required_and_blocks():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -757,7 +757,7 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -818,7 +818,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         await _collect(
@@ -869,7 +869,7 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(

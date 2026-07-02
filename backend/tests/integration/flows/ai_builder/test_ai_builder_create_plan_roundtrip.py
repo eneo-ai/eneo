@@ -4,20 +4,20 @@ from uuid import UUID
 
 import pytest
 
-from intric.database.tables.flow_tables import BuilderPlans
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.database.tables.flow_tables import BuilderPlans
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.integration
 
 
 async def _create_space(*, db_container, space_name: str) -> UUID:
-    from intric.database.tables.spaces_table import Spaces
+    from eneo.database.tables.spaces_table import Spaces
 
     async with db_container() as container:
         session = container.session()

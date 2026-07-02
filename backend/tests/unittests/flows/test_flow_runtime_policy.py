@@ -2,14 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from intric.flows.flow_runtime_policy import (
+from eneo.flows.flow_runtime_policy import (
     STEP_TIMEOUT_TASK_BUFFER_SECONDS,
     apply_flow_runtime_policy_patch,
     resolve_flow_runtime_policy,
     resolve_step_timeout_seconds,
     validate_flow_runtime_policy_object,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _settings(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 
-from intric.flows.http_transport.authored_config import (
+from eneo.flows.http_transport.authored_config import (
     CustomHeader,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
@@ -12,7 +12,7 @@ from intric.flows.http_transport.authored_config import (
     HttpBody,
     HttpBodyMode,
 )
-from intric.flows.http_transport.compiler import compile_http_config
+from eneo.flows.http_transport.compiler import compile_http_config
 
 
 def _config(

@@ -6,43 +6,43 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
     BackendQuestionPersistenceResult,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from eneo.flows.ai_builder.ai_builder_events import (
     build_question_event,
     build_text_event,
 )
-from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ToolProcessingResult,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -212,7 +212,7 @@ async def test_finalize_compiled_proposal_records_success_once_when_persisted() 
         return await _store_compiled_plan(**kwargs)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
         new=store_plan,
     ):
         result = await finalizer.finalize_compiled_proposal(
@@ -248,7 +248,7 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
     store_plan = AsyncMock(return_value=_stored_plan_result())
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
         new=store_plan,
     ):
         result = await finalizer.finalize_compiled_proposal(
@@ -310,7 +310,7 @@ async def test_finalize_compiled_proposal_accepts_retry_metadata_without_recorde
         return await _store_compiled_plan(**kwargs)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
         new=store_plan,
     ):
         result = await finalizer.finalize_compiled_proposal(
@@ -338,7 +338,7 @@ async def test_finalize_compiled_proposal_allows_missing_usage_tracker() -> None
         return await _store_compiled_plan(**kwargs)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
         new=store_plan,
     ):
         result = await finalizer.finalize_compiled_proposal(
@@ -384,19 +384,19 @@ async def test_finalize_compiled_proposal_persists_mcp_clarification_without_pla
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.mcp_clarification_issue_if_needed",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.mcp_clarification_issue_if_needed",
             return_value=issue,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.build_mcp_resource_selection_question",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.build_mcp_resource_selection_question",
             return_value=({"id": "mcp_resource_selection"}, "Choose an MCP resource."),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.persist_backend_question",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.persist_backend_question",
             new=persist_backend_question,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -429,7 +429,7 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
         return await _store_compiled_plan(**kwargs)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
         new=store_plan,
     ):
         result = await finalizer.finalize_compiled_proposal(

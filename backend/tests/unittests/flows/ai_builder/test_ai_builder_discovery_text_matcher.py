@@ -1,6 +1,6 @@
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
+from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
 

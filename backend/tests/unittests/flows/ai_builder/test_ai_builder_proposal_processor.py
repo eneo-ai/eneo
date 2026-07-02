@@ -10,59 +10,59 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder import (
+from eneo.flows.ai_builder import (
     ai_builder_proposal_processor as proposal_processor_module,
 )
-from intric.flows.ai_builder import (
+from eneo.flows.ai_builder import (
     ai_builder_proposal_telemetry as proposal_telemetry_module,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_proposal import (
+from eneo.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     encode_ai_builder_stream_event,
 )
-from intric.flows.ai_builder.ai_builder_mcp_intent import (
+from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_USE_SERVER_PREFIX,
     MCP_SELECTION_WITHOUT,
 )
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
-from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
+from eneo.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
-from intric.flows.ai_builder.ai_builder_proposal_repair import (
+from eneo.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     build_self_correction_error_event,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_tools import (
+from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
 )
-from intric.flows.domain.flow import FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -247,15 +247,15 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     with (
         _captured_proposal_telemetry() as telemetry_records,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=_store_compiled_plan,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
         ) as call_completion,
     ):
@@ -300,7 +300,7 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     with (
         _captured_proposal_telemetry() as telemetry_records,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
             new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
         ),
     ):
@@ -415,7 +415,7 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
     with (
         _captured_proposal_telemetry() as telemetry_records,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_forced_tool_retry_after_text",
             new=forced_retry,
         ),
@@ -485,7 +485,7 @@ async def test_propose_plan_missing_tool_after_forced_retry_logs_failed_turn() -
     with (
         _captured_proposal_telemetry() as telemetry_records,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
             "run_forced_tool_retry_after_text",
             new=forced_retry,
         ),
@@ -573,11 +573,11 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
             new=AsyncMock(),
         ) as call_completion,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -655,7 +655,7 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
     prior_plan = _builder_plan(prior_spec)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
         new=AsyncMock(),
     ) as call_completion:
         events = [
@@ -721,7 +721,7 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
             new=AsyncMock(),
         ) as call_completion,
         patch.object(
@@ -930,11 +930,11 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=_store_compiled_plan,
         ),
         patch.object(
@@ -1063,15 +1063,15 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -1167,15 +1167,15 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -1272,15 +1272,15 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
+            "eneo.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -1359,7 +1359,7 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             side_effect=AssistantSnapshotResourceUnavailableError(
                 kind="knowledge_base",
                 local_ref="missing-kb",
@@ -1431,7 +1431,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1439,7 +1439,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ) as compile_edit,
     ):
@@ -1492,7 +1492,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1500,7 +1500,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ),
     ):
@@ -1559,7 +1559,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1567,7 +1567,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
             ),
         ) as prepare_spec,
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ),
     ):
@@ -1632,7 +1632,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
     compiled_validation = MagicMock(valid=True, errors=[])
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1640,7 +1640,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ),
     ):
@@ -1699,7 +1699,7 @@ async def test_edit_proposal_passes_metadata_to_edit_compiler() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1707,7 +1707,7 @@ async def test_edit_proposal_passes_metadata_to_edit_compiler() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ) as compile_edit,
     ):
@@ -1766,7 +1766,7 @@ async def test_edit_proposal_passes_flat_modify_step_to_compiler() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1774,7 +1774,7 @@ async def test_edit_proposal_passes_flat_modify_step_to_compiler() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ) as compile_edit,
     ):

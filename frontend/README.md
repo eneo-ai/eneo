@@ -2,8 +2,8 @@
 
 Multirepo containing:
 - The Eneo Web GUI, a SvelteKit app in `/apps/web`
-- The Intric.js API client, a plain JS client wrapping all Intric endpoints used in the Web GUI in `packages/intric.js`
-- The Intric UI Library, offering reusable Svelte components for our frontend applications in `packages/ui`
+- The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
+- The Eneo UI Library, offering reusable Svelte components for our frontend applications in `packages/ui`
 
 ## Setup
 ### Installing

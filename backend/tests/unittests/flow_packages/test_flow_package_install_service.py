@@ -6,29 +6,29 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flow_packages.application.flow_package_import_planner import (
+from eneo.flow_packages.application.flow_package_import_planner import (
     FlowPackageImportPlannerCandidates,
     build_flow_package_import_plan,
 )
-from intric.flow_packages.application.flow_package_install_service import (
+from eneo.flow_packages.application.flow_package_install_service import (
     FlowPackageInstallService,
     validate_flow_package_install_selection,
 )
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
-from intric.flow_packages.domain.flow_package_errors import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
 )
-from intric.flow_packages.domain.flow_package_import_plan import (
+from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageLocalCandidate,
     FlowPackageModelCandidate,
 )
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeRequirement,
     FlowPackageMcpToolRequirement,
@@ -40,14 +40,14 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
     FlowPackageTemplateAssetRequirement,
 )
-from intric.flows.domain.flow import Flow
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingResolutionError,
     FlowResourceBindingResolutionReason,
     LocalResourceBinding,
@@ -261,9 +261,7 @@ async def test_install_preserves_selected_non_collection_knowledge_binding(
     assert result.resource_bindings_count == 2
     update = service.update_flow_assistant.await_args.kwargs["update"]
     assert update.groups == ([] if expected_field != "groups" else [knowledge_id])
-    assert update.websites == (
-        [knowledge_id] if expected_field == "websites" else []
-    )
+    assert update.websites == ([knowledge_id] if expected_field == "websites" else [])
     assert update.integration_knowledge_ids == (
         [knowledge_id] if expected_field == "integration_knowledge_ids" else []
     )

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.runtime.step_input_validation import (
+from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
 )
-from intric.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def test_validate_runtime_input_policy_rejects_unsupported_input_type() -> None:

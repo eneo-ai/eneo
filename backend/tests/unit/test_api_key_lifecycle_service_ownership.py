@@ -7,9 +7,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import (
+from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_models import (
     ApiKeyCreateRequest,
     ApiKeyOwnership,
     ApiKeyPermission,

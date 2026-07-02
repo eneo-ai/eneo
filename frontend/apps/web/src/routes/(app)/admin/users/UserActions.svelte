@@ -5,16 +5,16 @@
 -->
 
 <script lang="ts">
-  import type { User } from "@intric/intric-js";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
+  import type { User } from "@eneo/eneo-js";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
   import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "lucide-svelte";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { user } = $props<{ user: User }>();
@@ -22,7 +22,7 @@
   async function deleteUser() {
     isProcessing = true;
     try {
-      await intric.users.delete(user);
+      await eneo.users.delete(user);
       invalidate("admin:users"); // Stable dependency key
       $showDeleteDialog = false;
     } catch (e) {
@@ -33,7 +33,7 @@
 
   async function deactivateUser() {
     try {
-      await intric.users.deactivate({ user: { username: user.username } });
+      await eneo.users.deactivate({ user: { username: user.username } });
       invalidate("admin:users"); // Stable dependency key
     } catch (e) {
       console.error(e);
@@ -42,7 +42,7 @@
 
   async function reactivateUser() {
     try {
-      await intric.users.reactivate({ user: { username: user.username } });
+      await eneo.users.reactivate({ user: { username: user.username } });
       invalidate("admin:users"); // Stable dependency key
     } catch (e) {
       console.error(e);

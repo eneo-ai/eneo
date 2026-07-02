@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from intric.worker.redis.lease import redis_lease
+from eneo.worker.redis.lease import redis_lease
 
-_REFRESH = "intric.worker.redis.lease.LuaScripts.refresh_leader_lock"
-_RELEASE = "intric.worker.redis.lease.LuaScripts.release_leader_lock"
+_REFRESH = "eneo.worker.redis.lease.LuaScripts.refresh_leader_lock"
+_RELEASE = "eneo.worker.redis.lease.LuaScripts.release_leader_lock"
 
 
 def _redis(set_result):
@@ -130,7 +130,7 @@ async def test_watchdog_cancels_body_when_ownership_unconfirmed_for_ttl():
     with (
         patch(_REFRESH, new=AsyncMock(side_effect=RuntimeError("redis down"))),
         patch(_RELEASE, new=AsyncMock(return_value=False)) as release,
-        patch("intric.worker.redis.lease.monotonic", side_effect=[0.0, 301.0]),
+        patch("eneo.worker.redis.lease.monotonic", side_effect=[0.0, 301.0]),
     ):
         task = asyncio.create_task(run_with_lease())
         with pytest.raises(asyncio.CancelledError):

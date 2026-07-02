@@ -13,20 +13,20 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-import intric.flows.runtime.executor as executor_module
-import intric.flows.runtime.flow_runtime_trace as flow_runtime_trace
-from intric.authentication.auth_models import (
+import eneo.flows.runtime.executor as executor_module
+import eneo.flows.runtime.flow_runtime_trace as flow_runtime_trace
+from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ServicePrincipalInDB,
     ServicePrincipalState,
 )
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.assistant_execution_snapshot import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
     stable_hash,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
@@ -37,38 +37,38 @@ from intric.flows.domain.flow import (
     FlowStepResultStatus,
     RerunStepInputOverride,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
-from intric.flows.domain.rerun_exceptions import (
+from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
 )
-from intric.flows.domain.review_checkpoint_exceptions import (
+from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointRunNotRunningError,
     FlowReviewCheckpointStepResultIncompleteError,
     FlowReviewMultipleActiveCheckpointsError,
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.flow_run_provenance import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     ModelParameterSnapshot,
 )
-from intric.flows.flow_runtime_policy import FlowRuntimePolicy
-from intric.flows.infrastructure.flow_run_rerun_repo import (
+from eneo.flows.flow_runtime_policy import FlowRuntimePolicy
+from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunActiveRerunOperation,
     FlowRunRerunRepository,
 )
-from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
-from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
-from intric.flows.runtime.executor import (
+from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.executor import (
     FlowRunExecutor,
     FlowRunExecutorConfig,
     RunExecutionState,
@@ -76,14 +76,14 @@ from intric.flows.runtime.executor import (
     StepExecutionOutput,
     StepInputValue,
 )
-from intric.flows.runtime.flow_run_actor import FlowRunActor
-from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
-from intric.flows.runtime.step_execution_result import (
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
+from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
-from intric.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
@@ -1451,7 +1451,7 @@ async def test_execute_terminalizes_multiple_active_rerun_operations(
     )
     executor._flow_is_active = AsyncMock(return_value=True)
 
-    with caplog.at_level(logging.CRITICAL, logger="intric.flows.runtime.executor"):
+    with caplog.at_level(logging.CRITICAL, logger="eneo.flows.runtime.executor"):
         result = await executor.execute(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,
@@ -2614,7 +2614,7 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
         )
     )
 
-    with caplog.at_level(logging.INFO, logger="intric.flows.runtime.executor"):
+    with caplog.at_level(logging.INFO, logger="eneo.flows.runtime.executor"):
         result = await executor.execute(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,
@@ -2743,7 +2743,7 @@ async def test_execute_terminalizes_review_open_invariant_errors(
         )
     )
 
-    with caplog.at_level(logging.INFO, logger="intric.flows.runtime.executor"):
+    with caplog.at_level(logging.INFO, logger="eneo.flows.runtime.executor"):
         result = await executor.execute(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,

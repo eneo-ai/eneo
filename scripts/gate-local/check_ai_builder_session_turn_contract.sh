@@ -6,7 +6,7 @@ if [[ $# -gt 0 ]]; then
     SCAN_ROOTS=("$1")
 else
     SCAN_ROOTS=(
-        "${REPO_ROOT}/backend/src/intric/flows/ai_builder"
+        "${REPO_ROOT}/backend/src/eneo/flows/ai_builder"
         "${REPO_ROOT}/backend/tests/integration/flows"
         "${REPO_ROOT}/backend/tests/unittests/flows/ai_builder"
     )
@@ -37,7 +37,7 @@ if [[ -n "$optional_hits" ]]; then
     exit 1
 fi
 
-turn_module="${REPO_ROOT}/backend/src/intric/flows/ai_builder/ai_builder_session_turn.py"
+turn_module="${REPO_ROOT}/backend/src/eneo/flows/ai_builder/ai_builder_session_turn.py"
 if [[ -f "$turn_module" ]]; then
     import_hits=$(
         grep -nE '^(from|import) ' "$turn_module" \

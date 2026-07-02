@@ -16,25 +16,25 @@ This inventory is based on direct source review, not graph output:
 
 | Evidence | Source |
 |---|---|
-| Flow draft, publish, runtime, review, rerun, outbox, and Builder tables | `backend/src/intric/database/tables/flow_tables.py:156` |
-| Published definition schema version and checksum builder | `backend/src/intric/flows/published_definition.py:27` |
-| Runtime definition checksum verification before execution | `backend/src/intric/flows/runtime/executor.py:613` |
-| Published version repository computes checksum on create | `backend/src/intric/flows/infrastructure/flow_version_repo.py:22` |
-| JSONB owner registry and generated docs source | `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:93` |
+| Flow draft, publish, runtime, review, rerun, outbox, and Builder tables | `backend/src/eneo/database/tables/flow_tables.py:156` |
+| Published definition schema version and checksum builder | `backend/src/eneo/flows/published_definition.py:27` |
+| Runtime definition checksum verification before execution | `backend/src/eneo/flows/runtime/executor.py:613` |
+| Published version repository computes checksum on create | `backend/src/eneo/flows/infrastructure/flow_version_repo.py:22` |
+| JSONB owner registry and generated docs source | `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py:93` |
 | JSONB registry coverage test | `backend/tests/unittests/flows/test_flow_jsonb_ownership.py:42` |
-| AI Builder session, conversation, plan, and proposal domain models | `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:32` |
-| Typed PlanningState persisted in `builder_sessions.planning_state_jsonb` | `backend/src/intric/flows/ai_builder/planning_state.py:1` |
-| AI Builder repository validates proposal hash and planning-state snapshots | `backend/src/intric/flows/ai_builder/ai_builder_repo.py:961` |
-| Runtime endpoint registry and operation IDs | `backend/src/intric/flows/api/flow_runtime_endpoint_registry.py:76` |
-| Run creation idempotency and fingerprint checks | `backend/src/intric/flows/application/flow_run_service.py:223` |
-| Review checkpoint lifecycle service | `backend/src/intric/flows/application/flow_run_review_checkpoint_service.py:170` |
-| Rerun lifecycle service | `backend/src/intric/flows/application/flow_run_rerun_service.py:122` |
+| AI Builder session, conversation, plan, and proposal domain models | `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:32` |
+| Typed PlanningState persisted in `builder_sessions.planning_state_jsonb` | `backend/src/eneo/flows/ai_builder/planning_state.py:1` |
+| AI Builder repository validates proposal hash and planning-state snapshots | `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:961` |
+| Runtime endpoint registry and operation IDs | `backend/src/eneo/flows/api/flow_runtime_endpoint_registry.py:76` |
+| Run creation idempotency and fingerprint checks | `backend/src/eneo/flows/application/flow_run_service.py:223` |
+| Review checkpoint lifecycle service | `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py:170` |
+| Rerun lifecycle service | `backend/src/eneo/flows/application/flow_run_rerun_service.py:122` |
 
 ## Gate 0 - ERD And Ownership Inventory
 
 | Table | Product concept | Writer | Readers | Tenant/space owner | Key FKs | JSONB columns | JSONB decision | API consumer surface |
 |---|---|---|---|---|---|---|---|---|
-| `flows` | Mutable Flow draft and publish pointer | `FlowRepository` | authoring services, runtime contract services, package/export services | `tenant_id`, `space_id` | tenant, space, creator/owner users, published `(flow_id, version)` | `metadata_json` | Keep JSONB: sparse typed authoring metadata normalized by `intric.flows.flow_metadata` | list/inspect/published contract through Flow APIs |
+| `flows` | Mutable Flow draft and publish pointer | `FlowRepository` | authoring services, runtime contract services, package/export services | `tenant_id`, `space_id` | tenant, space, creator/owner users, published `(flow_id, version)` | `metadata_json` | Keep JSONB: sparse typed authoring metadata normalized by `eneo.flows.flow_metadata` | list/inspect/published contract through Flow APIs |
 | `flow_steps` | Editable draft step graph nodes | `FlowRepository` and Builder apply path | publish/materialization, authoring validation, package export | `tenant_id` through `flows` | flow, tenant, assistant, composite flow/tenant | `input_contract`, `output_contract`, `input_bindings`, `input_config`, `output_config`, `review_policy` | Keep JSONB: typed authored config validated before publish; no independent lifecycle | inspect Flow definition after publish, not direct runtime mutation |
 | `flow_step_dependencies` | Draft graph dependency edges | `FlowRepository` | publish/materialization and graph validation | `tenant_id` through flow | flow, parent step, child step, composite same-flow FKs | none | Already relational because edges have identity and referential integrity | indirectly visible through published graph/contract |
 | `flow_versions` | Immutable published Flow runtime snapshot | `FlowRepository` | runtime executor, contract service, run service, package export | `tenant_id` through flow | flow, tenant, unique `(flow_id, version)` | `definition_json` | Keep JSONB with schema version and checksum verification | inspect published Flow, start run, rerun, run history version binding |
@@ -60,36 +60,36 @@ This inventory is based on direct source review, not graph output:
 
 | Column | Pydantic owner | Schema version? | Query/filter need? | FK/identity hidden? | Retention/audit need? | Decision |
 |---|---|---|---:|---:|---:|---|
-| `flows.metadata_json` | `intric.flows.flow_metadata.FlowMetadata` | owner-validated | no | no | low | keep JSONB |
-| `flow_steps.input_contract` | `intric.flows.runtime.step_definition_parser.StepInputContract` | owner-validated | no | no | low | keep JSONB |
-| `flow_steps.output_contract` | `intric.flows.runtime.step_definition_parser.StepOutputContract` | owner-validated | no | no | low | keep JSONB |
-| `flow_steps.input_bindings` | `intric.flows.runtime.step_definition_parser.StepInputBindings` | owner-validated | no | no, draft graph identity is relational | low | keep JSONB |
-| `flow_steps.input_config` | `intric.flows.runtime.step_definition_parser.StepInputConfig` | owner-validated | no | no | low | keep JSONB |
-| `flow_steps.output_config` | `intric.flows.runtime.step_definition_parser.StepOutputConfig` | owner-validated | no | no | low | keep JSONB |
-| `flow_steps.review_policy` | `intric.flows.flow_review_policy.FlowReviewPolicy` | owner-validated | no | no | medium | keep JSONB |
-| `flow_versions.definition_json` | `intric.flows.published_definition.PublishedFlowDefinition` | checksum and embedded `schema_version` | no | no | high | keep JSONB |
-| `flow_template_assets.placeholders` | `intric.flows.flow_template_asset_service.TemplateAssetPlaceholders` | owner-validated | maybe exact placeholder validation only | no | low | keep JSONB |
-| `flow_package_imports.import_plan_json` | `intric.flow_packages.domain.flow_package_import_plan.FlowPackageImportPlan` | embedded schema version | no | no | medium | keep JSONB |
-| `flow_package_imports.selected_mappings_json` | `intric.flow_packages.domain.flow_package_import_record.FlowPackageSelectedMappings` | owner-validated | no | no | medium | keep JSONB |
-| `flow_package_imports.failure_json` | `intric.flow_packages.domain.flow_package_import_record.FlowPackageImportFailure` | owner-validated | no | no | high | keep JSONB |
-| `flow_runs.input_payload_json` | `intric.flows.flow_run_input_envelope.FlowRunInputEnvelope` | owner-validated | no | file links are relational | high | keep JSONB |
-| `flow_runs.output_payload_json` | `intric.flows.runtime.run_outcome.FlowRunOutputPayload` | owner-validated | no | no | high | keep JSONB |
-| `flow_runs.error_json` | `intric.flows.flow_run_error.FlowRunError` | embedded schema version | no | no | high | keep JSONB |
-| `flow_step_results.input_payload_json` | `intric.flows.runtime.step_result_builder.FlowStepResultInputPayload` | owner-validated | no | file refs are relational | high | keep JSONB |
-| `flow_step_results.output_payload_json` | `intric.flows.runtime.step_result_builder.FlowStepResultOutputPayload` | owner-validated | no | result files are relational | high | keep JSONB |
-| `flow_step_results.model_parameters_json` | `intric.flows.flow_run_provenance.FlowStepModelParameters` | provider-defined | no | no | medium | keep JSONB |
-| `flow_run_rerun_operations.input_payload_json` | `intric.flows.application.flow_run_rerun_service.FlowRunRerunInputEnvelope` | owner-validated | no | file refs are relational | high | keep JSONB |
-| `flow_step_attempts.provenance_json` | `intric.flows.flow_run_provenance.FlowStepAttemptProvenance` | embedded schema version | no | no | high | keep JSONB |
-| `flow_step_attempts.input_payload_json` | `intric.flows.runtime.step_result_builder.FlowStepAttemptInputPayload` | owner-validated | no | file refs are relational | high | keep JSONB |
-| `flow_step_attempts.output_payload_json` | `intric.flows.runtime.step_result_builder.FlowStepAttemptOutputPayload` | owner-validated | no | result files are relational | high | keep JSONB |
-| `flow_run_rerun_invalidated_steps.dependency_sources_json` | `intric.flows.flow_run_rerun_graph.RerunInvalidationDependencySources` | owner-validated | no | no | medium | keep JSONB |
-| `flow_run_review_checkpoints.original_payload_json` | `intric.flows.application.flow_run_review_checkpoint_service.ReviewCheckpointOriginalPayload` | table `schema_version` | no | no | high | keep JSONB |
-| `flow_run_review_checkpoints.current_payload_json` | `intric.flows.application.flow_run_review_checkpoint_service.ReviewCheckpointCurrentPayload` | table `schema_version` | no | no | high | keep JSONB |
-| `flow_run_review_checkpoints.output_contract_json` | `intric.flows.application.flow_run_review_checkpoint_service.ReviewCheckpointOutputContract` | table `schema_version` | no | no | high | keep JSONB |
-| `flow_run_review_checkpoints.next_step_ids_json` | `intric.flows.infrastructure.flow_run_review_checkpoint_repo.ReviewCheckpointNextStepIds` | table `schema_version` | no | no, step ids are snapshot provenance | medium | keep JSONB |
-| `builder_sessions.conversation` | `intric.flows.ai_builder.ai_builder_domain_models.ConversationMessage` array | owner-validated, message-id migration | no | no | medium | keep JSONB but replace deferred registry row with typed owner |
-| `builder_sessions.planning_state_jsonb` | `intric.flows.ai_builder.planning_state.PlanningState` | embedded FCM/planner/builder schema versions | no | no | medium | keep JSONB but replace deferred registry row with typed owner |
-| `builder_plans.proposal_json` | `intric.flows.ai_builder.ai_builder_domain_models.FlowBuilderProposal` | owner-validated plus `spec_hash` | no | resource bindings are inside proposal but applied relationally on materialization | high | keep JSONB |
+| `flows.metadata_json` | `eneo.flows.flow_metadata.FlowMetadata` | owner-validated | no | no | low | keep JSONB |
+| `flow_steps.input_contract` | `eneo.flows.runtime.step_definition_parser.StepInputContract` | owner-validated | no | no | low | keep JSONB |
+| `flow_steps.output_contract` | `eneo.flows.runtime.step_definition_parser.StepOutputContract` | owner-validated | no | no | low | keep JSONB |
+| `flow_steps.input_bindings` | `eneo.flows.runtime.step_definition_parser.StepInputBindings` | owner-validated | no | no, draft graph identity is relational | low | keep JSONB |
+| `flow_steps.input_config` | `eneo.flows.runtime.step_definition_parser.StepInputConfig` | owner-validated | no | no | low | keep JSONB |
+| `flow_steps.output_config` | `eneo.flows.runtime.step_definition_parser.StepOutputConfig` | owner-validated | no | no | low | keep JSONB |
+| `flow_steps.review_policy` | `eneo.flows.flow_review_policy.FlowReviewPolicy` | owner-validated | no | no | medium | keep JSONB |
+| `flow_versions.definition_json` | `eneo.flows.published_definition.PublishedFlowDefinition` | checksum and embedded `schema_version` | no | no | high | keep JSONB |
+| `flow_template_assets.placeholders` | `eneo.flows.flow_template_asset_service.TemplateAssetPlaceholders` | owner-validated | maybe exact placeholder validation only | no | low | keep JSONB |
+| `flow_package_imports.import_plan_json` | `eneo.flow_packages.domain.flow_package_import_plan.FlowPackageImportPlan` | embedded schema version | no | no | medium | keep JSONB |
+| `flow_package_imports.selected_mappings_json` | `eneo.flow_packages.domain.flow_package_import_record.FlowPackageSelectedMappings` | owner-validated | no | no | medium | keep JSONB |
+| `flow_package_imports.failure_json` | `eneo.flow_packages.domain.flow_package_import_record.FlowPackageImportFailure` | owner-validated | no | no | high | keep JSONB |
+| `flow_runs.input_payload_json` | `eneo.flows.flow_run_input_envelope.FlowRunInputEnvelope` | owner-validated | no | file links are relational | high | keep JSONB |
+| `flow_runs.output_payload_json` | `eneo.flows.runtime.run_outcome.FlowRunOutputPayload` | owner-validated | no | no | high | keep JSONB |
+| `flow_runs.error_json` | `eneo.flows.flow_run_error.FlowRunError` | embedded schema version | no | no | high | keep JSONB |
+| `flow_step_results.input_payload_json` | `eneo.flows.runtime.step_result_builder.FlowStepResultInputPayload` | owner-validated | no | file refs are relational | high | keep JSONB |
+| `flow_step_results.output_payload_json` | `eneo.flows.runtime.step_result_builder.FlowStepResultOutputPayload` | owner-validated | no | result files are relational | high | keep JSONB |
+| `flow_step_results.model_parameters_json` | `eneo.flows.flow_run_provenance.FlowStepModelParameters` | provider-defined | no | no | medium | keep JSONB |
+| `flow_run_rerun_operations.input_payload_json` | `eneo.flows.application.flow_run_rerun_service.FlowRunRerunInputEnvelope` | owner-validated | no | file refs are relational | high | keep JSONB |
+| `flow_step_attempts.provenance_json` | `eneo.flows.flow_run_provenance.FlowStepAttemptProvenance` | embedded schema version | no | no | high | keep JSONB |
+| `flow_step_attempts.input_payload_json` | `eneo.flows.runtime.step_result_builder.FlowStepAttemptInputPayload` | owner-validated | no | file refs are relational | high | keep JSONB |
+| `flow_step_attempts.output_payload_json` | `eneo.flows.runtime.step_result_builder.FlowStepAttemptOutputPayload` | owner-validated | no | result files are relational | high | keep JSONB |
+| `flow_run_rerun_invalidated_steps.dependency_sources_json` | `eneo.flows.flow_run_rerun_graph.RerunInvalidationDependencySources` | owner-validated | no | no | medium | keep JSONB |
+| `flow_run_review_checkpoints.original_payload_json` | `eneo.flows.application.flow_run_review_checkpoint_service.ReviewCheckpointOriginalPayload` | table `schema_version` | no | no | high | keep JSONB |
+| `flow_run_review_checkpoints.current_payload_json` | `eneo.flows.application.flow_run_review_checkpoint_service.ReviewCheckpointCurrentPayload` | table `schema_version` | no | no | high | keep JSONB |
+| `flow_run_review_checkpoints.output_contract_json` | `eneo.flows.application.flow_run_review_checkpoint_service.ReviewCheckpointOutputContract` | table `schema_version` | no | no | high | keep JSONB |
+| `flow_run_review_checkpoints.next_step_ids_json` | `eneo.flows.infrastructure.flow_run_review_checkpoint_repo.ReviewCheckpointNextStepIds` | table `schema_version` | no | no, step ids are snapshot provenance | medium | keep JSONB |
+| `builder_sessions.conversation` | `eneo.flows.ai_builder.ai_builder_domain_models.ConversationMessage` array | owner-validated, message-id migration | no | no | medium | keep JSONB but replace deferred registry row with typed owner |
+| `builder_sessions.planning_state_jsonb` | `eneo.flows.ai_builder.planning_state.PlanningState` | embedded FCM/planner/builder schema versions | no | no | medium | keep JSONB but replace deferred registry row with typed owner |
+| `builder_plans.proposal_json` | `eneo.flows.ai_builder.ai_builder_domain_models.FlowBuilderProposal` | owner-validated plus `spec_hash` | no | resource bindings are inside proposal but applied relationally on materialization | high | keep JSONB |
 
 ## Gate 2 - API Consumer Journey Matrix
 
@@ -116,7 +116,7 @@ Problem: `PlanStatus.REJECTED` and the `builder_plans.status` check allow `rejec
 
 Why it matters: `PlanStatus` is public through OpenAPI and the generated TypeScript client. Keeping an unwritten lifecycle state forces API consumers and frontend code to handle a state the product cannot produce.
 
-Current owner: `PlanStatus` in `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:39` and the DB check values in `backend/src/intric/database/tables/flow_tables.py:2058`.
+Current owner: `PlanStatus` in `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:39` and the DB check values in `backend/src/eneo/database/tables/flow_tables.py:2058`.
 
 Proposed canonical owner: the same domain enum and table check, with `rejected` removed from the current metadata and the original AI Builder table-creation migration. Flows are unreleased, so the cleaner path is to replay/reset development databases instead of adding a new compatibility migration that adds and then removes the same value.
 

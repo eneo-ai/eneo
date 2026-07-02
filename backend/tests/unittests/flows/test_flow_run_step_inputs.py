@@ -7,18 +7,18 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.flow_input_limits import FlowInputLimits
-from intric.flows.flow_run_step_inputs import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
     aggregate_runtime_file_limit,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     validate_submitted_step_inputs,
 )
-from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime.models import RuntimeStep
-from intric.main.exceptions import BadRequestException
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.models import RuntimeStep
+from eneo.main.exceptions import BadRequestException
 
 
 def _runtime_step() -> RuntimeStep:

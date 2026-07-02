@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from intric.libs.clients.throttle_retry import (
+from eneo.libs.clients.throttle_retry import (
     THROTTLE_AND_OVERLOAD_STATUS_CODES,
     parse_retry_after,
     retry_on_throttle,

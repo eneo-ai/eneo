@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from intric.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
+from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 GENERATOR_PATH = (
@@ -17,7 +17,7 @@ SDK_RESERVED_KEYS_JS = (
     / ".."
     / "frontend"
     / "packages"
-    / "intric-js"
+    / "eneo-js"
     / "src"
     / "flows"
     / "flow-run-reserved-input-payload-keys.js"

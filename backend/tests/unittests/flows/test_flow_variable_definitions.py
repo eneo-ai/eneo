@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from intric.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
-from intric.flows.flow_variable_definitions import (
+from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
+from eneo.flows.flow_variable_definitions import (
     RESERVED_FORM_FIELD_INPUT_KEYS,
     RESERVED_RUNTIME_VARIABLES,
     RUNTIME_VARIABLE_SHAPES,

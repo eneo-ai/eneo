@@ -1,4 +1,4 @@
-import type { Permission, Role } from "@intric/intric-js";
+import type { Permission, Role } from "@eneo/eneo-js";
 
 const flowPermissionExpansions: Partial<Record<Permission, Permission[]>> = {
   flows: ["flows_view", "flows_run", "flows_manage", "flows_ai_builder"],
@@ -24,7 +24,8 @@ export function hasPermission(entity: { roles?: Role[]; predefined_roles?: Role[
       requiredPermission: { anyOf?: Permission[]; allOf?: Permission[] } | null | Permission
     ) {
       if (requiredPermission === null) return true;
-      if (typeof requiredPermission === "string") return expandedPermissions.has(requiredPermission);
+      if (typeof requiredPermission === "string")
+        return expandedPermissions.has(requiredPermission);
 
       const passesAllOf = () => {
         if (!requiredPermission.allOf) return true;

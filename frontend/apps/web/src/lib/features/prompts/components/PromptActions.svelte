@@ -5,12 +5,12 @@
 -->
 
 <script lang="ts">
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dialog, Dropdown, Tooltip } from "@intric/ui";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { Button, Dialog, Dropdown, Tooltip } from "@eneo/ui";
   import { getPromptManager } from "../PromptManager";
-  import type { PromptSparse } from "@intric/intric-js";
-  import { IconInfo } from "@intric/icons/info";
+  import type { PromptSparse } from "@eneo/eneo-js";
+  import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
 
   export let prompt: PromptSparse;
@@ -87,7 +87,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   button[data-prompt-previewed="true"] {
     @apply bg-accent-dimmer pointer-events-none z-[-1] mix-blend-multiply;
   }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from intric.flows.runtime.flow_runtime_health import (
+from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthFlag,
     FlowRuntimeHealthPolicy,
     FlowRuntimeHealthSnapshot,

@@ -8,7 +8,7 @@ declare global {
     interface Error {
       message: string;
       status: number;
-      code: IntricErrorCode;
+      code: EneoErrorCode;
       /** Backend trace ID (32 hex chars) — present when the originating error came from an Eneo API call with an active server span. */
       traceId?: string;
     }

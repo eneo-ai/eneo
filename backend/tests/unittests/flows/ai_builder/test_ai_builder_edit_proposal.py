@@ -5,17 +5,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
-from intric.flows.assistant_authoring_snapshot import (
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
-from intric.flows.domain.flow import FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     InputType,

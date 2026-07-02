@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getExpiringKeysStore } from "./expiringKeysStore";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 

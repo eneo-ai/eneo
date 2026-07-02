@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import FlowStepCard from "./FlowStepCard.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
-  import { IconPlus } from "@intric/icons/plus";
+  import { IconPlus } from "@eneo/icons/plus";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";

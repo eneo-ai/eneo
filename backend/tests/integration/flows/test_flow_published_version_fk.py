@@ -6,7 +6,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from intric.database.tables.flow_tables import Flows, FlowVersions
+from eneo.database.tables.flow_tables import Flows, FlowVersions
 
 
 @pytest.mark.asyncio

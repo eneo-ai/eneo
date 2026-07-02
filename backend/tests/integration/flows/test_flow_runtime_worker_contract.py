@@ -12,9 +12,9 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
-import intric.flows.runtime.tasks as flow_runtime_tasks
-from intric.database.database import sessionmanager
-from intric.database.tables.flow_tables import (
+import eneo.flows.runtime.tasks as flow_runtime_tasks
+from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
@@ -23,8 +23,8 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
-from intric.flows.domain.flow import (
+from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
+from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
     FlowRunStatus,
@@ -33,21 +33,21 @@ from intric.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_factory import FlowFactory
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.published_definition import build_published_definition_json
-from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
-from intric.flows.runtime.flow_run_actor import FlowRunActor
-from intric.flows.runtime.step_attempt_runtime import (
+from eneo.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.published_definition import build_published_definition_json
+from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.step_attempt_runtime import (
     build_typed_failure_run_error_message,
 )
-from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
-from intric.main.container.container import Container
-from intric.main.exceptions import NotFoundException
+from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 
 
 @dataclass(frozen=True, slots=True)

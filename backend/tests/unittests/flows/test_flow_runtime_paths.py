@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.api.flow_runtime_paths import (
+from eneo.flows.api.flow_runtime_paths import (
     FlowReviewCheckpointRuntimePathsPublic,
     FlowRuntimePathsPublic,
     FlowRuntimePublic,

@@ -113,7 +113,7 @@ services:
         export PATH="/app/.venv/bin:$$PATH"
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
         python /e2e/seed.py          # seed mock completion model
-        exec gunicorn src.intric.server.main:app \
+        exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --bind 0.0.0.0:8000
     volumes:
@@ -148,7 +148,7 @@ services:
         - CMD-SHELL
         - >-
           PATH=/app/.venv/bin:$$PATH celery -A
-          intric.flows.runtime.celery_app:celery_app inspect active_queues
+          eneo.flows.runtime.celery_app:celery_app inspect active_queues
           --timeout=5 | grep -Fq "$${FLOW_CELERY_QUEUE:-flows.execute}"
       interval: 5s
       timeout: 10s

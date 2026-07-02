@@ -21,10 +21,7 @@ export enum AIBuilderIssueKind {
 
 export type AIBuilderDiagnosticReportKind = "error" | "quality";
 export type AIBuilderDiagnosticReportSurface =
-  | "chat_stream"
-  | "plan_apply"
-  | "plan_quality"
-  | "step_quality";
+  "chat_stream" | "plan_apply" | "plan_quality" | "step_quality";
 
 type DiagnosticStringField = Exclude<
   keyof AIBuilderDiagnosticContext,
@@ -38,7 +35,7 @@ export type AIBuilderDiagnosticReportError = Pick<
   | "message"
   | "phase"
   | "request_id"
-  | "intric_error_code"
+  | "eneo_error_code"
   | "diagnostic_context"
   | "details"
 >;
@@ -126,7 +123,7 @@ export interface AIBuilderDiagnosticReportErrorSummary {
   phase: AIBuilderError["phase"];
   message: string;
   request_id: string | null;
-  intric_error_code?: number | null;
+  eneo_error_code?: number | null;
 }
 
 export interface AIBuilderDiagnosticReportContext {
@@ -240,7 +237,7 @@ export function formatAIBuilderDiagnosticReport(report: AIBuilderDiagnosticRepor
     appendField(lines, "phase", report.error.phase);
     appendField(lines, "message", report.error.message);
     appendField(lines, "request_id", report.error.request_id);
-    appendField(lines, "intric_error_code", report.error.intric_error_code);
+    appendField(lines, "eneo_error_code", report.error.eneo_error_code);
   }
 
   lines.push("", "correlation:");
@@ -281,7 +278,7 @@ function buildErrorSummary(
     phase: error.phase,
     message: error.message,
     request_id: error.request_id,
-    intric_error_code: error.intric_error_code ?? null
+    eneo_error_code: error.eneo_error_code ?? null
   };
 }
 

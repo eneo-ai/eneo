@@ -38,12 +38,20 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # Guard against re-introducing the old product name (now Eneo).
+      - id: no-intric
+        name: no-intric
+        entry: python3 scripts/check_no_intric.py --repo-root .
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: pyright
         name: pyright
         entry: bash backend/scripts/run_pyright_in_devcontainer.sh
         language: system
         types: [python]
-        files: ^backend/src/intric/
+        files: ^backend/src/eneo/
         pass_filenames: false
         stages: [pre-commit]
 

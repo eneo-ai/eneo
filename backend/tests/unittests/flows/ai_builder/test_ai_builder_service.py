@@ -34,11 +34,11 @@ def _make_repo_mock() -> AsyncMock:
 
 import pytest
 
-from intric.files.file_models import File, FileType
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     ConversationMessage,
@@ -48,22 +48,22 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_events import (
     build_done_event,
     encode_ai_builder_stream_event,
 )
-from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
-from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
-from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
+from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
+from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
-from intric.flows.ai_builder.ai_builder_requirements_state import (
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
-from intric.flows.ai_builder.ai_builder_service import (
+from eneo.flows.ai_builder.ai_builder_service import (
     QUALITY_RETRY_WARNING_CODES,
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
@@ -73,27 +73,27 @@ from intric.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import SessionSendLease
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendLease
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1156,9 +1156,7 @@ class TestSendMessage:
             completion_service=completion_service,
         )
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content="OK")
             )
@@ -1209,9 +1207,7 @@ class TestSendMessage:
         )
         repo.load_planning_state.return_value = _make_committed_planning_state()
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(side_effect=RuntimeError("API error"))
             events = await _collect_events(
                 service.send_message(
@@ -1247,9 +1243,7 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock()
             events = await _collect_events(
                 service.send_message(
@@ -1296,7 +1290,8 @@ class TestSendMessageToolCall:
         ]
 
         messages = [
-            conversation_message_to_llm_message(message) for message in prior_conversation
+            conversation_message_to_llm_message(message)
+            for message in prior_conversation
         ]
         assistant_msgs = [
             m for m in messages if m["role"] == "assistant" and m.get("tool_calls")
@@ -1333,7 +1328,8 @@ class TestSendMessageToolCall:
         ]
 
         messages = [
-            conversation_message_to_llm_message(message) for message in prior_conversation
+            conversation_message_to_llm_message(message)
+            for message in prior_conversation
         ]
 
         assistant_id = messages[0]["tool_calls"][0]["id"]
@@ -1380,9 +1376,7 @@ class TestSendMessageToolCall:
         )
         repo.load_planning_state.return_value = _make_committed_planning_state()
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -1430,9 +1424,7 @@ class TestSendMessageToolCall:
         service = _make_service(user=user, repo=repo)
         repo.load_planning_state.return_value = _make_committed_planning_state()
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[good_tc])
             )
@@ -1498,9 +1490,7 @@ class TestSendMessageToolCall:
             "Säg bara 'OK, platta ut JSON-fälten' så fortsätter jag."
         )
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
@@ -1755,9 +1745,7 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -1815,9 +1803,7 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -1912,9 +1898,7 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(
                     content=None, tool_calls=[repeated_question]
@@ -1975,9 +1959,7 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.litellm"
-        ) as mock_litellm:
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -2007,7 +1989,7 @@ class TestReasoningLeakRegression:
 
     def test_plan_event_strips_reasoning(self):
         """Plan SSE events must not include reasoning."""
-        from intric.flows.ai_builder.ai_builder_events import (
+        from eneo.flows.ai_builder.ai_builder_events import (
             build_plan_event,
             encode_ai_builder_stream_event,
         )
@@ -2037,7 +2019,7 @@ class TestReasoningLeakRegression:
     def test_append_plan_messages_strips_reasoning_from_conversation(self):
         """append_plan_messages must strip reasoning and store only a compact
         summary in the conversation. Full spec lives in BuilderPlans table."""
-        from intric.flows.ai_builder.ai_builder_plan_store import append_plan_messages
+        from eneo.flows.ai_builder.ai_builder_plan_store import append_plan_messages
 
         conversation: list[ConversationMessage] = []
         arguments = {
@@ -2077,7 +2059,7 @@ class TestReasoningLeakRegression:
     def test_session_response_with_compact_arguments_has_no_reasoning(self):
         """SessionResponse with compact arguments (from append_plan_messages)
         should never contain reasoning."""
-        from intric.flows.ai_builder.ai_builder_api_models import (
+        from eneo.flows.ai_builder.ai_builder_api_models import (
             SessionResponse,
         )
 

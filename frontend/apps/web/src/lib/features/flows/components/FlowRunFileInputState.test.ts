@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { UploadedFile } from "@intric/intric-js";
+import type { UploadedFile } from "@eneo/eneo-js";
 import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
 

@@ -25,8 +25,8 @@ benchmark cases are free to reference specialty vocabulary.
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
-from intric.flows.ai_builder.ai_builder_discovery_questions import (
+from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
+from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
     comparison_scope_question,
     document_kind_question,

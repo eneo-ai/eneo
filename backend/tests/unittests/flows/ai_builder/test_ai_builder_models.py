@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_api_models import SendMessageRequest
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     AssistantSpecLocalRefNotPortableError,
     FlowDraftSpecCore,
@@ -178,7 +178,7 @@ class TestFlowDraftSpecCore:
         assert step.input_bindings == {"question": "{{ step_a.output.text }}"}
 
     def test_form_fields(self) -> None:
-        from intric.flows.flow_authoring_spec import (
+        from eneo.flows.flow_authoring_spec import (
             FormFieldSpec,
         )
 

@@ -27,9 +27,9 @@ from flow_consumer_guide_support import (
     write_page,
 )
 
-from intric.flows.enums import FlowOutputMode, FlowOutputType
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_capability_manifest import FINAL_OUTPUT_ARTIFACT_BY_TYPE
+from eneo.flows.enums import FlowOutputMode, FlowOutputType
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_capability_manifest import FINAL_OUTPUT_ARTIFACT_BY_TYPE
 
 CONSUMER_GUIDE_PAGE_SLUG = "designing-flows"
 FLOW_CONSUMER_GUIDE_DOCS_OUTPUT_PATH = output_path_for(CONSUMER_GUIDE_PAGE_SLUG)

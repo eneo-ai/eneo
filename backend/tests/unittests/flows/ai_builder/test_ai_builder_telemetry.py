@@ -4,17 +4,17 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from intric.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_telemetry import (
+from eneo.flows.ai_builder.ai_builder_telemetry import (
     _empty_session_telemetry,
     build_assistant_message_metadata,
     build_planner_telemetry,
     summarize_session_telemetry,
 )
-from intric.flows.ai_builder.ai_builder_tool_names import (
+from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.domain.flow import clone_json_object
+from eneo.flows.domain.flow import clone_json_object
 
 
 def test_clone_json_object_returns_none_for_non_mapping() -> None:

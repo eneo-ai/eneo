@@ -6,7 +6,7 @@
     FlowHttpRequestPreview,
     FlowHttpTestRequest,
     FlowHttpTestResponse
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
   import { parseHttpTestVariables } from "./httpTestVariables";
 
@@ -108,8 +108,7 @@
         value={testVariablesText}
         disabled={isPublished || testing}
         placeholder={m.http_test_variables_placeholder()}
-        oninput={(e) => (testVariablesText = e.currentTarget.value)}
-      ></textarea>
+        oninput={(e) => (testVariablesText = e.currentTarget.value)}></textarea>
       <span class="text-muted text-xs leading-relaxed">{m.http_test_variables_help()}</span>
     </label>
   {/if}

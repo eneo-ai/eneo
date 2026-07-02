@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { FlowRunError, FlowRunResultFile, FlowRunStep, Intric } from "@intric/intric-js";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconCheck } from "@intric/icons/check";
-  import { Markdown } from "@intric/ui";
+  import type { FlowRunError, FlowRunResultFile, FlowRunStep, Eneo } from "@eneo/eneo-js";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconCheck } from "@eneo/icons/check";
+  import { Markdown } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -49,7 +49,7 @@
     expanded,
     panelId,
     isPowerUser,
-    intric,
+    eneo,
     onToggle,
     onCopyPayload,
     onDownloadArtifact,
@@ -73,7 +73,7 @@
     expanded: boolean;
     panelId: string;
     isPowerUser: boolean;
-    intric: Intric;
+    eneo: Eneo;
     onToggle: (stepOrder: number) => void;
     onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
     onDownloadArtifact: (fileId: string) => Promise<void>;
@@ -314,7 +314,7 @@
         {/if}
 
         {#if stepRag}
-          <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {intric} />
+          <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {eneo} />
         {/if}
 
         {#if templateProvenance}

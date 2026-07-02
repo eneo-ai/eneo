@@ -27,9 +27,9 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { CheckCircle2, CircleAlert } from "lucide-svelte";
-  import { IntricError, type FlowRun, type TranscriptionModel } from "@intric/intric-js";
+  import { EneoError, type FlowRun, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
@@ -72,7 +72,7 @@
 
   const flowEditor = initFlowEditor({
     flow: untrack(() => data.flow),
-    intric: untrack(() => data.intric)
+    eneo: untrack(() => data.eneo)
   });
 
   // AI Builder service — initialized lazily when user switches to the AI Builder tab
@@ -262,7 +262,7 @@
       await flowEditor.flushSaves();
       builderStage = stage;
     } catch (e) {
-      const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+      const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
       toast.error(msg);
     } finally {
       stageNavigating = false;
@@ -328,10 +328,10 @@
           onclick={async () => {
             publishLoading = true;
             try {
-              const updated = await data.intric.flows.unpublish({ id: $resource.id });
+              const updated = await data.eneo.flows.unpublish({ id: $resource.id });
               flowEditor.setResource(updated);
             } catch (e) {
-              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+              const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
               console.error("Unpublish failed:", msg);
               toast.error(m.flow_unpublish_failed({ message: msg }));
             } finally {
@@ -349,7 +349,7 @@
       {:else}
         <FlowPackageExportDialog
           flow={$resource}
-          intric={data.intric}
+          eneo={data.eneo}
           beforeExport={async () => flowEditor.flushSaves()}
         />
         <Button
@@ -361,10 +361,10 @@
             publishLoading = true;
             try {
               await flowEditor.flushSaves();
-              const published = await data.intric.flows.publish({ id: $resource.id });
+              const published = await data.eneo.flows.publish({ id: $resource.id });
               flowEditor.setResource(published);
             } catch (e) {
-              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+              const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
               console.error("Publish failed:", msg);
               toast.error(m.flow_publish_failed({ message: msg }));
               if ($validationErrors.size > 0) {
@@ -950,7 +950,7 @@
                     await flowEditor.flushSaves();
                   } catch (error) {
                     const message =
-                      error instanceof IntricError
+                      error instanceof EneoError
                         ? error.getReadableMessage()
                         : "Kunde inte spara stegets ändringar.";
                     toast.error(message);
@@ -964,7 +964,7 @@
                     await flowEditor.moveStepAtIndex(index, direction);
                   } catch (error) {
                     const message =
-                      error instanceof IntricError
+                      error instanceof EneoError
                         ? error.getReadableMessage()
                         : "Kunde inte uppdatera stegordning.";
                     toast.error(message);
@@ -975,7 +975,7 @@
                     await flowEditor.removeStepAtIndex(index);
                   } catch (error) {
                     const message =
-                      error instanceof IntricError
+                      error instanceof EneoError
                         ? error.getReadableMessage()
                         : "Kunde inte ta bort steget.";
                     toast.error(message);
@@ -1012,7 +1012,7 @@
                       await flowEditor.removeStepAtIndex(idx);
                     } catch (error) {
                       const message =
-                        error instanceof IntricError
+                        error instanceof EneoError
                           ? error.getReadableMessage()
                           : "Kunde inte ta bort steget.";
                       toast.error(message);
@@ -1188,12 +1188,12 @@
         class:hidden={activeTab !== "ai-builder"}
       >
         <FlowAIBuilderEditHost
-          intric={data.intric}
+          eneo={data.eneo}
           spaceId={$currentSpace.id}
           flowId={$resource.id}
           onapplied={async (detail) => {
             try {
-              const updated = await data.intric.flows.get({ id: detail.flow_id });
+              const updated = await data.eneo.flows.get({ id: detail.flow_id });
               flowEditor.setResource(updated);
               const navigation = resolveAIBuilderApplyNavigation({
                 stepCount: updated.steps?.length ?? 0,
@@ -1227,7 +1227,7 @@
       <FlowRunsTable
         flow={$resource}
         {careDataPolicy}
-        eneo={data.intric}
+        eneo={data.eneo}
         visible={activeTab === "history"}
         optimisticRuns={optimisticHistoryRuns}
         reloadTrigger={runsReloadTrigger}
@@ -1245,7 +1245,7 @@
   bind:open={showRunDialog}
   flow={$resource}
   {careDataPolicy}
-  intric={data.intric}
+  eneo={data.eneo}
   lastInputPayload={latestHistoryPayload}
   onRunCreated={(detail) => {
     optimisticHistoryRuns = [

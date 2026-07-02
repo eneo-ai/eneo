@@ -2,12 +2,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.prompts.prompt_service import PromptService
+from eneo.prompts.prompt_service import PromptService
 
 
 @pytest.fixture

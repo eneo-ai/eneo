@@ -18,11 +18,11 @@ wording is no longer the current state.
 
 | Concept | Current owner | Evidence |
 | --- | --- | --- |
-| Assistant update command shape | `AssistantUpdateCommand` in `intric.assistants` | `backend/src/intric/assistants/assistant_update.py` |
-| Standalone and Flow request conversion | Assistant API adapter with two thin wrappers over one shared extractor | `backend/src/intric/assistants/api/assistant_update_adapter.py` |
-| Assistant update execution | `AssistantService.update_assistant(...)` accepts one command and explicit caller mode | `backend/src/intric/assistants/assistant_service.py` |
-| Flow-managed ownership | `FlowService.update_flow_assistant(...)` keeps Flow ownership checks and forwards `AssistantUpdateCaller.FLOW_MANAGED` | `backend/src/intric/flows/application/flow_service.py` |
-| Deleted duplicate owner | Former Flow-owned update command and adapter removed | `backend/src/intric/flows/application/flow_assistant_update.py`, `backend/src/intric/flows/api/flow_assistant_update_adapter.py` |
+| Assistant update command shape | `AssistantUpdateCommand` in `eneo.assistants` | `backend/src/eneo/assistants/assistant_update.py` |
+| Standalone and Flow request conversion | Assistant API adapter with two thin wrappers over one shared extractor | `backend/src/eneo/assistants/api/assistant_update_adapter.py` |
+| Assistant update execution | `AssistantService.update_assistant(...)` accepts one command and explicit caller mode | `backend/src/eneo/assistants/assistant_service.py` |
+| Flow-managed ownership | `FlowService.update_flow_assistant(...)` keeps Flow ownership checks and forwards `AssistantUpdateCaller.FLOW_MANAGED` | `backend/src/eneo/flows/application/flow_service.py` |
+| Deleted duplicate owner | Former Flow-owned update command and adapter removed | `backend/src/eneo/flows/application/flow_assistant_update.py`, `backend/src/eneo/flows/api/flow_assistant_update_adapter.py` |
 
 ```mermaid
 flowchart LR
@@ -49,11 +49,11 @@ but the broad deletion gate has been met without a weaker abstraction:
 
 | Area | Phase 4 disposition | Evidence |
 | --- | --- | --- |
-| Planner provider boundary | Deleted for deterministic server decisions. Proposal completions still use `ai_builder_litellm_completion.py`; classifier/adjudication remain separate features. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py`, `backend/src/intric/flows/ai_builder/ai_builder_slot_classifier.py`, `backend/src/intric/flows/ai_builder/ai_builder_semantic_adjudication.py` |
-| Server decision owner | Added. Questions, architecture commits, and requirements confirmation dispatch directly from `BuilderTurnDecision`; the former `PlannerOutput` action runtime is gone. | `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py`, `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py` |
-| Ask/confirm model-visible runtime | Deleted after reachability proof. Server-owned decisions now own questions and requirements confirmation; active proposal generation exposes only `propose_flow`. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:162`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:266`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` |
-| Proposal repair provider wrapper | Removed. Repair now carries `ProposalTurnContext`; the former repair runtime wrapper is gone. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:64`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:77` |
-| Proposal submission | Kept as the active proposal composition owner. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:260` |
+| Planner provider boundary | Deleted for deterministic server decisions. Proposal completions still use `ai_builder_litellm_completion.py`; classifier/adjudication remain separate features. | `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py`, `backend/src/eneo/flows/ai_builder/ai_builder_slot_classifier.py`, `backend/src/eneo/flows/ai_builder/ai_builder_semantic_adjudication.py` |
+| Server decision owner | Added. Questions, architecture commits, and requirements confirmation dispatch directly from `BuilderTurnDecision`; the former `PlannerOutput` action runtime is gone. | `backend/src/eneo/flows/ai_builder/ai_builder_turn_controller.py`, `backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py` |
+| Ask/confirm model-visible runtime | Deleted after reachability proof. Server-owned decisions now own questions and requirements confirmation; active proposal generation exposes only `propose_flow`. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:162`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:266`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` |
+| Proposal repair provider wrapper | Removed. Repair now carries `ProposalTurnContext`; the former repair runtime wrapper is gone. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:64`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:77` |
+| Proposal submission | Kept as the active proposal composition owner. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:260` |
 | Pydantic AI / AI SDK / LangGraph / MCP | Not adopted. No framework deleted enough named code to earn the migration in Phase 4. | Completion boundary and typed turn runner are local and smaller than a framework adapter. |
 
 ```mermaid
@@ -76,7 +76,7 @@ flowchart LR
 ## Before / After Metrics
 
 Metrics were measured for production Python files under
-`backend/src/intric/flows/ai_builder`.
+`backend/src/eneo/flows/ai_builder`.
 
 | Metric | Baseline `61facd8a3` | Current source | Delta |
 | --- | ---: | ---: | ---: |
@@ -97,7 +97,7 @@ Metric command:
 
 ```bash
 for ref in 61facd8a3 HEAD; do
-  files=$(git ls-tree -r --name-only "$ref" -- backend/src/intric/flows/ai_builder | rg '\.py$' | sort || true)
+  files=$(git ls-tree -r --name-only "$ref" -- backend/src/eneo/flows/ai_builder | rg '\.py$' | sort || true)
   file_count=$(printf '%s\n' "$files" | sed '/^$/d' | wc -l | tr -d ' ')
   loc=0
   while IFS= read -r f; do
@@ -107,10 +107,10 @@ for ref in 61facd8a3 HEAD; do
   done <<EOF
 $files
 EOF
-  dict_count=$(git grep -h -o 'dict\[str, Any\]' "$ref" -- backend/src/intric/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
-  any_count=$(git grep -h -o '\bAny\b' "$ref" -- backend/src/intric/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
-  acomp_count=$(git grep -n 'acompletion(' "$ref" -- backend/src/intric/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
-  proposal_call_count=$(git grep -n 'call_proposal_completion(' "$ref" -- backend/src/intric/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
+  dict_count=$(git grep -h -o 'dict\[str, Any\]' "$ref" -- backend/src/eneo/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
+  any_count=$(git grep -h -o '\bAny\b' "$ref" -- backend/src/eneo/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
+  acomp_count=$(git grep -n 'acompletion(' "$ref" -- backend/src/eneo/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
+  proposal_call_count=$(git grep -n 'call_proposal_completion(' "$ref" -- backend/src/eneo/flows/ai_builder 2>/dev/null | wc -l | tr -d ' ')
   printf '%s files=%s loc=%s dict_str_any=%s any=%s acompletion=%s proposal_completion_refs=%s\n' \
     "$ref" "$file_count" "$loc" "$dict_count" "$any_count" "$acomp_count" "$proposal_call_count"
 done
@@ -128,29 +128,29 @@ Builder runtime/capability families plus the deleted PlannerOutput action
 runtime, for net -16 production files. Renames do not affect the net count.
 
 ```text
-D backend/src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py
-D backend/src/intric/flows/ai_builder/ai_builder_capability_projection.py
-D backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py
-D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack.py
-D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack_core.py
-D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack_edit.py
-D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack_protocol.py
-A backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py
-D backend/src/intric/flows/ai_builder/ai_builder_planner_completion.py
-D backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py
-D backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py
-D backend/src/intric/flows/ai_builder/ai_builder_repair.py
-D backend/src/intric/flows/ai_builder/ai_builder_step_capabilities.py
-D backend/src/intric/flows/ai_builder/ai_builder_structured_turn.py
-D backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py
-D backend/src/intric/flows/ai_builder/ai_builder_orchestrator.py
-D backend/src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py
-D backend/src/intric/flows/ai_builder/ai_builder_planner_output_normalizer.py
-D backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py
-D backend/src/intric/flows/ai_builder/ai_builder_response_format.py
-A backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py
-R backend/src/intric/flows/ai_builder/ai_builder_create_outline.py -> backend/src/intric/flows/ai_builder/ai_builder_proposal_intent.py
-R backend/src/intric/flows/ai_builder/ai_builder_server_actions.py -> backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py
+D backend/src/eneo/flows/ai_builder/ai_builder_accepted_action_rendering.py
+D backend/src/eneo/flows/ai_builder/ai_builder_capability_projection.py
+D backend/src/eneo/flows/ai_builder/ai_builder_dispatcher.py
+D backend/src/eneo/flows/ai_builder/ai_builder_knowledge_pack.py
+D backend/src/eneo/flows/ai_builder/ai_builder_knowledge_pack_core.py
+D backend/src/eneo/flows/ai_builder/ai_builder_knowledge_pack_edit.py
+D backend/src/eneo/flows/ai_builder/ai_builder_knowledge_pack_protocol.py
+A backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py
+D backend/src/eneo/flows/ai_builder/ai_builder_planner_completion.py
+D backend/src/eneo/flows/ai_builder/ai_builder_proposal_completion.py
+D backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair_runtime.py
+D backend/src/eneo/flows/ai_builder/ai_builder_repair.py
+D backend/src/eneo/flows/ai_builder/ai_builder_step_capabilities.py
+D backend/src/eneo/flows/ai_builder/ai_builder_structured_turn.py
+D backend/src/eneo/flows/ai_builder/ai_builder_orchestration_pipeline.py
+D backend/src/eneo/flows/ai_builder/ai_builder_orchestrator.py
+D backend/src/eneo/flows/ai_builder/ai_builder_planner_action_dispatch.py
+D backend/src/eneo/flows/ai_builder/ai_builder_planner_output_normalizer.py
+D backend/src/eneo/flows/ai_builder/ai_builder_planner_turn.py
+D backend/src/eneo/flows/ai_builder/ai_builder_response_format.py
+A backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py
+R backend/src/eneo/flows/ai_builder/ai_builder_create_outline.py -> backend/src/eneo/flows/ai_builder/ai_builder_proposal_intent.py
+R backend/src/eneo/flows/ai_builder/ai_builder_server_actions.py -> backend/src/eneo/flows/ai_builder/ai_builder_turn_controller.py
 ```
 
 ## Retry Loop Ownership Matrix
@@ -206,14 +206,14 @@ residuals are the Phase 5+ deletion target, not a reason to keep editing Phase
 
 | Residual | Evidence | Phase 5+ target |
 | --- | --- | --- |
-| Tool schema bags | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:88` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:157` | Keep unless a later slice can type JSON Schema without custom wrapper classes. |
-| Stream event dictionaries | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:108`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:109`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:51` | One typed Builder event contract if it deletes all tuple/dict event variants. |
+| Tool schema bags | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:88` and `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:157` | Keep unless a later slice can type JSON Schema without custom wrapper classes. |
+| Stream event dictionaries | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:108`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:109`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:51` | One typed Builder event contract if it deletes all tuple/dict event variants. |
 
 Resolved after the original packet: proposal dispatch, proposal repair, and
 proposal submission share the existing `RuntimeToolCall` protocol. Evidence:
-`backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
-`backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:65`, and
-`backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:175`.
+`backend/src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
+`backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:65`, and
+`backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:175`.
 Resolved after the proposal request boundary packet: proposal messages use
 `LLMMessageParam`, prompt trimming preserves typed provider messages without
 provider-boundary casts, forced tool choice has one owner, and
@@ -227,8 +227,8 @@ The source slices were validated before this packet:
 | --- | --- |
 | `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder'` | `2376 passed` |
 | `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/integration/flows/ai_builder'` | `3 passed, 12 deselected` |
-| `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/integration/flows/ai_builder'` | Passed |
-| `ENEO_DEVCONTAINER_NAME=eneo-flows-clean_devcontainer-eneo-1 backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py src/intric/flows/ai_builder/ai_builder_turn_controller.py src/intric/flows/ai_builder/ai_builder_planner_failure_events.py src/intric/flows/ai_builder/ai_builder_telemetry.py src/intric/flows/ai_builder/ai_builder_service.py` | `0 errors, 0 warnings, 0 informations` |
+| `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/eneo/flows/ai_builder tests/unittests/flows/ai_builder tests/integration/flows/ai_builder'` | Passed |
+| `ENEO_DEVCONTAINER_NAME=eneo-flows-clean_devcontainer-eneo-1 backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_planner.py src/eneo/flows/ai_builder/ai_builder_planner_request_preparation.py src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py src/eneo/flows/ai_builder/ai_builder_turn_controller.py src/eneo/flows/ai_builder/ai_builder_planner_failure_events.py src/eneo/flows/ai_builder/ai_builder_telemetry.py src/eneo/flows/ai_builder/ai_builder_service.py` | `0 errors, 0 warnings, 0 informations` |
 | Claude peer loop, `flow-builder-control-plane-direct-dispatch`, iteration 2 | Blocked by Claude monthly spend limit; artifact saved under `.codex/artifacts/`. |
 | Antigravity peer loop, `flow-builder-direct-server-decision-dispatch`, iteration 3 | `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9` |
 | Import ownership tests for completion boundary | Passed during the relevant source slice. |
@@ -245,7 +245,7 @@ typed-residual target, not a blocker for this Phase 4 completion packet.
 **Conditional go for Phase 5A planning and red tests; no-go for immediate
 implementation. This packet is not authorization to start Phase 5A source work.**
 
-Under this Phase 4 goal, do not modify `backend/src/intric/assistants`,
+Under this Phase 4 goal, do not modify `backend/src/eneo/assistants`,
 Flow-managed assistant mutation code, MCP adapters, or generated API contracts
 to implement the Assistant command owner. That requires a new explicit goal.
 
@@ -258,12 +258,12 @@ not.
 
 | Path | Current owner | Evidence | Phase 5A implication |
 | --- | --- | --- | --- |
-| Standalone assistant HTTP update | `assistant_router.update_assistant(...)` converts `AssistantUpdatePublic` into optional service arguments and emits audit. | `backend/src/intric/assistants/api/assistant_router.py:603`, `backend/src/intric/assistants/api/assistant_router.py:693`, `backend/src/intric/assistants/api/assistant_router.py:739` | Adapter should translate request to a command; audit ownership must be explicit. |
-| Assistant service update | `AssistantService.update_assistant(...)` owns permission, governance, prompt/model/resource validation, and persistence. | `backend/src/intric/assistants/assistant_service.py:489`, `backend/src/intric/assistants/assistant_service.py:510`, `backend/src/intric/assistants/assistant_service.py:731`, `backend/src/intric/assistants/assistant_service.py:788` | This is the source material for the command owner; do not bypass it from tools. |
-| Flow-managed assistant HTTP update | `flow_assistant_router.update_flow_assistant(...)` maps API input into `to_flow_assistant_update_command(...)` and calls Flow service. | `backend/src/intric/flows/api/flow_assistant_router.py:249`, `backend/src/intric/flows/api/flow_assistant_router.py:265`, `backend/src/intric/flows/api/flow_assistant_router.py:267` | Flow-managed writes must remain Flow-owned. |
-| Flow service update | `FlowService.update_flow_assistant(...)` calls AssistantService with Flow-managed context. | `backend/src/intric/flows/application/flow_service.py:304`, `backend/src/intric/flows/application/flow_service.py:320` | Future Assistant commands need an explicit caller mode, not implicit bypass. |
-| Flow draft materialization | `FlowDraftMaterializationExecutor` applies generated Flow assistant updates through Flow service. | `backend/src/intric/flows/application/flow_draft_materialization_executor.py:414` | Builder must continue applying AssistantSpec atomically with Flow authoring. |
-| Standalone MCP server add/remove/config | Assistant router and service have direct MCP mutation methods. | `backend/src/intric/assistants/api/assistant_router.py:1388`, `backend/src/intric/assistants/api/assistant_router.py:1430`, `backend/src/intric/assistants/assistant_service.py:1856`, `backend/src/intric/assistants/assistant_service.py:1960`, `backend/src/intric/assistants/assistant_service.py:2027` | These are deletion candidates only after a command owner preserves permissions, audit, and Flow-managed rejection. |
+| Standalone assistant HTTP update | `assistant_router.update_assistant(...)` converts `AssistantUpdatePublic` into optional service arguments and emits audit. | `backend/src/eneo/assistants/api/assistant_router.py:603`, `backend/src/eneo/assistants/api/assistant_router.py:693`, `backend/src/eneo/assistants/api/assistant_router.py:739` | Adapter should translate request to a command; audit ownership must be explicit. |
+| Assistant service update | `AssistantService.update_assistant(...)` owns permission, governance, prompt/model/resource validation, and persistence. | `backend/src/eneo/assistants/assistant_service.py:489`, `backend/src/eneo/assistants/assistant_service.py:510`, `backend/src/eneo/assistants/assistant_service.py:731`, `backend/src/eneo/assistants/assistant_service.py:788` | This is the source material for the command owner; do not bypass it from tools. |
+| Flow-managed assistant HTTP update | `flow_assistant_router.update_flow_assistant(...)` maps API input into `to_flow_assistant_update_command(...)` and calls Flow service. | `backend/src/eneo/flows/api/flow_assistant_router.py:249`, `backend/src/eneo/flows/api/flow_assistant_router.py:265`, `backend/src/eneo/flows/api/flow_assistant_router.py:267` | Flow-managed writes must remain Flow-owned. |
+| Flow service update | `FlowService.update_flow_assistant(...)` calls AssistantService with Flow-managed context. | `backend/src/eneo/flows/application/flow_service.py:304`, `backend/src/eneo/flows/application/flow_service.py:320` | Future Assistant commands need an explicit caller mode, not implicit bypass. |
+| Flow draft materialization | `FlowDraftMaterializationExecutor` applies generated Flow assistant updates through Flow service. | `backend/src/eneo/flows/application/flow_draft_materialization_executor.py:414` | Builder must continue applying AssistantSpec atomically with Flow authoring. |
+| Standalone MCP server add/remove/config | Assistant router and service have direct MCP mutation methods. | `backend/src/eneo/assistants/api/assistant_router.py:1388`, `backend/src/eneo/assistants/api/assistant_router.py:1430`, `backend/src/eneo/assistants/assistant_service.py:1856`, `backend/src/eneo/assistants/assistant_service.py:1960`, `backend/src/eneo/assistants/assistant_service.py:2027` | These are deletion candidates only after a command owner preserves permissions, audit, and Flow-managed rejection. |
 
 ### Audit Owner
 
@@ -271,13 +271,13 @@ Assistant audit is adapter-owned today:
 
 | Action | Current evidence |
 | --- | --- |
-| Create standalone assistant | `backend/src/intric/assistants/api/assistant_router.py:176`, `backend/src/intric/assistants/api/assistant_router.py:180` |
-| Update standalone assistant | `backend/src/intric/assistants/api/assistant_router.py:739`, `backend/src/intric/assistants/api/assistant_router.py:743` |
-| Delete standalone assistant | `backend/src/intric/assistants/api/assistant_router.py:824`, `backend/src/intric/assistants/api/assistant_router.py:828` |
-| Transfer standalone assistant | `backend/src/intric/assistants/api/assistant_router.py:1238`, `backend/src/intric/assistants/api/assistant_router.py:1242` |
-| Publish standalone assistant | `backend/src/intric/assistants/api/assistant_router.py:1312`, `backend/src/intric/assistants/api/assistant_router.py:1316` |
-| Add/remove MCP server | `backend/src/intric/assistants/api/assistant_router.py:1398`, `backend/src/intric/assistants/api/assistant_router.py:1406`, `backend/src/intric/assistants/api/assistant_router.py:1449`, `backend/src/intric/assistants/api/assistant_router.py:1455` |
-| Flow-managed create/update/delete | `backend/src/intric/flows/api/flow_assistant_router.py:136`, `backend/src/intric/flows/api/flow_assistant_router.py:139`, `backend/src/intric/flows/api/flow_assistant_router.py:272`, `backend/src/intric/flows/api/flow_assistant_router.py:275`, `backend/src/intric/flows/api/flow_assistant_router.py:336`, `backend/src/intric/flows/api/flow_assistant_router.py:339` |
+| Create standalone assistant | `backend/src/eneo/assistants/api/assistant_router.py:176`, `backend/src/eneo/assistants/api/assistant_router.py:180` |
+| Update standalone assistant | `backend/src/eneo/assistants/api/assistant_router.py:739`, `backend/src/eneo/assistants/api/assistant_router.py:743` |
+| Delete standalone assistant | `backend/src/eneo/assistants/api/assistant_router.py:824`, `backend/src/eneo/assistants/api/assistant_router.py:828` |
+| Transfer standalone assistant | `backend/src/eneo/assistants/api/assistant_router.py:1238`, `backend/src/eneo/assistants/api/assistant_router.py:1242` |
+| Publish standalone assistant | `backend/src/eneo/assistants/api/assistant_router.py:1312`, `backend/src/eneo/assistants/api/assistant_router.py:1316` |
+| Add/remove MCP server | `backend/src/eneo/assistants/api/assistant_router.py:1398`, `backend/src/eneo/assistants/api/assistant_router.py:1406`, `backend/src/eneo/assistants/api/assistant_router.py:1449`, `backend/src/eneo/assistants/api/assistant_router.py:1455` |
+| Flow-managed create/update/delete | `backend/src/eneo/flows/api/flow_assistant_router.py:136`, `backend/src/eneo/flows/api/flow_assistant_router.py:139`, `backend/src/eneo/flows/api/flow_assistant_router.py:272`, `backend/src/eneo/flows/api/flow_assistant_router.py:275`, `backend/src/eneo/flows/api/flow_assistant_router.py:336`, `backend/src/eneo/flows/api/flow_assistant_router.py:339` |
 
 Phase 5A must choose deliberately: either keep audit in adapters and make
 capability/MCP adapters emit the same facts, or move audit into a command
@@ -287,20 +287,20 @@ result/apply boundary. Do not let MCP own audit.
 
 No explicit Assistant update revision, expected-version, or idempotency key was
 found in the current Assistant mutation path. The only `version` hits under
-`backend/src/intric/assistants` are retrieval/search API version parameters and
+`backend/src/eneo/assistants` are retrieval/search API version parameters and
 `updated_at` exposure, not optimistic update guards.
 
 Evidence command:
 
 ```bash
 rg -n "expected|revision|version|idempot|updated_at|with_for_update|FOR UPDATE|stale" \
-  backend/src/intric/assistants backend/src/intric/database/tables/assistant_table.py -g '*.py'
+  backend/src/eneo/assistants backend/src/eneo/database/tables/assistant_table.py -g '*.py'
 ```
 
 Relevant hits include `updated_at` serialization in `assistant_factory.py` and
 `assistant_models.py`, retrieval `version` parameters in `assistant_service.py`
 and `assistant_router.py`, and one stale-model comment at
-`backend/src/intric/assistants/assistant_service.py:1629`; none provides update
+`backend/src/eneo/assistants/assistant_service.py:1629`; none provides update
 idempotency or optimistic concurrency.
 
 Phase 5A red tests should pin one policy:
@@ -315,36 +315,36 @@ Phase 5A red tests should pin one policy:
 
 | Governance rule | Evidence |
 | --- | --- |
-| Logging toggle requires admin. | `backend/src/intric/assistants/assistant_service.py:510` |
-| Personal default assistant can only change model under `PERSONAL_CHAT`; broader edits need assistant edit permission. | `backend/src/intric/assistants/assistant_service.py:523`, `backend/src/intric/assistants/assistant_service.py:547` |
-| Prompt changes run governance policy before prompt persistence. | `backend/src/intric/assistants/assistant_service.py:587`, `backend/src/intric/assistants/assistant_service.py:592` |
-| Empty prompt text is a deliberate clear, not omission. | `backend/src/intric/assistants/assistant_service.py:601` |
-| Completion model must be enabled in the space. | `backend/src/intric/assistants/assistant_service.py:625`, `backend/src/intric/assistants/assistant_service.py:630` |
-| MCP servers must be tenant-enabled and, unless policy-governed, assigned to the assistant space. | `backend/src/intric/assistants/assistant_service.py:663`, `backend/src/intric/assistants/assistant_service.py:677`, `backend/src/intric/assistants/assistant_service.py:710` |
-| Governance policy checks model/MCP changes. | `backend/src/intric/assistants/assistant_service.py:731` |
-| Knowledge and MCP cannot both be active. | `backend/src/intric/assistants/assistant_service.py:761` |
-| Space references are revalidated after mutation assembly. | `backend/src/intric/assistants/assistant_service.py:780` |
+| Logging toggle requires admin. | `backend/src/eneo/assistants/assistant_service.py:510` |
+| Personal default assistant can only change model under `PERSONAL_CHAT`; broader edits need assistant edit permission. | `backend/src/eneo/assistants/assistant_service.py:523`, `backend/src/eneo/assistants/assistant_service.py:547` |
+| Prompt changes run governance policy before prompt persistence. | `backend/src/eneo/assistants/assistant_service.py:587`, `backend/src/eneo/assistants/assistant_service.py:592` |
+| Empty prompt text is a deliberate clear, not omission. | `backend/src/eneo/assistants/assistant_service.py:601` |
+| Completion model must be enabled in the space. | `backend/src/eneo/assistants/assistant_service.py:625`, `backend/src/eneo/assistants/assistant_service.py:630` |
+| MCP servers must be tenant-enabled and, unless policy-governed, assigned to the assistant space. | `backend/src/eneo/assistants/assistant_service.py:663`, `backend/src/eneo/assistants/assistant_service.py:677`, `backend/src/eneo/assistants/assistant_service.py:710` |
+| Governance policy checks model/MCP changes. | `backend/src/eneo/assistants/assistant_service.py:731` |
+| Knowledge and MCP cannot both be active. | `backend/src/eneo/assistants/assistant_service.py:761` |
+| Space references are revalidated after mutation assembly. | `backend/src/eneo/assistants/assistant_service.py:780` |
 
 ### Flow-managed Boundary
 
 Standalone Assistant routes reject Flow-managed assistant mutations before
 calling the standalone service path:
 
-- `backend/src/intric/assistants/api/assistant_router.py:99`
-- `backend/src/intric/assistants/api/assistant_router.py:620`
-- `backend/src/intric/assistants/api/assistant_router.py:778`
-- `backend/src/intric/assistants/api/assistant_router.py:1198`
-- `backend/src/intric/assistants/api/assistant_router.py:1290`
-- `backend/src/intric/assistants/api/assistant_router.py:1391`
-- `backend/src/intric/assistants/api/assistant_router.py:1440`
+- `backend/src/eneo/assistants/api/assistant_router.py:99`
+- `backend/src/eneo/assistants/api/assistant_router.py:620`
+- `backend/src/eneo/assistants/api/assistant_router.py:778`
+- `backend/src/eneo/assistants/api/assistant_router.py:1198`
+- `backend/src/eneo/assistants/api/assistant_router.py:1290`
+- `backend/src/eneo/assistants/api/assistant_router.py:1391`
+- `backend/src/eneo/assistants/api/assistant_router.py:1440`
 
 Assistant service MCP mutation methods also reject Flow-managed assistants
 directly:
 
-- `backend/src/intric/assistants/assistant_service.py:117`
-- `backend/src/intric/assistants/assistant_service.py:1856`
-- `backend/src/intric/assistants/assistant_service.py:1960`
-- `backend/src/intric/assistants/assistant_service.py:2027`
+- `backend/src/eneo/assistants/assistant_service.py:117`
+- `backend/src/eneo/assistants/assistant_service.py:1856`
+- `backend/src/eneo/assistants/assistant_service.py:1960`
+- `backend/src/eneo/assistants/assistant_service.py:2027`
 
 Phase 5A must close the remaining gap without creating a compatibility shim:
 `AssistantService.update_assistant(...)` itself does not show a direct
@@ -362,21 +362,21 @@ Local refs exist:
 
 Relevant PR #480 files include:
 
-- `backend/src/intric/config_capabilities/capability.py`
-- `backend/src/intric/config_capabilities/context.py`
-- `backend/src/intric/config_capabilities/registry.py`
-- `backend/src/intric/config_capabilities/capabilities/assistant_settings.py`
-- `backend/src/intric/assistant_config_mcp/server.py`
+- `backend/src/eneo/config_capabilities/capability.py`
+- `backend/src/eneo/config_capabilities/context.py`
+- `backend/src/eneo/config_capabilities/registry.py`
+- `backend/src/eneo/config_capabilities/capabilities/assistant_settings.py`
+- `backend/src/eneo/assistant_config_mcp/server.py`
 
 Reuse ideas:
 
 | Reuse | Evidence in PR #480 | Constraint for Phase 5A |
 | --- | --- | --- |
-| Pydantic input models for model-visible/configurable operations | `github-pr/480/head:backend/src/intric/config_capabilities/capabilities/assistant_settings.py:30`, `:34`, `:40`, `:47` | Inputs should feed an Assistant command owner, not one tool handler per field. |
-| Server-bound target identity | `github-pr/480/head:backend/src/intric/assistant_config_mcp/server.py:6`, `:9`, `:10`, `:255` | Good constraint: tools should never accept arbitrary assistant ids from the model. |
-| Confirmation before write transaction | `github-pr/480/head:backend/src/intric/assistant_config_mcp/server.py:154`, `:159`, `:250` | Keep confirmation outside apply. Do not hold transactions while asking the user. |
-| Existing service reuse | `github-pr/480/head:backend/src/intric/config_capabilities/capabilities/assistant_settings.py:105`, `:117`, `:129`, `:140`, `:150` | Service reuse is good only after the service has a cleaner command contract. |
-| Schema derivation from typed inputs | `github-pr/480/head:backend/src/intric/assistant_config_mcp/server.py:261`, `:268`, `:284` | Derive adapter schemas from command inputs after command ownership is settled. |
+| Pydantic input models for model-visible/configurable operations | `github-pr/480/head:backend/src/eneo/config_capabilities/capabilities/assistant_settings.py:30`, `:34`, `:40`, `:47` | Inputs should feed an Assistant command owner, not one tool handler per field. |
+| Server-bound target identity | `github-pr/480/head:backend/src/eneo/assistant_config_mcp/server.py:6`, `:9`, `:10`, `:255` | Good constraint: tools should never accept arbitrary assistant ids from the model. |
+| Confirmation before write transaction | `github-pr/480/head:backend/src/eneo/assistant_config_mcp/server.py:154`, `:159`, `:250` | Keep confirmation outside apply. Do not hold transactions while asking the user. |
+| Existing service reuse | `github-pr/480/head:backend/src/eneo/config_capabilities/capabilities/assistant_settings.py:105`, `:117`, `:129`, `:140`, `:150` | Service reuse is good only after the service has a cleaner command contract. |
+| Schema derivation from typed inputs | `github-pr/480/head:backend/src/eneo/assistant_config_mcp/server.py:261`, `:268`, `:284` | Derive adapter schemas from command inputs after command ownership is settled. |
 
 Do not reuse:
 

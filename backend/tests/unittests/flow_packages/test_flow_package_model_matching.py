@@ -5,11 +5,11 @@ from uuid import UUID
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from intric.flow_packages.application.flow_package_model_matching import (
+from eneo.flow_packages.application.flow_package_model_matching import (
     hard_model_candidate_rejection_reasons,
     resolve_model_requirement,
 )
-from intric.flow_packages.domain.flow_package_import_plan import (
+from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageDependencyResolutionEntry,
     FlowPackageImportPlanStatus,
     FlowPackageModelCandidate,
@@ -17,7 +17,7 @@ from intric.flow_packages.domain.flow_package_import_plan import (
     FlowPackageModelMatchIssue,
     FlowPackagePolicyStatus,
 )
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageModelIdentity,
     FlowPackageModelKind,
@@ -25,7 +25,7 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelRequirement,
     FlowPackageRequirementDataSensitivity,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,

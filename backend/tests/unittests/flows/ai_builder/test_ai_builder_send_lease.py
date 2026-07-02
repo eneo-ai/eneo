@@ -7,15 +7,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_error_contract import (
+from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.ai_builder.ai_builder_send_lease import (
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_send_lease import (
     claim_ai_builder_send_turn,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import SessionSendLease
+from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendLease
 
 
 class _FakeSendLeaseRepo:
@@ -76,7 +76,7 @@ class _FakeSendLeaseRepo:
 
 def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_send_lease."
+        "eneo.flows.ai_builder.ai_builder_send_lease."
         "_send_lock_refresh_interval_seconds",
         lambda: 0,
     )

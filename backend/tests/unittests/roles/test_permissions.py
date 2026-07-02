@@ -5,17 +5,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.roles.permissions import (
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.roles.permissions import (
     Permission,
     has_permission,
     validate_permission,
     validate_permissions,
 )
-from intric.roles.role import RoleCreateRequest, RoleInDB, RoleUpdateRequest
-from intric.roles.roles_service import RolesService
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB
+from eneo.roles.role import RoleCreateRequest, RoleInDB, RoleUpdateRequest
+from eneo.roles.roles_service import RolesService
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 _TEST_TENANT = TenantInDB(id=uuid4(), name="test", quota_limit=1024**3)
 
@@ -291,7 +291,7 @@ class TestPermissionSemantics:
 class TestRoleTemplates:
     @pytest.fixture
     def templates(self):
-        from intric.server.dependencies.predefined_roles import (
+        from eneo.server.dependencies.predefined_roles import (
             load_predefined_roles_from_config,
         )
 

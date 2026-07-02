@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from intric.flows.http_transport.authored_config import (
+from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     CustomHeader,
     HttpAuthApiKey,
@@ -13,7 +13,7 @@ from intric.flows.http_transport.authored_config import (
     HttpBody,
     HttpBodyMode,
 )
-from intric.flows.http_transport.secret_codec import (
+from eneo.flows.http_transport.secret_codec import (
     decrypt_authored_config,
     encrypt_authored_config,
     merge_secrets_on_update,

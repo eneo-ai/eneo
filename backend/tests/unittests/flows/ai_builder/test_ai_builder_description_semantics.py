@@ -6,11 +6,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.application.flow_authoring_description_semantics import (
+from eneo.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
-from intric.flows.domain.flow import FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,

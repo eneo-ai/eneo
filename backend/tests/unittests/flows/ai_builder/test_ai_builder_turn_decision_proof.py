@@ -8,32 +8,32 @@ from typing import TypeAlias
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_action_policy import (
+from eneo.flows.ai_builder.ai_builder_action_policy import (
     compute_unresolved_core_slots,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
-from intric.flows.ai_builder.ai_builder_turn_controller import (
+from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
     resolve_turn_control,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
     SlotSource,
     StepTriple,
 )
-from intric.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
 ExpectedDecisionType: TypeAlias = (
     type[AskCanonicalQuestion]

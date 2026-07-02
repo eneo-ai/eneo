@@ -29,12 +29,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_commit_invariance import (
+from eneo.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
     assert_architecture_commit_draft_matches_pinned,
     assert_architecture_commit_unchanged,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
     StepTriple,
@@ -199,7 +199,7 @@ class TestDraftPreservation:
 
 class TestPublicSurface:
     def test_expected_symbols_exported(self) -> None:
-        from intric.flows.ai_builder import ai_builder_commit_invariance as module
+        from eneo.flows.ai_builder import ai_builder_commit_invariance as module
 
         for symbol in (
             "assert_architecture_commit_draft_matches_pinned",

@@ -12,17 +12,17 @@
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import type { Intric } from "@intric/intric-js";
+  import type { Eneo } from "@eneo/eneo-js";
 
-  type Template = Awaited<ReturnType<Intric["helpAssistants"]["admin"]["listTemplates"]>>[number];
+  type Template = Awaited<ReturnType<Eneo["helpAssistants"]["admin"]["listTemplates"]>>[number];
 
-  let { templates, intric }: { templates: Template[]; intric: Intric } = $props();
+  let { templates, eneo }: { templates: Template[]; eneo: Eneo } = $props();
 
   const install = createAsyncState(async (kind: Template["kind"]) => {
     try {
       // Installs a blank helper (enabled, not visible). The admin then pastes
       // instructions on the helper's settings page before enabling visibility.
-      await intric.helpAssistants.admin.install({ kind });
+      await eneo.helpAssistants.admin.install({ kind });
       await invalidate("admin:help-assistants:load");
     } catch (e) {
       toastError(e);

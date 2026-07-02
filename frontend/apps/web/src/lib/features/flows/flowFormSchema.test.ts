@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type { FlowRunContract } from "@intric/intric-js";
+import type { FlowRunContract } from "@eneo/eneo-js";
 
 import {
   buildFlowFormSchemaMetadata,

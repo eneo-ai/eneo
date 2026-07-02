@@ -1,5 +1,5 @@
 import * as m from "$lib/paraglide/messages";
-import type { components } from "@intric/intric-js";
+import type { components } from "@eneo/eneo-js";
 
 type ActionType = components["schemas"]["ActionType"];
 type MessageFn = () => string;

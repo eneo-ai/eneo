@@ -3,9 +3,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.flow_settings import FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE
-from intric.main.exceptions import BadRequestException
-from intric.tenants.tenant import (
+from eneo.flows.flow_settings import FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE
+from eneo.main.exceptions import BadRequestException
+from eneo.tenants.tenant import (
     TenantInDB,
     TenantState,
     TenantUpdate,
@@ -148,7 +148,7 @@ def test_tenant_in_db_propagates_unexpected_ai_builder_validator_error(
         raise RuntimeError("ai builder validator failed")
 
     monkeypatch.setattr(
-        "intric.flows.flow_settings.validate_ai_builder_budget_settings_object",
+        "eneo.flows.flow_settings.validate_ai_builder_budget_settings_object",
         fail_validation,
     )
 
@@ -287,7 +287,7 @@ def test_tenant_in_db_propagates_unexpected_retention_policy_validator_error(
         raise RuntimeError("retention policy validator failed")
 
     monkeypatch.setattr(
-        "intric.flows.flow_settings.validate_flow_retention_policy_object",
+        "eneo.flows.flow_settings.validate_flow_retention_policy_object",
         fail_validation,
     )
 

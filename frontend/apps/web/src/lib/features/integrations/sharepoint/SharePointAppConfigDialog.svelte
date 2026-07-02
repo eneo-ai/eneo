@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { getEneo } from "$lib/core/Eneo";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getErrorMessage, toastError } from "$lib/core/errors";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { writable, type Writable } from "svelte/store";
@@ -48,7 +48,7 @@
 
   let { openController }: { openController: Writable<boolean> } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Form state
   let authMethod = $state<AuthMethod>("service_account"); // Default to recommended
@@ -65,7 +65,7 @@
   const loadConfig = createAsyncState(async () => {
     try {
       /* eslint-disable @typescript-eslint/no-explicit-any */
-      const data = (await intric.client.fetch(
+      const data = (await eneo.client.fetch(
         "/api/v1/admin/sharepoint/app" as any,
         {
           method: "get"
@@ -101,7 +101,7 @@
         tenant_domain: tenantDomain
       };
 
-      const result = (await intric.client.fetch("/api/v1/admin/sharepoint/app/test", {
+      const result = (await eneo.client.fetch("/api/v1/admin/sharepoint/app/test", {
         method: "post",
         requestBody: {
           "application/json": payload
@@ -138,7 +138,7 @@
         tenant_domain: tenantDomain
       };
 
-      const result = (await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const result = (await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
         requestBody: {
           "application/json": payload
@@ -166,7 +166,7 @@
         tenant_domain: existingConfig.tenant_domain
       };
 
-      const result = (await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const result = (await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
         requestBody: {
           "application/json": payload
@@ -195,7 +195,7 @@
         tenant_domain: tenantDomain
       };
 
-      const result = (await intric.client.fetch(
+      const result = (await eneo.client.fetch(
         "/api/v1/admin/sharepoint/service-account/auth/start",
         {
           method: "post",

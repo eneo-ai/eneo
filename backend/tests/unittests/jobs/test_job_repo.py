@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.jobs.job_repo import JobRepository
+from eneo.jobs.job_repo import JobRepository
 
 
 @pytest.mark.asyncio

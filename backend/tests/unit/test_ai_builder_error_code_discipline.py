@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 AI_BUILDER_SOURCE = (
-    Path(__file__).resolve().parents[2] / "src" / "intric" / "flows" / "ai_builder"
+    Path(__file__).resolve().parents[2] / "src" / "eneo" / "flows" / "ai_builder"
 )
 RAW_EXCEPTION_NAMES = {
     "BadRequestException",

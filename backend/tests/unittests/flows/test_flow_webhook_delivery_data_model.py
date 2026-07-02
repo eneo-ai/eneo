@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import ForeignKeyConstraint
 
-from intric.database.tables.flow_tables import FlowRunWebhookDeliveries
+from eneo.database.tables.flow_tables import FlowRunWebhookDeliveries
 
 
 def _foreign_key_constraint(name: str) -> ForeignKeyConstraint:

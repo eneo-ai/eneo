@@ -8,27 +8,27 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows import FlowFactory
-from intric.flows.domain.flow import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows import FlowFactory
+from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepResultStatus,
     RerunStepInputOverride,
 )
-from intric.flows.domain.flow_run_exceptions import (
+from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
-from intric.flows.domain.rerun_exceptions import (
+from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunMultipleActiveOperationsError,
 )
-from intric.flows.domain.run_step_input_exceptions import (
+from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
-from intric.flows.flow_run_input_envelope import RerunInputOverride
-from intric.flows.flow_run_rerun_graph import RerunInvalidatedStep
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.principal import FlowPrincipal
+from eneo.flows.flow_run_input_envelope import RerunInputOverride
+from eneo.flows.flow_run_rerun_graph import RerunInvalidatedStep
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.principal import FlowPrincipal
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +113,7 @@ def _prepare_completed_rerun_accept_scenario(monkeypatch) -> _RerunAcceptScenari
         AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
-        "intric.flows.infrastructure.flow_run_rerun_repo.next_step_attempt_no",
+        "eneo.flows.infrastructure.flow_run_rerun_repo.next_step_attempt_no",
         AsyncMock(return_value=2),
     )
     return _RerunAcceptScenario(

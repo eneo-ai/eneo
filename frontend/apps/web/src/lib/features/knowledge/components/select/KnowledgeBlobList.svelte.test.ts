@@ -1,4 +1,4 @@
-import type { InfoBlob } from "@intric/intric-js";
+import type { InfoBlob } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it } from "vitest";

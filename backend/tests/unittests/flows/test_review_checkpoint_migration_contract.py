@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from runpy import run_path
 
-from intric.flows.enums import (
+from eneo.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def test_review_checkpoint_snapshot_migration_constraint_values_match_flow_enums() -> (

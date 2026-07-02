@@ -1,4 +1,4 @@
-import type { components } from "@intric/intric-js";
+import type { components } from "@eneo/eneo-js";
 
 export type StructuredQuestionOption = components["schemas"]["StructuredQuestionOptionPayload"];
 

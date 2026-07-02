@@ -4,12 +4,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
     compile_flow_draft_changeset,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -19,7 +19,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _step_spec(

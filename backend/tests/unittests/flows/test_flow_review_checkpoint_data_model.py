@@ -7,12 +7,12 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, Index
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
-from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_models import FlowServicePrincipalActorPublic
-from intric.authentication.principal_types import PrincipalType
-from intric.database.tables.flow_tables import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.flow_tables import (
     FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES,
     FLOW_RUN_AUDIT_TARGET_STATUS_VALUES,
@@ -22,18 +22,18 @@ from intric.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
     FlowRuns,
 )
-from intric.flows.api.flow_models import (
+from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointEvidencePublic,
     FlowRunReviewCheckpointPublic,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _constraint_names(table: object) -> set[str]:

@@ -1,8 +1,8 @@
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from intric.main.exceptions import ErrorCodes
-from intric.server.main import get_application
+from eneo.main.exceptions import ErrorCodes
+from eneo.server.main import get_application
 
 
 def _build_client_for_exception(detail, *, status_code: int = 503, headers=None):
@@ -69,7 +69,7 @@ def test_http_exception_422_uses_validation_general_error_and_preserves_headers(
     assert response.headers["x-correlation-id"] == "exception-correlation-id"
     payload = response.json()
     assert payload["message"] == "Request validation failed."
-    assert payload["intric_error_code"] == ErrorCodes.VALIDATION_ERROR
+    assert payload["eneo_error_code"] == ErrorCodes.VALIDATION_ERROR
     assert payload["code"] == "request_validation_error"
     assert payload["request_id"] == "req-422"
     assert payload["details"] == {

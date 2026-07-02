@@ -5,13 +5,13 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.apps.apps.api.app_models import InputField, InputFieldType
-from intric.apps.apps.app_factory import AppFactory
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.app_table import Apps
-from intric.database.tables.model_providers_table import ModelProviders
-from intric.templates.app_template.app_template import AppTemplate
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.apps.apps.api.app_models import InputField, InputFieldType
+from eneo.apps.apps.app_factory import AppFactory
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.templates.app_template.app_template import AppTemplate
 
 
 @pytest.fixture

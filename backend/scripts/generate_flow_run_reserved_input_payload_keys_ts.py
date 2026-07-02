@@ -19,15 +19,15 @@ TARGET_JS = (
     REPO_ROOT
     / "frontend"
     / "packages"
-    / "intric-js"
+    / "eneo-js"
     / "src"
     / "flows"
     / "flow-run-reserved-input-payload-keys.js"
 )
 TARGET_DTS = TARGET_JS.with_suffix(".d.ts")
-SOURCE_DESCRIPTION = "backend/src/intric/flows/flow_run_input_envelope.py"
+SOURCE_DESCRIPTION = "backend/src/eneo/flows/flow_run_input_envelope.py"
 FLOW_RUN_INPUT_ENVELOPE_SOURCE = (
-    BACKEND_SRC / "intric" / "flows" / "flow_run_input_envelope.py"
+    BACKEND_SRC / "eneo" / "flows" / "flow_run_input_envelope.py"
 )
 
 

@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
-from intric.flows.principal import FlowPrincipal
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from eneo.flows.principal import FlowPrincipal
 
 
 @pytest.mark.asyncio

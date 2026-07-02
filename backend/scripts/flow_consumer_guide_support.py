@@ -8,26 +8,26 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Literal, get_args
 
-from intric.flows.api.flow_runtime_endpoint_registry import (
+from eneo.flows.api.flow_runtime_endpoint_registry import (
     FLOW_RUNTIME_ENDPOINT_CONTRACTS,
     FlowRuntimeEndpointContract,
     flow_runtime_endpoint_by_operation_id,
     flow_runtime_endpoint_by_path_field,
 )
-from intric.flows.api.flow_runtime_paths import (
+from eneo.flows.api.flow_runtime_paths import (
     FlowReviewCheckpointRuntimePathsPublic,
     FlowRuntimePathsPublic,
     build_flow_endpoint_template,
 )
-from intric.flows.enums import FlowOutputMode, FlowOutputType
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_capability_manifest import (
+from eneo.flows.enums import FlowOutputMode, FlowOutputType
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_capability_manifest import (
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
     OutputArtifact,
     RuntimeInputMode,
 )
-from intric.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
-from intric.flows.flow_run_contract_models import (
+from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
+from eneo.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowReviewStepContractPublic,
     FlowRunContractPublic,

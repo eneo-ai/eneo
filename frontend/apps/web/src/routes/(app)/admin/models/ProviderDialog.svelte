@@ -11,13 +11,13 @@
 -->
 
 <script lang="ts">
-  import type { ModelProviderPublic } from "@intric/intric-js";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
   import { onMount } from "svelte";
   import { Loader2 } from "lucide-svelte";
 
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
@@ -48,7 +48,7 @@
     provider: ModelProviderPublic | null;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Open-state bridge (Writable<boolean> ↔ runes) -------------------------
   let dialogOpen = $state(false);
@@ -65,7 +65,7 @@
     if (capabilities || capabilitiesLoading) return;
     capabilitiesLoading = true;
     try {
-      capabilities = await getModelProviderCapabilities(intric);
+      capabilities = await getModelProviderCapabilities(eneo);
     } catch {
       // Silently fall back — `resolveProviderFields` returns sensible defaults.
     } finally {
@@ -167,7 +167,7 @@
 
     isSubmitting = true;
     try {
-      await intric.modelProviders.update({ id: provider.id }, buildPayload());
+      await eneo.modelProviders.update({ id: provider.id }, buildPayload());
       await invalidate("admin:model-providers:load");
       toast.success(m.provider_updated_success());
       dialogOpen = false;

@@ -1,14 +1,14 @@
 <script lang="ts">
-  import type { CompletionModel, FlowStep, PromptSparse } from "@intric/intric-js";
+  import type { CompletionModel, FlowStep, PromptSparse } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconLockClosed } from "@intric/icons/lock-closed";
-  import { IconQuestionMark } from "@intric/icons/question-mark";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconLockClosed } from "@eneo/icons/lock-closed";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";

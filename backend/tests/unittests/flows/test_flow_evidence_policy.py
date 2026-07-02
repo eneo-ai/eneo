@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from intric.flows.flow_evidence_policy import (
+from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
     EvidenceCapabilityLevel,
@@ -16,7 +16,7 @@ from intric.flows.flow_evidence_policy import (
     resolve_service_key_evidence_capability,
     validate_flow_evidence_policy_object,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 @pytest.mark.parametrize(
@@ -54,15 +54,20 @@ def test_resolve_flow_evidence_policy_treats_missing_storage_version_as_v1() -> 
     ) == FlowEvidencePolicy(allow_sensitive_flow_exports=True)
 
 
-def test_resolve_flow_evidence_policy_fails_closed_for_unknown_storage_version() -> None:
-    assert resolve_flow_evidence_policy(
-        {
-            "evidence_policy": {
-                "version": 99,
-                "allow_sensitive_flow_exports": True,
+def test_resolve_flow_evidence_policy_fails_closed_for_unknown_storage_version() -> (
+    None
+):
+    assert (
+        resolve_flow_evidence_policy(
+            {
+                "evidence_policy": {
+                    "version": 99,
+                    "allow_sensitive_flow_exports": True,
+                }
             }
-        }
-    ) == FlowEvidencePolicy()
+        )
+        == FlowEvidencePolicy()
+    )
 
 
 @pytest.mark.parametrize(
@@ -180,8 +185,8 @@ def test_apply_flow_evidence_policy_patch_preserves_unrelated_settings() -> None
         "runtime_policy",
         "document_render_limits",
     ):
-            assert updated[key] == current_settings[key]
+        assert updated[key] == current_settings[key]
     assert updated["evidence_policy"] == {
         FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY: FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
-        "classification_3": {"allow_run_owner_raw_export": True}
+        "classification_3": {"allow_run_owner_raw_export": True},
     }

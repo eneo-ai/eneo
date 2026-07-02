@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from intric.flows.flow_error_taxonomy import (
+from eneo.flows.flow_error_taxonomy import (
     FLOW_ERROR_CATEGORY_ORDER,
     FLOW_ERROR_TAXONOMY,
     validate_flow_error_taxonomy,

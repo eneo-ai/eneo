@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { ApiKeyCreatedResponse, ApiKeyScopeType, ApiKeyV2 } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
+  import type { ApiKeyCreatedResponse, ApiKeyScopeType, ApiKeyV2 } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
@@ -31,7 +31,7 @@
   } from "./notificationPreferences";
   import { getExpiringKeysStore } from "./expiringKeysStore";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const { user, tenant } = getAppContext();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
   const canCreateApiKeys = user.hasPermission("api_keys");
@@ -76,7 +76,7 @@
     loading = true;
     errorMessage = null;
     try {
-      const response = await intric.apiKeys.list({
+      const response = await eneo.apiKeys.list({
         scope_type: scopeType,
         scope_id: scopeId,
         limit: 20
@@ -94,7 +94,7 @@
   async function loadScopeFollowState() {
     if (!canFollowScope) return;
     try {
-      const subscriptions = await listNotificationSubscriptions(intric);
+      const subscriptions = await listNotificationSubscriptions(eneo);
       followedKeyIds = extractFollowedKeyIds(subscriptions);
       isScopeFollowed = hasScopeSubscription(subscriptions, scopeType, scopeId);
     } catch (error) {
@@ -107,9 +107,9 @@
     scopeFollowLoading = true;
     try {
       if (isScopeFollowed) {
-        await unfollowScopeNotifications(intric, scopeType, scopeId);
+        await unfollowScopeNotifications(eneo, scopeType, scopeId);
       } else {
-        await followScopeNotifications(intric, scopeType, scopeId);
+        await followScopeNotifications(eneo, scopeType, scopeId);
       }
       await loadScopeFollowState();
       await forceRefreshExpiringStore();

@@ -1,21 +1,21 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
 
-  import type { Intric } from "@intric/intric-js";
+  import type { Eneo } from "@eneo/eneo-js";
 
   import FlowAIBuilder from "./FlowAIBuilder.svelte";
   import { initAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 
   interface Props {
-    intric: Intric;
+    eneo: Eneo;
     spaceId: string;
     flowId: string;
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
   }
 
-  let { intric, spaceId, flowId, onapplied }: Props = $props();
+  let { eneo, spaceId, flowId, onapplied }: Props = $props();
 
-  const service = untrack(() => initAIBuilderService(intric, spaceId, flowId));
+  const service = untrack(() => initAIBuilderService(eneo, spaceId, flowId));
 
   onDestroy(() => {
     service.destroy();

@@ -13,7 +13,7 @@
  *
  * ## Adding support for a new error code
  *
- * When a new ErrorCode is added in the backend (backend/src/intric/main/exceptions.py),
+ * When a new ErrorCode is added in the backend (backend/src/eneo/main/exceptions.py),
  * three steps are required to get localized error messages in the frontend:
  *
  * 1. Add i18n messages in BOTH language files:

@@ -11,11 +11,11 @@ import jwt
 import pytest
 from fastapi import HTTPException
 
-from intric.authentication import federation_router
-from intric.authentication.federation_router import CallbackRequest
-from intric.settings.encryption_service import EncryptionService
-from intric.tenants.tenant import TenantInDB, TenantState
-from intric.users.user import UserInDB
+from eneo.authentication import federation_router
+from eneo.authentication.federation_router import CallbackRequest
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.user import UserInDB
 
 
 class DummySettings(SimpleNamespace):

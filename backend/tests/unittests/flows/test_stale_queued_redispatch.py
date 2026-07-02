@@ -5,14 +5,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.application.stale_queued_redispatch import (
+from eneo.flows.application.stale_queued_redispatch import (
     StaleQueuedRedispatchDispatched,
     StaleQueuedRedispatchDispatchFailed,
     StaleQueuedRedispatchInvalidRequest,
     StaleQueuedRedispatchNotClaimed,
     redispatch_stale_queued_run,
 )
-from intric.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
+from eneo.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
 from tests.unittests.flows.test_flow_router import _run
 
 

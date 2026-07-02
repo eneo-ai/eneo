@@ -6,12 +6,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder import ai_builder_discovery_runtime as runtime
-from intric.flows.ai_builder.ai_builder_discovery_models import (
+from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
+from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
     DiscoveryAnalysis,
 )
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     DiscoveryRuntimeResult,
     RuntimeDiscoveryContext,
     _targeted_classification_bias,
@@ -20,15 +20,15 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_runtime_result,
     build_runtime_planning_state,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
+from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,

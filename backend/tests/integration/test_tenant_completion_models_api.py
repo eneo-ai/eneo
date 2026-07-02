@@ -3,9 +3,9 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import select, text
 
-from intric.authentication.auth_service import AuthService
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.model_providers_table import ModelProviders
+from eneo.authentication.auth_service import AuthService
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.model_providers_table import ModelProviders
 
 
 @pytest.fixture

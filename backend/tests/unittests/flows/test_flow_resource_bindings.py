@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     FLOW_RESOURCE_BINDING_SOURCE_VALUES,
     RESOURCE_SLOT_LOCAL_KIND_PAIRS,
     FlowResourceBindingResolutionError,

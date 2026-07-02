@@ -1,4 +1,4 @@
-import { IntricError } from "@intric/intric-js";
+import { EneoError } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 /**
@@ -16,7 +16,7 @@ import { m } from "$lib/paraglide/messages";
  * If step 1 or 2 is skipped, the error will fall back to the backend's
  * English message — functional, but not localized.
  *
- * Error codes are defined in: backend/src/intric/main/exceptions.py → ErrorCodes enum
+ * Error codes are defined in: backend/src/eneo/main/exceptions.py → ErrorCodes enum
  * The @unique decorator on ErrorCodes guarantees no duplicate codes exist.
  */
 const ERROR_CODE_MESSAGES: Record<number, () => string> = {
@@ -62,7 +62,7 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
  * Use toastError() to show the message directly as a toast notification.
  */
 export function getErrorMessage(error: unknown): string {
-  if (error instanceof IntricError) {
+  if (error instanceof EneoError) {
     const mapped = ERROR_CODE_MESSAGES[error.code];
     if (mapped) {
       return mapped();

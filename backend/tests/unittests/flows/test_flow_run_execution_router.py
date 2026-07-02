@@ -14,17 +14,17 @@ from uuid import uuid4
 import pytest
 from fastapi import BackgroundTasks
 
-import intric.flows.application.flow_dispatch as flow_dispatch_module
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
-from intric.audit.domain.outcome import Outcome
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api.flow_models import (
+import eneo.flows.application.flow_dispatch as flow_dispatch_module
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
+from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunStepRerunRequest,
 )
-from intric.flows.api.flow_run_execution_router import (
+from eneo.flows.api.flow_run_execution_router import (
     cancel_flow_run,
     create_flow_run,
     get_flow_run,
@@ -32,45 +32,45 @@ from intric.flows.api.flow_run_execution_router import (
     redispatch_flow_run,
     rerun_flow_run_step,
 )
-from intric.flows.api.flow_run_steps_router import (
+from eneo.flows.api.flow_run_steps_router import (
     get_flow_graph,
     list_flow_run_steps,
 )
-from intric.flows.application.flow_dispatch import (
+from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
-from intric.flows.application.flow_run_service import (
+from eneo.flows.application.flow_run_service import (
     CreateRunResult,
     FlowRunPageWithResultFilesAndTokenUsage,
     FlowRunRedispatchResult,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndTokenUsage,
 )
-from intric.flows.application.stale_queued_redispatch import (
+from eneo.flows.application.stale_queued_redispatch import (
     StaleQueuedRedispatchDispatchError,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepResult,
 )
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from intric.flows.enums import FlowRunRerunOperationStatus, FlowStepResultStatus
-from intric.flows.flow_run_dispatch_request import (
+from eneo.flows.enums import FlowRunRerunOperationStatus, FlowStepResultStatus
+from eneo.flows.flow_run_dispatch_request import (
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
 )
-from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
-from intric.flows.published_definition import (
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     parse_published_definition,
 )
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
 from tests.unittests.flows.test_flow_router import (
     _enable_explicit_transaction,
     _enable_space_access,

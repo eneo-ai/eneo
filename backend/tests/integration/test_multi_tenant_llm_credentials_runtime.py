@@ -8,14 +8,14 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.settings.credential_resolver import CredentialResolver
-from intric.tenants.tenant_repo import TenantRepository
+from eneo.settings.credential_resolver import CredentialResolver
+from eneo.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture(autouse=True)
 def enable_tenant_credentials(test_settings):
     """Enable tenant credentials feature for all tests in this module."""
-    from intric.main.config import set_settings
+    from eneo.main.config import set_settings
 
     enabled_settings = test_settings.model_copy(
         update={"tenant_credentials_enabled": True}

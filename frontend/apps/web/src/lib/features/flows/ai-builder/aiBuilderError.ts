@@ -152,7 +152,7 @@ function publicErrorFromRecord(record: Record<string, unknown>): AIBuilderError 
     message,
     phase: phase as AIBuilderErrorPhase,
     request_id: stringField(record, "request_id"),
-    intric_error_code: numberField(record, "intric_error_code") ?? null,
+    eneo_error_code: numberField(record, "eneo_error_code") ?? null,
     diagnostic_context: normalizeDiagnosticContext(record.diagnostic_context),
     details: normalizeDetails(record.details)
   };
@@ -176,7 +176,7 @@ function clientError({
     message,
     phase: "client",
     request_id: null,
-    intric_error_code: null,
+    eneo_error_code: null,
     diagnostic_context: null,
     details
   };

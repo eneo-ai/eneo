@@ -5,14 +5,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from intric.flows.api.flow_template_asset_models import (
+from eneo.flows.api.flow_template_asset_models import (
     FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE,
     FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE,
     FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
     FlowTemplatePlaceholderPublic,
 )
-from intric.flows.domain.flow import FlowTemplateAsset
+from eneo.flows.domain.flow import FlowTemplateAsset
 
 
 def _assert_example_keys_belong_to_model(

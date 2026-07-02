@@ -4,7 +4,7 @@ import { hasPermission } from "$lib/core/hasPermission";
 export const ssr = false;
 
 export const load = async (event) => {
-  const { intric, currentSpace, user } = await event.parent();
+  const { eneo, currentSpace, user } = await event.parent();
 
   const isOrgSpace = currentSpace.organization === true;
   if (isOrgSpace) {
@@ -15,5 +15,5 @@ export const load = async (event) => {
     throw error(403);
   }
 
-  return { intric, currentSpace };
+  return { eneo, currentSpace };
 };

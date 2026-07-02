@@ -29,8 +29,8 @@ from typing import Any
 
 import pytest
 
-from intric.settings.credential_resolver import CredentialResolver
-from intric.settings.encryption_service import EncryptionService
+from eneo.settings.credential_resolver import CredentialResolver
+from eneo.settings.encryption_service import EncryptionService
 
 
 class MockSettings:
@@ -386,9 +386,9 @@ __test_metadata__ = {
     "fixed_date": "2025-10-21",
     "regression_risk": "HIGH",
     "related_files": [
-        "backend/src/intric/settings/credential_resolver.py",
-        "backend/src/intric/settings/encryption_service.py",
-        "backend/src/intric/tenants/tenant_repo.py",
+        "backend/src/eneo/settings/credential_resolver.py",
+        "backend/src/eneo/settings/encryption_service.py",
+        "backend/src/eneo/tenants/tenant_repo.py",
     ],
     "security_impact": (
         "Without these tests, a refactoring could re-introduce the critical security "

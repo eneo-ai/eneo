@@ -12,19 +12,19 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from intric.flows.application.flow_run_lifecycle_events import (  # noqa: E402
+from eneo.flows.application.flow_run_lifecycle_events import (  # noqa: E402
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
     FLOW_RUN_LIFECYCLE_LOG_MESSAGE,
     FLOW_RUN_TERMINALIZATION_OPERATION,
 )
-from intric.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
     render_flow_docs_mermaid_block,
 )
-from intric.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
     FlowDocsRelatedNextraCard,
     render_flow_docs_related_nextra_cards,
 )
-from intric.flows.runtime.flow_runtime_trace import (  # noqa: E402
+from eneo.flows.runtime.flow_runtime_trace import (  # noqa: E402
     FLOW_RUN_EXECUTE_SPAN_NAME,
     FLOW_RUN_SPAN_ATTRIBUTE_KEYS,
     FLOW_STEP_EXECUTE_SPAN_NAME,
@@ -282,11 +282,11 @@ REVIEWER_CHECKLIST_TOPICS: tuple[ReviewerChecklistTopic, ...] = (
             _source("API standard", "docs/engineering/api-design-standard.md"),
             _source(
                 "Error-code enum",
-                "backend/src/intric/flows/flow_api_error_code.py",
+                "backend/src/eneo/flows/flow_api_error_code.py",
             ),
             _source(
                 "Review exceptions",
-                "backend/src/intric/flows/domain/review_checkpoint_exceptions.py",
+                "backend/src/eneo/flows/domain/review_checkpoint_exceptions.py",
             ),
         ),
     ),
@@ -296,14 +296,14 @@ REVIEWER_CHECKLIST_TOPICS: tuple[ReviewerChecklistTopic, ...] = (
         check="Tenant filters use tenant_id, and runtime ownership checks use FlowPrincipal plus cross-principal denial tests.",
         reject="Reject synthetic users, tenant-free queries, and tests that skip service-key or cross-principal denial.",
         source_refs=(
-            _source("Flow principal", "backend/src/intric/flows/principal.py"),
+            _source("Flow principal", "backend/src/eneo/flows/principal.py"),
             _source(
                 "Run access policy",
-                "backend/src/intric/flows/application/flow_run_access_policy.py",
+                "backend/src/eneo/flows/application/flow_run_access_policy.py",
             ),
             _source(
                 "Runtime actor",
-                "backend/src/intric/flows/runtime/flow_run_actor.py",
+                "backend/src/eneo/flows/runtime/flow_run_actor.py",
             ),
         ),
     ),
@@ -332,11 +332,11 @@ REVIEWER_CHECKLIST_TOPICS: tuple[ReviewerChecklistTopic, ...] = (
         source_refs=(
             _source(
                 "HTTP validator",
-                "backend/src/intric/flows/flow_validators_http.py",
+                "backend/src/eneo/flows/flow_validators_http.py",
             ),
             _source(
                 "HTTP runtime",
-                "backend/src/intric/flows/runtime/http_runtime.py",
+                "backend/src/eneo/flows/runtime/http_runtime.py",
             ),
             _source(
                 "Key decisions",
@@ -376,7 +376,7 @@ REVIEWER_CHECKLIST_TOPICS: tuple[ReviewerChecklistTopic, ...] = (
             ),
             _source(
                 "Error taxonomy",
-                "backend/src/intric/flows/flow_error_taxonomy.py",
+                "backend/src/eneo/flows/flow_error_taxonomy.py",
             ),
         ),
     ),
@@ -388,11 +388,11 @@ REVIEWER_CHECKLIST_TOPICS: tuple[ReviewerChecklistTopic, ...] = (
         source_refs=(
             _source(
                 "Runtime trace helpers",
-                "backend/src/intric/flows/runtime/flow_runtime_trace.py",
+                "backend/src/eneo/flows/runtime/flow_runtime_trace.py",
             ),
             _source(
                 "Lifecycle events",
-                "backend/src/intric/flows/application/flow_run_lifecycle_events.py",
+                "backend/src/eneo/flows/application/flow_run_lifecycle_events.py",
             ),
             _source(
                 "Lifecycle docs",
@@ -412,7 +412,7 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         source_refs=(
             _source(
                 "Run execution router",
-                "backend/src/intric/flows/api/flow_run_execution_router.py",
+                "backend/src/eneo/flows/api/flow_run_execution_router.py",
             ),
             _source(
                 "API design standard",
@@ -426,8 +426,8 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         start_here="Start in `runtime/`, then identify the persisted state owner.",
         proof="Prove idempotency, terminalization, retry behavior, and trace correlation.",
         source_refs=(
-            _source("Executor", "backend/src/intric/flows/runtime/executor.py"),
-            _source("Runtime tasks", "backend/src/intric/flows/runtime/tasks.py"),
+            _source("Executor", "backend/src/eneo/flows/runtime/executor.py"),
+            _source("Runtime tasks", "backend/src/eneo/flows/runtime/tasks.py"),
             _source(
                 "Worker contract tests",
                 "backend/tests/integration/flows/test_flow_runtime_worker_contract.py",
@@ -437,11 +437,11 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         procedure_steps=(
             ProcedureStep(
                 "Update status vocabulary",
-                "Start in `backend/src/intric/flows/enums.py` and update the status vocabulary plus capability mappings together.",
+                "Start in `backend/src/eneo/flows/enums.py` and update the status vocabulary plus capability mappings together.",
             ),
             ProcedureStep(
                 "Change the writer",
-                "Change the application or runtime owner that writes the state, such as `backend/src/intric/flows/application/flow_run_terminalization.py` or `backend/src/intric/flows/runtime/executor.py`.",
+                "Change the application or runtime owner that writes the state, such as `backend/src/eneo/flows/application/flow_run_terminalization.py` or `backend/src/eneo/flows/runtime/executor.py`.",
             ),
             ProcedureStep(
                 "Use canonical persistence",
@@ -461,27 +461,27 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         source_refs=(
             _source(
                 "Handler construction",
-                "backend/src/intric/flows/runtime/executor.py",
+                "backend/src/eneo/flows/runtime/executor.py",
             ),
             _source(
                 "Handler contract",
-                "backend/src/intric/flows/runtime/step_handlers/base.py",
+                "backend/src/eneo/flows/runtime/step_handlers/base.py",
             ),
-            _source("Output modes", "backend/src/intric/flows/output_modes.py"),
+            _source("Output modes", "backend/src/eneo/flows/output_modes.py"),
             _source(
                 "Output processing",
-                "backend/src/intric/flows/output_processing.py",
+                "backend/src/eneo/flows/output_processing.py",
             ),
             _source(
                 "Step definition parser",
-                "backend/src/intric/flows/runtime/step_definition_parser.py",
+                "backend/src/eneo/flows/runtime/step_definition_parser.py",
             ),
         ),
         procedure_title="Add a step capability",
         procedure_steps=(
             ProcedureStep(
                 "Define capability shape",
-                "Start in `backend/src/intric/flows/flow_capability_manifest.py` and define the supported input, output, and artifact shape.",
+                "Start in `backend/src/eneo/flows/flow_capability_manifest.py` and define the supported input, output, and artifact shape.",
             ),
             ProcedureStep(
                 "Add runtime support",
@@ -489,7 +489,7 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
             ),
             ProcedureStep(
                 "Update parsing and output",
-                "Update parser or output ownership in `backend/src/intric/flows/runtime/step_definition_parser.py`, `backend/src/intric/flows/output_modes.py`, or `backend/src/intric/flows/output_processing.py`.",
+                "Update parser or output ownership in `backend/src/eneo/flows/runtime/step_definition_parser.py`, `backend/src/eneo/flows/output_modes.py`, or `backend/src/eneo/flows/output_processing.py`.",
             ),
             ProcedureStep(
                 "Test and regenerate docs",
@@ -505,19 +505,19 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         source_refs=(
             _source(
                 "Runtime file service",
-                "backend/src/intric/flows/flow_runtime_file_service.py",
+                "backend/src/eneo/flows/flow_runtime_file_service.py",
             ),
             _source(
                 "Runtime upload repository",
-                "backend/src/intric/flows/flow_runtime_upload_repo.py",
+                "backend/src/eneo/flows/flow_runtime_upload_repo.py",
             ),
             _source(
                 "Step input validation",
-                "backend/src/intric/flows/flow_run_step_inputs.py",
+                "backend/src/eneo/flows/flow_run_step_inputs.py",
             ),
             _source(
                 "Step input row builder",
-                "backend/src/intric/flows/infrastructure/flow_run_step_input_file_rows.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_step_input_file_rows.py",
             ),
         ),
     ),
@@ -529,11 +529,11 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         source_refs=(
             _source(
                 "Flow tables",
-                "backend/src/intric/database/tables/flow_tables.py",
+                "backend/src/eneo/database/tables/flow_tables.py",
             ),
             _source(
                 "JSONB ownership",
-                "backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py",
+                "backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py",
             ),
             _source(
                 "Data schema docs",
@@ -544,11 +544,11 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         procedure_steps=(
             ProcedureStep(
                 "Start at the table",
-                "Start at the SQLAlchemy column in `backend/src/intric/database/tables/flow_tables.py` or the table module that owns the row.",
+                "Start at the SQLAlchemy column in `backend/src/eneo/database/tables/flow_tables.py` or the table module that owns the row.",
             ),
             ProcedureStep(
                 "Register the typed owner",
-                "Add the typed owner in `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py` with version, corruption behavior, and relational-candidate rationale.",
+                "Add the typed owner in `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py` with version, corruption behavior, and relational-candidate rationale.",
             ),
             ProcedureStep(
                 "Validate at the boundary",
@@ -568,11 +568,11 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         source_refs=(
             _source(
                 "Error-code enum",
-                "backend/src/intric/flows/flow_api_error_code.py",
+                "backend/src/eneo/flows/flow_api_error_code.py",
             ),
             _source(
                 "Failure taxonomy",
-                "backend/src/intric/flows/flow_error_taxonomy.py",
+                "backend/src/eneo/flows/flow_error_taxonomy.py",
             ),
             _source(
                 "Frontend messages",
@@ -583,11 +583,11 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         procedure_steps=(
             ProcedureStep(
                 "Add the public code",
-                "Add the public code in `backend/src/intric/flows/flow_api_error_code.py`.",
+                "Add the public code in `backend/src/eneo/flows/flow_api_error_code.py`.",
             ),
             ProcedureStep(
                 "Add recovery metadata",
-                "Add metadata and recovery actions in `backend/src/intric/flows/flow_error_taxonomy.py`.",
+                "Add metadata and recovery actions in `backend/src/eneo/flows/flow_error_taxonomy.py`.",
             ),
             ProcedureStep(
                 "Update localizations",
@@ -607,15 +607,15 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         source_refs=(
             _source(
                 "Checkpoint repository",
-                "backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py",
             ),
             _source(
                 "Checkpoint service",
-                "backend/src/intric/flows/application/flow_run_review_checkpoint_service.py",
+                "backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py",
             ),
             _source(
                 "Checkpoint exceptions",
-                "backend/src/intric/flows/domain/review_checkpoint_exceptions.py",
+                "backend/src/eneo/flows/domain/review_checkpoint_exceptions.py",
             ),
         ),
     ),
@@ -658,10 +658,10 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
         ),
         next_action="Use `trace_id` as the persisted Flow correlation token, not as the OpenTelemetry protocol trace id.",
         source_refs=(
-            _source("Run API model", "backend/src/intric/flows/api/flow_models.py"),
+            _source("Run API model", "backend/src/eneo/flows/api/flow_models.py"),
             _source(
                 "Evidence export",
-                "backend/src/intric/flows/flow_run_export_json.py",
+                "backend/src/eneo/flows/flow_run_export_json.py",
             ),
         ),
     ),
@@ -677,12 +677,12 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
         source_refs=(
             _source(
                 "Run service",
-                "backend/src/intric/flows/application/flow_run_service.py",
+                "backend/src/eneo/flows/application/flow_run_service.py",
             ),
-            _source("Runtime tasks", "backend/src/intric/flows/runtime/tasks.py"),
+            _source("Runtime tasks", "backend/src/eneo/flows/runtime/tasks.py"),
             _source(
                 "Status capabilities",
-                "backend/src/intric/flows/api/flow_run_status_capability_models.py",
+                "backend/src/eneo/flows/api/flow_run_status_capability_models.py",
             ),
         ),
     ),
@@ -694,9 +694,9 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
         source_refs=(
             _source(
                 "Runtime trace helpers",
-                "backend/src/intric/flows/runtime/flow_runtime_trace.py",
+                "backend/src/eneo/flows/runtime/flow_runtime_trace.py",
             ),
-            _source("Runtime tasks", "backend/src/intric/flows/runtime/tasks.py"),
+            _source("Runtime tasks", "backend/src/eneo/flows/runtime/tasks.py"),
             _source(
                 "Trace tests",
                 "backend/tests/unittests/flows/test_flow_runtime_trace.py",
@@ -709,7 +709,7 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
         signals=FLOW_STEP_SPAN_DEBUG_SIGNALS,
         next_action="Use step id, order, attempt number, and result status to match the span to persisted step rows.",
         source_refs=(
-            _source("Executor", "backend/src/intric/flows/runtime/executor.py"),
+            _source("Executor", "backend/src/eneo/flows/runtime/executor.py"),
             _source(
                 "Executor trace tests",
                 "backend/tests/unittests/flows/test_flow_executor_runtime.py",
@@ -731,7 +731,7 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
         source_refs=(
             _source(
                 "Lifecycle events",
-                "backend/src/intric/flows/application/flow_run_lifecycle_events.py",
+                "backend/src/eneo/flows/application/flow_run_lifecycle_events.py",
             ),
             _source(
                 "Lifecycle event tests",
@@ -757,15 +757,15 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
             ),
             _source(
                 "Run repository",
-                "backend/src/intric/flows/infrastructure/flow_run_repo.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_repo.py",
             ),
             _source(
                 "Checkpoint repository",
-                "backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py",
             ),
             _source(
                 "Rerun repository",
-                "backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py",
             ),
         ),
     ),
@@ -782,7 +782,7 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
         source_refs=(
             _source(
                 "Error taxonomy",
-                "backend/src/intric/flows/flow_error_taxonomy.py",
+                "backend/src/eneo/flows/flow_error_taxonomy.py",
             ),
             _source(
                 "Failure docs",

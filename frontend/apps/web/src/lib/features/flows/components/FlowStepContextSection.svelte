@@ -6,12 +6,12 @@
     IntegrationKnowledge,
     UploadedFile,
     WebsiteSparse
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconCancel } from "@intric/icons/cancel";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconCancel } from "@eneo/icons/cancel";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";

@@ -4,7 +4,7 @@ from uuid import UUID
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
@@ -19,11 +19,11 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     format_resource_resolution_feedback,
     render_resource_reference_block,
 )
-from intric.flows.assistant_authoring_snapshot import (
+from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -33,7 +33,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from intric.authentication.api_key_resolver import (
+from eneo.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
-from intric.authentication.auth_models import ApiKeyPermission
+from eneo.authentication.auth_models import ApiKeyPermission
 from tests.unit.api_key_test_utils import make_api_key
 
 

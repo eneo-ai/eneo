@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
-import { getIntric } from "$lib/core/Intric";
-import type { Intric, UserIntegration } from "@intric/intric-js";
+import { getEneo } from "$lib/core/Eneo";
+import type { Eneo, UserIntegration } from "@eneo/eneo-js";
 import { onMount } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import { toast } from "$lib/components/toast";
@@ -35,11 +35,11 @@ export class IntegrationAuthService {
   /** Stores the current auth requests, key is the `tenant_integration_id` */
   #authRequests = new SvelteMap<string, AuthRequestContext>();
   #onConnected: OnConnectedCallback;
-  #intric: Intric;
+  #eneo: Eneo;
 
   constructor(options: { onConnected: OnConnectedCallback }) {
     this.#onConnected = options.onConnected;
-    this.#intric = getIntric();
+    this.#eneo = getEneo();
     onMount(() => {
       window.addEventListener("message", this.receiveMessageHandler);
     });
@@ -76,7 +76,7 @@ export class IntegrationAuthService {
       `width=${width},height=${height},top=${top},left=${left},popup`
     );
 
-    const { url, state } = await this.#intric.integrations.user.getAuthUrl({
+    const { url, state } = await this.#eneo.integrations.user.getAuthUrl({
       integration: { tenant_integration_id }
     });
 
@@ -149,7 +149,7 @@ export class IntegrationAuthService {
     clearInterval(request.popupInspectInterval);
 
     try {
-      const updatedIntegration = await this.#intric.integrations.user.registerAuthCode({
+      const updatedIntegration = await this.#eneo.integrations.user.registerAuthCode({
         integration: request.integration,
         code,
         state
@@ -199,7 +199,7 @@ type AuthRequestContext = {
 };
 
 type IntegrationCallbackMessage = {
-  type: "intric/integration-callback";
+  type: "eneo/integration-callback";
   code: string | null;
   state: string | null;
   params: string;
@@ -210,5 +210,5 @@ function isIntegrationCallbackMessage(data: unknown): data is IntegrationCallbac
   if (typeof data !== "object") return false;
   if (!("type" in data)) return false;
 
-  return data && typeof data === "object" && data.type === "intric/integration-callback";
+  return data && typeof data === "object" && data.type === "eneo/integration-callback";
 }

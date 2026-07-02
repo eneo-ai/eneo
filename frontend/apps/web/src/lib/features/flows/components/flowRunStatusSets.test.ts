@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FLOW_RUN_STATUS_CAPABILITIES, FLOW_RUN_STATUS_FILTER_ORDER } from "@intric/intric-js";
+import { FLOW_RUN_STATUS_CAPABILITIES, FLOW_RUN_STATUS_FILTER_ORDER } from "@eneo/eneo-js";
 
 import {
   canRedispatchFlowRun,

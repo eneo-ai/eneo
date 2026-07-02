@@ -5,15 +5,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.actor_types import ActorType
-from intric.authentication.auth_models import (
+from eneo.audit.domain.actor_types import ActorType
+from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ServicePrincipalInDB,
     ServicePrincipalState,
 )
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.runtime.flow_run_actor import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.runtime.flow_run_actor import (
     FlowRunActor,
     FlowRunServicePrincipalInactiveError,
 )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.template_reference_analyzer import (
+from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
     consumes_runtime_input,

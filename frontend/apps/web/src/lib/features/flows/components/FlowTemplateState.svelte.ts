@@ -1,6 +1,6 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 import type { FlowEditor } from "$lib/features/flows/FlowEditor";
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import { get } from "svelte/store";
 import { m } from "$lib/paraglide/messages";
 import { toast } from "$lib/components/toast";
@@ -34,7 +34,7 @@ type TemplateFillContext = {
 };
 
 export class FlowTemplateState {
-  #intric: Intric;
+  #eneo: Eneo;
   #flowEditor: FlowEditor;
 
   availableFiles: FlowTemplateAssetOption[] = $state([]);
@@ -57,8 +57,8 @@ export class FlowTemplateState {
     emptyValue: ""
   };
 
-  constructor(opts: { intric: Intric; flowEditor: FlowEditor }) {
-    this.#intric = opts.intric;
+  constructor(opts: { eneo: Eneo; flowEditor: FlowEditor }) {
+    this.#eneo = opts.eneo;
     this.#flowEditor = opts.flowEditor;
   }
 
@@ -70,7 +70,7 @@ export class FlowTemplateState {
     if (!force && (this.filesLoading || this.filesLoaded)) return;
     this.filesLoading = true;
     try {
-      const response = await this.#intric.flows.templates.list({ id: this.#getFlowId() });
+      const response = await this.#eneo.flows.templates.list({ id: this.#getFlowId() });
       this.availableFiles = Array.isArray(response)
         ? response
         : Array.isArray((response as { items?: FlowTemplateAssetOption[] })?.items)
@@ -91,7 +91,7 @@ export class FlowTemplateState {
     this.inspecting = true;
     this.configError = null;
     try {
-      const result = await this.#intric.flows.templates.inspect({
+      const result = await this.#eneo.flows.templates.inspect({
         id: this.#getFlowId(),
         fileId: assetId
       });
@@ -150,7 +150,7 @@ export class FlowTemplateState {
     this.configError = null;
     this.inspecting = true;
     try {
-      const uploaded = await this.#intric.flows.templates.upload({
+      const uploaded = await this.#eneo.flows.templates.upload({
         id: this.#getFlowId(),
         file
       });
@@ -170,7 +170,7 @@ export class FlowTemplateState {
 
   async download(resolvedAssetId: string) {
     try {
-      const { url } = await this.#intric.flows.templates.signedUrl({
+      const { url } = await this.#eneo.flows.templates.signedUrl({
         id: this.#getFlowId(),
         fileId: resolvedAssetId,
         contentDisposition: "attachment"

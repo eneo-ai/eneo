@@ -1,13 +1,13 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Dialog, Button, Input } from "@intric/ui";
+  import { Dialog, Button, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     refreshCurrentSpace,
     state: { currentSpace }
@@ -23,7 +23,7 @@
     if (!collection) return;
     isProcessing = true;
     try {
-      collection = await intric.groups.update({
+      collection = await eneo.groups.update({
         group: { id: collection.id },
         update: { name: collectionName }
       });
@@ -41,7 +41,7 @@
     isProcessing = true;
     try {
       const { id: spaceId, routeId } = $currentSpace;
-      const newCollection = await intric.groups.create({
+      const newCollection = await eneo.groups.create({
         spaceId,
         name: collectionName,
         embedding_model: embeddingModel

@@ -4,8 +4,8 @@ import inspect
 from types import ModuleType
 from typing import TypeGuard, get_args
 
-from intric.flows.domain import rerun_exceptions, review_checkpoint_exceptions
-from intric.flows.domain.rerun_exceptions import (
+from eneo.flows.domain import rerun_exceptions, review_checkpoint_exceptions
+from eneo.flows.domain.rerun_exceptions import (
     FLOW_RUN_RERUN_LIFECYCLE_FAILURE_CLASSES,
     FLOW_RUN_RERUN_RUNTIME_INVARIANT_CLASSES,
     FlowRunRerunLifecycleError,
@@ -13,7 +13,7 @@ from intric.flows.domain.rerun_exceptions import (
     FlowRunRerunRuntimeInvariantError,
     FlowRunRerunRuntimeInvariantFailure,
 )
-from intric.flows.domain.review_checkpoint_exceptions import (
+from eneo.flows.domain.review_checkpoint_exceptions import (
     FLOW_REVIEW_CHECKPOINT_LIFECYCLE_FAILURE_CLASSES,
     FLOW_REVIEW_CHECKPOINT_OPEN_TERMINAL_INVARIANT_CLASSES,
     FLOW_REVIEW_CHECKPOINT_RUNTIME_INVARIANT_CLASSES,

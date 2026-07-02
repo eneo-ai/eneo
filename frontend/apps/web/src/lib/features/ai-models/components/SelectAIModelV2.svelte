@@ -15,7 +15,7 @@
 
 <script lang="ts" generics="T extends SelectableAIModel">
   import { createEventDispatcher } from "svelte";
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel } from "@eneo/eneo-js";
   import { uid } from "uid";
   import { Ban, ChevronsUpDown } from "lucide-svelte";
   import * as Popover from "$lib/components/ui/popover/index.js";

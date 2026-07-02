@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from intric.flow_packages.domain.flow_package_checksum import hash_json_value
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_checksum import hash_json_value
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_manifest import (
     APP_PACKAGE_PAYLOAD_SCHEMA,
     ASSISTANT_PACKAGE_PAYLOAD_SCHEMA,
     FLOW_PACKAGE_PAYLOAD_SCHEMA,
@@ -16,8 +16,8 @@ from intric.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
     flow_package_filename,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeGuidance,
     FlowPackageKnowledgeRequirement,
@@ -33,13 +33,13 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageTemplateAssetGuidance,
     FlowPackageTemplateAssetRequirement,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
+from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
 
 
 def test_manifest_rejects_unknown_fields() -> None:

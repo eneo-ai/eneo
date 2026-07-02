@@ -8,38 +8,38 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from intric.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
-from intric.authentication.principal_types import PrincipalType
-from intric.database.database import sessionmanager
-from intric.database.tables.api_keys_v2_table import ApiKeysV2
-from intric.database.tables.flow_tables import (
+from eneo.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.database import sessionmanager
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.database.tables.service_principals_table import ServicePrincipals
-from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.domain.flow import (
+from eneo.database.tables.service_principals_table import ServicePrincipals
+from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.domain.flow import (
     Flow,
     FlowRunStatus,
     FlowStep,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.flow_run_input_envelope import (
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.principal import FlowPrincipal
+from eneo.flows.principal import FlowPrincipal
 
 
 def _build_flow(

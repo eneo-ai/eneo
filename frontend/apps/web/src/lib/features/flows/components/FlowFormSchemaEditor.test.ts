@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { tick } from "svelte";
-import type { Flow, FlowStep, Intric } from "@intric/intric-js";
+import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
@@ -26,7 +26,7 @@ function makeFlow(fields: FlowFormField[]): Flow {
   };
 }
 
-function makeIntric(): Intric {
+function makeEneo(): Eneo {
   return {
     files: {
       delete: vi.fn()
@@ -45,7 +45,7 @@ function makeIntric(): Intric {
     assistants: {
       listPrompts: vi.fn()
     }
-  } as unknown as Intric;
+  } as unknown as Eneo;
 }
 
 function field(name: string, label: string, order = 1): FlowFormField {
@@ -62,7 +62,7 @@ function renderHarness(fields: FlowFormField[]): { editor: FlowEditor } {
   let editor: FlowEditor | null = null;
   render(FlowFormSchemaEditorHarness, {
     flow: makeFlow(fields),
-    intric: makeIntric(),
+    eneo: makeEneo(),
     onEditor: (value) => {
       editor = value;
     }

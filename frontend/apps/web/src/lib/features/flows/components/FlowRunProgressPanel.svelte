@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IntricError, type FlowGraph, type FlowRunStep, type Intric } from "@intric/intric-js";
+  import { EneoError, type FlowGraph, type FlowRunStep, type Eneo } from "@eneo/eneo-js";
   import { onMount, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -25,7 +25,7 @@
   }: {
     runId: string;
     flowId: string;
-    eneo: Intric;
+    eneo: Eneo;
     runStatus: string;
     runStartedAt?: string | null;
     initialSnapshot?: FlowRunProgressSnapshot | null;
@@ -55,7 +55,7 @@
   }
 
   function isNotFoundError(error: unknown): boolean {
-    if (error instanceof IntricError) return error.status === 404;
+    if (error instanceof EneoError) return error.status === 404;
     if (error !== null && typeof error === "object") {
       const status = (error as { status?: unknown }).status;
       return status === 404;

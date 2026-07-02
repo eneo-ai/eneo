@@ -1,4 +1,4 @@
-import { type Intric, type UploadedFile } from "@intric/intric-js";
+import { type Eneo, type UploadedFile } from "@eneo/eneo-js";
 import { derived, get, readonly, writable } from "svelte/store";
 import { getAddedItems, getRemovedItems } from "./getChangedItems";
 import { getDiff, type CompareOptions, type Diff } from "./getDiff";
@@ -29,9 +29,9 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   ) => Promise<T>;
   /** Provide a key if attachements should also be managed, e.g. deleted when the attachment field is reverted */
   manageAttachements: Extract<keyof T, string> | false;
-  intric: Intric;
+  eneo: Eneo;
 }) {
-  const { intric, updateResource } = data;
+  const { eneo, updateResource } = data;
   // To be able to edit the resource we need to deep clone the input,
   //  otherwise we bind to pointers and change everything at the same time
 
@@ -80,7 +80,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       if (field === undefined || field === "files") {
         removedFiles.forEach((file) => {
           try {
-            intric.files.delete({ fileId: file.id });
+            eneo.files.delete({ fileId: file.id });
           } catch {
             console.error(`Couldnt delete removed file ${file.id}`);
           }
@@ -109,7 +109,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       if (field === undefined || field === "attachments") {
         discardedUploads.forEach((upload) => {
           try {
-            intric.files.delete({ fileId: upload.id });
+            eneo.files.delete({ fileId: upload.id });
           } catch {
             console.error(`Couldn't delete existing upload ${upload.id}`);
           }

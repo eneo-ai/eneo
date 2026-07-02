@@ -4,12 +4,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.ai_models_service import AIModelsService
-from intric.main.config import get_settings
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB
-from intric.user_groups.user_group import UserGroupInDB
-from intric.users.user import UserInDB
+from eneo.ai_models.ai_models_service import AIModelsService
+from eneo.main.config import get_settings
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
+from eneo.user_groups.user_group import UserGroupInDB
+from eneo.users.user import UserInDB
 from tests.fixtures import (
     TEST_EMBEDDING_MODEL,
     TEST_EMBEDDING_MODEL_ADA,

@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 
 import {
   downloadEvidenceExport,
@@ -65,13 +65,13 @@ test("downloadEvidenceExport fetches canonical evidence export before download",
 
   await downloadEvidenceExport(
     {
-      intric: {
+      eneo: {
         flows: {
           runs: {
             exportEvidence
           }
         }
-      } as unknown as Intric,
+      } as unknown as Eneo,
       flowId: "flow-1",
       runId: "run-1"
     },

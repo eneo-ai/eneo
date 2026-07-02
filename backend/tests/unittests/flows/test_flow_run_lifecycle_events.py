@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.application.flow_run_lifecycle_events import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.application.flow_run_lifecycle_events import (
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
     FLOW_RUN_LIFECYCLE_EVENT_SCHEMA_VERSION,
     FLOW_RUN_LIFECYCLE_LOG_MESSAGE,
@@ -15,12 +15,12 @@ from intric.flows.application.flow_run_lifecycle_events import (
     FlowRunTerminalizationOutcome,
     emit_flow_run_terminalization_event,
 )
-from intric.flows.domain.flow import FlowRun, FlowRunStatus
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_error import FlowRunError
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
 
-LIFECYCLE_LOGGER = "intric.flows.application.flow_run_lifecycle_events"
+LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 
 
 def _run() -> FlowRun:

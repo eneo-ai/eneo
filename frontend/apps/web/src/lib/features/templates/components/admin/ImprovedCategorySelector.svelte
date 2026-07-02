@@ -1,9 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { createSelect } from "@melt-ui/svelte";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconCheck } from "@intric/icons/check";
-  import { Input } from "@intric/ui";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconCheck } from "@eneo/icons/check";
+  import { Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { assistantTemplateCategories, appTemplateCategories } from "../../TemplateCategories";
 
@@ -138,7 +138,7 @@
 </div>
 
 <style lang="postcss">
-  @reference '@intric/ui/styles';
+  @reference '@eneo/ui/styles';
 
   div[data-highlighted] {
     @apply bg-hover-dimmer;

@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.runtime.step_definition_parser import parse_runtime_steps
-from intric.main.exceptions import BadRequestException
+from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
+from eneo.main.exceptions import BadRequestException
 
 
 def _step_snapshot(**overrides: object) -> dict[str, object]:

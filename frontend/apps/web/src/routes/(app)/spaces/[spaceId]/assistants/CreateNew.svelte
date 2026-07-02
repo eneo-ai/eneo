@@ -1,22 +1,22 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import TemplateCreateAssistant from "$lib/features/templates/components/assistants/TemplateCreateAssistant.svelte";
   import { getTemplateController } from "$lib/features/templates/TemplateController";
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconPeople } from "@intric/icons/people";
-  import { type Settings } from "@intric/intric-js";
-  import { Button, Dialog, Dropdown, Input } from "@intric/ui";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconPeople } from "@eneo/icons/people";
+  import { type Settings } from "@eneo/eneo-js";
+  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   let { data }: { data: { settings: Settings } } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const {
     state: { showCreateDialog: showCreateAssistantDialog }
@@ -34,7 +34,7 @@
 
   async function createNewGroupChat() {
     try {
-      const newGroup = await intric.groupChats.create({
+      const newGroup = await eneo.groupChats.create({
         name: newGroupChatName,
         spaceId: $currentSpace.id
       });

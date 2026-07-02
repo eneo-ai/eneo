@@ -1,10 +1,10 @@
 <script lang="ts">
-  import type { FlowRunContractStepInput, UploadedFile } from "@intric/intric-js";
+  import type { FlowRunContractStepInput, UploadedFile } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconInfo } from "@intric/icons/info";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import {

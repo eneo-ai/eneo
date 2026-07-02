@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.database import sessionmanager
-from intric.database.tables.flow_tables import (
+from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -19,9 +19,9 @@ from intric.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
 )
-from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
-from intric.flows.domain.flow import (
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
+from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
     FlowRunStatus,
@@ -29,31 +29,31 @@ from intric.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.domain.review_checkpoint_exceptions import (
+from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointStepResultIncompleteError,
     FlowReviewMultipleActiveCheckpointsError,
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_factory import FlowFactory
-from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.published_definition import build_published_definition_json
-from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
-from intric.flows.runtime.flow_run_actor import FlowRunActor
-from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
-from intric.main.container.container import Container
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.published_definition import build_published_definition_json
+from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.main.container.container import Container
+from eneo.main.exceptions import TypedIOValidationException
 
 
 class _ModelKwargs:

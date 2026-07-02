@@ -1,4 +1,4 @@
-import type { UploadedFile } from "@intric/intric-js";
+import type { UploadedFile } from "@eneo/eneo-js";
 import type { SessionState } from "$lib/features/audio/recordingSession";
 import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import {

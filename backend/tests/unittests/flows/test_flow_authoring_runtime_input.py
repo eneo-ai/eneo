@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from intric.flows.domain.flow import FlowPersistedJsonObject
-from intric.flows.flow_authoring_runtime_input import (
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.flow_authoring_runtime_input import (
     resolve_runtime_input_config,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,

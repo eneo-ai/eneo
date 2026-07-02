@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import WebsiteActions from "./WebsiteActions.svelte";
   import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
@@ -8,8 +8,8 @@
   import SelectionCellCheckbox from "./SelectionCellCheckbox.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived, writable } from "svelte/store";
-  import type { WebsiteSparse } from "@intric/intric-js";
-  import { IconWeb } from "@intric/icons/web";
+  import type { WebsiteSparse } from "@eneo/eneo-js";
+  import { IconWeb } from "@eneo/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { m } from "$lib/paraglide/messages";
 

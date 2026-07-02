@@ -1,8 +1,8 @@
 <script lang="ts">
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import type { FlowSparse } from "@intric/intric-js";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import type { FlowSparse } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";

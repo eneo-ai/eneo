@@ -7,12 +7,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from intric.flows.application.flow_run_rerun_service import FlowRunRerunService
-from intric.flows.domain.flow import FlowRunStatus, RerunStepInputOverride
-from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
-from intric.flows.domain.rerun_exceptions import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_rerun_service import FlowRunRerunService
+from eneo.flows.domain.flow import FlowRunStatus, RerunStepInputOverride
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunInvalidTransitionError,
     FlowRunRerunMissingCurrentResultsError,
     FlowRunRerunRootStepIncompleteError,
@@ -20,25 +20,25 @@ from intric.flows.domain.rerun_exceptions import (
     FlowRunRerunStepInputsInvalidError,
     FlowRunRerunStepNotFoundError,
 )
-from intric.flows.domain.run_step_input_exceptions import (
+from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
-from intric.flows.domain.runtime_invariant_exceptions import (
+from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from intric.flows.enums import RerunDependencyKind
-from intric.flows.flow_run_input_envelope import (
+from eneo.flows.enums import RerunDependencyKind
+from eneo.flows.flow_run_input_envelope import (
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
     RerunInputOverride,
 )
-from intric.flows.flow_run_rerun_request import (
+from eneo.flows.flow_run_rerun_request import (
     FlowRunRerunRequestFingerprintInput,
     build_rerun_request_fingerprint,
 )
-from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.published_definition import FLOW_PUBLISHED_FORM_SCHEMA_INVALID
-from intric.main.exceptions import (
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.published_definition import FLOW_PUBLISHED_FORM_SCHEMA_INVALID
+from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,

@@ -10,7 +10,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from intric.integration.infrastructure.auth_service.sharepoint_auth_service import (
+from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
 
@@ -63,7 +63,7 @@ class TestGetCredentials:
         tenant_id = uuid4()
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -98,7 +98,7 @@ class TestGetCredentials:
         tenant_id = uuid4()
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = None
@@ -119,7 +119,7 @@ class TestGetCredentials:
         tenant_id = uuid4()
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = None
@@ -139,7 +139,7 @@ class TestGenAuthUrl:
         state = "random-state-token"
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -157,7 +157,7 @@ class TestGenAuthUrl:
         tenant_id = uuid4()
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -179,7 +179,7 @@ class TestGenAuthUrl:
         state = "my-unique-state-123"
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -195,7 +195,7 @@ class TestGenAuthUrl:
         tenant_id = uuid4()
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -219,7 +219,7 @@ class TestExchangeToken:
         mock_response.json.return_value = mock_token_response
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -252,7 +252,7 @@ class TestExchangeToken:
         mock_response.json.return_value = mock_token_response
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -291,7 +291,7 @@ class TestExchangeToken:
         )
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -324,7 +324,7 @@ class TestRefreshAccessToken:
         mock_response.json.return_value = mock_token_response
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -355,7 +355,7 @@ class TestRefreshAccessToken:
         mock_response.json.return_value = mock_token_response
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"
@@ -390,7 +390,7 @@ class TestRefreshAccessToken:
         )
 
         with patch(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.oauth_callback_url = "https://example.com/callback"

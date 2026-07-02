@@ -9,8 +9,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.database.tables.flow_tables import BuilderPlans
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.database.tables.flow_tables import BuilderPlans
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
@@ -18,14 +18,14 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     LintWarning,
     PlanStatus,
 )
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_repo import (
+from eneo.flows.ai_builder.ai_builder_repo import (
     _plan_from_row,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -35,7 +35,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,

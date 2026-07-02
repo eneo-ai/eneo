@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { toast } from "$lib/components/toast";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { resolve } from "$app/paths";
 
   let { data } = $props();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let fileMaxSizeBytes = $state("");
   let audioMaxSizeBytes = $state("");
@@ -170,10 +170,8 @@
       }
 
       const [updatedInputLimits, updatedRuntimePolicy] = await Promise.all([
-        shouldUpdateInputLimits ? intric.settings.updateFlowInputLimits(inputLimitsPatch) : null,
-        shouldUpdateRuntimePolicy
-          ? intric.settings.updateFlowRuntimePolicy(runtimePolicyPatch)
-          : null
+        shouldUpdateInputLimits ? eneo.settings.updateFlowInputLimits(inputLimitsPatch) : null,
+        shouldUpdateRuntimePolicy ? eneo.settings.updateFlowRuntimePolicy(runtimePolicyPatch) : null
       ]);
 
       if (updatedInputLimits) {

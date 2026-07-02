@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
-  import { IconTrash } from "@intric/icons/trash";
+  import type { FlowStep } from "@eneo/eneo-js";
+  import { IconTrash } from "@eneo/icons/trash";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";

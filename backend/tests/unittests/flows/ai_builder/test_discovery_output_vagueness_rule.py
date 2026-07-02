@@ -10,13 +10,13 @@ build words without task intent should not fire it.
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     looks_like_output_is_vague,
 )
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 

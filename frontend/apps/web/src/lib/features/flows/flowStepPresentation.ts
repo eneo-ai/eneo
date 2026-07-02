@@ -1,4 +1,4 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 import type { SelectableInputTypeOption } from "./flowStepTypes";
 
 type InputSource = FlowStep["input_source"];
@@ -25,9 +25,7 @@ export type FlowDownstreamKind = "text" | "text_and_structured";
 export type FlowEdgePayloadKind = "flow_input" | "text" | "structured" | "none";
 
 export type FlowRuntimeFileOriginKind =
-  | "flow_input_runtime"
-  | "no_runtime_upload"
-  | "static_step_context";
+  "flow_input_runtime" | "no_runtime_upload" | "static_step_context";
 
 export type FlowStepSummaryModel = {
   sourceKind: FlowSourceHintKind;

@@ -3,17 +3,17 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
     ErrorCodes,
     FileTooLargeException,
 )
-from intric.server.exception_handlers import (
+from eneo.server.exception_handlers import (
     add_exception_handlers,
     is_active_display_name_violation,
 )
-from intric.server.main import get_application
+from eneo.server.main import get_application
 
 
 class _FakeOrig:
@@ -81,7 +81,7 @@ def test_active_nickname_violation_maps_to_409():
 
     response = TestClient(app).get("/collide")
     assert response.status_code == 409
-    assert response.json()["intric_error_code"] == ErrorCodes.NAME_COLLISION
+    assert response.json()["eneo_error_code"] == ErrorCodes.NAME_COLLISION
 
 
 def test_file_too_large_exception_includes_structured_details():
@@ -117,7 +117,7 @@ def test_exception_handler_returns_file_size_details_for_413():
 
     assert response.status_code == 413
     body = response.json()
-    assert body["intric_error_code"] == ErrorCodes.FILE_TOO_LARGE
+    assert body["eneo_error_code"] == ErrorCodes.FILE_TOO_LARGE
     assert body["details"]["file_size_bytes"] == 2_048
     assert body["details"]["max_size_bytes"] == 1_024
     # Internal config (setting_name) should not leak to clients
@@ -138,7 +138,7 @@ def test_exception_handler_omits_details_for_exceptions_without_details():
     assert response.status_code == 400
     body = response.json()
     assert body["message"] == "Bad input"
-    assert body["intric_error_code"] == ErrorCodes.BAD_REQUEST
+    assert body["eneo_error_code"] == ErrorCodes.BAD_REQUEST
     assert "details" not in body
 
 
@@ -160,7 +160,7 @@ def test_exception_handler_returns_conflict_contract():
     assert response.status_code == 409
     body = response.json()
     assert body["message"] == "Runtime file is already attached to a flow run."
-    assert body["intric_error_code"] == ErrorCodes.CONFLICT
+    assert body["eneo_error_code"] == ErrorCodes.CONFLICT
     assert body["code"] == "flow_runtime_file_attached"
     assert body["context"] == {"file_id": "file-1"}
 
@@ -182,7 +182,7 @@ def test_request_validation_error_returns_sanitized_general_error():
     assert response.status_code == 422
     body = response.json()
     assert body["message"] == "Request validation failed."
-    assert body["intric_error_code"] == ErrorCodes.VALIDATION_ERROR
+    assert body["eneo_error_code"] == ErrorCodes.VALIDATION_ERROR
     assert body["code"] == "request_validation_error"
     assert body["request_id"] == "request-validation-id"
     assert "detail" not in body
@@ -209,7 +209,7 @@ def test_main_app_request_validation_error_uses_general_error_for_non_flow_route
     assert response.status_code == 422
     body = response.json()
     assert body["message"] == "Request validation failed."
-    assert body["intric_error_code"] == ErrorCodes.VALIDATION_ERROR
+    assert body["eneo_error_code"] == ErrorCodes.VALIDATION_ERROR
     assert body["code"] == "request_validation_error"
     assert body["request_id"] == "crawler-validation-id"
     assert body["details"]["errors"][0]["location"] == ["query", "include_all"]

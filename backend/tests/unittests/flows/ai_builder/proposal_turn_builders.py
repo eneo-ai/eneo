@@ -4,32 +4,32 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     PlanStatus,
 )
-from intric.flows.ai_builder.ai_builder_edit_compiler import EditCompilationResult
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+from eneo.flows.ai_builder.ai_builder_edit_compiler import EditCompilationResult
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_event_models import AIBuilderPlanEvent
-from intric.flows.ai_builder.ai_builder_events import build_plan_event
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderPlanEvent
+from eneo.flows.ai_builder.ai_builder_events import build_plan_event
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ProposalTurnContext,
     ToolRetryInvocation,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,

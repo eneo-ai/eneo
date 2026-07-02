@@ -3,7 +3,7 @@ import type {
   GroupSparse,
   IntegrationKnowledge,
   WebsiteSparse
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 
 export type AvailableKnowledge = {
   [id: string]: {
@@ -119,12 +119,9 @@ export function getAvailableKnowledge(
       // Now that the model is set up we can exit, same goes for websites below
       if (!isCompatible) return;
       if (selectedIntegerationKnowledgeIds.includes(integrationKnowledge.id)) return;
-      if (
-        !(
-          matchesFilter(integrationKnowledge.name) ||
-          matchesFilter(integrationKnowledge.wrapper_name)
-        )
-      )
+      if (!(
+        matchesFilter(integrationKnowledge.name) || matchesFilter(integrationKnowledge.wrapper_name)
+      ))
         return;
 
       availableKnowledge[integrationKnowledge.embedding_model.id].integrationKnowledge.push(

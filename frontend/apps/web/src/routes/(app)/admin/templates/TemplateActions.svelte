@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { components } from "@intric/intric-js";
-  import { Button, Dropdown } from "@intric/ui";
+  import type { components } from "@eneo/eneo-js";
+  import { Button, Dropdown } from "@eneo/ui";
   import {
     MoreVertical,
     Edit,
@@ -20,7 +20,7 @@
   import { writable } from "svelte/store";
   import { goto, invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import TemplateDeleteDialog from "$lib/features/templates/components/admin/TemplateDeleteDialog.svelte";
   import TemplateRollbackDialog from "$lib/features/templates/components/admin/TemplateRollbackDialog.svelte";
 
@@ -30,7 +30,7 @@
 
   let { template, type }: { template: Template; type: "assistant" | "app" } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   let isDeleteOpen = writable(false);
   let isRollbackOpen = writable(false);
 
@@ -43,9 +43,9 @@
       const newDefaultValue = !template.is_default;
 
       if (type === "assistant") {
-        await intric.templates.admin.toggleDefaultAssistant(template.id, newDefaultValue);
+        await eneo.templates.admin.toggleDefaultAssistant(template.id, newDefaultValue);
       } else {
-        await intric.templates.admin.toggleDefaultApp(template.id, newDefaultValue);
+        await eneo.templates.admin.toggleDefaultApp(template.id, newDefaultValue);
       }
 
       template.is_default = newDefaultValue;

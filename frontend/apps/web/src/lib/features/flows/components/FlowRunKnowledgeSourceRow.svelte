@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FlowRunDebugRagReference, Intric } from "@intric/intric-js";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import type { FlowRunDebugRagReference, Eneo } from "@eneo/eneo-js";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -15,11 +15,11 @@
   let {
     reference,
     index,
-    intric
+    eneo
   }: {
     reference: FlowRunDebugRagReference;
     index: number;
-    intric: Intric;
+    eneo: Eneo;
   } = $props();
 
   let counts = $derived(getKnowledgeReferenceCounts(reference));
@@ -43,7 +43,7 @@
 </script>
 
 <FlowChunkViewer
-  {intric}
+  {eneo}
   infoBlobId={reference.id}
   title={reference.title ?? null}
   sourceIdShort={reference.id_short ?? reference.id.slice(0, 8)}

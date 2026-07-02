@@ -4,7 +4,7 @@
     "chart-green",
     "chart-moss",
     "chart-red",
-    "chart-intric",
+    "chart-eneo",
     "chart-yellow",
     "chart-blue",
     "accent-default"
@@ -30,8 +30,8 @@
 </script>
 
 <script lang="ts">
-  import { Tooltip } from "@intric/ui";
-  import { IconInfo } from "@intric/icons/info";
+  import { Tooltip } from "@eneo/ui";
+  import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
 
   type DisplayModel = {

@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder import ai_builder_slot_classifier as classifier
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     classify_slots,
     parse_slot_classification_response,
     slot_classification_prompt_hash,

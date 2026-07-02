@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.infrastructure.flow_schema_docs_exporter import (
+from eneo.flows.infrastructure.flow_schema_docs_exporter import (
     FLOW_DEVELOPER_SCHEMA_DOCS_OUTPUT_PATH,
     write_flow_schema_docs_page,
 )

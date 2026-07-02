@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Intric, FlowStep } from "@intric/intric-js";
+  import type { Eneo, FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -8,13 +8,13 @@
     flowId,
     publishedVersion,
     currentStep,
-    intric,
+    eneo,
     onRestore
   }: {
     flowId: string;
     publishedVersion: number | null | undefined;
     currentStep: FlowStep;
-    intric: Intric;
+    eneo: Eneo;
     onRestore?: (prompt: string) => void;
   } = $props();
 
@@ -26,7 +26,7 @@
     if (!publishedVersion || !flowId) return;
     loading = true;
     try {
-      const graph = await intric.flows.graph({ id: flowId });
+      const graph = await eneo.flows.graph({ id: flowId });
       const matchingNode = graph.nodes?.find(
         (n: any) => n.step_order === currentStep.step_order && n.type === "llm"
       );

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_signal_confidence import (
+from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     has_low_confidence_signals,
     high_confidence_signals,
     score_conversation_signals,

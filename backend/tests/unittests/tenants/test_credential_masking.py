@@ -12,7 +12,7 @@ used by the tenant repository and API responses.
 
 import pytest
 
-from intric.tenants.masking import mask_api_key
+from eneo.tenants.masking import mask_api_key
 
 
 def mask_credentials(credentials: dict) -> dict[str, str]:

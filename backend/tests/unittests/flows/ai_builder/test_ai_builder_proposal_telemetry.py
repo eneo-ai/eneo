@@ -10,10 +10,10 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     APPLY_TELEMETRY_LOG_KEY,
     APPLY_TELEMETRY_SCHEMA_VERSION,
     PROPOSAL_TELEMETRY_LOG_KEY,
@@ -30,14 +30,14 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.application.flow_authoring_command import FlowAuthoringPreview
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_usage
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _FAILURE_KIND_SOURCE_FILES = (
-    _REPO_ROOT / "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py",
-    _REPO_ROOT / "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py",
+    _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py",
+    _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_edit_proposal.py",
 )
 
 

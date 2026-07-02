@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
 )
-from intric.flows.ai_builder.ai_builder_validation_common import (
+from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
 )
-from intric.flows.ai_builder.ai_builder_validator import (
+from eneo.flows.ai_builder.ai_builder_validator import (
     _BUILDER_IGNORED_FLOW_VALIDATION_CODES,
     _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE,
     _CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION,
     validate_spec,
 )
-from intric.flows.domain.flow_step_validation import FlowGraphIssueCode
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

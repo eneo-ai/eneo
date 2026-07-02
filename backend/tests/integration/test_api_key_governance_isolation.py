@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.config import get_settings
+from eneo.main.config import get_settings
 
 
 @pytest.fixture

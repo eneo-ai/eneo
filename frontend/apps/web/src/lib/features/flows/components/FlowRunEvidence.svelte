@@ -3,9 +3,9 @@
     FlowRunEvidenceWithTypedSteps,
     FlowRunResultFile,
     FlowRunStep,
-    Intric
-  } from "@intric/intric-js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+    Eneo
+  } from "@eneo/eneo-js";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { onMount } from "svelte";
   import { toast } from "$lib/components/toast";
   import {
@@ -38,7 +38,7 @@
     runId: string;
     flowId: string;
     sensitiveCareDataFlow?: boolean;
-    eneo: Intric;
+    eneo: Eneo;
     runStatus: string;
     fallbackSnapshot?: FlowRunProgressSnapshot | null;
   } = $props();
@@ -139,7 +139,7 @@
 
   async function downloadCanonicalEvidenceExport() {
     try {
-      await downloadEvidenceExport({ intric: eneo, flowId, runId });
+      await downloadEvidenceExport({ eneo: eneo, flowId, runId });
     } catch (error) {
       console.error("Could not download canonical evidence export", error);
       toast.error(m.flow_run_download_evidence_export_failed());
@@ -331,7 +331,7 @@
         expanded={expandedSteps.includes(result.step_order)}
         panelId={getStepPanelId(result.step_order)}
         isPowerUser={$mode === "power_user"}
-        intric={eneo}
+        {eneo}
         onToggle={toggleStep}
         onCopyPayload={copyPayload}
         onDownloadArtifact={downloadArtifact}

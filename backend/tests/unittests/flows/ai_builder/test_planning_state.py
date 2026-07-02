@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ARCHITECTURE_HASH_HEX_LENGTH,
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -28,7 +28,7 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.enums import AIBuilderInputType
+from eneo.flows.enums import AIBuilderInputType
 
 _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 

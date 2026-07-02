@@ -5,26 +5,26 @@
 -->
 
 <script lang="ts">
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog } from "@intric/ui";
-  import type { UserGroup } from "@intric/intric-js";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog } from "@eneo/ui";
+  import type { UserGroup } from "@eneo/eneo-js";
   import UserGroupEditor from "./UserGroupEditor.svelte";
   import UserGroupMembersEditor from "./UserGroupMembersEditor.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   export let userGroup: UserGroup;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let isDeleting = false;
   let showDeleteDialog: Dialog.OpenState;
   async function deleteResource() {
     isDeleting = true;
     try {
-      await intric.userGroups.delete(userGroup);
+      await eneo.userGroups.delete(userGroup);
       invalidate("admin:user-groups:load");
       $showDeleteDialog = false;
     } catch (e) {

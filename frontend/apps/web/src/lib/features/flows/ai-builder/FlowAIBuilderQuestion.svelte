@@ -222,7 +222,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .question-panel {
     @apply mt-3 flex flex-col rounded-xl border;

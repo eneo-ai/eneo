@@ -5,14 +5,14 @@
 -->
 
 <script lang="ts">
-  import { IconApp } from "@intric/icons/app";
-  import { IconAssistants } from "@intric/icons/assistants";
-  import { IconCog } from "@intric/icons/cog";
-  import { IconKnowledge } from "@intric/icons/knowledge";
-  import { IconOverview } from "@intric/icons/overview";
-  import { IconServices } from "@intric/icons/services";
-  import { IconSpeechBubble } from "@intric/icons/speech-bubble";
-  import { IconWorkflow } from "@intric/icons/workflow";
+  import { IconApp } from "@eneo/icons/app";
+  import { IconAssistants } from "@eneo/icons/assistants";
+  import { IconCog } from "@eneo/icons/cog";
+  import { IconKnowledge } from "@eneo/icons/knowledge";
+  import { IconOverview } from "@eneo/icons/overview";
+  import { IconServices } from "@eneo/icons/services";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
+  import { IconWorkflow } from "@eneo/icons/workflow";
   import { page } from "$app/stores";
   import { getAppContext } from "$lib/core/AppContext";
   import { Navigation } from "$lib/components/layout";

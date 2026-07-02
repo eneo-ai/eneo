@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.files.transcriber import Transcriber
+from eneo.files.transcriber import Transcriber
 
 
 @pytest.mark.asyncio
@@ -141,7 +141,7 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
     async def fake_to_wav(_filepath):
         yield wav_file
 
-    monkeypatch.setattr("intric.files.transcriber.audio.to_wav", fake_to_wav)
+    monkeypatch.setattr("eneo.files.transcriber.audio.to_wav", fake_to_wav)
 
     result = await transcriber.transcribe_from_filepath(
         filepath=tmp_path / "input.wav",

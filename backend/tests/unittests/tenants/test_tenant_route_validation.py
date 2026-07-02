@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from intric.tenants.presentation.tenant_federation_router import (
+from eneo.tenants.presentation.tenant_federation_router import (
     PatchFederationRequest,
 )
 

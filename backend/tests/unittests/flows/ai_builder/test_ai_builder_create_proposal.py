@@ -4,42 +4,42 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_architecture_commit import (
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
-from intric.flows.ai_builder.ai_builder_architecture_errors import (
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_create_proposal import (
+from eneo.flows.ai_builder.ai_builder_create_proposal import (
     process_create_intent_arguments,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_mcp_intent import (
+from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
 )
-from intric.flows.ai_builder.ai_builder_proposal_policy import (
+from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     format_create_contextual_quality_feedback,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     DETAILED_CASE_METADATA,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -411,7 +411,10 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
             "flow_name": "Duplicate names",
             "plan_rationale": "Two semantic steps accidentally share a name.",
             "steps": [
-                {"name": "Förbered PDF-innehåll", "instructions": "Sammanfatta texten."},
+                {
+                    "name": "Förbered PDF-innehåll",
+                    "instructions": "Sammanfatta texten.",
+                },
                 {"name": "Förbered PDF-innehåll", "instructions": "Skriv slutrapport."},
             ],
         },

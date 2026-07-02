@@ -2,22 +2,22 @@ from __future__ import annotations
 
 import io
 import sys
-from types import SimpleNamespace
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 from docx import Document
 from docx.oxml.ns import qn
 
-from intric.flows.runtime.docx_template_runtime import (
-    _iter_section_headers,
+from eneo.flows.runtime.docx_template_runtime import (
     _iter_section_footers,
+    _iter_section_headers,
     extract_docx_template_text_preview,
     extract_docx_text,
     inspect_docx_template_bytes,
     render_docx_template,
 )
-from intric.main.exceptions import FileNotSupportedException, TypedIOValidationException
+from eneo.main.exceptions import FileNotSupportedException, TypedIOValidationException
 
 
 def _build_template_bytes() -> bytes:
@@ -42,8 +42,12 @@ def _build_template_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def test_inspect_docx_template_bytes_finds_placeholders_across_document_regions() -> None:
-    placeholders = inspect_docx_template_bytes(_build_template_bytes(), filename="rapport.docx")
+def test_inspect_docx_template_bytes_finds_placeholders_across_document_regions() -> (
+    None
+):
+    placeholders = inspect_docx_template_bytes(
+        _build_template_bytes(), filename="rapport.docx"
+    )
 
     assert {(item["name"], item["location"]) for item in placeholders} >= {
         ("title", "body"),
@@ -69,10 +73,17 @@ def test_render_docx_template_replaces_split_run_placeholders() -> None:
 
     rendered = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
-    header_text = "\n".join(paragraph.text for paragraph in rendered.sections[0].header.paragraphs)
-    footer_text = "\n".join(paragraph.text for paragraph in rendered.sections[0].footer.paragraphs)
+    header_text = "\n".join(
+        paragraph.text for paragraph in rendered.sections[0].header.paragraphs
+    )
+    footer_text = "\n".join(
+        paragraph.text for paragraph in rendered.sections[0].footer.paragraphs
+    )
 
-    assert mimetype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert (
+        mimetype
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
     assert filename == "step_11_output.docx"
     assert "Demokratiskt deltagande" in all_text
     assert "Inledningstext" in all_text
@@ -81,7 +92,9 @@ def test_render_docx_template_replaces_split_run_placeholders() -> None:
     assert "Version 3" in footer_text
 
 
-def test_render_docx_template_supports_flat_context_for_dotted_placeholder_names() -> None:
+def test_render_docx_template_supports_flat_context_for_dotted_placeholder_names() -> (
+    None
+):
     doc = Document()
     doc.add_paragraph("{{step_1.output.text}}")
     buffer = io.BytesIO()
@@ -94,7 +107,9 @@ def test_render_docx_template_supports_flat_context_for_dotted_placeholder_names
     )
 
     rendered = Document(io.BytesIO(blob))
-    assert "Dotted binding rendered" in "\n".join(paragraph.text for paragraph in rendered.paragraphs)
+    assert "Dotted binding rendered" in "\n".join(
+        paragraph.text for paragraph in rendered.paragraphs
+    )
 
 
 def test_render_docx_template_supports_placeholders_with_spaces() -> None:
@@ -131,7 +146,9 @@ def test_inspect_docx_template_bytes_rejects_macro_enabled_payloads() -> None:
 
 
 def test_render_docx_template_rejects_missing_context_placeholders() -> None:
-    with pytest.raises(TypedIOValidationException, match="Unresolved template placeholders"):
+    with pytest.raises(
+        TypedIOValidationException, match="Unresolved template placeholders"
+    ):
         render_docx_template(
             template_bytes=_build_template_bytes(),
             context={"title": "Only title"},
@@ -146,7 +163,9 @@ def test_extract_docx_template_text_preview_returns_readable_text() -> None:
     assert "Rapport för {{author}}" in preview
 
 
-def test_render_docx_template_wraps_undefined_render_errors_with_actionable_message(monkeypatch) -> None:
+def test_render_docx_template_wraps_undefined_render_errors_with_actionable_message(
+    monkeypatch,
+) -> None:
     class _FakeDocxTemplate:
         def __init__(self, _path: str) -> None:
             pass
@@ -157,9 +176,13 @@ def test_render_docx_template_wraps_undefined_render_errors_with_actionable_mess
         def save(self, _path: str) -> None:
             raise AssertionError("save should not be reached")
 
-    monkeypatch.setitem(sys.modules, "docxtpl", SimpleNamespace(DocxTemplate=_FakeDocxTemplate))
+    monkeypatch.setitem(
+        sys.modules, "docxtpl", SimpleNamespace(DocxTemplate=_FakeDocxTemplate)
+    )
 
-    with pytest.raises(TypedIOValidationException, match="written directly in the DOCX"):
+    with pytest.raises(
+        TypedIOValidationException, match="written directly in the DOCX"
+    ):
         render_docx_template(
             template_bytes=_build_template_bytes(),
             context={
@@ -269,6 +292,7 @@ def test_iter_section_headers_skips_corrupted_header_gracefully() -> None:
 
     # Manually inject a header reference into the XML without a real part
     from lxml import etree
+
     ref = etree.SubElement(
         section._sectPr,
         qn("w:headerReference"),
@@ -298,6 +322,7 @@ def test_iter_section_headers_ignores_unknown_type() -> None:
     section = doc.sections[0]
 
     from lxml import etree
+
     ref = etree.SubElement(
         section._sectPr,
         qn("w:headerReference"),

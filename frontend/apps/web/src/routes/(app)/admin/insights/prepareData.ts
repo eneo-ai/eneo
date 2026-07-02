@@ -4,8 +4,8 @@
     Licensed under the MIT License.
 */
 
-import type { AnalyticsAggregatedData } from "@intric/intric-js";
-import type { Chart } from "@intric/ui";
+import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
+import type { Chart } from "@eneo/ui";
 import {
   fromAbsolute,
   getDayOfWeek,

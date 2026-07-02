@@ -4,7 +4,7 @@ import { PAGINATION } from "$lib/core/constants";
 import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerType";
 
 export const load: PageLoad = async (event) => {
-  const { intric, currentSpace } = await event.parent();
+  const { eneo, currentSpace } = await event.parent();
   const partnerType = event.url.searchParams.get("type") ?? "default-assistant";
 
   if (!isValidChatPartnerType(partnerType)) {
@@ -32,11 +32,11 @@ export const load: PageLoad = async (event) => {
   const getPartner = async () => {
     switch (partnerType) {
       case "assistant":
-        return intric.assistants.get({
+        return eneo.assistants.get({
           id: partnerId
         });
       case "group-chat":
-        return intric.groupChats.get({
+        return eneo.groupChats.get({
           id: partnerId
         });
       // instead of case "default-assistant"
@@ -50,7 +50,7 @@ export const load: PageLoad = async (event) => {
 
   const loadSession = async () => {
     if (accessDenied || !selectedSessionId) return null;
-    return intric.conversations.get({ id: selectedSessionId });
+    return eneo.conversations.get({ id: selectedSessionId });
   };
 
   const listSessions = async () => {
@@ -58,7 +58,7 @@ export const load: PageLoad = async (event) => {
       return { items: [], total_count: 0, count: 0, next_cursor: null };
     }
     return (
-      intric.conversations
+      eneo.conversations
         .list({
           chatPartner: { id: partnerId, type: partnerType },
           pagination: { limit: PAGINATION.PAGE_SIZE }

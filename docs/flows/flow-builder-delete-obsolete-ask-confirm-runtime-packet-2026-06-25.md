@@ -12,12 +12,12 @@
 
 | Runtime path | Tool schemas exposed to model | Can model emit ask/confirm? | Current owner | Evidence |
 | --- | --- | ---: | --- | --- |
-| Server-owned canonical question | None | No | `dispatch_server_decision` | `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py:90` |
-| Server-owned requirements summary | None | No | `dispatch_server_decision` | `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py:90` |
-| Active proposal generation | `propose_flow` only | No | `ProposalSubmissionOwner` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:162`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:266` |
-| Proposal processor | No generic tool dispatch | No | `AIBuilderProposalProcessor.propose_plan` delegates to active proposal submission | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:87`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:130` |
-| MCP preflight clarification | None; server-persisted question | No | `_mcp_preflight_events_if_needed` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:153` |
-| Historical tool metadata | Constants only | No live dispatch | Conversation metadata/UI compatibility | `backend/src/intric/flows/ai_builder/ai_builder_tools.py:26` |
+| Server-owned canonical question | None | No | `dispatch_server_decision` | `backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py:90` |
+| Server-owned requirements summary | None | No | `dispatch_server_decision` | `backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py:90` |
+| Active proposal generation | `propose_flow` only | No | `ProposalSubmissionOwner` | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:162`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:266` |
+| Proposal processor | No generic tool dispatch | No | `AIBuilderProposalProcessor.propose_plan` delegates to active proposal submission | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py:87`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py:130` |
+| MCP preflight clarification | None; server-persisted question | No | `_mcp_preflight_events_if_needed` | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py:153` |
+| Historical tool metadata | Constants only | No live dispatch | Conversation metadata/UI compatibility | `backend/src/eneo/flows/ai_builder/ai_builder_tools.py:26` |
 
 Guard test: `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869`
 asserts the obsolete runtime paths stay deleted, the processor does not define
@@ -28,8 +28,8 @@ production source does not import the obsolete modules.
 
 | Deleted / shrunk item | Why it was removed |
 | --- | --- |
-| `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py` | The model no longer receives `ask_structured_question`; server decisions own canonical questions. |
-| `backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py` | The model no longer receives `confirm_requirements`; server decisions own requirements confirmation. |
+| `backend/src/eneo/flows/ai_builder/ai_builder_question_recovery.py` | The model no longer receives `ask_structured_question`; server decisions own canonical questions. |
+| `backend/src/eneo/flows/ai_builder/ai_builder_confirm_requirements.py` | The model no longer receives `confirm_requirements`; server decisions own requirements confirmation. |
 | Ask/confirm schema builders and grouped schema builders in `ai_builder_tools.py` | Active proposal turns expose only `propose_flow`. |
 | Ask/confirm parsers in `ai_builder_tool_parsing.py` | There is no live model tool payload to parse. |
 | `AIBuilderProposalProcessor.handle_tool_call(...)` and ask/confirm dispatch helpers | Generic tool dispatch was only preserving obsolete model actions. |
@@ -90,7 +90,7 @@ Flow proposal payload.
 | --- | --- |
 | `docker exec -u vscode -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && uv run pytest tests/unittests/flows/ai_builder -q'` | `2318 passed` |
 | `docker exec -u vscode -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q'` | `51 passed` |
-| `docker exec -u vscode -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py'` | Passed |
+| `docker exec -u vscode -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && uv run ruff check src/eneo/flows/ai_builder tests/unittests/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py'` | Passed |
 | `ENEO_DEVCONTAINER_NAME=eneo-flows-clean_devcontainer-eneo-1 backend/scripts/run_pyright_in_devcontainer.sh ...` for changed AI Builder modules and focused tests | `0 errors, 0 warnings, 0 informations` |
 | `docker exec -u vscode -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && uv run lint-imports --no-cache'` | `Contracts: 7 kept, 0 broken` |
 

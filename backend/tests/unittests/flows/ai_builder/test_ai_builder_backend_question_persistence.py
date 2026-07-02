@@ -6,15 +6,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
     persist_backend_question,
 )
-from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )

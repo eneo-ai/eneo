@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.files.file_size_service import FileSizeService
-from intric.jobs.task_service import TaskService
-from intric.main.exceptions import FileNotSupportedException
+from eneo.files.file_size_service import FileSizeService
+from eneo.jobs.task_service import TaskService
+from eneo.main.exceptions import FileNotSupportedException
 from tests.fixtures import TEST_USER
 
 
@@ -19,7 +19,7 @@ def tmp_upload_dir(tmp_path):
 def file_size_service(tmp_upload_dir, monkeypatch):
     from types import SimpleNamespace
 
-    from intric.files import file_size_service as fss_module
+    from eneo.files import file_size_service as fss_module
 
     settings = SimpleNamespace(upload_tmp_dir=tmp_upload_dir)
     monkeypatch.setattr(fss_module, "get_settings", lambda: settings)
@@ -113,12 +113,12 @@ def test_get_task_type_unknown_mime_rejected():
 
 
 def test_get_task_type_text_returns_upload_task():
-    from intric.jobs.job_models import Task
+    from eneo.jobs.job_models import Task
 
     assert TaskService.get_task_type("text/plain") is Task.UPLOAD_FILE
 
 
 def test_get_task_type_audio_returns_transcription_task():
-    from intric.jobs.job_models import Task
+    from eneo.jobs.job_models import Task
 
     assert TaskService.get_task_type("audio/wav") is Task.TRANSCRIPTION

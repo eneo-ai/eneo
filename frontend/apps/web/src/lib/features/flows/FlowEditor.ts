@@ -6,13 +6,7 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import {
-  IntricError,
-  type Flow,
-  type FlowStep,
-  type Intric,
-  type PromptSparse
-} from "@intric/intric-js";
+import { EneoError, type Flow, type FlowStep, type Eneo, type PromptSparse } from "@eneo/eneo-js";
 import { derived, get, readonly, writable } from "svelte/store";
 import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
@@ -32,7 +26,7 @@ import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
 
 type FlowEditorInitData = {
   flow: Flow;
-  intric: Intric;
+  eneo: Eneo;
   onUpdateDone?: (flow: Flow) => void;
 };
 
@@ -90,10 +84,10 @@ function stripTemporaryStepId(step: FlowStep): FlowStep {
 const [getFlowEditor, setFlowEditor] = createContext<FlowEditor>("Edit a flow");
 
 function createFlowEditor(data: FlowEditorInitData) {
-  type LoadedAssistant = Awaited<ReturnType<typeof data.intric.flows.assistants.get>>;
+  type LoadedAssistant = Awaited<ReturnType<typeof data.eneo.flows.assistants.get>>;
   const assistantRevision = writable(0);
   const editor = createResourceEditor({
-    intric: data.intric,
+    eneo: data.eneo,
     resource: data.flow,
     defaults: {},
     updateResource: async (resource, changes) => {
@@ -102,7 +96,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       if (cleanChanges.steps && Array.isArray(cleanChanges.steps)) {
         cleanChanges.steps = (cleanChanges.steps as FlowStep[]).map(stripTemporaryStepId);
       }
-      const updated = (await data.intric.flows.update({
+      const updated = (await data.eneo.flows.update({
         flow: resource,
         update: cleanChanges
       })) as Flow;
@@ -308,12 +302,12 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   const assistantSaveManager = new AssistantSaveManager<LoadedAssistant>({
     loadRemote: async (assistantId) =>
-      data.intric.flows.assistants.get({
+      data.eneo.flows.assistants.get({
         id: getFlowId(),
         assistantId
       }),
     saveRemote: async (assistantId, changes) =>
-      data.intric.flows.assistants.update({
+      data.eneo.flows.assistants.update({
         id: getFlowId(),
         assistantId,
         update: changes
@@ -321,7 +315,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     shouldSaveImmediately: shouldSaveAssistantImmediately,
     isDisabled: () => get(isPublished),
     getErrorMessage: (error) =>
-      error instanceof IntricError ? error.getReadableMessage() : "assistant_save_failed",
+      error instanceof EneoError ? error.getReadableMessage() : "assistant_save_failed",
     onValidationError: setAssistantValidationError,
     onSaved: () => {
       assistantRevision.update((value) => value + 1);
@@ -597,7 +591,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     // Background: create hidden assistant
     try {
-      const assistant = await data.intric.flows.assistants.create({
+      const assistant = await data.eneo.flows.assistants.create({
         id: getFlowId(),
         name: defaultStepName
       });
@@ -664,7 +658,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     // Background: create hidden assistant
     try {
-      const assistant = await data.intric.flows.assistants.create({
+      const assistant = await data.eneo.flows.assistants.create({
         id: getFlowId(),
         name: defaultStepName
       });
@@ -750,7 +744,7 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   async function listAssistantPrompts(assistantId: string): Promise<PromptSparse[]> {
-    return data.intric.assistants.listPrompts({ id: assistantId });
+    return data.eneo.assistants.listPrompts({ id: assistantId });
   }
 
   function getStableStepKey(step: FlowStep, index: number): string {

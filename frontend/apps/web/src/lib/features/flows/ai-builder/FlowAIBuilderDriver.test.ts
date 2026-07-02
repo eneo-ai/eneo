@@ -83,7 +83,7 @@ function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderE
     message: "AI Builder failed",
     phase: "client",
     request_id: null,
-    intric_error_code: null,
+    eneo_error_code: null,
     diagnostic_context: null,
     details: {},
     ...overrides
@@ -510,7 +510,7 @@ describe("FlowAIBuilderDriver", () => {
             category: "soft_block",
             phase: "requirements",
             request_id: "req-soft-block",
-            intric_error_code: 9007
+            eneo_error_code: 9007
           })
         });
         handlers.onClose();
@@ -535,7 +535,7 @@ describe("FlowAIBuilderDriver", () => {
             message: "The AI Builder stream failed. Please try again.",
             phase: "router",
             request_id: "req-stream",
-            intric_error_code: 9024
+            eneo_error_code: 9024
           })
         });
         handlers.onClose();
@@ -817,7 +817,7 @@ describe("FlowAIBuilderDriver", () => {
         message: "Flow is published",
         phase: "router",
         request_id: "req-published",
-        intric_error_code: 9007,
+        eneo_error_code: 9007,
         diagnostic_context: { flow_id: "flow-1" },
         details: { published_version: 3 }
       }
@@ -842,7 +842,7 @@ describe("FlowAIBuilderDriver", () => {
       message: "Flow is published",
       phase: "router",
       request_id: "req-published",
-      intric_error_code: 9007,
+      eneo_error_code: 9007,
       diagnostic_context: { flow_id: "flow-1" },
       details: { published_version: 3 }
     });
@@ -879,7 +879,7 @@ describe("FlowAIBuilderDriver", () => {
       message: "Unexpected apply failure",
       phase: "client",
       request_id: null,
-      intric_error_code: null,
+      eneo_error_code: null,
       diagnostic_context: null,
       details: {
         retryable: false,
@@ -915,7 +915,7 @@ describe("FlowAIBuilderDriver", () => {
         message: "Flow is published",
         phase: "router",
         request_id: "req-published",
-        intric_error_code: 9007,
+        eneo_error_code: 9007,
         diagnostic_context: { flow_id: "flow-1" },
         details: { published_version: 3 }
       }
@@ -955,7 +955,7 @@ describe("FlowAIBuilderDriver", () => {
         message: "Flow was modified",
         phase: "router",
         request_id: "req-stale",
-        intric_error_code: 9007,
+        eneo_error_code: 9007,
         details: { latest_revision: 9 }
       }
     };
@@ -976,7 +976,7 @@ describe("FlowAIBuilderDriver", () => {
         message: "Flow is published",
         phase: "router",
         request_id: "req-published",
-        intric_error_code: 9007,
+        eneo_error_code: 9007,
         diagnostic_context: { flow_id: "flow-1" },
         details: { published_version: 3 }
       }
@@ -991,7 +991,7 @@ describe("FlowAIBuilderDriver", () => {
       message: "Flow was modified",
       phase: "client",
       request_id: null,
-      intric_error_code: null,
+      eneo_error_code: null,
       diagnostic_context: null,
       details: {
         flow_id: "flow-1",

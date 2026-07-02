@@ -130,7 +130,7 @@ stateDiagram-v2
 
 </div>
 
-- `backend/src/intric/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.
+- `backend/src/eneo/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.
 - Typed failures go through `_handle_typed_step_failure`; generic exceptions go through `_handle_generic_step_failure`.
 - Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.
 - Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.
@@ -212,12 +212,12 @@ sequenceDiagram
 
 </div>
 
-- `backend/src/intric/flows/api/flow_run_execution_router.py` parses the request and schedules dispatch after commit.
-- `backend/src/intric/flows/application/flow_run_service.py` creates the run and dispatch request.
-- `backend/src/intric/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.
-- `backend/src/intric/flows/infrastructure/flow_run_repo.py` writes queued to running through `mark_running_if_claimable`.
-- `backend/src/intric/flows/runtime/executor.py` runs steps and hands terminal outcomes to the terminalizer.
-- `backend/src/intric/flows/application/flow_run_terminalization.py` writes terminal run state.
+- `backend/src/eneo/flows/api/flow_run_execution_router.py` parses the request and schedules dispatch after commit.
+- `backend/src/eneo/flows/application/flow_run_service.py` creates the run and dispatch request.
+- `backend/src/eneo/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.
+- `backend/src/eneo/flows/infrastructure/flow_run_repo.py` writes queued to running through `mark_running_if_claimable`.
+- `backend/src/eneo/flows/runtime/executor.py` runs steps and hands terminal outcomes to the terminalizer.
+- `backend/src/eneo/flows/application/flow_run_terminalization.py` writes terminal run state.
 
 ### Step execution and handler dispatch
 
@@ -239,9 +239,9 @@ sequenceDiagram
 
 </div>
 
-- `backend/src/intric/flows/runtime/executor.py` owns the step loop and failure handling.
-- `backend/src/intric/flows/runtime/step_execution_runtime.py` owns handler dispatch.
-- `backend/src/intric/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.
+- `backend/src/eneo/flows/runtime/executor.py` owns the step loop and failure handling.
+- `backend/src/eneo/flows/runtime/step_execution_runtime.py` owns handler dispatch.
+- `backend/src/eneo/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.
 
 ### Review checkpoint pause, decision, and resume
 
@@ -267,11 +267,11 @@ sequenceDiagram
 
 </div>
 
-- `backend/src/intric/flows/runtime/executor.py` requests checkpoint opening after a reviewed step completes.
-- `backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py` writes checkpoint states and run await/resume transitions.
-- `backend/src/intric/flows/application/flow_run_review_checkpoint_service.py` validates review API use cases.
-- `backend/src/intric/flows/runtime/tasks.py` executes the queued run after resume dispatch.
-- `backend/src/intric/flows/application/flow_review_expiry_reconciliation.py` expires active checkpoints and cancels the run through the terminalizer; `runtime/tasks.py` owns the `flows.reconcile_review_expiry` task.
+- `backend/src/eneo/flows/runtime/executor.py` requests checkpoint opening after a reviewed step completes.
+- `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` writes checkpoint states and run await/resume transitions.
+- `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` validates review API use cases.
+- `backend/src/eneo/flows/runtime/tasks.py` executes the queued run after resume dispatch.
+- `backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py` expires active checkpoints and cancels the run through the terminalizer; `runtime/tasks.py` owns the `flows.reconcile_review_expiry` task.
 
 ### Rerun with invalidation
 
@@ -296,34 +296,34 @@ sequenceDiagram
 
 </div>
 
-- `backend/src/intric/flows/application/flow_run_rerun_service.py` normalizes request payloads and fingerprinting.
-- `backend/src/intric/flows/flow_run_rerun_graph.py` owns downstream invalidation graph construction.
-- `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py` persists rerun operations and resets the run to queued.
-- `backend/src/intric/flows/runtime/executor.py` links rerun invalidated steps to new attempts.
+- `backend/src/eneo/flows/application/flow_run_rerun_service.py` normalizes request payloads and fingerprinting.
+- `backend/src/eneo/flows/flow_run_rerun_graph.py` owns downstream invalidation graph construction.
+- `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py` persists rerun operations and resets the run to queued.
+- `backend/src/eneo/flows/runtime/executor.py` links rerun invalidated steps to new attempts.
 
 ## Source guards
 
-| Source                                                                       | Guarded lifecycle role                                                                                                         |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `backend/src/intric/flows/enums.py`                                          | Run status vocabulary: run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states. |
-| `backend/src/intric/flows/api/flow_run_execution_router.py`                  | Run API adapter: HTTP request parsing, authorization, response assembly, and dispatch scheduling.                              |
-| `backend/src/intric/flows/application/flow_run_service.py`                   | Run service: run creation and dispatch request construction.                                                                   |
-| `backend/src/intric/flows/infrastructure/flow_run_repo.py`                   | Run repository: run claim, queued-to-running transition, active step-result closure, and open-attempt closure.                 |
-| `backend/src/intric/flows/runtime/tasks.py`                                  | Runtime task: worker entrypoint, actor resolution, tracing, and executor construction.                                         |
-| `backend/src/intric/flows/runtime/executor.py`                               | Executor: step claim, step execution, review pause, rerun attempt linking, and finalization handoff.                           |
-| `backend/src/intric/flows/application/flow_run_terminalization.py`           | Terminalizer: terminal run status writes, run error writes, active checkpoint cancellation, and active rerun closure.          |
-| `backend/src/intric/flows/runtime/run_outcome.py`                            | Run outcome: final run outcome selection from current step results.                                                            |
-| `backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py` | Review checkpoint repository: review checkpoint persistence, state transitions, and run await/resume transitions.              |
-| `backend/src/intric/flows/application/flow_run_review_checkpoint_service.py` | Review checkpoint service: review API use cases and domain-error to API-error translation.                                     |
-| `backend/src/intric/flows/application/flow_review_expiry_reconciliation.py`  | Review expiry reconciler: expired review checkpoint reconciliation and run cancellation handoff.                               |
-| `backend/src/intric/flows/application/flow_run_rerun_service.py`             | Rerun service: rerun request normalization, validation, fingerprinting, and command creation.                                  |
-| `backend/src/intric/flows/flow_run_rerun_graph.py`                           | Rerun graph: downstream invalidation graph construction.                                                                       |
-| `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py`             | Rerun repository: rerun operation persistence, invalidated-step rows, input overrides, and run reset to queued.                |
-| `backend/src/intric/flows/flow_run_step_inputs.py`                           | Step input validation: runtime step input normalization, upload access validation, and binding locks.                          |
-| `backend/src/intric/flows/flow_runtime_file_service.py`                      | Runtime file service: runtime upload validation and reusable upload registration.                                              |
-| `backend/src/intric/flows/flow_runtime_upload_repo.py`                       | Runtime upload repository: runtime upload owner, tenant, flow, and step binding checks.                                        |
-| `backend/src/intric/flows/infrastructure/flow_run_step_input_file_rows.py`   | Step input file rows: relational run step-input file row construction and insertion.                                           |
-| `backend/tests/unittests/flows/test_flow_docs_site_contract.py`              | Committed lifecycle page parity, enum coverage, and source-reference drift guard.                                              |
+| Source                                                                     | Guarded lifecycle role                                                                                                         |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `backend/src/eneo/flows/enums.py`                                          | Run status vocabulary: run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states. |
+| `backend/src/eneo/flows/api/flow_run_execution_router.py`                  | Run API adapter: HTTP request parsing, authorization, response assembly, and dispatch scheduling.                              |
+| `backend/src/eneo/flows/application/flow_run_service.py`                   | Run service: run creation and dispatch request construction.                                                                   |
+| `backend/src/eneo/flows/infrastructure/flow_run_repo.py`                   | Run repository: run claim, queued-to-running transition, active step-result closure, and open-attempt closure.                 |
+| `backend/src/eneo/flows/runtime/tasks.py`                                  | Runtime task: worker entrypoint, actor resolution, tracing, and executor construction.                                         |
+| `backend/src/eneo/flows/runtime/executor.py`                               | Executor: step claim, step execution, review pause, rerun attempt linking, and finalization handoff.                           |
+| `backend/src/eneo/flows/application/flow_run_terminalization.py`           | Terminalizer: terminal run status writes, run error writes, active checkpoint cancellation, and active rerun closure.          |
+| `backend/src/eneo/flows/runtime/run_outcome.py`                            | Run outcome: final run outcome selection from current step results.                                                            |
+| `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` | Review checkpoint repository: review checkpoint persistence, state transitions, and run await/resume transitions.              |
+| `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` | Review checkpoint service: review API use cases and domain-error to API-error translation.                                     |
+| `backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py`  | Review expiry reconciler: expired review checkpoint reconciliation and run cancellation handoff.                               |
+| `backend/src/eneo/flows/application/flow_run_rerun_service.py`             | Rerun service: rerun request normalization, validation, fingerprinting, and command creation.                                  |
+| `backend/src/eneo/flows/flow_run_rerun_graph.py`                           | Rerun graph: downstream invalidation graph construction.                                                                       |
+| `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py`             | Rerun repository: rerun operation persistence, invalidated-step rows, input overrides, and run reset to queued.                |
+| `backend/src/eneo/flows/flow_run_step_inputs.py`                           | Step input validation: runtime step input normalization, upload access validation, and binding locks.                          |
+| `backend/src/eneo/flows/flow_runtime_file_service.py`                      | Runtime file service: runtime upload validation and reusable upload registration.                                              |
+| `backend/src/eneo/flows/flow_runtime_upload_repo.py`                       | Runtime upload repository: runtime upload owner, tenant, flow, and step binding checks.                                        |
+| `backend/src/eneo/flows/infrastructure/flow_run_step_input_file_rows.py`   | Step input file rows: relational run step-input file row construction and insertion.                                           |
+| `backend/tests/unittests/flows/test_flow_docs_site_contract.py`            | Committed lifecycle page parity, enum coverage, and source-reference drift guard.                                              |
 
 ## Related
 

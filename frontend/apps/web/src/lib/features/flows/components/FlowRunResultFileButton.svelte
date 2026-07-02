@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FlowRunResultFile } from "@intric/intric-js";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import type { FlowRunResultFile } from "@eneo/eneo-js";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
 

@@ -5,8 +5,8 @@ import inspect
 import pytest
 from pydantic import Field, ValidationError
 
-from intric.flows.domain.flow import FlowPersistedJsonObject
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     AssistantSpecLocalRefNotPortableError,
     FlowDraftSpecCore,

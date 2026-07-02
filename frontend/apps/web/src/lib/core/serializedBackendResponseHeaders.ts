@@ -1,4 +1,4 @@
-// Keep in sync with backend response headers read by @intric/intric-js errors during SSR.
+// Keep in sync with backend response headers read by @eneo/eneo-js errors during SSR.
 const serializedBackendResponseHeaders = new Set([
   "x-trace-id",
   "x-correlation-id",

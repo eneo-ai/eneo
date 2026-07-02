@@ -1,15 +1,15 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { type Group } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { type Group } from "@eneo/eneo-js";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   export let disabled = false;
   export let collection: Group;
-  const intric = getIntric();
+  const eneo = getEneo();
   const { refreshCurrentSpace } = getSpacesManager();
 
   let title: string = "";
@@ -23,7 +23,7 @@
 
     try {
       isUploading = true;
-      await intric.infoBlobs.create({ group_id: collection.id, text, metadata: { title } });
+      await eneo.infoBlobs.create({ group_id: collection.id, text, metadata: { title } });
       refreshCurrentSpace();
       invalidate("blobs:list");
       $showDialog = false;

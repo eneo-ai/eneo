@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-BACKEND_SRC = Path(__file__).resolve().parents[4] / "src" / "intric"
+BACKEND_SRC = Path(__file__).resolve().parents[4] / "src" / "eneo"
 AI_BUILDER_DIR = BACKEND_SRC / "flows" / "ai_builder"
 
 # Typed save/load for `planning_state_jsonb` lives here. This module is
@@ -73,7 +73,7 @@ def test_save_load_owner_module_exists() -> None:
 
 
 def test_no_raw_jsonb_writes_on_planning_state_jsonb() -> None:
-    """No module in `backend/src/intric/flows/ai_builder/` may use
+    """No module in `backend/src/eneo/flows/ai_builder/` may use
     `jsonb_set`, `jsonb_insert`, or `||` on `planning_state_jsonb`. The
     only write path is `AIBuilderRepository.save_planning_state`, which
     replaces the full snapshot via `UPDATE ... SET planning_state_jsonb = ...`.
@@ -94,7 +94,7 @@ def test_no_raw_jsonb_writes_on_planning_state_jsonb() -> None:
 
 
 def test_no_raw_jsonb_reads_on_planning_state_jsonb() -> None:
-    """No module in `backend/src/intric/flows/ai_builder/` may read
+    """No module in `backend/src/eneo/flows/ai_builder/` may read
     `planning_state_jsonb` via `->` or `->>` path operators. The only
     read path is `AIBuilderRepository.load_planning_state`, which
     returns the typed `PlanningState` Pydantic model.

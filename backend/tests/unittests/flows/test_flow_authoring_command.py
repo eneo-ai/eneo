@@ -7,21 +7,21 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import TypeAdapter
 
-from intric.flows.application.flow_authoring_command import (
+from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftMaterializationResult,
     compile_flow_draft_changeset,
 )
-from intric.flows.application.flow_draft_materialization_executor import (
+from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -30,14 +30,14 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def test_flow_authoring_command_discriminates_create_and_edit() -> None:
@@ -127,7 +127,10 @@ async def test_prepare_rejects_create_command_with_existing_step_ref() -> None:
 @pytest.mark.parametrize(
     ("assistant_spec", "expected_slot_ref"),
     [
-        (AssistantSpec(instructions="Use model.", model_ref="model.default"), "model.default"),
+        (
+            AssistantSpec(instructions="Use model.", model_ref="model.default"),
+            "model.default",
+        ),
         (
             AssistantSpec(
                 instructions="Use knowledge.",

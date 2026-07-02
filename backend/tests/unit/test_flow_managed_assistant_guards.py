@@ -7,9 +7,9 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from intric.assistants.api.assistant_models import AssistantUpdatePublic
-from intric.assistants.api.assistant_router import delete_assistant, update_assistant
-from intric.assistants.assistant import AssistantOrigin
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic
+from eneo.assistants.api.assistant_router import delete_assistant, update_assistant
+from eneo.assistants.assistant import AssistantOrigin
 
 
 @pytest.mark.asyncio

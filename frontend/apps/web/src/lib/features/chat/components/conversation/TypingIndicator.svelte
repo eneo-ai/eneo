@@ -11,7 +11,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   @keyframes typing-breathe {
     0%,

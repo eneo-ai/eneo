@@ -10,39 +10,39 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows.application.flow_run_lifecycle_events import (
+from eneo.flows.application.flow_run_lifecycle_events import (
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
 )
-from intric.flows.application.flow_run_terminalization import (
+from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationInvariantError,
     FlowRunTerminalizer,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     Flow,
     FlowRunStatus,
     FlowStep,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_factory import FlowFactory
-from intric.flows.flow_run_error import FlowRunError
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
-from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 
-LIFECYCLE_LOGGER = "intric.flows.application.flow_run_lifecycle_events"
+LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 
 
 def _flow_run_terminalizer(run_repo: FlowRunRepository) -> FlowRunTerminalizer:

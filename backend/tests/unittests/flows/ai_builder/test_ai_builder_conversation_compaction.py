@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from intric.flows.ai_builder.ai_builder_conversation_compaction import (
+from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
-from intric.flows.ai_builder.ai_builder_framework_policy import (
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
-from intric.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
+from eneo.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
 
 
 def _msg(
@@ -135,7 +135,7 @@ def test_compaction_preserves_structured_answers_needed_for_discovery_soft_bypas
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_interaction_utils.build_discovery_block_message",
+        "eneo.flows.ai_builder.ai_builder_interaction_utils.build_discovery_block_message",
         return_value="still blocked",
     ):
         assert analyze_discovery_ready(compacted) is True

@@ -1,4 +1,4 @@
-import type { FlowRun } from "@intric/intric-js";
+import type { FlowRun } from "@eneo/eneo-js";
 import {
   FLOW_RUN_STATUS_VALUES,
   type FlowRunStatus,

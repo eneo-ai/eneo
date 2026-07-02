@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from intric.flows.flow_metadata import (
+from eneo.flows.flow_metadata import (
     FlowCareDataPolicy,
     FlowFormFieldType,
     FlowFormSchemaParseMode,
@@ -14,7 +14,7 @@ from intric.flows.flow_metadata import (
     serialize_flow_form_schema,
     serialize_flow_metadata,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _metadata(fields: list[dict[str, object]]) -> dict[str, object]:

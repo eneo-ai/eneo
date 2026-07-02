@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { IconTrash } from "@intric/icons/trash";
+  import { IconTrash } from "@eneo/icons/trash";
   import { m } from "$lib/paraglide/messages";
 
   let {

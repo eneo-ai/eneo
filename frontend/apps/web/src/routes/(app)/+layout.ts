@@ -1,12 +1,12 @@
 import { createZitadelClient } from "$lib/core/Zitadel";
-import { createIntric, createIntricSocket } from "@intric/intric-js";
+import { createEneo, createEneoSocket } from "@eneo/eneo-js";
 
 export const load = async (event) => {
   event.depends("global:state");
 
   const { tokens, environment, featureFlags } = event.data;
 
-  const intric = createIntric({
+  const eneo = createEneo({
     token: tokens.id_token,
     baseUrl: environment.baseUrl ?? "",
     fetch: event.fetch
@@ -21,7 +21,7 @@ export const load = async (event) => {
     );
   }
 
-  const intricSocket = createIntricSocket(
+  const eneoSocket = createEneoSocket(
     {
       token: event.data.tokens.id_token,
       baseUrl: environment.baseUrl ?? ""
@@ -48,23 +48,23 @@ export const load = async (event) => {
 
   const [userInfo, user, tenant, backendVersion, limits, settings] = await Promise.all([
     getUserInfo(),
-    intric.users.me(),
-    intric.users.tenant(),
-    intric.version.get(),
-    intric.limits.list(),
-    intric.settings.get()
+    eneo.users.me(),
+    eneo.users.tenant(),
+    eneo.version.get(),
+    eneo.limits.list(),
+    eneo.settings.get()
   ]);
 
   const versions = {
     frontend: environment.frontendVersion,
     backend: backendVersion,
-    client: intric.client.version,
+    client: eneo.client.version,
     gitInfo: environment.gitInfo
   };
 
   return {
-    intric,
-    intricSocket,
+    eneo,
+    eneoSocket,
     zitadelClient,
     user,
     userInfo: userInfo ?? {

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconTrash } from "@intric/icons/trash";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { m } from "$lib/paraglide/messages";

@@ -1,4 +1,4 @@
-import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
+import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
 
 type CompletionModelAvailability = Pick<CompletionModel, "can_access">;
 type TranscriptionModelAvailability = Pick<TranscriptionModel, "can_access">;

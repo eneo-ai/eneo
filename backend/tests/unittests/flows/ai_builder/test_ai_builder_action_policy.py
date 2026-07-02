@@ -6,21 +6,21 @@ from datetime import datetime, timezone
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_action_policy import (
+from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
 
 def _slot_value(slot_name: str) -> str:

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { FlowRunDebugRag, FlowRunDebugRagReference, Intric } from "@intric/intric-js";
+  import type { FlowRunDebugRag, FlowRunDebugRagReference, Eneo } from "@eneo/eneo-js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -15,11 +15,11 @@
 
   let {
     rag = null,
-    intric,
+    eneo,
     stepOrder
   }: {
     rag?: FlowRunDebugRag | null | undefined;
-    intric: Intric;
+    eneo: Eneo;
     stepOrder: number;
   } = $props();
 
@@ -162,7 +162,7 @@
               class="border-default bg-primary divide-default divide-y overflow-hidden rounded-lg border"
             >
               {#each referencePreview.references as reference, index (reference.id)}
-                <FlowRunKnowledgeSourceRow {intric} {reference} {index} />
+                <FlowRunKnowledgeSourceRow {eneo} {reference} {index} />
               {/each}
             </ol>
 
@@ -228,7 +228,7 @@
             class="border-default bg-primary divide-default divide-y overflow-hidden rounded-lg border"
           >
             {#each visibleFilteredReferenceMatches as { reference, index } (reference.id)}
-              <FlowRunKnowledgeSourceRow {intric} {reference} {index} />
+              <FlowRunKnowledgeSourceRow {eneo} {reference} {index} />
             {/each}
           </ol>
           {#if visibleFilteredReferenceMatches.length < filteredReferenceMatches.length}

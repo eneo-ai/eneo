@@ -8,14 +8,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.flow_access_policy import (
+from eneo.flows.flow_access_policy import (
     FlowApiAction,
     require_flow_action,
     user_can_perform_flow_action,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.main.exceptions import UnauthorizedException
-from intric.roles.permissions import Permission
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import UnauthorizedException
+from eneo.roles.permissions import Permission
 
 
 def _user(*permissions: Permission):
@@ -285,7 +285,7 @@ def test_non_view_service_key_denials_do_not_get_runtime_endpoint_hint(
 
 
 def test_flow_permission_mapping_has_one_source_owner() -> None:
-    flow_root = Path(__file__).parents[3] / "src" / "intric" / "flows"
+    flow_root = Path(__file__).parents[3] / "src" / "eneo" / "flows"
     offenders: list[str] = []
     for path in flow_root.rglob("*.py"):
         if path.name == "flow_access_policy.py":
@@ -298,7 +298,7 @@ def test_flow_permission_mapping_has_one_source_owner() -> None:
 
 
 def test_service_key_ownership_decode_has_one_source_owner() -> None:
-    flow_root = Path(__file__).parents[3] / "src" / "intric" / "flows"
+    flow_root = Path(__file__).parents[3] / "src" / "eneo" / "flows"
     offenders: list[str] = []
     for path in flow_root.rglob("*.py"):
         if path.name == "principal.py":
@@ -311,7 +311,7 @@ def test_service_key_ownership_decode_has_one_source_owner() -> None:
 
 
 def test_flow_routers_do_not_read_raw_api_key_scope_state() -> None:
-    flow_root = Path(__file__).parents[3] / "src" / "intric" / "flows"
+    flow_root = Path(__file__).parents[3] / "src" / "eneo" / "flows"
     forbidden = (
         "api_key_scope_type",
         "api_key_scope_id",
@@ -327,7 +327,7 @@ def test_flow_routers_do_not_read_raw_api_key_scope_state() -> None:
 
 
 def test_flow_run_user_id_is_not_used_as_a_canonical_owner_path() -> None:
-    src_root = Path(__file__).parents[3] / "src" / "intric"
+    src_root = Path(__file__).parents[3] / "src" / "eneo"
     searched_roots = [src_root / "flows", src_root / "files"]
     legacy_owner_patterns = [
         re.compile(pattern, re.MULTILINE)

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from intric.observability.failure_events import (
+from eneo.observability.failure_events import (
     FAILURE_EVENT_SCHEMA_VERSION,
     log_failure_event,
     make_failure_fingerprint,

@@ -1,9 +1,9 @@
 import time
 from uuid import uuid4
 
-from intric.authentication.signed_urls import verify_signed_token
-from intric.files.file_models import ContentDisposition, SignedURLRequest
-from intric.files.signed_urls import build_signed_download_response
+from eneo.authentication.signed_urls import verify_signed_token
+from eneo.files.file_models import ContentDisposition, SignedURLRequest
+from eneo.files.signed_urls import build_signed_download_response
 
 
 def test_build_signed_download_response_preserves_tenant_bound_token() -> None:

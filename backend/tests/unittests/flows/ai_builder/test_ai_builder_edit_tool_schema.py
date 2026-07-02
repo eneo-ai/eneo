@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
+from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
-from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_source_values,
     builder_input_type_values,
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from intric.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.domain.flow import FlowStep
-from intric.flows.enums import FlowMcpPolicy
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.enums import FlowMcpPolicy
 
 
 def _make_step(step_order: int) -> FlowStep:

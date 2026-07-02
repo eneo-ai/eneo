@@ -7,28 +7,28 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.domain.flow import FlowRun, FlowRunStatus
-from intric.flows.flow_run_input_envelope import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
-from intric.flows.runtime.executor import (
+from eneo.flows.runtime.executor import (
     FlowRunExecutor,
     RunExecutionState,
     RuntimeStep,
 )
-from intric.flows.runtime.flow_run_actor import FlowRunActor
-from intric.flows.runtime.transcription import FlowTranscriptionResult
-from intric.flows.runtime.transcription_runtime import (
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.transcription import FlowTranscriptionResult
+from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
-from intric.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import TypedIOValidationException
 
 
 class _SpaceStub:
@@ -709,7 +709,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     )
     resolver = AsyncMock(return_value=transcription_result)
     monkeypatch.setattr(
-        "intric.flows.runtime.transcription_runtime.resolve_and_transcribe_audio_for_step",
+        "eneo.flows.runtime.transcription_runtime.resolve_and_transcribe_audio_for_step",
         resolver,
     )
 
@@ -779,7 +779,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         near_inline_limit=False,
     )
     monkeypatch.setattr(
-        "intric.flows.runtime.transcription_runtime.resolve_and_transcribe_audio_for_step",
+        "eneo.flows.runtime.transcription_runtime.resolve_and_transcribe_audio_for_step",
         AsyncMock(return_value=transcription_result),
     )
 

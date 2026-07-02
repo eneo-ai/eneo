@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IntricError } from "@intric/intric-js";
+import { EneoError } from "@eneo/eneo-js";
 
 import {
   describeFlowRunError,
@@ -22,7 +22,7 @@ import {
 
 describe("flowRuntimeErrorMapping", () => {
   it("describes required runtime input errors with step context", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Required runtime input files are missing.",
       "RESPONSE",
       400,
@@ -39,7 +39,7 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("describes review typed contract errors with review context", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Review checkpoint step 1 output: 'summary' is a required property",
       "RESPONSE",
       400,
@@ -69,7 +69,7 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("describes expired review errors with deadline context", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Review checkpoint has expired.",
       "RESPONSE",
       400,
@@ -104,7 +104,7 @@ describe("flowRuntimeErrorMapping", () => {
 
   it("has descriptors for every frontend-owned Flow API error code", () => {
     for (const code of FLOW_API_ERROR_CODES) {
-      const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+      const error = new EneoError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
 
       expect(describeFlowApiError(error)?.messageKey).toBe(`flow_error_${code}`);
     }
@@ -127,13 +127,12 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("returns null for unknown wire run error codes", () => {
-    // Wire data is untyped; keep the runtime guard even though generated run codes are closed.
     const error = {
       schema_version: 1,
       code: "provider_timeout",
       message: "Provider timed out.",
       source: "executor_failed"
-    } as FlowRunError;
+    };
 
     expect(describeFlowRunError(error)).toBeNull();
   });
@@ -149,7 +148,7 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("uses the structured response code over the legacy client code", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "stale",
       "RESPONSE",
       400,
@@ -166,7 +165,7 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("maps template access code through the Flow API descriptor", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "forbidden",
       "RESPONSE",
       403,
@@ -205,7 +204,7 @@ describe("flowRuntimeErrorMapping", () => {
       ]
     ]
   ])("maps %s through the localized Flow API descriptor", (code, messages) => {
-    const error = new IntricError(
+    const error = new EneoError(
       "forbidden",
       "RESPONSE",
       403,
@@ -222,7 +221,7 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("maps invalid rerun step inputs through the Flow API descriptor", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Rerun step_inputs may only target the rerun root step.",
       "RESPONSE",
       400,
@@ -268,7 +267,7 @@ describe("flowRuntimeErrorMapping", () => {
       ]
     ]
   ])("maps newly cataloged %s through the localized Flow API descriptor", (code, messages) => {
-    const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+    const error = new EneoError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
 
     expect(describeFlowApiError(error)).toMatchObject({
       code,
@@ -278,7 +277,7 @@ describe("flowRuntimeErrorMapping", () => {
   });
 
   it("maps invalid published form schema errors through the Flow API descriptor", () => {
-    const error = new IntricError(
+    const error = new EneoError(
       "Published flow form schema is invalid.",
       "RESPONSE",
       400,

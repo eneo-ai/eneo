@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_error_contract import (
+from eneo.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_ERROR_REGISTRY,
     AIBuilderBadRequestException,
     AIBuilderDiagnosticContext,
@@ -18,8 +18,8 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
     split_ai_builder_error_context,
 )
-from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from intric.main.exceptions import ErrorCodes
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.main.exceptions import ErrorCodes
 
 
 def test_error_registry_has_entry_for_every_error_code_enum_member() -> None:
@@ -65,7 +65,7 @@ def test_error_event_serializes_to_public_v2_schema() -> None:
         "category": "upstream",
         "message": "The AI planner failed. Please try again.",
         "phase": "planner",
-        "intric_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+        "eneo_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
         "request_id": "req-ai-builder-1",
         "diagnostic_context": {
             "request_id": "req-ai-builder-1",
@@ -92,7 +92,7 @@ def test_public_error_round_trips_for_every_registry_entry() -> None:
         assert round_tripped.code is code
         assert round_tripped.category is registry_entry.category
         assert round_tripped.phase is registry_entry.default_phase
-        assert round_tripped.intric_error_code is registry_entry.intric_error_code
+        assert round_tripped.eneo_error_code is registry_entry.eneo_error_code
 
 
 @pytest.mark.parametrize(
@@ -113,7 +113,7 @@ def test_error_details_reject_nested_or_oversized_values(
             code=AIBuilderErrorCode.BAD_REQUEST,
             category=AI_BUILDER_ERROR_REGISTRY[AIBuilderErrorCode.BAD_REQUEST].category,
             phase=AIBuilderErrorPhase.ROUTER,
-            intric_error_code=ErrorCodes.BAD_REQUEST,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
             request_id="req-context",
             details=details,
         )

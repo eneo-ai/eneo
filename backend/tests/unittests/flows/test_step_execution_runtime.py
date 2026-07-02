@@ -9,30 +9,30 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import Completion, TokenUsage
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.citation_sidecar import (
+from eneo.ai_models.completion_models.completion_model import Completion, TokenUsage
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
 )
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.flow_run_step_result_file import build_step_result_file_references
-from intric.flows.runtime.models import (
+from eneo.flows.flow_run_step_result_file import build_step_result_file_references
+from eneo.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
 )
-from intric.flows.runtime.output_formats import resolve_format_spec
-from intric.flows.runtime.output_formats.base import append_output_format_instructions
-from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
-from intric.flows.runtime.step_execution_runtime import (
+from eneo.flows.runtime.output_formats import resolve_format_spec
+from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
+from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
@@ -48,8 +48,8 @@ from intric.flows.runtime.step_execution_runtime import (
     json_mode_cache_key,
     prepare_step_execution,
 )
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def _run() -> FlowRun:
@@ -376,7 +376,7 @@ def test_detect_native_json_output_support_uses_litellm_model_name(
         return ["response_format", "temperature"]
 
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.get_supported_openai_params",
+        "eneo.flows.runtime.step_execution_runtime.get_supported_openai_params",
         fake_supported_params,
     )
     assistant = SimpleNamespace(
@@ -403,7 +403,7 @@ def test_detect_native_json_output_support_falls_back_to_provider_prefixed_name(
         return ["temperature"]
 
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.get_supported_openai_params",
+        "eneo.flows.runtime.step_execution_runtime.get_supported_openai_params",
         fake_supported_params,
     )
     assistant = SimpleNamespace(
@@ -425,7 +425,7 @@ def test_detect_native_json_output_support_logs_lookup_failures(
     caplog: pytest.LogCaptureFixture,
 ):
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.get_supported_openai_params",
+        "eneo.flows.runtime.step_execution_runtime.get_supported_openai_params",
         MagicMock(side_effect=RuntimeError("lookup failed")),
     )
     assistant = SimpleNamespace(
@@ -438,7 +438,7 @@ def test_detect_native_json_output_support_logs_lookup_failures(
 
     caplog.set_level(
         logging.WARNING,
-        logger="intric.flows.runtime.step_execution_runtime",
+        logger="eneo.flows.runtime.step_execution_runtime",
     )
     supported = detect_native_json_output_support(assistant)
 
@@ -529,7 +529,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         lambda assistant: None,
     )
     run = _run()
@@ -611,7 +611,7 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
     regardless of how the json-mode retry path branches.
     """
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         lambda assistant: None,
     )
     run = _run()
@@ -699,7 +699,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
     handler treats this exactly like the original timeout.
     """
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         lambda assistant: None,
     )
     run = _run()
@@ -980,7 +980,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
     caplog: pytest.LogCaptureFixture,
 ):
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         lambda assistant: None,
     )
     run = _run()
@@ -1036,7 +1036,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
 
     caplog.set_level(
         logging.WARNING,
-        logger="intric.flows.runtime.step_execution_runtime",
+        logger="eneo.flows.runtime.step_execution_runtime",
     )
     output = await complete_step_execution(
         step=step,
@@ -1058,7 +1058,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         lambda assistant: False,
     )
     run = _run()
@@ -1132,7 +1132,7 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
         raise AssertionError("array schemas must not request json_object mode")
 
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         _unexpected_json_mode_detection,
     )
     run = _run()

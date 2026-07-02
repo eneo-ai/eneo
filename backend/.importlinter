@@ -1,9 +1,9 @@
 [importlinter]
-root_package = intric
+root_package = eneo
 include_external_packages = False
 
 [importlinter:contract:flows-engine-no-ai-builder]
-# The flows engine (everything under `intric.flows` except the AI Builder
+# The flows engine (everything under `eneo.flows` except the AI Builder
 # plugin itself) must not import from the AI Builder. This contract locks
 # the boundary so no new direct imports from the engine into the plugin
 # slip in.
@@ -11,89 +11,89 @@ name = Flows engine must not import AI Builder
 type = forbidden
 allow_indirect_imports = true
 source_modules =
-    intric.flows.api
-    intric.flows.application
-    intric.flows.assistant_authoring_snapshot
-    intric.flows.assistant_execution_snapshot
-    intric.flows.citation_sidecar
-    intric.flows.domain
-    intric.flows.enums
-    intric.flows.execution_backend
-    intric.flows.flow_access_policy
-    intric.flows.flow_ai_builder_budget_settings
-    intric.flows.flow_api_error_code
-    intric.flows.flow_api_exceptions
-    intric.flows.flow_authoring_name
-    intric.flows.flow_authoring_runtime_input
-    intric.flows.flow_authoring_spec
-    intric.flows.flow_authoring_transcription
-    intric.flows.flow_authoring_variable_rewriting
-    intric.flows.flow_capability_manifest
-    intric.flows.flow_care_data_policy
-    intric.flows.flow_document_limits
-    intric.flows.flow_error_taxonomy
-    intric.flows.flow_evidence_policy
-    intric.flows.flow_factory
-    intric.flows.flow_input_limits
-    intric.flows.flow_metadata
-    intric.flows.flow_resource_bindings
-    intric.flows.flow_retention_policy
-    intric.flows.flow_retention_tombstone
-    intric.flows.flow_review_expiry_policy
-    intric.flows.flow_review_policy
-    intric.flows.flow_run_contract_models
-    intric.flows.flow_run_contract_service
-    intric.flows.flow_run_dispatch_request
-    intric.flows.flow_run_error
-    intric.flows.flow_run_evidence
-    intric.flows.flow_run_evidence_bundle
-    intric.flows.flow_run_evidence_export_manifest
-    intric.flows.flow_run_evidence_export_summary
-    intric.flows.flow_run_export_json
-    intric.flows.flow_run_input_envelope
-    intric.flows.flow_run_input_payload
-    intric.flows.flow_run_payload_validation
-    intric.flows.flow_run_provenance
-    intric.flows.flow_run_redaction
-    intric.flows.flow_run_rerun_graph
-    intric.flows.flow_run_rerun_request
-    intric.flows.flow_run_step_input_file
-    intric.flows.flow_run_step_inputs
-    intric.flows.flow_run_step_result_file
-    intric.flows.flow_runtime_file_integrity
-    intric.flows.flow_runtime_file_service
-    intric.flows.flow_runtime_policy
-    intric.flows.flow_runtime_upload_repo
-    intric.flows.flow_security_classification
-    intric.flows.flow_settings
-    intric.flows.flow_template_asset_repo
-    intric.flows.flow_template_asset_service
-    intric.flows.flow_validators
-    intric.flows.flow_validators_form
-    intric.flows.flow_validators_http
-    intric.flows.flow_validators_template
-    intric.flows.flow_variable_definitions
-    intric.flows.http_transport
-    intric.flows.infrastructure
-    intric.flows.input_binding_contract_rules
-    intric.flows.output_modes
-    intric.flows.output_processing
-    intric.flows.principal
-    intric.flows.published_definition
-    intric.flows.published_runtime
-    intric.flows.runtime
-    intric.flows.runtime_input
-    intric.flows.source_display
-    intric.flows.step_chain_rules
-    intric.flows.step_lineage
-    intric.flows.template_reference_analyzer
-    intric.flows.transcription_config
-    intric.flows.type_policies
-    intric.flows.variable_resolver
+    eneo.flows.api
+    eneo.flows.application
+    eneo.flows.assistant_authoring_snapshot
+    eneo.flows.assistant_execution_snapshot
+    eneo.flows.citation_sidecar
+    eneo.flows.domain
+    eneo.flows.enums
+    eneo.flows.execution_backend
+    eneo.flows.flow_access_policy
+    eneo.flows.flow_ai_builder_budget_settings
+    eneo.flows.flow_api_error_code
+    eneo.flows.flow_api_exceptions
+    eneo.flows.flow_authoring_name
+    eneo.flows.flow_authoring_runtime_input
+    eneo.flows.flow_authoring_spec
+    eneo.flows.flow_authoring_transcription
+    eneo.flows.flow_authoring_variable_rewriting
+    eneo.flows.flow_capability_manifest
+    eneo.flows.flow_care_data_policy
+    eneo.flows.flow_document_limits
+    eneo.flows.flow_error_taxonomy
+    eneo.flows.flow_evidence_policy
+    eneo.flows.flow_factory
+    eneo.flows.flow_input_limits
+    eneo.flows.flow_metadata
+    eneo.flows.flow_resource_bindings
+    eneo.flows.flow_retention_policy
+    eneo.flows.flow_retention_tombstone
+    eneo.flows.flow_review_expiry_policy
+    eneo.flows.flow_review_policy
+    eneo.flows.flow_run_contract_models
+    eneo.flows.flow_run_contract_service
+    eneo.flows.flow_run_dispatch_request
+    eneo.flows.flow_run_error
+    eneo.flows.flow_run_evidence
+    eneo.flows.flow_run_evidence_bundle
+    eneo.flows.flow_run_evidence_export_manifest
+    eneo.flows.flow_run_evidence_export_summary
+    eneo.flows.flow_run_export_json
+    eneo.flows.flow_run_input_envelope
+    eneo.flows.flow_run_input_payload
+    eneo.flows.flow_run_payload_validation
+    eneo.flows.flow_run_provenance
+    eneo.flows.flow_run_redaction
+    eneo.flows.flow_run_rerun_graph
+    eneo.flows.flow_run_rerun_request
+    eneo.flows.flow_run_step_input_file
+    eneo.flows.flow_run_step_inputs
+    eneo.flows.flow_run_step_result_file
+    eneo.flows.flow_runtime_file_integrity
+    eneo.flows.flow_runtime_file_service
+    eneo.flows.flow_runtime_policy
+    eneo.flows.flow_runtime_upload_repo
+    eneo.flows.flow_security_classification
+    eneo.flows.flow_settings
+    eneo.flows.flow_template_asset_repo
+    eneo.flows.flow_template_asset_service
+    eneo.flows.flow_validators
+    eneo.flows.flow_validators_form
+    eneo.flows.flow_validators_http
+    eneo.flows.flow_validators_template
+    eneo.flows.flow_variable_definitions
+    eneo.flows.http_transport
+    eneo.flows.infrastructure
+    eneo.flows.input_binding_contract_rules
+    eneo.flows.output_modes
+    eneo.flows.output_processing
+    eneo.flows.principal
+    eneo.flows.published_definition
+    eneo.flows.published_runtime
+    eneo.flows.runtime
+    eneo.flows.runtime_input
+    eneo.flows.source_display
+    eneo.flows.step_chain_rules
+    eneo.flows.step_lineage
+    eneo.flows.template_reference_analyzer
+    eneo.flows.transcription_config
+    eneo.flows.type_policies
+    eneo.flows.variable_resolver
 forbidden_modules =
-    intric.flows.ai_builder
+    eneo.flows.ai_builder
 ignore_imports =
-    intric.flows.api.flow_router -> intric.flows.ai_builder.ai_builder_router
+    eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router
 
 [importlinter:contract:fcm-no-ai-builder]
 # The Flow Capability Manifest is engine truth. Even though the broader
@@ -104,9 +104,9 @@ ignore_imports =
 name = FCM must not import AI Builder
 type = forbidden
 source_modules =
-    intric.flows.flow_capability_manifest
+    eneo.flows.flow_capability_manifest
 forbidden_modules =
-    intric.flows.ai_builder
+    eneo.flows.ai_builder
 
 [importlinter:contract:flow-packages-application-no-ai-builder]
 # Flow package application services may consume the shared Flow authoring
@@ -115,9 +115,9 @@ name = Flow package application must not import AI Builder
 type = forbidden
 allow_indirect_imports = true
 source_modules =
-    intric.flow_packages.application
+    eneo.flow_packages.application
 forbidden_modules =
-    intric.flows.ai_builder
+    eneo.flows.ai_builder
 
 [importlinter:contract:flow-packages-domain-no-ai-builder]
 # Flow package domain owns portable package schemas and must not depend on
@@ -126,9 +126,9 @@ name = Flow package domain must not import AI Builder
 type = forbidden
 allow_indirect_imports = true
 source_modules =
-    intric.flow_packages.domain
+    eneo.flow_packages.domain
 forbidden_modules =
-    intric.flows.ai_builder
+    eneo.flows.ai_builder
 
 [importlinter:contract:flow-packages-domain-no-infrastructure]
 # Package schemas, checksums, and envelope invariants are the portable contract.
@@ -137,9 +137,9 @@ name = Flow package domain must not import infrastructure
 type = forbidden
 allow_indirect_imports = true
 source_modules =
-    intric.flow_packages.domain
+    eneo.flow_packages.domain
 forbidden_modules =
-    intric.flow_packages.infrastructure
+    eneo.flow_packages.infrastructure
 
 [importlinter:contract:flow-packages-infrastructure-no-ai-builder]
 # Zip/package adapters may parse the portable authoring graph, but they must not
@@ -148,9 +148,9 @@ name = Flow package infrastructure must not import AI Builder
 type = forbidden
 allow_indirect_imports = true
 source_modules =
-    intric.flow_packages.infrastructure
+    eneo.flow_packages.infrastructure
 forbidden_modules =
-    intric.flows.ai_builder
+    eneo.flows.ai_builder
 
 [importlinter:contract:ai-builder-no-mcp-execution]
 # AI Builder may read MCP server/tool metadata while planning, but it must not
@@ -160,8 +160,8 @@ name = AI Builder must not import MCP execution surfaces
 type = forbidden
 allow_indirect_imports = true
 source_modules =
-    intric.flows.ai_builder
+    eneo.flows.ai_builder
 forbidden_modules =
-    intric.mcp_servers.infrastructure.proxy
-    intric.mcp_servers.infrastructure.client
-    intric.mcp_servers.application.mcp_server_service
+    eneo.mcp_servers.infrastructure.proxy
+    eneo.mcp_servers.infrastructure.client
+    eneo.mcp_servers.application.mcp_server_service

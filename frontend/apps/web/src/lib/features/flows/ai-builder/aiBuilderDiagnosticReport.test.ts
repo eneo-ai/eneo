@@ -33,7 +33,7 @@ describe("aiBuilderDiagnosticReport", () => {
         phase: "router",
         message: "Flow is published",
         request_id: "request-error",
-        intric_error_code: 40015,
+        eneo_error_code: 40015,
         diagnostic_context: {
           session_id: "session-from-error",
           flow_id: "flow-from-error"

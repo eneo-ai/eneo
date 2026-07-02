@@ -1,17 +1,17 @@
-"""Tests for intric.flows.output_processing — pure function module."""
+"""Tests for eneo.flows.output_processing — pure function module."""
 
 from __future__ import annotations
 
 import pytest
 
-from intric.flows.output_processing import (
+from eneo.flows.output_processing import (
     compile_validators,
     parse_json_output,
     prune_extras_to_strict_schema,
     validate_against_contract,
     validate_schema_syntax,
 )
-from intric.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import TypedIOValidationException
 
 # --- parse_json_output ---
 

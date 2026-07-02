@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
 
@@ -28,7 +28,7 @@ def _make_adapter() -> TenantModelAdapter:
     adapter._prepare_kwargs = lambda model_kwargs, **kwargs: {}
     adapter._create_messages_from_context = lambda context: []
     adapter._build_tools_from_context = lambda context: []
-    adapter._merge_mcp_tools = lambda intric_tools, mcp_proxy: [{"type": "function"}]
+    adapter._merge_mcp_tools = lambda eneo_tools, mcp_proxy: [{"type": "function"}]
     adapter._get_dropped_params = lambda litellm_kwargs: set()
     adapter._get_effective_params = lambda litellm_kwargs, dropped: {}
     adapter._strip_thinking_content = lambda text: text
@@ -62,7 +62,7 @@ async def test_get_response_populates_tool_calls_metadata_for_non_streaming():
     mocked_acompletion = AsyncMock(side_effect=[first_response, follow_up_response])
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
         mocked_acompletion,
     ):
         completion = await adapter.get_response(

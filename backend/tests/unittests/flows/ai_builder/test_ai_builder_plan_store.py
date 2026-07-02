@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderEditApproval,
     FlowBuilderProposal,
@@ -16,31 +16,31 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
     LintWarning,
 )
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_plan_store import (
+from eneo.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
     append_plan_messages,
     build_flow_builder_proposal,
     build_lint_warnings,
     store_plan_and_update_conversation,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_validation_common import (
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
-from intric.flows.ai_builder.planning_state import PlanningState
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -50,7 +50,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,

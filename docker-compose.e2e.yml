@@ -103,7 +103,7 @@ services:
         apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
         python /workspace/e2e/seed.py  # seed mock completion model
-        exec gunicorn src.intric.server.main:app \
+        exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --bind 0.0.0.0:8000
     ports:
@@ -146,7 +146,7 @@ services:
         - CMD-SHELL
         - >-
           PATH=/workspace/backend/.venv/bin:$$PATH celery -A
-          intric.flows.runtime.celery_app:celery_app inspect active_queues
+          eneo.flows.runtime.celery_app:celery_app inspect active_queues
           --timeout=5 | grep -Fq "$${FLOW_CELERY_QUEUE:-flows.execute}"
       interval: 5s
       timeout: 10s

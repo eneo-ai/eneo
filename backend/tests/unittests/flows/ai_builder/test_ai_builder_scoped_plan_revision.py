@@ -7,40 +7,40 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     metadata_with_slot_classification,
     slot_classification_metadata_from_result,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
-from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_scoped_plan_revision import (
+from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     ScopedPlanRevisionRequest,
     process_scoped_step_revision_if_requested,
     run_scoped_plan_revision_attempt,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -134,7 +134,7 @@ async def test_scoped_revision_returns_error_event_for_deterministic_failure() -
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_scoped_plan_revision."
+        "eneo.flows.ai_builder.ai_builder_scoped_plan_revision."
         "process_scoped_step_revision_if_requested",
         return_value=deterministic_failure,
     ):

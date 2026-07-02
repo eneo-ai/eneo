@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { TranscriptionModel, ModelProviderPublic } from "@intric/intric-js";
+  import type { TranscriptionModel, ModelProviderPublic } from "@eneo/eneo-js";
   import ProviderGroupedModelTable from "./components/ProviderGroupedModelTable.svelte";
 
   export let transcriptionModels: TranscriptionModel[];

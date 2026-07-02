@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from intric.flows.http_transport.normalizer import is_authored_config
+from eneo.flows.http_transport.normalizer import is_authored_config
 
 # --- is_authored_config ---
 

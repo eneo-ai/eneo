@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 FLOW_RUNTIME_ROOT = (
-    Path(__file__).resolve().parents[3] / "src" / "intric" / "flows" / "runtime"
+    Path(__file__).resolve().parents[3] / "src" / "eneo" / "flows" / "runtime"
 )
 DOCUMENT_RENDERING_DEPENDENCIES = frozenset(
     {"docx", "docxtpl", "weasyprint", "markdown_it"}

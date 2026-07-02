@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FlowRunReviewCheckpoint, Intric } from "@intric/intric-js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import type { FlowRunReviewCheckpoint, Eneo } from "@eneo/eneo-js";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { onMount } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -21,7 +21,7 @@
   }: {
     runId: string;
     flowId: string;
-    eneo: Intric;
+    eneo: Eneo;
     onChanged?: () => void;
   } = $props();
 

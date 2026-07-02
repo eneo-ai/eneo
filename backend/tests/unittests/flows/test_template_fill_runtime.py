@@ -9,23 +9,23 @@ from uuid import uuid4
 import pytest
 from docx import Document
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.domain.flow import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime import template_fill_runtime as template_fill_runtime_module
-from intric.flows.runtime.models import RunExecutionState, RuntimeStep
-from intric.flows.runtime.template_fill_runtime import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
+from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
+from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
     execute_template_fill_step,
 )
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.exceptions import (
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import (
     NotFoundException,
     TypedIOValidationException,
 )

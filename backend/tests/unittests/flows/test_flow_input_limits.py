@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from intric.flows.flow_input_limits import (
+from eneo.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     apply_flow_input_limits_patch,
     effective_flow_input_limit,
@@ -12,7 +12,7 @@ from intric.flows.flow_input_limits import (
     resolve_flow_input_limits,
     validate_flow_input_limits_object,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _app_settings(upload: int, transcription: int) -> SimpleNamespace:
@@ -26,7 +26,7 @@ def test_resolve_defaults_when_tenant_settings_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
@@ -38,7 +38,7 @@ def test_resolve_defaults_when_tenant_settings_missing(
 
 def test_resolve_uses_tenant_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
@@ -59,7 +59,7 @@ def test_resolve_falls_back_for_malformed_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
@@ -80,7 +80,7 @@ def test_resolve_falls_back_for_boolean_limit_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
@@ -175,7 +175,7 @@ def test_resolve_defaults_includes_file_count_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
@@ -189,7 +189,7 @@ def test_resolve_uses_tenant_file_count_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
@@ -210,7 +210,7 @@ def test_resolve_falls_back_for_malformed_file_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "intric.flows.flow_input_limits.get_settings",
+        "eneo.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
     )
 

@@ -18,85 +18,85 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import CheckConstraint, Index
 from sqlalchemy.exc import IntegrityError
 
-from intric.actors.actors.space_actor import SpaceActor
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.database.tables.flow_tables import (
+from eneo.actors.actors.space_actor import SpaceActor
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.database.tables.flow_tables import (
     FLOW_PACKAGE_IMPORT_SOURCE_VALUES,
     FLOW_PACKAGE_IMPORT_STATUS_VALUES,
     FlowPackageImports,
     Flows,
 )
-from intric.flow_packages.api import flow_package_router
-from intric.flow_packages.api.flow_package_models import (
+from eneo.flow_packages.api import flow_package_router
+from eneo.flow_packages.api.flow_package_models import (
     FlowPackageExportRequest,
     FlowPackageImportRequest,
 )
-from intric.flow_packages.application.flow_package_import_planner import (
+from eneo.flow_packages.application.flow_package_import_planner import (
     FlowPackageImportPlannerCandidates,
 )
-from intric.flow_packages.domain.flow_package_checksum import (
+from eneo.flow_packages.domain.flow_package_checksum import (
     compose_content_checksum,
     hash_json_value,
 )
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_errors import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
 )
-from intric.flow_packages.domain.flow_package_import_plan import (
+from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlan,
     FlowPackageImportPlanSummary,
     FlowPackageModelCandidate,
 )
-from intric.flow_packages.domain.flow_package_import_record import (
+from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportFailurePayload,
     FlowPackageImportSelection,
     FlowPackageImportSource,
     FlowPackageImportStatus,
 )
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_manifest import (
     FLOW_PACKAGE_PAYLOAD_SCHEMA,
     EneoPackageKind,
     FlowPackageManifest,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelIdentity,
     FlowPackageModelKind,
     FlowPackageModelRequirement,
     FlowPackageRequirementSet,
 )
-from intric.flow_packages.infrastructure import flow_package_zip_reader as reader
-from intric.flows.api.flow_access_context import (
+from eneo.flow_packages.infrastructure import flow_package_zip_reader as reader
+from eneo.flows.api.flow_access_context import (
     FlowAccessContext,
     FlowSpaceAccessContext,
 )
-from intric.flows.application.flow_authoring_command import (
+from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
-from intric.flows.flow_access_policy import FlowApiAction
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.json_types import JsonObject
-from intric.main.container.container import Container
-from intric.main.models import ModelId
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleCreate
-from intric.spaces.api.space_models import SpaceRoleValue
-from intric.spaces.space import Space
-from intric.users.user import UserAdd, UserState
+from eneo.json_types import JsonObject
+from eneo.main.container.container import Container
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.space import Space
+from eneo.users.user import UserAdd, UserState
 
 
 def _constraint_names(table: object) -> set[str]:

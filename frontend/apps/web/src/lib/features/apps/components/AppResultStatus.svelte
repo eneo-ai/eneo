@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { IconCheck } from "@intric/icons/check";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { Tooltip } from "@intric/ui";
-  import type { AppRun } from "@intric/intric-js";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { Tooltip } from "@eneo/ui";
+  import type { AppRun } from "@eneo/eneo-js";
   export let run: Pick<AppRun, "status">;
   export let variant: "icon" | "full" = "icon";
   import { m } from "$lib/paraglide/messages";
@@ -44,7 +44,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .complete {
     @apply bg-positive-dimmer text-positive-stronger;
   }

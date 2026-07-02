@@ -1,4 +1,4 @@
-import type { ApiKeyState, ApiKeyV2 } from "@intric/intric-js";
+import type { ApiKeyState, ApiKeyV2 } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import {

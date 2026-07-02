@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.category_mappings import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )

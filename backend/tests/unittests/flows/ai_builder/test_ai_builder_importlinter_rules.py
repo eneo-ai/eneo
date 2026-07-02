@@ -8,15 +8,15 @@ the rule lives:
 - **Rule 2 (importlinter)** — the Flow Capability Manifest is engine truth
   and lives outside the plugin namespace, so a dedicated
   ``.importlinter`` forbidden-contract (`fcm-no-ai-builder`) expresses the
-  rule cleanly: source (``intric.flows.flow_capability_manifest``) is a
-  sibling of the forbidden parent package (``intric.flows.ai_builder``).
+  rule cleanly: source (``eneo.flows.flow_capability_manifest``) is a
+  sibling of the forbidden parent package (``eneo.flows.ai_builder``).
   The dedicated contract is belt-and-suspenders with the broader
   ``flows-engine-no-ai-builder`` contract and gives an FCM-specific
   failure message.
 - **Rules 3 & 4 (AST-scan)** — Pattern Registry and Question Catalog
-  *live inside* ``intric.flows.ai_builder``, so an importlinter
+  *live inside* ``eneo.flows.ai_builder``, so an importlinter
   ``forbidden`` contract with ``forbidden_modules =
-  intric.flows.ai_builder`` rejects them with "Modules have shared
+  eneo.flows.ai_builder`` rejects them with "Modules have shared
   descendants" (source is a descendant of forbidden). Enumerating every
   sibling in ``forbidden_modules`` would be brittle (80+ entries, one
   config change per new sibling). Instead we use the same AST-scan
@@ -46,9 +46,9 @@ RULE_7_SECTION = "importlinter:contract:ai-builder-no-mcp-execution"
 RULE_2_NAME = "FCM must not import AI Builder"
 RULE_7_NAME = "AI Builder must not import MCP execution surfaces"
 
-AI_BUILDER_PACKAGE = "intric.flows.ai_builder"
-FCM_MODULE = "intric.flows.flow_capability_manifest"
-FLOW_API_PARENT_PACKAGE = "intric.flows.api"
+AI_BUILDER_PACKAGE = "eneo.flows.ai_builder"
+FCM_MODULE = "eneo.flows.flow_capability_manifest"
+FLOW_API_PARENT_PACKAGE = "eneo.flows.api"
 STALE_AI_BUILDER_REFERENCES: frozenset[str] = frozenset(
     {
         "ai_builder_materialization_bridge",
@@ -61,13 +61,13 @@ STALE_AI_BUILDER_REFERENCES: frozenset[str] = frozenset(
 )
 MCP_EXECUTION_MODULES: frozenset[str] = frozenset(
     {
-        "intric.mcp_servers.infrastructure.proxy",
-        "intric.mcp_servers.infrastructure.client",
-        "intric.mcp_servers.application.mcp_server_service",
+        "eneo.mcp_servers.infrastructure.proxy",
+        "eneo.mcp_servers.infrastructure.client",
+        "eneo.mcp_servers.application.mcp_server_service",
     }
 )
 FLOW_STEP_MCP_TOOLS_TABLE = "FlowStepMCPTools"
-FLOW_STEP_MCP_TOOLS_TABLE_FILE = pathlib.Path("intric/database/tables/flow_tables.py")
+FLOW_STEP_MCP_TOOLS_TABLE_FILE = pathlib.Path("eneo/database/tables/flow_tables.py")
 
 
 def _backend_root() -> Path:
@@ -97,9 +97,9 @@ def _config_lines(
 def _plugin_sibling_imports(
     module_path: pathlib.Path, permitted: frozenset[str]
 ) -> list[str]:
-    """Return static ``intric.flows.ai_builder.*`` sibling imports from
+    """Return static ``eneo.flows.ai_builder.*`` sibling imports from
     ``module_path`` that are not in ``permitted``. Relative imports and
-    package-form imports (``from intric.flows import ai_builder``) are
+    package-form imports (``from eneo.flows import ai_builder``) are
     always treated as offences — no architecture lets them in.
     """
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -124,10 +124,10 @@ def _plugin_sibling_imports(
                     names = ", ".join(alias.name for alias in node.names)
                     offenders.append(f"from {module} import {names}")
                 continue
-            if module == "intric.flows":
+            if module == "eneo.flows":
                 for alias in node.names:
                     if alias.name == "ai_builder":
-                        offenders.append(f"from intric.flows import {alias.name}")
+                        offenders.append(f"from eneo.flows import {alias.name}")
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 name = alias.name
@@ -144,16 +144,16 @@ def _modules_importing_flows_api(
     package_root: pathlib.Path,
 ) -> dict[str, list[str]]:
     """Return ``{relative_posix_path: [import_strings]}`` for ``.py`` files
-    under ``package_root`` that pull in any ``intric.flows.api.*`` module
+    under ``package_root`` that pull in any ``eneo.flows.api.*`` module
     by any import shape:
 
-    - ``from intric.flows.api.<module> import X``
-    - ``import intric.flows.api.<module>``
-    - ``from intric.flows.api import <module>``   (parent-package form)
-    - ``from intric.flows import api``            (grandparent form; then
+    - ``from eneo.flows.api.<module> import X``
+    - ``import eneo.flows.api.<module>``
+    - ``from eneo.flows.api import <module>``   (parent-package form)
+    - ``from eneo.flows import api``            (grandparent form; then
       ``api.flow_models.X`` at the call site)
 
-    The whole ``intric.flows.api`` surface is off-limits to AI Builder source:
+    The whole ``eneo.flows.api`` surface is off-limits to AI Builder source:
     DTOs, assemblers, HTTP routers — none of them are legitimate dependencies
     of planner and proposal code.
 
@@ -175,7 +175,7 @@ def _modules_importing_flows_api(
                 elif module.startswith(f"{FLOW_API_PARENT_PACKAGE}."):
                     names = ", ".join(alias.name for alias in node.names)
                     imports.append(f"from {module} import {names}")
-                elif module == "intric.flows":
+                elif module == "eneo.flows":
                     for alias in node.names:
                         if alias.name == "api":
                             imports.append(f"from {module} import {alias.name}")
@@ -228,8 +228,8 @@ def _modules_importing_mcp_execution(
     """
     offenders: dict[str, list[str]] = {}
     execution_parent_aliases: dict[str, frozenset[str]] = {
-        "intric.mcp_servers.infrastructure": frozenset({"proxy", "client"}),
-        "intric.mcp_servers.application": frozenset({"mcp_server_service"}),
+        "eneo.mcp_servers.infrastructure": frozenset({"proxy", "client"}),
+        "eneo.mcp_servers.application": frozenset({"mcp_server_service"}),
     }
     for py_file in sorted(package_root.rglob("*.py")):
         if py_file.name == "__init__.py":
@@ -279,7 +279,7 @@ def _source_references_to_flow_step_mcp_tools(
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 module = node.module or ""
-                if module == "intric.database.tables.flow_tables":
+                if module == "eneo.database.tables.flow_tables":
                     for alias in node.names:
                         if alias.name == FLOW_STEP_MCP_TOOLS_TABLE:
                             references.append(f"from {module} import {alias.name}")
@@ -364,7 +364,7 @@ class TestRule7AiBuilderNoMcpExecutionContract:
     """Rule 7 — AI Builder planning can see MCP metadata, not execute tools."""
 
     def _package_root(self) -> pathlib.Path:
-        return _backend_root() / "src" / "intric" / "flows" / "ai_builder"
+        return _backend_root() / "src" / "eneo" / "flows" / "ai_builder"
 
     def test_section_exists(self) -> None:
         assert _config().has_section(RULE_7_SECTION), (
@@ -405,29 +405,27 @@ class TestRule7AiBuilderNoMcpExecutionContract:
     ) -> None:
         shapes = {
             "proxy_from.py": (
-                "from intric.mcp_servers.infrastructure.proxy import MCPProxySession\n"
+                "from eneo.mcp_servers.infrastructure.proxy import MCPProxySession\n"
             ),
             "client_from.py": (
-                "from intric.mcp_servers.infrastructure.client import MCPClient\n"
+                "from eneo.mcp_servers.infrastructure.client import MCPClient\n"
             ),
             "service_from.py": (
-                "from intric.mcp_servers.application.mcp_server_service "
+                "from eneo.mcp_servers.application.mcp_server_service "
                 "import MCPServerService\n"
             ),
             "parent_proxy_from.py": (
-                "from intric.mcp_servers.infrastructure import proxy\n"
+                "from eneo.mcp_servers.infrastructure import proxy\n"
             ),
             "parent_client_from.py": (
-                "from intric.mcp_servers.infrastructure import client\n"
+                "from eneo.mcp_servers.infrastructure import client\n"
             ),
             "parent_service_from.py": (
-                "from intric.mcp_servers.application import mcp_server_service\n"
+                "from eneo.mcp_servers.application import mcp_server_service\n"
             ),
-            "bare_proxy_import.py": (
-                "import intric.mcp_servers.infrastructure.proxy\n"
-            ),
+            "bare_proxy_import.py": ("import eneo.mcp_servers.infrastructure.proxy\n"),
             "nested/deep_client_import.py": (
-                "import intric.mcp_servers.infrastructure.client.mcp_client\n"
+                "import eneo.mcp_servers.infrastructure.client.mcp_client\n"
             ),
         }
         for rel_name, src in shapes.items():
@@ -466,10 +464,10 @@ class TestRule7AiBuilderNoMcpExecutionContract:
 
 class TestRule3PatternRegistryDirectSiblingImports:
     """Rule 3 — Pattern Registry may only import, from sibling modules
-    under ``intric.flows.ai_builder``, the Question Catalog and the slot
+    under ``eneo.flows.ai_builder``, the Question Catalog and the slot
     vocabulary. FCM lives outside the plugin package and is not considered
     a sibling here (it is a separate allow-list concern — the FCM is
-    always importable by anything inside ``intric.flows``).
+    always importable by anything inside ``eneo.flows``).
 
     The permitted-sibling allow-list below is the full set; any new
     sibling import must extend it deliberately, not by accident.
@@ -486,7 +484,7 @@ class TestRule3PatternRegistryDirectSiblingImports:
         return (
             _backend_root()
             / "src"
-            / "intric"
+            / "eneo"
             / "flows"
             / "ai_builder"
             / "pattern_registry.py"
@@ -499,7 +497,7 @@ class TestRule3PatternRegistryDirectSiblingImports:
         assert not offenders, (
             "pattern_registry.py may only import 'question_catalog' or "
             "'ai_builder_slot_vocabulary' from the ai_builder plugin. "
-            "FCM imports (intric.flows.flow_capability_manifest) live "
+            "FCM imports (eneo.flows.flow_capability_manifest) live "
             "outside the plugin and are unaffected by this rule.\n"
             f"Offending imports: {offenders}"
         )
@@ -525,7 +523,7 @@ class TestRule4QuestionCatalogDirectSiblingImports:
         return (
             _backend_root()
             / "src"
-            / "intric"
+            / "eneo"
             / "flows"
             / "ai_builder"
             / "question_catalog.py"
@@ -538,7 +536,7 @@ class TestRule4QuestionCatalogDirectSiblingImports:
         assert not offenders, (
             "question_catalog.py may only import "
             "'ai_builder_slot_vocabulary' from the ai_builder plugin. "
-            "FCM imports (intric.flows.flow_capability_manifest) live "
+            "FCM imports (eneo.flows.flow_capability_manifest) live "
             "outside the plugin and are unaffected by this rule.\n"
             f"Offending imports: {offenders}"
         )
@@ -548,7 +546,7 @@ class TestRule6FlowApiBoundary:
     """Rule 6 — AI Builder source must not depend on Flow API adapters."""
 
     def _package_root(self) -> pathlib.Path:
-        return _backend_root() / "src" / "intric" / "flows" / "ai_builder"
+        return _backend_root() / "src" / "eneo" / "flows" / "ai_builder"
 
     def test_no_ai_builder_source_imports_flows_api(self) -> None:
         offenders = _modules_importing_flows_api(self._package_root())
@@ -561,7 +559,7 @@ class TestRule6FlowApiBoundary:
     def test_materialization_bridge_names_are_not_reintroduced(self) -> None:
         backend_root = _backend_root()
         roots = (
-            backend_root / "src" / "intric" / "flows" / "ai_builder",
+            backend_root / "src" / "eneo" / "flows" / "ai_builder",
             backend_root / "tests" / "unittests" / "flows" / "ai_builder",
             backend_root / "tests" / "integration" / "flows" / "ai_builder",
         )
@@ -579,33 +577,33 @@ class TestRule6FlowApiBoundary:
         self, tmp_path: pathlib.Path
     ) -> None:
         """The ACL helper must catch every import shape that reaches any
-        ``intric.flows.api.*`` module, including the parent-package form
+        ``eneo.flows.api.*`` module, including the parent-package form
         and non-`flow_models` leaves (e.g. `flow_assembler`). Without this
         fixture check, a silent helper regression would leave the
         production-tree ACL test passing because no offenders exist today
         — a green that would mask a future real offender.
         """
         shapes = {
-            "qualified_from.py": "from intric.flows.api.flow_models import X\n",
-            "parent_from.py": "from intric.flows.api import flow_models\n",
-            "bare_import.py": "import intric.flows.api.flow_models\n",
-            # Non-`flow_models` leaf under intric.flows.api — pins that the
+            "qualified_from.py": "from eneo.flows.api.flow_models import X\n",
+            "parent_from.py": "from eneo.flows.api import flow_models\n",
+            "bare_import.py": "import eneo.flows.api.flow_models\n",
+            # Non-`flow_models` leaf under eneo.flows.api — pins that the
             # ACL is a package guard, not a single-module guard. If a future
             # refactor narrows the helper back to flow_models only, this
             # fixture goes missing and the test fires.
-            "assembler_from.py": ("from intric.flows.api.flow_assembler import X\n"),
+            "assembler_from.py": ("from eneo.flows.api.flow_assembler import X\n"),
             # Router leaf — pins that HTTP router imports are also off-limits.
-            "router_from.py": ("from intric.flows.api.flow_router import router\n"),
-            # Grandparent-package form — `from intric.flows import api` hands
+            "router_from.py": ("from eneo.flows.api.flow_router import router\n"),
+            # Grandparent-package form — `from eneo.flows import api` hands
             # the caller the whole subpackage as a module object; a later
             # attribute access (`api.flow_models.X`) would bypass the other
             # shapes. Mirrors the Rule 3/4 grandparent guard for
-            # `from intric.flows import ai_builder`.
-            "grandparent_from.py": "from intric.flows import api\n",
+            # `from eneo.flows import ai_builder`.
+            "grandparent_from.py": "from eneo.flows import api\n",
             # Nested offender also pins the recursive scan + relative-path
             # keying the helper uses. If this drops back to a flat glob, the
             # nested fixture goes missing and the test fires.
-            "nested/deep_from.py": "from intric.flows.api.flow_models import Y\n",
+            "nested/deep_from.py": "from eneo.flows.api.flow_models import Y\n",
         }
         for rel_name, src in shapes.items():
             target = tmp_path / rel_name

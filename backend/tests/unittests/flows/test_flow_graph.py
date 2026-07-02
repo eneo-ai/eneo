@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
-from intric.flows.api.flow_graph import (
+from eneo.flows.api.flow_graph import (
     GRAPH_RESPONSE_EXAMPLE,
     GraphEdge,
     GraphNode,
@@ -14,9 +14,9 @@ from intric.flows.api.flow_graph import (
     build_graph_response,
     enrich_nodes_with_run_results,
 )
-from intric.flows.domain.flow import FlowStep, FlowStepResult
-from intric.flows.enums import FlowOutputType, FlowStepResultStatus
-from intric.flows.flow_validators import validate_steps
+from eneo.flows.domain.flow import FlowStep, FlowStepResult
+from eneo.flows.enums import FlowOutputType, FlowStepResultStatus
+from eneo.flows.flow_validators import validate_steps
 
 _GOLDEN_FLOW_ID = UUID("00000000-0000-0000-0000-000000000001")
 _GOLDEN_TENANT_ID = UUID("00000000-0000-0000-0000-000000000010")

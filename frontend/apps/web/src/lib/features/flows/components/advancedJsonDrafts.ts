@@ -1,14 +1,11 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type AdvancedJsonField =
-  | "input_contract"
-  | "output_contract"
-  | "input_config"
-  | "output_config";
+  "input_contract" | "output_contract" | "input_config" | "output_config";
 
 export const ADVANCED_JSON_FIELDS: AdvancedJsonField[] = [
   "input_contract",
@@ -164,12 +161,7 @@ export function formatAdvancedJsonDraftField(
   parseError: string | null;
   formatted: boolean;
 } {
-  const result = parseAdvancedJsonField(
-    currentDrafts,
-    currentErrors,
-    field,
-    currentDrafts[field]
-  );
+  const result = parseAdvancedJsonField(currentDrafts, currentErrors, field, currentDrafts[field]);
   if (result.parseError !== null || result.parsed === null) {
     return { ...result, formatted: false };
   }

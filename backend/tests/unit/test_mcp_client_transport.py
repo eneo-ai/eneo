@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient
+from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 
-_MODULE = "intric.mcp_servers.infrastructure.client.mcp_client"
+_MODULE = "eneo.mcp_servers.infrastructure.client.mcp_client"
 
 
 def _bearer_server() -> MagicMock:

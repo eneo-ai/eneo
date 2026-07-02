@@ -11,15 +11,15 @@ from uuid import uuid4
 import pytest
 from fastapi import UploadFile
 
-from intric.audit.domain.action_types import ActionType
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api.flow_models import FlowRunContractPublic
-from intric.flows.api.flow_upload_router import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api.flow_models import FlowRunContractPublic
+from eneo.flows.api.flow_upload_router import (
     delete_flow_runtime_file,
     get_flow_run_contract,
     upload_flow_runtime_file,
 )
-from intric.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction
 
 
 @pytest.mark.asyncio

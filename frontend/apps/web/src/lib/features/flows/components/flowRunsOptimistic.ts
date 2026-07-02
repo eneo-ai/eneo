@@ -1,4 +1,4 @@
-import type { FlowRun } from "@intric/intric-js";
+import type { FlowRun } from "@eneo/eneo-js";
 
 export function mergeOptimisticFlowRuns(runs: FlowRun[], optimisticRuns: FlowRun[]): FlowRun[] {
   if (optimisticRuns.length === 0) return runs;

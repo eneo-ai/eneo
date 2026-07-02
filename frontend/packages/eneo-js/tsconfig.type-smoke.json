@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "checkJs": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@eneo/eneo-js": ["./index.d.ts"]
+    }
+  },
+  "include": ["index.d.ts", "src/types/flow-resource-aliases.types.ts"],
+  "exclude": []
+}

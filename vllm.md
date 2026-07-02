@@ -121,7 +121,7 @@ Please configure via: PUT /api/v1/tenants/{tenant_id}/credentials/vllm
 
 ### Client Initialization
 
-**File**: `backend/src/intric/completion_models/infrastructure/adapters/vllm_model_adapter.py`
+**File**: `backend/src/eneo/completion_models/infrastructure/adapters/vllm_model_adapter.py`
 
 ```python
 from openai import AsyncOpenAI
@@ -455,7 +455,7 @@ X-API-Key: tenant-specific-api-key-here
 
 ### Provider Field Validation
 
-**File**: `backend/src/intric/tenants/provider_field_config.py`
+**File**: `backend/src/eneo/tenants/provider_field_config.py`
 
 Eneo validates vLLM credentials against these rules:
 
@@ -603,12 +603,12 @@ A compatible vLLM server must:
 
 | Component | File Path | Purpose |
 |-----------|-----------|---------|
-| vLLM Adapter | `/backend/src/intric/completion_models/infrastructure/adapters/vllm_model_adapter.py` | Main vLLM integration logic |
-| Credentials API | `/backend/src/intric/tenants/presentation/tenant_credentials_router.py` | API endpoints for credential management |
-| Credential Resolver | `/backend/src/intric/settings/credential_resolver.py` | Resolves and decrypts credentials |
-| Provider Config | `/backend/src/intric/tenants/provider_field_config.py` | Defines required fields for vLLM |
-| OpenAI Response Handler | `/backend/src/intric/completion_models/infrastructure/get_response_open_ai.py` | Handles API calls and error mapping |
-| Tenant Model | `/backend/src/intric/tenants/tenant.py` | Tenant database model with credentials |
+| vLLM Adapter | `/backend/src/eneo/completion_models/infrastructure/adapters/vllm_model_adapter.py` | Main vLLM integration logic |
+| Credentials API | `/backend/src/eneo/tenants/presentation/tenant_credentials_router.py` | API endpoints for credential management |
+| Credential Resolver | `/backend/src/eneo/settings/credential_resolver.py` | Resolves and decrypts credentials |
+| Provider Config | `/backend/src/eneo/tenants/provider_field_config.py` | Defines required fields for vLLM |
+| OpenAI Response Handler | `/backend/src/eneo/completion_models/infrastructure/get_response_open_ai.py` | Handles API calls and error mapping |
+| Tenant Model | `/backend/src/eneo/tenants/tenant.py` | Tenant database model with credentials |
 
 ---
 

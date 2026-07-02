@@ -1,11 +1,10 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 export const FLOW_CITATION_MODE_OFF = "off" as const;
 export const FLOW_CITATION_MODE_INLINE_INREF_SIDECAR = "inline_inref_sidecar" as const;
 
 export type FlowCitationMode =
-  | typeof FLOW_CITATION_MODE_OFF
-  | typeof FLOW_CITATION_MODE_INLINE_INREF_SIDECAR;
+  typeof FLOW_CITATION_MODE_OFF | typeof FLOW_CITATION_MODE_INLINE_INREF_SIDECAR;
 
 type OutputConfigValue = FlowStep["output_config"];
 
@@ -28,9 +27,9 @@ export function supportsFlowCitationMode(
 ): boolean {
   return Boolean(
     step &&
-      step.output_type === "text" &&
-      step.output_mode !== "template_fill" &&
-      step.output_mode !== "transcribe_only"
+    step.output_type === "text" &&
+    step.output_mode !== "template_fill" &&
+    step.output_mode !== "transcribe_only"
   );
 }
 

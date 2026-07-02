@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_result_contract import (
+from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_SIGNAL_ID,
     derive_result_contract,
     render_result_contract_prompt_block,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
 )
-from intric.flows.ai_builder.question_catalog import legal_slot_values
+from eneo.flows.ai_builder.question_catalog import legal_slot_values
 
 _GOAL_SIGNATURES = {
     "stop_after_primary_operation": "Stop after the primary operation",

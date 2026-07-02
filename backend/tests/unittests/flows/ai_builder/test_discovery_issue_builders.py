@@ -5,11 +5,11 @@ import pathlib
 
 import pytest
 
-import intric.flows.ai_builder.ai_builder_discovery as discovery
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+import eneo.flows.ai_builder.ai_builder_discovery as discovery
+from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 
 _EXPECTED_BUILDER_NAMES: tuple[str, ...] = (
     "_build_comparison_scope_conflict_issue",

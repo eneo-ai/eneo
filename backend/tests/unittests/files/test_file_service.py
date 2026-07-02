@@ -4,8 +4,8 @@ from uuid import uuid4
 import pytest
 from fastapi import UploadFile
 
-from intric.files.file_models import FileBaseWithContent, FileType
-from intric.files.file_service import FileService
+from eneo.files.file_models import FileBaseWithContent, FileType
+from eneo.files.file_service import FileService
 
 
 class _OpenSession:
@@ -79,6 +79,7 @@ async def test_save_file_passes_result_to_repo(service, protocol, repo, user):
     assert create_arg.owner_service_id is None
     assert create_arg.tenant_id == user.tenant_id
     assert create_arg.name == "test.txt"
+
 
 @pytest.mark.asyncio
 async def test_document_from_upload_uses_document_path(service, protocol, repo):

@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { Role } from "@intric/intric-js";
-  import { Select } from "@intric/ui";
+  import type { Role } from "@eneo/eneo-js";
+  import { Select } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
 

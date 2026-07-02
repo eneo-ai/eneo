@@ -6,13 +6,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.api.flow_service_principal_actor_read_model import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
-from intric.flows.domain.flow import FlowRunReviewCheckpoint
-from intric.flows.enums import FlowOutputType, FlowRunReviewCheckpointState
-from intric.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.domain.flow import FlowRunReviewCheckpoint
+from eneo.flows.enums import FlowOutputType, FlowRunReviewCheckpointState
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 @pytest.mark.asyncio

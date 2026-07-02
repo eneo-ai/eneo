@@ -26,14 +26,14 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.spaces_table import Spaces
-from intric.help_assistants.domain.assignment_history_reason import (
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.spaces_table import Spaces
+from eneo.help_assistants.domain.assignment_history_reason import (
     AssignmentHistoryReason,
 )
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.main.exceptions import NotFoundException
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.main.exceptions import NotFoundException
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 

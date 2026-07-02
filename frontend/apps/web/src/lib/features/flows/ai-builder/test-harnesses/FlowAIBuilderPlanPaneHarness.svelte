@@ -1,6 +1,6 @@
 <script lang="ts">
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { Space } from "@intric/intric-js";
+  import type { Space } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import type { AIBuilderClientTransport, FlowAIBuilderState } from "../FlowAIBuilderDriver";
   import FlowAIBuilderPlanPane from "../FlowAIBuilderPlanPane.svelte";
@@ -29,14 +29,14 @@
     const spacesManagerParams: Parameters<typeof initSpacesManager>[0] = {
       spaces: [],
       currentSpace: currentSpace as unknown as Space,
-      intric: {} as Parameters<typeof initSpacesManager>[0]["intric"]
+      eneo: {} as Parameters<typeof initSpacesManager>[0]["eneo"]
     };
     initSpacesManager(spacesManagerParams);
 
-    const intric: Parameters<typeof initAIBuilderService>[0] = {
+    const eneo: Parameters<typeof initAIBuilderService>[0] = {
       client: transport
     } as Parameters<typeof initAIBuilderService>[0];
-    return initAIBuilderService(intric, "space-1", null);
+    return initAIBuilderService(eneo, "space-1", null);
   });
 
   untrack(() => service.seedState(state));

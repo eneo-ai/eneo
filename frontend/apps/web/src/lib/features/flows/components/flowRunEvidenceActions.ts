@@ -1,4 +1,4 @@
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 
 export function serializeEvidencePayload(payload: unknown): string {
   if (typeof payload === "string") {
@@ -28,7 +28,7 @@ const defaultDownloadDeps: DownloadDeps = {
 export function downloadJsonArtifact(
   fileName: string,
   payload: unknown,
-  deps: Partial<DownloadDeps> = {},
+  deps: Partial<DownloadDeps> = {}
 ): void {
   const resolved: DownloadDeps = { ...defaultDownloadDeps, ...deps };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -46,18 +46,18 @@ export function downloadJsonArtifact(
 
 export async function downloadEvidenceExport(
   params: {
-    intric: Intric;
+    eneo: Eneo;
     flowId: string;
     runId: string;
   },
   deps: {
     triggerDownload?: typeof downloadJsonArtifact;
-  } = {},
+  } = {}
 ): Promise<void> {
-  const exportPayload = await params.intric.flows.runs.exportEvidence({
+  const exportPayload = await params.eneo.flows.runs.exportEvidence({
     id: params.runId,
     flowId: params.flowId,
-    format: "json",
+    format: "json"
   });
   const triggerDownload = deps.triggerDownload ?? downloadJsonArtifact;
   triggerDownload(`flow-run-evidence-${params.runId}.json`, exportPayload);

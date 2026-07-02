@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.transcription_models.infrastructure.adapters.litellm_transcription import (
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
 )
 
@@ -39,7 +39,7 @@ async def test_kb_whisper_language_fallback_only_when_language_is_auto(
         return SimpleNamespace(text="transcript")
 
     monkeypatch.setattr(
-        "intric.transcription_models.infrastructure.adapters.litellm_transcription.litellm.atranscription",
+        "eneo.transcription_models.infrastructure.adapters.litellm_transcription.litellm.atranscription",
         AsyncMock(side_effect=fake_atranscription),
     )
     audio_path = tmp_path / "chunk.wav"

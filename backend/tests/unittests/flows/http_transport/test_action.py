@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 import pytest
 
-from intric.flows.http_transport.authored_config import (
+from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     CustomHeader,
     HttpAuthBearer,
@@ -14,10 +14,10 @@ from intric.flows.http_transport.authored_config import (
     HttpBody,
     HttpBodyMode,
 )
-from intric.flows.http_transport.errors import HttpTransportError
-from intric.flows.http_transport.test_action import execute_http_test
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.exceptions import BadRequestException
+from eneo.flows.http_transport.errors import HttpTransportError
+from eneo.flows.http_transport.test_action import execute_http_test
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import BadRequestException
 
 
 def _config(
@@ -41,7 +41,7 @@ def _interpolate(template: str, context: dict[str, Any]) -> str:
 
 
 def _transport_interpolate(template: str, context: dict[str, Any]) -> str:
-    from intric.flows.http_transport.errors import HttpTemplateInterpolationError
+    from eneo.flows.http_transport.errors import HttpTemplateInterpolationError
 
     try:
         return _interpolate(template, context)

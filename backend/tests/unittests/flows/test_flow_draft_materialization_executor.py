@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.flows.application.flow_draft_materialization import (
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate,
     FlowDraftAssistantToDelete,
     FlowDraftAssistantToUpdate,
@@ -16,19 +16,19 @@ from intric.flows.application.flow_draft_materialization import (
     FlowDraftMaterializationStage,
     FlowDraftStepChangeKind,
 )
-from intric.flows.application.flow_draft_materialization_executor import (
+from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from intric.flows.domain.flow import Flow
-from intric.flows.flow_authoring_spec import AssistantSpec
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.domain.flow import Flow
+from eneo.flows.flow_authoring_spec import AssistantSpec
+from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _flow(

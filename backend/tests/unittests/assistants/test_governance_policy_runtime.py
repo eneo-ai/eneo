@@ -4,12 +4,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.assistants.assistant_service import AssistantService
-from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.main.exceptions import BadRequestException
-from intric.main.models import NOT_PROVIDED
-from intric.services.service import DatastoreResult
-from intric.sessions.session import SessionInDB
+from eneo.assistants.assistant_service import AssistantService
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.main.exceptions import BadRequestException
+from eneo.main.models import NOT_PROVIDED
+from eneo.services.service import DatastoreResult
+from eneo.sessions.session import SessionInDB
 from tests.fixtures import TEST_MODEL_CHATGPT, TEST_MODEL_GPT4, TEST_USER
 
 
@@ -703,7 +703,7 @@ def _personal_default_space(assistant):
 async def test_get_effective_completion_model_enforces_read_auth():
     # Preflight is reachable with an arbitrary assistant_id; it must not return a
     # model for an assistant the caller cannot read.
-    from intric.main.exceptions import UnauthorizedException
+    from eneo.main.exceptions import UnauthorizedException
 
     assistant = MagicMock()
     assistant.is_default = False

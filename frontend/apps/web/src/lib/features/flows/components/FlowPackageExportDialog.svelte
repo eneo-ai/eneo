@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IntricError, type Flow, type Intric } from "@intric/intric-js";
+  import { EneoError, type Flow, type Eneo } from "@eneo/eneo-js";
   import {
     AlertTriangle,
     CheckCircle2,
@@ -25,11 +25,11 @@
 
   let {
     flow,
-    intric,
+    eneo,
     beforeExport
   }: {
     flow: Flow;
-    intric: Intric;
+    eneo: Eneo;
     beforeExport?: () => Promise<void>;
   } = $props();
 
@@ -86,7 +86,7 @@
     exportError = null;
     try {
       await beforeExport?.();
-      const response = await intric.flows.packages.export({
+      const response = await eneo.flows.packages.export({
         id: flow.id,
         packageId: trimmedId,
         packageVersion: trimmedVersion,
@@ -99,7 +99,7 @@
     } catch (error) {
       const message =
         mapFlowPackageExportError(error) ??
-        (error instanceof IntricError ? error.getReadableMessage() : String(error));
+        (error instanceof EneoError ? error.getReadableMessage() : String(error));
       exportError = m.flow_package_export_failed({ message });
     } finally {
       exporting = false;

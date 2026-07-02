@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Markdown } from "@intric/ui";
+  import { Markdown } from "@eneo/ui";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import FlowAIBuilderRequirementsSummary from "./FlowAIBuilderRequirementsSummary.svelte";
   import type { RequirementsSummary } from "./protocol";
@@ -90,7 +90,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .message-row {
     margin-bottom: 1.25rem;

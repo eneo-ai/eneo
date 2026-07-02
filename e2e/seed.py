@@ -16,13 +16,13 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.database import sessionmanager
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.model_providers_table import ModelProviders
-from intric.database.tables.roles_table import Roles
-from intric.database.tables.tenant_table import Tenants
-from intric.main.config import get_settings
-from intric.server.dependencies.predefined_roles import (
+from eneo.database.database import sessionmanager
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.tenant_table import Tenants
+from eneo.main.config import get_settings
+from eneo.server.dependencies.predefined_roles import (
     load_predefined_roles_from_config,
 )
 

@@ -2,7 +2,7 @@ import { error } from "@sveltejs/kit";
 import { hasPermission } from "$lib/core/hasPermission";
 
 export const load = async (event) => {
-  const { intric, currentSpace, user } = await event.parent();
+  const { eneo, currentSpace, user } = await event.parent();
 
   const isOrgSpace = currentSpace.organization === true;
   if (isOrgSpace) {
@@ -13,7 +13,7 @@ export const load = async (event) => {
     throw error(403);
   }
 
-  const flowsData = await intric.flows.list({ spaceId: currentSpace.id });
+  const flowsData = await eneo.flows.list({ spaceId: currentSpace.id });
   const flows = flowsData.items ?? flowsData;
 
   return { flows };

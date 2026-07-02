@@ -5,8 +5,8 @@ from uuid import UUID
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.flow_run_rerun_request import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.flow_run_rerun_request import (
     RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION,
     FlowRunRerunRequestFingerprintInput,
     build_rerun_request_fingerprint,

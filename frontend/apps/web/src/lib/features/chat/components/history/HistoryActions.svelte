@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEdit } from "@intric/icons/edit";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { getChatService } from "../../ChatService.svelte";
-  import type { ConversationSparse } from "@intric/intric-js";
+  import type { ConversationSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 

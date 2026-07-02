@@ -6,22 +6,22 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
-from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
+from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     dispatch_server_decision,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_turn_controller import (
+from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     BuilderTurnDecision,
     CommitArchitecture,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
     PlanningState,

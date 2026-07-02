@@ -14,27 +14,27 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import BackgroundTasks
 
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.authentication.principal_types import PrincipalType
-from intric.files.file_models import FileType
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.domain.flow import (
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileType
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowStep,
 )
-from intric.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
-from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.flow_run_evidence_export_manifest import (
+from eneo.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_evidence_export_manifest import (
     EvidenceReviewCheckpointSummary,
 )
-from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
-from intric.main.exceptions import (
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.main.exceptions import (
     UnauthorizedException,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
 
 
 def _flow_step(step_id, step_order: int) -> FlowStep:

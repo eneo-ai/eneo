@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { InfoBlob } from "@intric/intric-js";
-  import { IconLinkExternal } from "@intric/icons/link-external";
-  import { Button } from "@intric/ui";
+  import type { InfoBlob } from "@eneo/eneo-js";
+  import { IconLinkExternal } from "@eneo/icons/link-external";
+  import { Button } from "@eneo/ui";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
 </script>

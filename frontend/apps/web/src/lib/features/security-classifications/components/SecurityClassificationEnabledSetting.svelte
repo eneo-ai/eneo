@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { toastError } from "$lib/core/errors";

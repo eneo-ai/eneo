@@ -11,80 +11,80 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.files.file_models import File, FileType
-from intric.flows.ai_builder.ai_builder_discovery_models import (
+from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
     DiscoveryAnalysis,
 )
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     DiscoveryRuntimeResult,
     _should_emit_forced_followup,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     SessionStatus,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import (
+from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
+from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
     KeyDecisionPayload,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     encode_ai_builder_stream_event,
 )
-from intric.flows.ai_builder.ai_builder_planner import (
+from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
 )
-from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
     prepare_planner_request,
 )
-from intric.flows.ai_builder.ai_builder_requirements_state import RequirementsState
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
+from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
     PendingQuestionResolution,
 )
-from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionDispatchResult,
 )
-from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from intric.flows.ai_builder.ai_builder_turn_controller import (
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
 )
-from intric.flows.ai_builder.ai_builder_user_question_metadata import (
+from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     resolve_user_question_metadata,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     StepTriple,
 )
-from intric.flows.ai_builder.planning_state_builder import (
+from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _make_planner() -> AIBuilderPlanner:
@@ -303,11 +303,11 @@ def _configure_minimal_send_message(
     )
     planner.repo.load_planning_state.return_value = None
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
         AsyncMock(return_value=(None, None)),
     )
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
         AsyncMock(return_value=prepared_request),
     )
 
@@ -338,7 +338,7 @@ async def _collect_send_message_events(
 
 def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_send_lease."
+        "eneo.flows.ai_builder.ai_builder_send_lease."
         "_send_lock_refresh_interval_seconds",
         lambda: 0,
     )
@@ -356,12 +356,12 @@ async def test_resolve_user_question_metadata_uses_freeform_inference_before_adj
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
             "infer_question_answer_from_freeform",
             return_value=inferred_answer,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
             "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
         ) as adjudicate,
@@ -574,12 +574,12 @@ async def test_resolve_user_question_metadata_does_not_adjudicate_without_pendin
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
             "infer_question_answer_from_freeform",
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
             "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
         ) as adjudicate,
@@ -627,12 +627,12 @@ async def test_resolve_user_question_metadata_marks_auxiliary_llm_when_pending_a
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
             "infer_question_answer_from_freeform",
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
             "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
             return_value=PendingQuestionResolution(
@@ -740,18 +740,18 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(
                 None, discovery_analysis, PlanningState.empty()
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ) as compute_budget,
     ):
@@ -803,11 +803,11 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(
                 "legacy discovery question",
@@ -875,20 +875,20 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(None, discovery_analysis, state),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
             return_value=requirements,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
             return_value=SimpleNamespace(
                 context="attachment context",
                 included_file_ids=[],
@@ -897,15 +897,15 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             ),
         ) as build_attachment_context,
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_plan_proposal_system_prompt",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_plan_proposal_system_prompt",
             return_value="proposal prompt",
         ) as build_plan_proposal_system_prompt,
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build from this file"}],
         ),
     ):
@@ -971,24 +971,24 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(None, discovery_analysis, state),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
             return_value=requirements,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build a report flow"}],
         ),
     ):
@@ -1030,11 +1030,11 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(
                 None, discovery_analysis, PlanningState.empty()
@@ -1098,28 +1098,28 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(None, discovery_analysis, state),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
             return_value=requirements,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build a flow"}],
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.logger.info"
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.logger.info"
         ) as logger_info,
     ):
         await _prepare_planner_request_for_test(
@@ -1199,7 +1199,7 @@ async def test_send_message_converts_dispatch_lease_lost_exception_to_events(
         )
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
         fail_with_lease_lost,
     )
 
@@ -1236,7 +1236,7 @@ async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_di
 
     planner.repo.refresh_session_send_lease.side_effect = refresh_fails
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
         wait_for_refresh_loss,
     )
 
@@ -1309,7 +1309,7 @@ async def test_send_message_releases_lease_after_server_dispatch_exception(
         raise RuntimeError("dispatch failed")
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
         fail_dispatch,
     )
 
@@ -1333,7 +1333,7 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
     )
     planner.repo.load_planning_state.return_value = None
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
         AsyncMock(return_value=(None, None)),
     )
 
@@ -1341,7 +1341,7 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
         raise RuntimeError("preparation failed")
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
         fail_prepare,
     )
     stream = planner.send_message(
@@ -1472,11 +1472,11 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         yield build_text_event("proposal")
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
         AsyncMock(return_value=(None, prior_plan)),
     )
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
         fake_prepare,
     )
     monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)

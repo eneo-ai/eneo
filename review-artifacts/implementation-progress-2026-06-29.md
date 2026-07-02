@@ -6,8 +6,8 @@
 - Findings addressed: `verify-builder-aiux:07`, `B-DEL-6`
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:127` indexes the relevant anchors.
-  - `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:31-35` defines `SessionStatus` without `APPLYING`.
-  - `frontend/packages/intric-js/src/types/schema.d.ts:22884` exposes `"chatting" | "awaiting_approval" | "applied" | "cancelled"` only.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:31-35` defines `SessionStatus` without `APPLYING`.
+  - `frontend/packages/eneo-js/src/types/schema.d.ts:22884` exposes `"chatting" | "awaiting_approval" | "applied" | "cancelled"` only.
   - `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts:545` wrote `status: "applying"` before the fix.
   - `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDraftRecovery.svelte:74-75` handled a dead `"applying"` case before the fix.
   - `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte:138-212` already drives apply progress through local `isApplying`.
@@ -24,7 +24,7 @@
 - Complexity deleted or owner clarified:
   - Deleted a duplicate frontend status path and kept the backend/generated `SessionStatus` contract as the single source of truth for persisted session lifecycle.
 - Validation commands and results:
-  - `rg -n "status:\\s*\\\"applying\\\"|case \\\"applying\\\"|session\\.status\\s*===\\s*['\\\"]applying['\\\"]|session\\.status\\s*!==\\s*['\\\"]applying['\\\"]" frontend/apps/web/src/lib/features/flows/ai-builder frontend/packages/intric-js/src/types/schema.d.ts` -> no matches.
+  - `rg -n "status:\\s*\\\"applying\\\"|case \\\"applying\\\"|session\\.status\\s*===\\s*['\\\"]applying['\\\"]|session\\.status\\s*!==\\s*['\\\"]applying['\\\"]" frontend/apps/web/src/lib/features/flows/ai-builder frontend/packages/eneo-js/src/types/schema.d.ts` -> no matches.
   - `cd frontend/apps/web && bunx svelte-check --tsconfig ./tsconfig.json` -> 0 errors, 1 pre-existing unrelated warning in `src/routes/(app)/account/+page.svelte:25`.
 - Remaining risk / follow-up:
   - No PG-1 residual risk found. Next slice is PG-2.
@@ -37,10 +37,10 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:162` indexes the E2E Celery worker gap.
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:21` scopes PG-2 to `docker-compose.e2e.ci.yml` and `docker-compose.e2e.yml`.
   - `docker-compose.e2e.ci.yml:103-115` and `docker-compose.e2e.yml:91-102` previously started only the HTTP backend via Gunicorn.
-  - `backend/src/intric/flows/runtime/celery_execution_backend.py:37-49` dispatches Flow runs to Celery.
-  - `backend/src/intric/flows/runtime/tasks.py:362-366` registers the `flows.execute` Celery task.
-  - `backend/src/intric/flows/runtime/cli.py:20-31` makes `flow-worker` consume `settings.flow_celery_queue`.
-  - `backend/src/intric/flows/runtime/celery_app.py:57-78` defines Flow beat schedules for reconciliation and delivery work.
+  - `backend/src/eneo/flows/runtime/celery_execution_backend.py:37-49` dispatches Flow runs to Celery.
+  - `backend/src/eneo/flows/runtime/tasks.py:362-366` registers the `flows.execute` Celery task.
+  - `backend/src/eneo/flows/runtime/cli.py:20-31` makes `flow-worker` consume `settings.flow_celery_queue`.
+  - `backend/src/eneo/flows/runtime/celery_app.py:57-78` defines Flow beat schedules for reconciliation and delivery work.
   - `backend/run.sh:21-31` maps `RUN_AS_CELERY_WORKER` and `RUN_AS_CELERY_BEAT` to the existing `flow-worker` and `flow-beat` entrypoints from `backend/pyproject.toml:75-76`.
   - `docs/deployment/docker-compose.yml:134-167` already uses `celery-worker-flows` and `celery-beat-flows` service names with those env flags.
 - Verification agents used, with verdicts:
@@ -75,22 +75,22 @@
 - Findings addressed: `A-DEL-1 / missed-deadcode:01`, `A-DEL-3 / missed-deadcode:05`
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:174` indexed the dead authoring-snapshot cluster, and `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:24` scoped the deletion to `FlowAuthoringUnsupportedFeature`, `FlowAuthoringSnapshot`, `flow_to_authoring_snapshot`, and their `__all__` entries.
-  - `backend/src/intric/flows/application/flow_authoring_snapshot.py:29`, `:36`, `:43`, and `:151-155` defined/exported the deleted authoring-snapshot symbols before the fix.
+  - `backend/src/eneo/flows/application/flow_authoring_snapshot.py:29`, `:36`, `:43`, and `:151-155` defined/exported the deleted authoring-snapshot symbols before the fix.
   - `rg -n "flow_to_authoring_snapshot|FlowAuthoringSnapshot|FlowAuthoringUnsupportedFeature" backend/src backend/tests frontend -g '!frontend/bun.lock'` showed only same-file definition/type/export hits before the fix.
   - CRG `callers_of(flow_to_authoring_snapshot)` and `callers_of(FlowAuthoringUnsupportedFeature)` returned 0 callers; CRG `callers_of(FlowAuthoringSnapshot)` returned only `flow_to_authoring_snapshot`, confirming the class was only used by the deleted wrapper.
-  - CRG `importers_of(flow_authoring_snapshot.py)` returned one live importer, `backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py:52`, which imports only `current_flow_authoring_spec`.
-  - `backend/src/intric/flows/application/flow_authoring_snapshot.py:67-146` kept the live `current_flow_authoring_spec`, `flow_step_to_authoring_spec`, `AssistantSnapshotProjector`, and `_resolve_existing_assistant_spec` path before the fix.
+  - CRG `importers_of(flow_authoring_snapshot.py)` returned one live importer, `backend/src/eneo/flows/ai_builder/ai_builder_edit_compiler.py:52`, which imports only `current_flow_authoring_spec`.
+  - `backend/src/eneo/flows/application/flow_authoring_snapshot.py:67-146` kept the live `current_flow_authoring_spec`, `flow_step_to_authoring_spec`, `AssistantSnapshotProjector`, and `_resolve_existing_assistant_spec` path before the fix.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:177` indexed the dead `run_create_fields` row, and `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:26` scoped the deletion to `FlowPrincipal.run_create_fields`.
-  - `backend/src/intric/flows/principal.py:92-98` defined `run_create_fields` before the fix; `rg -n "run_create_fields" backend/src backend/tests -g '*.py'` showed only that definition.
+  - `backend/src/eneo/flows/principal.py:92-98` defined `run_create_fields` before the fix; `rg -n "run_create_fields" backend/src backend/tests -g '*.py'` showed only that definition.
   - CRG `callers_of(run_create_fields)` returned 0 callers.
-  - `backend/src/intric/flows/application/flow_run_service.py:449-452` and `backend/src/intric/flows/infrastructure/flow_run_repo.py:145-148` already build run principal fields inline, so deleting the dead method does not change run creation behavior.
-  - Live siblings remain referenced: `file_owner_fields` at `backend/src/intric/flows/runtime/executor.py:2122`, `backend/src/intric/flows/runtime/template_fill_runtime.py:170`, and `backend/src/intric/flows/runtime/output_runtime.py:128`; `audit_actor_fields` at `backend/src/intric/flows/api/flow_api_common.py:61`, `backend/src/intric/flows/runtime/flow_run_actor.py:127`, and `backend/src/intric/flows/runtime/flow_run_actor.py:134`.
+  - `backend/src/eneo/flows/application/flow_run_service.py:449-452` and `backend/src/eneo/flows/infrastructure/flow_run_repo.py:145-148` already build run principal fields inline, so deleting the dead method does not change run creation behavior.
+  - Live siblings remain referenced: `file_owner_fields` at `backend/src/eneo/flows/runtime/executor.py:2122`, `backend/src/eneo/flows/runtime/template_fill_runtime.py:170`, and `backend/src/eneo/flows/runtime/output_runtime.py:128`; `audit_actor_fields` at `backend/src/eneo/flows/api/flow_api_common.py:61`, `backend/src/eneo/flows/runtime/flow_run_actor.py:127`, and `backend/src/eneo/flows/runtime/flow_run_actor.py:134`.
 - Verification agents used, with verdicts:
   - `dead_code_deletion_reviewer` for `A-DEL-1` verdict: `confirmed`; exact `rg` showed the authoring-snapshot symbols were only defined/typed/exported in the same module, no wildcard import/package re-export used them, and the smallest fix was to delete only those symbols plus the now-unused imports.
   - `dead_code_deletion_reviewer` for `A-DEL-3` verdict: `confirmed`; exact `rg` and CRG showed zero source/test callers for `run_create_fields`, live sibling methods remained referenced, and rewiring run creation through the dict helper would be broader and weaker than deletion.
 - Files changed:
-  - `backend/src/intric/flows/application/flow_authoring_snapshot.py`
-  - `backend/src/intric/flows/principal.py`
+  - `backend/src/eneo/flows/application/flow_authoring_snapshot.py`
+  - `backend/src/eneo/flows/principal.py`
 - Behavior changed:
   - Removed dead in-repo public Python symbols only. No runtime path changes are expected because source/test/frontend reference checks and CRG caller checks found no live callers.
 - Complexity deleted or owner clarified:
@@ -98,12 +98,12 @@
   - Deleted a dead `FlowPrincipal` run-field projection that implied run creation used it when run creation already writes those fields through the application service and repository.
 - Validation commands and results:
   - `rg -n "flow_to_authoring_snapshot|FlowAuthoringSnapshot|FlowAuthoringUnsupportedFeature|run_create_fields" backend/src backend/tests frontend -g '!frontend/bun.lock'` -> no matches.
-  - `rg -n "current_flow_authoring_spec|flow_step_to_authoring_spec|AssistantSnapshotProjector|_resolve_existing_assistant_spec" backend/src/intric/flows/application/flow_authoring_snapshot.py backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_projection.py -g '*.py'` -> survivor projection path still referenced.
-  - `rg -n "file_owner_fields|audit_actor_fields" backend/src/intric/flows backend/tests/unittests/flows -g '*.py'` -> live sibling methods still referenced.
-  - `cd backend && uv run ruff check src/intric/flows/application/flow_authoring_snapshot.py src/intric/flows/principal.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/application/flow_authoring_snapshot.py src/intric/flows/principal.py src/intric/flows/ai_builder/ai_builder_edit_compiler.py` -> pass, 0 errors.
+  - `rg -n "current_flow_authoring_spec|flow_step_to_authoring_spec|AssistantSnapshotProjector|_resolve_existing_assistant_spec" backend/src/eneo/flows/application/flow_authoring_snapshot.py backend/src/eneo/flows/ai_builder/ai_builder_edit_compiler.py backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_projection.py -g '*.py'` -> survivor projection path still referenced.
+  - `rg -n "file_owner_fields|audit_actor_fields" backend/src/eneo/flows backend/tests/unittests/flows -g '*.py'` -> live sibling methods still referenced.
+  - `cd backend && uv run ruff check src/eneo/flows/application/flow_authoring_snapshot.py src/eneo/flows/principal.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/application/flow_authoring_snapshot.py src/eneo/flows/principal.py src/eneo/flows/ai_builder/ai_builder_edit_compiler.py` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_authoring_projection.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/test_flow_run_actor.py -q` -> pass, 70 passed.
-  - `git diff --check -- backend/src/intric/flows/application/flow_authoring_snapshot.py backend/src/intric/flows/principal.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff --check -- backend/src/eneo/flows/application/flow_authoring_snapshot.py backend/src/eneo/flows/principal.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - CRG `get_review_context` with explicit changed files -> high shared-file impact surface, no concrete blocker surfaced.
   - CRG `get_affected_flows` for the two source files -> 0 execution flows affected.
 - Remaining risk / follow-up:
@@ -121,22 +121,22 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:175-176` indexes the dead facade wrappers and dead policy/util helpers.
   - Before the edit, direct `rg` for `PlannerCompletionResult|call_planner_completion|aggregate_user_text|render_structured_reference_block|determine_turn_decision|compiled_chain_step_template|metadata_has_real_question_answer|latest_tool_call_arguments|infer_mixed_input_architecture_choice|is_narrow_output_edit_request|build_question_fallback_text|find_unavailable_named_mcp_request|extract_planner_pattern_recipe_signals|selected_any_mcp` under `backend/src backend/tests frontend` returned only definition/export hits.
   - CRG `callers_of(determine_turn_decision)`, `callers_of(find_unavailable_named_mcp_request)`, and `callers_of(infer_mixed_input_architecture_choice)` returned 0 callers in this session.
-  - `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:27-29` still owns the protected `CompletionMetadata` type after deleting the dead `PlannerCompletionResult` path.
-  - `backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py:339`, `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:21`, `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py:78`, and `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:584` remain as the real retained implementations behind the deleted wrappers.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:27-29` still owns the protected `CompletionMetadata` type after deleting the dead `PlannerCompletionResult` path.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_framework_policy.py:339`, `backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py:21`, `backend/src/eneo/flows/ai_builder/ai_builder_turn_controller.py:78`, and `backend/src/eneo/flows/ai_builder/ai_builder_step_skeleton.py:584` remain as the real retained implementations behind the deleted wrappers.
 - Verification agents used, with verdicts:
   - `PG-3a.2` read-only verifier verdict: `confirmed`; delete only the named symbols, keep `CompletionMetadata`, `_aggregate_user_text`, `build_structured_reference_payload`, `resolve_turn_control`, `_compiled_chain_step_template`, and `NamedMCPReferenceIssue`.
   - Claude peer-loop session `eneo-flows-pg3-remaining-2026-06-29`: initial passes required proof that `B-DEL-1` structured-output resolution is side-effect-free and that `B-DEL-4` does not delete retained implementations; final pass returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after those proofs and the keep decision were documented.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_interaction_utils.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_framework_policy.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_turn_controller.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_step_skeleton.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_input_architecture_policy.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_interaction_utils.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_mcp_intent.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_planner_pattern_signals.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py`
 - Behavior changed:
   - Removed dead in-repo Builder Python symbols and their stale exports only.
@@ -147,11 +147,11 @@
 - Validation commands and results:
   - `rg -n --no-heading -S "\\b(PlannerCompletionResult|call_planner_completion|aggregate_user_text|render_structured_reference_block|determine_turn_decision|compiled_chain_step_template|metadata_has_real_question_answer|latest_tool_call_arguments|infer_mixed_input_architecture_choice|is_narrow_output_edit_request|build_question_fallback_text|find_unavailable_named_mcp_request|extract_planner_pattern_recipe_signals|selected_any_mcp)\\b" backend/src backend/tests frontend --glob '!**/.venv/**' --glob '!frontend/bun.lock'` -> no matches.
   - `rg -n "_aggregate_user_text|build_structured_reference_payload|resolve_turn_control|_compiled_chain_step_template|CompletionMetadata" backend/src backend/tests --glob '*.py'` -> retained owners still present and referenced.
-  - `rg -n "from intric\\.flows\\.ai_builder\\.(ai_builder_litellm_completion|ai_builder_framework_policy|ai_builder_flow_capability_reference|ai_builder_turn_controller|ai_builder_step_skeleton|ai_builder_conversation_metadata|ai_builder_input_architecture_policy|ai_builder_interaction_utils|ai_builder_mcp_intent|ai_builder_planner_pattern_signals) import \\*" backend/src backend/tests --glob '*.py'` -> no wildcard imports.
-  - `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_litellm_completion.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py src/intric/flows/ai_builder/ai_builder_turn_controller.py src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py src/intric/flows/ai_builder/ai_builder_interaction_utils.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/ai_builder` -> pass, 0 errors.
+  - `rg -n "from eneo\\.flows\\.ai_builder\\.(ai_builder_litellm_completion|ai_builder_framework_policy|ai_builder_flow_capability_reference|ai_builder_turn_controller|ai_builder_step_skeleton|ai_builder_conversation_metadata|ai_builder_input_architecture_policy|ai_builder_interaction_utils|ai_builder_mcp_intent|ai_builder_planner_pattern_signals) import \\*" backend/src backend/tests --glob '*.py'` -> no wildcard imports.
+  - `cd backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_litellm_completion.py src/eneo/flows/ai_builder/ai_builder_framework_policy.py src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py src/eneo/flows/ai_builder/ai_builder_turn_controller.py src/eneo/flows/ai_builder/ai_builder_step_skeleton.py src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py src/eneo/flows/ai_builder/ai_builder_input_architecture_policy.py src/eneo/flows/ai_builder/ai_builder_interaction_utils.py src/eneo/flows/ai_builder/ai_builder_mcp_intent.py src/eneo/flows/ai_builder/ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/ai_builder` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py tests/unittests/flows/ai_builder/test_ai_builder_turn_controller.py tests/unittests/flows/ai_builder/test_ai_builder_turn_decision_proof.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q` -> pass, 211 passed.
-  - `git diff --check -- backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py` -> pass.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py` -> pass.
 - Remaining risk / follow-up:
   - Remaining risk is limited to out-of-repo imports of the deleted Builder helper names; direct in-repo source/test/frontend checks found no live callers.
   - `build_structured_reference_payload` is kept by the explicit `B-DEL-4` carve-out even though deleting `render_structured_reference_block` leaves it currently referenced only by tests; see `PG3-FU-1`.
@@ -161,33 +161,33 @@
 - Slice id: PG-3b
 - Findings addressed: `A-DEL-4 / missed-module-depth:01`
 - Verified evidence before change:
-  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:27` scopes the deletion to `backend/src/intric/flows/runtime/document_renderer.py` and repointing its test call sites.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:27` scopes the deletion to `backend/src/eneo/flows/runtime/document_renderer.py` and repointing its test call sites.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:173` indexes the pass-through facade, production direct service use, and test-only importer.
-  - Before deletion, `backend/src/intric/flows/runtime/document_renderer.py:14-41` only wrapped `default_document_render_service().render_document` and `default_document_render_service().render_structured_document`.
-  - `backend/src/intric/flows/runtime/executor.py:546-550` constructs `default_document_render_service(...)` directly, and `backend/src/intric/flows/runtime/executor.py:2098-2102` passes `self.document_render_service.render_document` / `render_structured_document` into typed-output runtime.
+  - Before deletion, `backend/src/eneo/flows/runtime/document_renderer.py:14-41` only wrapped `default_document_render_service().render_document` and `default_document_render_service().render_structured_document`.
+  - `backend/src/eneo/flows/runtime/executor.py:546-550` constructs `default_document_render_service(...)` directly, and `backend/src/eneo/flows/runtime/executor.py:2098-2102` passes `self.document_render_service.render_document` / `render_structured_document` into typed-output runtime.
   - Direct `rg "document_renderer|render_document\\(|render_structured_document\\(" backend/src backend/tests --glob '*.py'` showed the only `document_renderer` import was `backend/tests/unittests/flows/test_document_renderer.py:13` before the fix.
-  - CRG `importers_of(backend/src/intric/flows/runtime/document_renderer.py)` returned 0 importers; direct `rg` was used as truth for the test importer that CRG did not report.
+  - CRG `importers_of(backend/src/eneo/flows/runtime/document_renderer.py)` returned 0 importers; direct `rg` was used as truth for the test importer that CRG did not report.
 - Verification agents used, with verdicts:
   - `PG-3b` read-only verifier verdict: `confirmed`; delete the runtime `document_renderer.py` facade, repoint `test_document_renderer.py` to `default_document_render_service()`, and do not create test aliases for the deleted facade functions.
 - Files changed:
-  - `backend/src/intric/flows/runtime/document_renderer.py` (deleted)
+  - `backend/src/eneo/flows/runtime/document_renderer.py` (deleted)
   - `backend/tests/unittests/flows/test_document_renderer.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
   - Removed the test-only pass-through facade and its hidden process-global cached service.
   - Tests now exercise the real `DocumentRenderService` owner through `default_document_render_service()`; production already used `DocumentRenderService` directly, so no production runtime behavior changes are expected.
 - Complexity deleted or owner clarified:
-  - Deleted a shallow "stable facade" module and made `intric.flows.runtime.document_rendering.service.DocumentRenderService` the only renderer service owner.
+  - Deleted a shallow "stable facade" module and made `eneo.flows.runtime.document_rendering.service.DocumentRenderService` the only renderer service owner.
 - Validation commands and results:
-  - `rg -n "intric\\.flows\\.runtime\\.document_renderer|from intric\\.flows\\.runtime\\.document_renderer|document_renderer import" backend/src backend/tests --glob '*.py'` -> no matches.
+  - `rg -n "eneo\\.flows\\.runtime\\.document_renderer|from eneo\\.flows\\.runtime\\.document_renderer|document_renderer import" backend/src backend/tests --glob '*.py'` -> no matches.
   - `rg -n -P "(?<!\\.)\\brender_document\\(|(?<!\\.)\\brender_structured_document\\(" backend/tests/unittests/flows/test_document_renderer.py` -> no unqualified render calls.
-  - `cd backend && uv run ruff check src/intric/flows/runtime/document_rendering tests/unittests/flows/test_document_renderer.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/runtime tests/unittests/flows/test_document_renderer.py` -> pass, 0 errors.
+  - `cd backend && uv run ruff check src/eneo/flows/runtime/document_rendering tests/unittests/flows/test_document_renderer.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/runtime tests/unittests/flows/test_document_renderer.py` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/unittests/flows/test_document_renderer.py -q` on the host -> failed only on PDF cases because host WeasyPrint cannot load native `libgobject-2.0-0`; non-PDF subset passed, 33 passed / 13 deselected.
   - `docker start cf394ee1b6e8` then `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_document_renderer.py -q'` -> pass, 46 passed.
-  - `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/runtime/document_rendering tests/unittests/flows/test_document_renderer.py'` -> pass.
-  - `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/pyright src/intric/flows/runtime tests/unittests/flows/test_document_renderer.py'` -> failed with broad pre-existing container import-resolution errors for packages such as `celery`, `docx`, and `markdown_it`; host pyright above is the type gate for this slice.
-  - `git diff --check -- backend/src/intric/flows/runtime/document_renderer.py backend/tests/unittests/flows/test_document_renderer.py` -> pass.
+  - `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/runtime/document_rendering tests/unittests/flows/test_document_renderer.py'` -> pass.
+  - `docker exec cf394ee1b6e8 sh -lc 'cd /workspace/backend && .venv/bin/pyright src/eneo/flows/runtime tests/unittests/flows/test_document_renderer.py'` -> failed with broad pre-existing container import-resolution errors for packages such as `celery`, `docx`, and `markdown_it`; host pyright above is the type gate for this slice.
+  - `git diff --check -- backend/src/eneo/flows/runtime/document_renderer.py backend/tests/unittests/flows/test_document_renderer.py` -> pass.
 - Remaining risk / follow-up:
   - No in-repo runtime caller remains. Residual risk is limited to out-of-repo imports of the deleted facade, which is not a compatibility requirement for this pre-production cleanup.
   - Host PDF tests need native WeasyPrint libraries; the devcontainer is the reliable validation environment for PDF rendering.
@@ -200,18 +200,18 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:47` scopes the deletion to `resolve_planner_structured_output_capability`, the `PreparedMessageContext` field, router forwarding, and the planner parameter while keeping the shared `StructuredOutputCapabilityDecision` type.
   - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:62-70` lists the keep-carve-outs; this slice kept `StructuredOutputCapabilityDecision`, `CompletionMetadata`, `FlowExecutionBackend`, the JSON-text proposal repair fallback, and the active private-fields migration/test.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:65` indexes the structured-output resolve/forward/discard chain and the shared type owner.
-  - Before the edit, `backend/src/intric/flows/ai_builder/ai_builder_service.py:364-368` delegated to `completion_service.resolve_structured_output_capability`, `backend/src/intric/flows/ai_builder/ai_builder_service.py:393-397` invoked it per prepared message context, and `backend/src/intric/flows/ai_builder/ai_builder_service.py:442-449` returned it on `PreparedMessageContext`.
-  - Before the edit, `backend/src/intric/flows/ai_builder/ai_builder_router.py:648-666` forwarded the value into `service.send_message`.
-  - Before the edit, `backend/src/intric/flows/ai_builder/ai_builder_planner.py:113-135` accepted `structured_output_decision` and immediately assigned it to `_`.
+  - Before the edit, `backend/src/eneo/flows/ai_builder/ai_builder_service.py:364-368` delegated to `completion_service.resolve_structured_output_capability`, `backend/src/eneo/flows/ai_builder/ai_builder_service.py:393-397` invoked it per prepared message context, and `backend/src/eneo/flows/ai_builder/ai_builder_service.py:442-449` returned it on `PreparedMessageContext`.
+  - Before the edit, `backend/src/eneo/flows/ai_builder/ai_builder_router.py:648-666` forwarded the value into `service.send_message`.
+  - Before the edit, `backend/src/eneo/flows/ai_builder/ai_builder_planner.py:113-135` accepted `structured_output_decision` and immediately assigned it to `_`.
   - CRG `callers_of(resolve_planner_structured_output_capability)` returned exactly one caller, `prepare_message_context`.
   - Claude side-effect verification checked the shared resolver path: `CompletionService.resolve_structured_output_capability` delegates through `TenantModelAdapter.resolve_structured_output_capability` to local LiteLLM capability-table probing; no provider network call or state mutation was found.
 - Verification agents used, with verdicts:
   - `PG-3c` read-only verifier verdict: `confirmed`; remove only the AI Builder pass-through field/method/forwarding/discarded parameter/test plumbing, keep the shared completion-model capability producer/type and proposal completion behavior.
   - Claude peer-loop session `eneo-flows-pg3-remaining-2026-06-29`: final pass returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after the side-effect proof and keep-carve-out handling were documented.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_service.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_router.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_planner.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_service.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_router.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_planner.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -220,14 +220,14 @@
   - The planner/service/router API between internal Builder components no longer advertises provider-aware structured-output behavior that the planner ignored.
 - Complexity deleted or owner clarified:
   - Deleted 106 net lines of dead async plumbing and mock-only tests.
-  - Kept structured-output capability ownership in `intric.completion_models.infrastructure`, outside the AI Builder planner path.
+  - Kept structured-output capability ownership in `eneo.completion_models.infrastructure`, outside the AI Builder planner path.
 - Validation commands and results:
-  - `rg -n "resolve_planner_structured_output_capability|structured_output_decision" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder --glob '*.py'` -> no matches.
-  - `rg -n "StructuredOutputCapabilityDecision|resolve_structured_output_capability|unsupported_structured_output_decision" backend/src/intric/completion_models backend/tests/unit/test_tenant_model_capabilities.py --glob '*.py'` -> shared type/resolver retained and tested.
-  - `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_router.py src/intric/flows/ai_builder/ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/ai_builder src/intric/completion_models/infrastructure` -> pass, 0 errors.
+  - `rg -n "resolve_planner_structured_output_capability|structured_output_decision" backend/src/eneo/flows/ai_builder backend/tests/unittests/flows/ai_builder --glob '*.py'` -> no matches.
+  - `rg -n "StructuredOutputCapabilityDecision|resolve_structured_output_capability|unsupported_structured_output_decision" backend/src/eneo/completion_models backend/tests/unit/test_tenant_model_capabilities.py --glob '*.py'` -> shared type/resolver retained and tested.
+  - `cd backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_service.py src/eneo/flows/ai_builder/ai_builder_router.py src/eneo/flows/ai_builder/ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/ai_builder src/eneo/completion_models/infrastructure` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unit/test_tenant_model_capabilities.py -q` -> pass, 198 passed.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_service.py backend/src/intric/flows/ai_builder/ai_builder_router.py backend/src/intric/flows/ai_builder/ai_builder_planner.py backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_service.py backend/src/eneo/flows/ai_builder/ai_builder_router.py backend/src/eneo/flows/ai_builder/ai_builder_planner.py backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
 - Remaining risk / follow-up:
   - Shared `CompletionService.resolve_structured_output_capability` may now be a zero-production-caller capability outside Builder; it is deliberately kept in PG-3c because the backlog protects the shared type/owner. See `PG3-FU-2`.
 
@@ -238,8 +238,8 @@
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:28` scoped the deletion to `STEP_HANDLER_REGISTRY`, `StepHandlerClass`, the registry coverage test, the AST match-case guard, and the docs-contract registry pin.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:20` indexed the decorative registry lookup/assert/hand-construction path.
-  - Before the edit, `backend/src/intric/flows/runtime/step_handlers/__init__.py:15-31` defined `StepHandlerClass` and `STEP_HANDLER_REGISTRY`.
-  - Before the edit, `backend/src/intric/flows/runtime/executor.py:1217-1238` read the registry only to assert concrete classes, then constructed the same concrete handlers in a `match`.
+  - Before the edit, `backend/src/eneo/flows/runtime/step_handlers/__init__.py:15-31` defined `StepHandlerClass` and `STEP_HANDLER_REGISTRY`.
+  - Before the edit, `backend/src/eneo/flows/runtime/executor.py:1217-1238` read the registry only to assert concrete classes, then constructed the same concrete handlers in a `match`.
   - Before the edit, direct `rg` for `STEP_HANDLER_REGISTRY|StepHandlerClass|runtime handler registry|Step handler registry` under `backend/src`, `backend/tests`, `backend/scripts`, and the docs site showed only the executor lookup, the registry definition/export, registry-coupled tests, and generated docs/docs-contract pins.
   - CRG `get_minimal_context` for the explicit PG-4 file set reported low risk. CRG `importers_of` for `runtime/step_handlers/__init__.py` was not useful, so direct `rg` remained the proof source.
 - Verification agents used, with verdicts:
@@ -248,8 +248,8 @@
   - Claude peer-loop implementation gate iteration 2 verdict: `changes_required`; code and ownership were clean, but the generated procedure text used a backtick-wrapped `backend/.../step_handlers/` directory token that failed the docs source-reference contract. The generator was corrected to use unprefixed `runtime/step_handlers/`, the docs were regenerated, and the full docs contract file was run.
   - Claude peer-loop implementation gate iteration 3 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9`; no code blockers remained, with the commit-scope guardrail to stage only the PG-4 paths.
 - Files changed:
-  - `backend/src/intric/flows/runtime/step_handlers/__init__.py`
-  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/src/eneo/flows/runtime/step_handlers/__init__.py`
+  - `backend/src/eneo/flows/runtime/executor.py`
   - `backend/tests/unittests/flows/test_flow_runtime_step_handlers.py`
   - `backend/tests/unittests/flows/test_flow_docs_site_contract.py`
   - `backend/scripts/flow_developer_reviewer_guide_docs.py`
@@ -273,12 +273,12 @@
   - `make docs:regen` -> pass after tightening the generated-docs catalog text to satisfy its short-sentence and file-path validators.
   - `rg -n "STEP_HANDLER_REGISTRY|StepHandlerClass|runtime handler registry|Step handler registry" backend/src backend/scripts frontend/apps/docs-site --glob '!**/.venv/**'` -> no matches.
   - `rg -n "STEP_HANDLER_REGISTRY|StepHandlerClass|runtime handler registry|Step handler registry" backend/tests/unittests/flows/test_flow_runtime_step_handlers.py backend/tests/unittests/flows/test_flow_docs_site_contract.py --glob '!**/.venv/**'` -> only the negative docs-contract assertion remains.
-  - `cd backend && uv run ruff check src/intric/flows/runtime/step_handlers/__init__.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_docs_site_contract.py scripts/flow_developer_reviewer_guide_docs.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/runtime/step_handlers/__init__.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_docs_site_contract.py scripts/flow_developer_reviewer_guide_docs.py` -> pass, 0 errors.
+  - `cd backend && uv run ruff check src/eneo/flows/runtime/step_handlers/__init__.py src/eneo/flows/runtime/executor.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_docs_site_contract.py scripts/flow_developer_reviewer_guide_docs.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/runtime/step_handlers/__init__.py src/eneo/flows/runtime/executor.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_docs_site_contract.py scripts/flow_developer_reviewer_guide_docs.py` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_rejects_invalid_output_mode tests/unittests/flows/test_flow_executor_runtime.py::test_execute_fails_run_when_definition_snapshot_is_invalid tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_reviewer_guide_is_generated_from_review_catalog tests/unittests/flows/test_flow_architecture_guards.py::test_output_mode_literal_branches_only_appear_in_allowlisted_call_sites -q` -> pass, 13 passed.
   - `cd backend && uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py -q` -> pass, 69 passed.
   - `cd frontend && bun prettier --check apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx` -> pass.
-  - `git diff --check -- backend/scripts/flow_developer_reviewer_guide_docs.py backend/src/intric/flows/runtime/executor.py backend/src/intric/flows/runtime/step_handlers/__init__.py backend/tests/unittests/flows/test_flow_runtime_step_handlers.py backend/tests/unittests/flows/test_flow_docs_site_contract.py frontend/apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx` -> pass.
+  - `git diff --check -- backend/scripts/flow_developer_reviewer_guide_docs.py backend/src/eneo/flows/runtime/executor.py backend/src/eneo/flows/runtime/step_handlers/__init__.py backend/tests/unittests/flows/test_flow_runtime_step_handlers.py backend/tests/unittests/flows/test_flow_docs_site_contract.py frontend/apps/docs-site/src/content/docs/flows-for-developers/reviewing-flows-code.mdx` -> pass.
 - Remaining risk / follow-up:
   - Residual risk is limited to out-of-repo imports of the deleted Python names; no in-repo production or docs reference remains.
   - The broader output-mode vocabulary map remains deliberately out of scope because it is not the decorative registry finding and may affect API/runtime contract ownership.
@@ -291,7 +291,7 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:24` scopes PG-5 to awaiting executor coroutine cancellation before task-boundary timeout terminalization, with no completed step result after terminalization.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:21` indexes the `future.cancel()` race and the prior no-op cancellation test.
   - `review-artifacts/ultracode-independent-review-2026-06-29/open-questions.md:24` requires a real non-mocked cancel path before treating the severity as proven.
-  - Before the edit, `backend/src/intric/flows/runtime/tasks.py:521-560` scheduled `_execute_flow_run_async(...)`, called `future.result(timeout=...)`, then ran `future.cancel()` and immediately scheduled timeout terminalization on `TimeoutError` / `SoftTimeLimitExceeded`.
+  - Before the edit, `backend/src/eneo/flows/runtime/tasks.py:521-560` scheduled `_execute_flow_run_async(...)`, called `future.result(timeout=...)`, then ran `future.cancel()` and immediately scheduled timeout terminalization on `TimeoutError` / `SoftTimeLimitExceeded`.
   - Before the edit, `backend/tests/unittests/flows/test_celery_runtime.py:616-740` used fake futures that closed the coroutine and asserted exception mapping, so they never exercised event-loop task cancellation or cleanup ordering.
   - A scratch proof confirmed `concurrent.futures.Future.cancel(); future.result(timeout=...)` returns before coroutine cleanup finishes, so it cannot be used as a drain.
   - During implementation review, a read-only runtime verifier found the first PG-5 draft did not cancel the submitted future when timeout fired before the wrapper captured `asyncio.current_task()`.
@@ -302,7 +302,7 @@
   - Claude peer-loop session `eneo-flows-pg5-precapture-cancel-2026-06-29` verification verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after the test name, source comment, and design-decision ledger entry were corrected.
   - CRG `get_minimal_context` with explicit PG-5/PG-8 files reported low graph risk; CRG `callees_of(_execute_flow_run_task)` confirmed the task-boundary owner routes through local runtime task helpers.
 - Files changed:
-  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/src/eneo/flows/runtime/tasks.py`
   - `backend/tests/unittests/flows/test_celery_runtime.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -324,9 +324,9 @@
   - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization -q` -> pass after the fix, 2 passed.
   - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminalization tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalization -q` -> pass after the pre-capture fix, 3 passed.
   - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py -q` -> pass, 42 passed.
-  - `cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass, 0 errors.
-  - `git diff --check -- backend/src/intric/flows/runtime/tasks.py backend/tests/unittests/flows/test_celery_runtime.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `cd backend && uv run ruff check src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/eneo/flows/runtime/tasks.py backend/tests/unittests/flows/test_celery_runtime.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / follow-up:
   - PG-5 proves loop-task cancellation cleanup precedes timeout terminalization at the task boundary. PG-8 must still add the requested DB-backed no-broker proof that the failed run/audit state and no-completed-step invariant hold with persisted rows.
 
@@ -337,14 +337,14 @@
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:25` scopes PG-6 to guarding the three secondary terminalization `.result(timeout=10)` call sites in `flows/runtime/tasks.py`.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:23` indexes the unguarded secondary terminalization path.
-  - Before the edit, `backend/src/intric/flows/runtime/tasks.py:440-455`, `:507-519`, and `:529-541` scheduled `terminalize_flow_run_failure(...)` and called `.result(timeout=10)` without a guard.
+  - Before the edit, `backend/src/eneo/flows/runtime/tasks.py:440-455`, `:507-519`, and `:529-541` scheduled `terminalize_flow_run_failure(...)` and called `.result(timeout=10)` without a guard.
   - Before the edit, `backend/tests/unittests/flows/test_celery_runtime.py:615-799` covered timeout and generic task failure only when secondary terminalization succeeded.
   - A red unit test proved the current bug: `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_returns_failed_when_task_terminalization_fails -q` failed on all three parametrized paths because terminalization `RuntimeError` / `TimeoutError` escaped `_execute_flow_run_task`.
 - Verification agents used, with verdicts:
   - Claude peer-loop prompt verification artifacts for `pg5-pg6-pg8-next-prompt-2026-06-29` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` for the runtime cluster direction after requiring the captured-task PG-5 drain and PG-6 guarded terminalization helper.
   - CRG `get_review_context` with explicit `tasks.py` and `test_celery_runtime.py` reported high impact for the runtime task owner; direct source and targeted tests were used as proof.
 - Files changed:
-  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/src/eneo/flows/runtime/tasks.py`
   - `backend/tests/unittests/flows/test_celery_runtime.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -361,9 +361,9 @@
   - What not to preserve: unguarded secondary `.result(timeout=10)` calls that can re-raise and hide the task's deterministic failed result.
 - Validation commands and results:
   - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py::test_execute_flow_run_returns_failed_when_task_terminalization_fails -q` -> red before the fix, then pass, 3 passed.
-  - `cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass, 0 errors.
-  - `git diff --check -- backend/src/intric/flows/runtime/tasks.py backend/tests/unittests/flows/test_celery_runtime.py` -> pass.
+  - `cd backend && uv run ruff check src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/eneo/flows/runtime/tasks.py backend/tests/unittests/flows/test_celery_runtime.py` -> pass.
 - Remaining risk / follow-up:
   - PG-6 does not fix the coroutine unwind race. PG-5 must still replace the current timeout/soft-limit `future.cancel()` path with a captured-task cancel-and-join and prove cleanup precedes terminalization.
 
@@ -375,11 +375,11 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:27` scopes PG-8 to a DB-backed Celery task-boundary terminalization test, without adding a broker harness.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:21` indexes the task-boundary timeout/cancellation concern that PG-8 must prove against persisted rows.
   - `review-artifacts/ultracode-independent-review-2026-06-29/open-questions.md:24` requires a real cancellation path plus FAILED run, `flow_task_timeout`, and no post-terminalization COMPLETED step result.
-  - `backend/src/intric/flows/runtime/tasks.py:482-625` is still the task-boundary owner: it schedules `_execute_flow_run_async`, handles timeout / soft-time-limit cancellation, terminalizes with `FlowRunLifecycleSource.TASK_TIMEOUT`, and returns `{"status": "failed", "reason": "timeout"}`.
-  - `backend/src/intric/flows/infrastructure/flow_run_repo.py:170-183` pre-seeds pending step-result rows for a created run.
-  - `backend/src/intric/flows/application/flow_run_terminalization.py:189-203` closes active step results and attempts when a run is terminalized as FAILED.
-  - `backend/src/intric/flows/infrastructure/flow_repo.py:688-709` only saves a step result while the parent run is still active; after terminalization, the upsert returns `None`.
-  - `backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py:75-93` inserts the audit-outbox action, source, target status, and error code used by the task-boundary terminalization contract.
+  - `backend/src/eneo/flows/runtime/tasks.py:482-625` is still the task-boundary owner: it schedules `_execute_flow_run_async`, handles timeout / soft-time-limit cancellation, terminalizes with `FlowRunLifecycleSource.TASK_TIMEOUT`, and returns `{"status": "failed", "reason": "timeout"}`.
+  - `backend/src/eneo/flows/infrastructure/flow_run_repo.py:170-183` pre-seeds pending step-result rows for a created run.
+  - `backend/src/eneo/flows/application/flow_run_terminalization.py:189-203` closes active step results and attempts when a run is terminalized as FAILED.
+  - `backend/src/eneo/flows/infrastructure/flow_repo.py:688-709` only saves a step result while the parent run is still active; after terminalization, the upsert returns `None`.
+  - `backend/src/eneo/flows/infrastructure/flow_run_audit_outbox_repo.py:75-93` inserts the audit-outbox action, source, target status, and error code used by the task-boundary terminalization contract.
 - Verification agents used, with verdicts:
   - CRG `get_minimal_context` with explicit `test_flow_runtime_worker_contract.py` reported the expected runtime-task entities (`_execute_flow_run_task`, cancellation helpers, and the new PG-8 test); direct source verification was used for all claims.
   - CRG `get_review_context` with explicit `test_flow_runtime_worker_contract.py` reported high impact because the file exercises central Flow runtime behavior; the slice was kept test-only.
@@ -402,8 +402,8 @@
   - Decision or measurement needed: no PG-8 product decision; the unrelated typed-output message drift needs a separate owner decision before changing that test.
   - What not to preserve: tests that only mock `future.cancel()`, private event-loop DB access, broker orchestration for this invariant, and partial assertions that omit the audit-outbox source/error contract.
 - Validation commands and results:
-  - `cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass, 0 errors.
+  - `cd backend && uv run ruff check src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_celery_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py` -> pass, 0 errors.
   - `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py -q` -> pass, 42 passed.
   - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_task_timeout_terminalization_rejects_late_completed_step_write -q` -> pass, 1 passed.
   - `cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q` -> fail with 1 unrelated pre-existing typed-output assertion drift; the new PG-8 test passed in that run. Expected `"Step 1: typed input/output validation failed (typed_io_output_parse_failed)."` but runtime returned `"Step 1: The model output could not be parsed into the expected JSON shape (typed_io_output_parse_failed)."`.
@@ -417,7 +417,7 @@
 ## Runtime Worker Contract Baseline Repair
 
 - Scope: test-only stale assertion repair before PG-7.
-- Source owner: `backend/src/intric/flows/runtime/step_attempt_runtime.py:135-145` owns `build_typed_failure_run_error_message(...)`; with `contract_validation=None`, it uses the fallback cause from `FLOW_ERROR_TAXONOMY[FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED]`.
+- Source owner: `backend/src/eneo/flows/runtime/step_attempt_runtime.py:135-145` owns `build_typed_failure_run_error_message(...)`; with `contract_validation=None`, it uses the fallback cause from `FLOW_ERROR_TAXONOMY[FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED]`.
 - Stale assertion provenance: `git log -L 1071,1090:backend/tests/integration/flows/test_flow_runtime_worker_contract.py --oneline --decorate` traces the hardcoded full-message literal to `66d45a9e0 refactor(flows-runtime): execute steps through handlers`, so this was pre-existing drift and not introduced by the PG-8 commit.
 - Behavior changed: none. Runtime wording, taxonomy wording, frontend fixtures, generated clients, and docs were not changed.
 - Validation commands and results:
@@ -433,19 +433,19 @@
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:26` scopes PG-7 to caching Space on the per-step security hot path.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:25` indexes the hot-path full-Space hydration finding.
-  - `backend/src/intric/flows/runtime/models.py:107-122` had per-run `assistant_cache`, `json_mode_supported`, and `file_cache`, but no Space cache.
-  - `backend/src/intric/flows/runtime/execution_state_builder.py:19-30` builds one `RunExecutionState` per executor pass.
-  - `backend/src/intric/flows/runtime/executor.py:752-760` validates runtime step security once per step.
-  - Before the edit, `backend/src/intric/flows/runtime/executor.py:1955-1964` loaded a Space to get an assistant and cached only the assistant, while `backend/src/intric/flows/runtime/executor.py:2016-2035` loaded a Space again for security validation.
-  - `backend/src/intric/flows/flow_security_classification.py:83-95` reads Space only for the baseline security-classification level; assistant-derived model/knowledge/MCP levels still come from the assistant.
-  - `backend/src/intric/spaces/space_repo.py:1578-1591` resolves Space through a tenant-scoped assistant join; `backend/src/intric/database/tables/assistant_table.py:53-55` shows an assistant has a single scalar `space_id` FK, nullable only for non-Space assistants that already fail this runtime lookup.
+  - `backend/src/eneo/flows/runtime/models.py:107-122` had per-run `assistant_cache`, `json_mode_supported`, and `file_cache`, but no Space cache.
+  - `backend/src/eneo/flows/runtime/execution_state_builder.py:19-30` builds one `RunExecutionState` per executor pass.
+  - `backend/src/eneo/flows/runtime/executor.py:752-760` validates runtime step security once per step.
+  - Before the edit, `backend/src/eneo/flows/runtime/executor.py:1955-1964` loaded a Space to get an assistant and cached only the assistant, while `backend/src/eneo/flows/runtime/executor.py:2016-2035` loaded a Space again for security validation.
+  - `backend/src/eneo/flows/flow_security_classification.py:83-95` reads Space only for the baseline security-classification level; assistant-derived model/knowledge/MCP levels still come from the assistant.
+  - `backend/src/eneo/spaces/space_repo.py:1578-1591` resolves Space through a tenant-scoped assistant join; `backend/src/eneo/database/tables/assistant_table.py:53-55` shows an assistant has a single scalar `space_id` FK, nullable only for non-Space assistants that already fail this runtime lookup.
 - Verification agents used, with verdicts:
   - CRG `get_minimal_context` with explicit `executor.py` reported low graph risk but noisy key entities; direct source review was used for all PG-7 claims.
   - Claude peer-loop session `eneo-flows-pg7-space-cache-2026-06-29` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; it rejected the first two-dict plan as overbuilt, required the assistant to be derived from the cached Space, and required honest per-execution freshness semantics.
   - Claude peer-loop session `eneo-flows-pg7-space-cache-2026-06-29` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it confirmed the one-dict implementation, tests, and freshness framing address the iteration-1 concerns.
 - Files changed:
-  - `backend/src/intric/flows/runtime/models.py`
-  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/src/eneo/flows/runtime/models.py`
+  - `backend/src/eneo/flows/runtime/executor.py`
   - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -466,9 +466,9 @@
   - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_reuses_space_for_same_space_assistants tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_keeps_distinct_space_hydration -q` -> pass after the fix, 2 passed.
   - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_assistant_cache_hit tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_reuses_space_for_same_space_assistants tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_step_security_keeps_distinct_space_hydration tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_accepts_matching_execution_surface tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_rejects_prompt_drift tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_skips_legacy_steps_without_snapshot tests/unittests/flows/test_flow_executor_runtime.py::test_validate_assistant_snapshots_requires_schema_versioned_snapshots tests/unittests/flows/test_flow_executor_runtime.py::test_execute_fails_before_claim_when_assistant_snapshot_drifted tests/unittests/flows/test_flow_executor_runtime.py::test_validate_runtime_step_security_rejects_write_down -q` -> pass, 9 passed.
   - `cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -q` -> pass, 75 passed.
-  - `cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/execution_state_builder.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_executor_runtime.py` -> pass.
-  - `cd backend && uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/execution_state_builder.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_executor_runtime.py` -> pass, 0 errors.
-  - `git diff --check -- backend/src/intric/flows/runtime/models.py backend/src/intric/flows/runtime/executor.py backend/tests/unittests/flows/test_flow_executor_runtime.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `cd backend && uv run ruff check src/eneo/flows/runtime/models.py src/eneo/flows/runtime/execution_state_builder.py src/eneo/flows/runtime/executor.py tests/unittests/flows/test_flow_executor_runtime.py` -> pass.
+  - `cd backend && uv run pyright src/eneo/flows/runtime/models.py src/eneo/flows/runtime/execution_state_builder.py src/eneo/flows/runtime/executor.py tests/unittests/flows/test_flow_executor_runtime.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/eneo/flows/runtime/models.py backend/src/eneo/flows/runtime/executor.py backend/tests/unittests/flows/test_flow_executor_runtime.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / follow-up:
   - The default-assistant cache population branch is not directly covered by the new tests; regular assistant indexing and distinct-Space safety are covered. Risk is limited to missed reuse for a default assistant, not a security weakening.
   - Rollback is local: remove `RunExecutionState.space_cache`, `_load_space_for_assistant`, and the two PG-7 tests to return to per-step Space hydration.
@@ -482,7 +482,7 @@
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:38` names browser -> API -> Celery -> status -> result as a remaining test-confidence gap, and `:130` says to run PG-9 after PG-2 makes the E2E stack capable of a real Flow run.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:145` indexes the absence of Flows/AI Builder Playwright coverage; `:162` indexes the prior missing E2E Celery worker that blocked real Flow runs.
   - Direct source confirmed Flow list requires `flows_view` at `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/+page.ts:12-14`, and the editor requires `flows_manage` at `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.ts:10-12`.
-  - Direct source confirmed the Flow worker consumes `settings.flow_celery_queue` at `backend/src/intric/flows/runtime/cli.py:20-31`, `flows.execute` routes to that queue at `backend/src/intric/flows/runtime/celery_app.py:36-49`, and the default queue name is `flows.execute` at `backend/src/intric/main/config.py:300`.
+  - Direct source confirmed the Flow worker consumes `settings.flow_celery_queue` at `backend/src/eneo/flows/runtime/cli.py:20-31`, `flows.execute` routes to that queue at `backend/src/eneo/flows/runtime/celery_app.py:36-49`, and the default queue name is `flows.execute` at `backend/src/eneo/main/config.py:300`.
   - Direct `rg -n "task_always_eager|always_eager|CELERY_TASK_ALWAYS_EAGER|celery.*eager" backend docker-compose.e2e.yml docker-compose.e2e.ci.yml frontend e2e` returned no matches, so the smoke does not depend on eager Celery mode.
   - Direct source confirmed the E2E mock model is deterministic text-only: `e2e/mock_model_server.py:16` returns `E2E mock completion: pong`, and `e2e/seed.py:137` seeds `supports_tool_calling=False`.
 - Verification agents used, with verdicts:
@@ -515,7 +515,7 @@
   - `cd backend && uv run ruff format ../e2e/seed.py && uv run ruff check ../e2e/seed.py` -> pass.
   - `cd backend && uv run pyright ../e2e/seed.py` -> pass, 0 errors.
   - `cd frontend && bun prettier --write apps/web/e2e/global-setup.ts apps/web/src/lib/features/flows/components/FlowRunsTable.svelte apps/web/tests/flows.spec.ts` -> pass.
-  - `cd frontend && bun run --filter @intric/web check` -> pass, 0 errors and 1 unrelated pre-existing warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`.
+  - `cd frontend && bun run --filter @eneo/web check` -> pass, 0 errors and 1 unrelated pre-existing warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`.
   - `docker compose -f docker-compose.e2e.yml config --quiet` -> pass.
   - `docker compose -f docker-compose.e2e.ci.yml config --quiet` -> pass.
   - `rg -n "task_always_eager|always_eager|CELERY_TASK_ALWAYS_EAGER|celery.*eager" backend docker-compose.e2e.yml docker-compose.e2e.ci.yml frontend e2e` -> no matches.
@@ -535,19 +535,19 @@
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:29` scopes PG-10 to a single `GeneralError` envelope, with `flow_trace_audit.py` explicitly calling out deletion of `build_flow_trace_error_payload`.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:83-85` indexes the app-global `RequestValidationError` gap separately from the two Flow evidence bespoke payload paths.
-  - Before this edit, `backend/src/intric/flows/api/flow_trace_audit.py:21-35` built a Flow-only error payload, `:70-78` returned audit-fail 503 through that builder, and `backend/src/intric/flows/api/flow_run_evidence_router.py:254-265` returned raw evidence reason-required 400 through the same builder.
-  - Before this edit, `backend/src/intric/flows/api/flow_run_evidence_router.py:137-146` and `:279-288` returned the audit helper's direct 503 response instead of letting the FastAPI exception handler own the envelope.
-  - `backend/src/intric/main/models.py:159-199` defines `GeneralError`; `backend/src/intric/server/exception_handlers.py:56-67` owns request-id extraction and `:97-144` owns mapped-exception `GeneralError` responses.
+  - Before this edit, `backend/src/eneo/flows/api/flow_trace_audit.py:21-35` built a Flow-only error payload, `:70-78` returned audit-fail 503 through that builder, and `backend/src/eneo/flows/api/flow_run_evidence_router.py:254-265` returned raw evidence reason-required 400 through the same builder.
+  - Before this edit, `backend/src/eneo/flows/api/flow_run_evidence_router.py:137-146` and `:279-288` returned the audit helper's direct 503 response instead of letting the FastAPI exception handler own the envelope.
+  - `backend/src/eneo/main/models.py:159-199` defines `GeneralError`; `backend/src/eneo/server/exception_handlers.py:56-67` owns request-id extraction and `:97-144` owns mapped-exception `GeneralError` responses.
   - Direct `rg -n "build_flow_trace_error_payload" backend/src backend/tests` showed only the definition in `flow_trace_audit.py`, the audit-fail use in that file, and the raw export caller in `flow_run_evidence_router.py`.
-  - Direct `rg -n "RequestValidationError" backend/src/intric/server backend/src/intric/main backend/src/intric/flows/api backend/tests` found no main-app handler; PG-10b remains app-global because changing FastAPI validation errors affects all endpoints and generated clients.
+  - Direct `rg -n "RequestValidationError" backend/src/eneo/server backend/src/eneo/main backend/src/eneo/flows/api backend/tests` found no main-app handler; PG-10b remains app-global because changing FastAPI validation errors affects all endpoints and generated clients.
 - Verification agents used, with verdicts:
   - CRG `get_minimal_context` was used as a reducer for PG-10a and reported noisy context; direct source and exact `rg` were used for proof.
   - Claude peer-loop session `pg10a-flow-evidence-general-error` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; valid feedback applied by reusing the existing FastAPI exception-handler owner instead of inlining new Flow direct-return `GeneralError` builders.
   - Claude peer-loop session `pg10a-flow-evidence-general-error` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it confirmed the raise-based owner consolidation, tests, and deleted-helper proof, with only non-blocking commit-hygiene and future typing notes.
 - Files changed:
-  - `backend/src/intric/main/exceptions.py`
-  - `backend/src/intric/flows/api/flow_trace_audit.py`
-  - `backend/src/intric/flows/api/flow_run_evidence_router.py`
+  - `backend/src/eneo/main/exceptions.py`
+  - `backend/src/eneo/flows/api/flow_trace_audit.py`
+  - `backend/src/eneo/flows/api/flow_run_evidence_router.py`
   - `backend/tests/unittests/flows/test_flow_evidence_router.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -568,12 +568,12 @@
 - Validation commands and results:
   - Red proof before implementation: `cd backend && uv run pytest tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_fails_closed_when_audit_write_fails tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_rejects_raw_invalid_reason -q` -> failed, 3 failed, because both bespoke payloads omitted the injected request id.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_evidence_router.py::test_flow_evidence_raw_reason_error_response_includes_request_id tests/unittests/flows/test_flow_evidence_router.py::test_flow_evidence_audit_failure_error_response_includes_request_id tests/unittests/flows/test_flow_evidence_router.py::test_flow_evidence_error_response_omits_request_id_when_absent tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_fails_closed_when_audit_write_fails tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_rejects_raw_invalid_reason -q'` -> pass, 6 passed.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/main/exceptions.py src/intric/server/exception_handlers.py src/intric/flows/api/flow_trace_audit.py src/intric/flows/api/flow_run_evidence_router.py tests/unittests/flows/test_flow_evidence_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pyright --pythonpath .venv/bin/python src/intric/main/exceptions.py src/intric/server/exception_handlers.py src/intric/flows/api/flow_trace_audit.py src/intric/flows/api/flow_run_evidence_router.py tests/unittests/flows/test_flow_evidence_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/main/exceptions.py src/eneo/server/exception_handlers.py src/eneo/flows/api/flow_trace_audit.py src/eneo/flows/api/flow_run_evidence_router.py tests/unittests/flows/test_flow_evidence_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pyright --pythonpath .venv/bin/python src/eneo/main/exceptions.py src/eneo/server/exception_handlers.py src/eneo/flows/api/flow_trace_audit.py src/eneo/flows/api/flow_run_evidence_router.py tests/unittests/flows/test_flow_evidence_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_evidence_router.py -q'` -> pass, 16 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unit/test_flow_openapi_contract.py::test_openapi_flow_consumer_typed_error_schemas -q'` -> pass, 1 passed.
   - `rg -n "build_flow_trace_error_payload" backend/src backend/tests` -> no matches.
-  - `git diff --check -- backend/src/intric/main/exceptions.py backend/src/intric/flows/api/flow_trace_audit.py backend/src/intric/flows/api/flow_run_evidence_router.py backend/tests/unittests/flows/test_flow_evidence_router.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff --check -- backend/src/eneo/main/exceptions.py backend/src/eneo/flows/api/flow_trace_audit.py backend/src/eneo/flows/api/flow_run_evidence_router.py backend/tests/unittests/flows/test_flow_evidence_router.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / follow-up:
   - PG-10a deliberately does not change FastAPI's app-global request-validation behavior. PG-10b must handle that as a separate generated-client-visible API contract slice, not as a Flow evidence cleanup.
   - The new `AuditLoggingUnavailableException` is mapped to 503 with `ErrorCodes.INTERNAL_SERVER_ERROR`, preserving the prior wire type and code while letting the existing handler attach request identity.
@@ -587,7 +587,7 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:29` includes FastAPI validation errors in PG-10 but flags generated-client-visible risk.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:136-143` states PG-10b must remain separate from PG-10a and must not touch global validation behavior without an explicit decision.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:374-381` records the app-global `RequestValidationError` / `GeneralError` contract as an undecided API/generated-client owner decision.
-  - Direct `rg -n "RequestValidationError" backend/src/intric/server backend/src/intric/main backend/src/intric/flows/api backend/tests` during PG-10a found no main-app handler; that gap is still app-global, not Flow-local.
+  - Direct `rg -n "RequestValidationError" backend/src/eneo/server backend/src/eneo/main backend/src/eneo/flows/api backend/tests` during PG-10a found no main-app handler; that gap is still app-global, not Flow-local.
 - Decision / blocker:
   - PG-10b is not implemented in this slice because changing FastAPI request-validation 422 shape affects all endpoints and generated clients, including non-Flow consumers.
   - The smallest clean follow-up is a dedicated app-global API contract slice that names the 422 code/context policy, updates generated-client-visible contracts, and covers representative non-Flow plus Flow endpoints.
@@ -596,7 +596,7 @@
   - Canonical owner after: unchanged until the API/generated-client decision is made.
   - Duplicate paths remaining: mapped application errors use `server/exception_handlers.py`, while FastAPI validation errors can still return raw `{detail: [...]}`.
   - 9/10 follow-up candidate: implement PG-10b as a dedicated app-global API envelope contract slice after the generated-client/non-Flow impact decision.
-  - Decision or measurement needed: decide global 422 `GeneralError` code, `intric_error_code`, `context`, `request_id`, and compatibility posture for generated clients.
+  - Decision or measurement needed: decide global 422 `GeneralError` code, `eneo_error_code`, `context`, `request_id`, and compatibility posture for generated clients.
   - What not to preserve: indefinite raw FastAPI validation envelopes if the explicit API decision approves the standard `GeneralError` shape.
 - Validation commands and results:
   - No code was changed for PG-10b.
@@ -609,19 +609,19 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:30` scopes PG-11 to deleting `webhook_delivered` / `webhook_error` from `output_payload_json` while leaving delivery state observable in `flow_run_webhook_deliveries`.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:33-34` indexes the duplicate JSON writers and the `webhook_error` export leak.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:104` names `flow_run_webhook_deliveries` as the intended owner and instructs deleting the JSON mirror after confirming no frontend/manual consumer reads the flags.
-  - Direct `rg -n "webhook_delivered|webhook_error|with_webhook_delivery_status" backend/src backend/tests frontend/packages frontend/apps docs -g "!frontend/bun.lock" -g "!**/.venv/**"` before editing found production writers only in `step_execution_runtime.py`, `step_result_builder.py`, and `flow_webhook_delivery.py`; a legacy export scrub in `flow_run_export_json.py`; a hand-maintained TypeScript type in `frontend/packages/intric-js/src/types/resources.d.ts`; and tests.
-  - Fresh source review confirmed `backend/src/intric/flows/runtime/step_execution_runtime.py:502-511` seeded `webhook_delivered`, `backend/src/intric/flows/runtime/step_result_builder.py:121-134` only mutated the mirror, and `backend/src/intric/flows/runtime/flow_webhook_delivery.py:319-421` used that helper for success/dead-letter writes.
-  - Fresh source review confirmed `backend/src/intric/flows/flow_run_export_json.py:1077-1089` already strips `webhook_delivered` before structured-output detection, so legacy export normalization must keep that scrub and add `webhook_error`.
+  - Direct `rg -n "webhook_delivered|webhook_error|with_webhook_delivery_status" backend/src backend/tests frontend/packages frontend/apps docs -g "!frontend/bun.lock" -g "!**/.venv/**"` before editing found production writers only in `step_execution_runtime.py`, `step_result_builder.py`, and `flow_webhook_delivery.py`; a legacy export scrub in `flow_run_export_json.py`; a hand-maintained TypeScript type in `frontend/packages/eneo-js/src/types/resources.d.ts`; and tests.
+  - Fresh source review confirmed `backend/src/eneo/flows/runtime/step_execution_runtime.py:502-511` seeded `webhook_delivered`, `backend/src/eneo/flows/runtime/step_result_builder.py:121-134` only mutated the mirror, and `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:319-421` used that helper for success/dead-letter writes.
+  - Fresh source review confirmed `backend/src/eneo/flows/flow_run_export_json.py:1077-1089` already strips `webhook_delivered` before structured-output detection, so legacy export normalization must keep that scrub and add `webhook_error`.
 - Verification agents used, with verdicts:
   - CRG `get_minimal_context` and `query_graph` were used as first-pass reducers for the runtime/export files; all concrete claims were verified with direct source reads and exact `rg`.
   - Claude peer-loop session `pg11-webhook-delivery-mirror-20260629` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by keeping legacy `webhook_delivered` export scrubbing, adding `webhook_error` scrubbing plus an export regression, and preserving the success-path `save_step_result` active-run guard without JSON mutation.
   - Claude peer-loop session `pg11-webhook-delivery-mirror-20260629` iteration 2 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; it agreed the production diff was correct but required explicit proof that the authored-HTTP fixture repair was stale setup rather than a masked delivery regression.
   - Claude peer-loop session `pg11-webhook-delivery-mirror-20260629` iteration 3 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it independently verified the fixture repair chain against the existing auth/timeout validators and cleared the commit gate.
 - Files changed:
-  - `backend/src/intric/flows/runtime/step_execution_runtime.py`
-  - `backend/src/intric/flows/runtime/step_result_builder.py`
-  - `backend/src/intric/flows/runtime/flow_webhook_delivery.py`
-  - `backend/src/intric/flows/flow_run_export_json.py`
+  - `backend/src/eneo/flows/runtime/step_execution_runtime.py`
+  - `backend/src/eneo/flows/runtime/step_result_builder.py`
+  - `backend/src/eneo/flows/runtime/flow_webhook_delivery.py`
+  - `backend/src/eneo/flows/flow_run_export_json.py`
   - `backend/tests/unittests/flows/test_step_execution_runtime.py`
   - `backend/tests/unittests/flows/test_flow_run_evidence.py`
   - `backend/tests/unittests/flows/test_flow_runtime_builders.py`
@@ -632,7 +632,7 @@
   - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
   - `backend/tests/integration/flows/test_flow_review_pause_worker_contract.py`
   - `backend/tests/integration/test_flow_runtime_retention_cleanup.py`
-  - `frontend/packages/intric-js/src/types/resources.d.ts`
+  - `frontend/packages/eneo-js/src/types/resources.d.ts`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
   - New step/run output payloads no longer include `webhook_delivered` or `webhook_error`.
@@ -665,9 +665,9 @@
   - `cd backend && .venv/bin/pytest tests/integration/test_flow_runtime_retention_cleanup.py -q` -> pass, 23 passed.
   - `cd backend && .venv/bin/ruff check <touched backend files/tests>` -> pass.
   - Direct `.venv/bin/pyright <touched files>` was not authoritative in this devcontainer because it did not use the repo dependency environment and reported existing missing-import/unknown-type noise; `cd backend && uv run pyright` -> pass, 0 errors.
-  - `cd frontend && bun run --filter @intric/intric-js check` -> pass.
-  - `cd frontend/packages/intric-js && bun x prettier --check src/types/resources.d.ts` -> pass.
-  - `rg -n "FlowRunOutputPayload|schema.d.ts|openapi-typescript|update.js" frontend/packages/intric-js -g "!node_modules/**"` confirmed `FlowRunOutputPayload` lives in hand-maintained `resources.d.ts`; OpenAPI regeneration writes `src/types/schema.d.ts` and client version metadata.
+  - `cd frontend && bun run --filter @eneo/eneo-js check` -> pass.
+  - `cd frontend/packages/eneo-js && bun x prettier --check src/types/resources.d.ts` -> pass.
+  - `rg -n "FlowRunOutputPayload|schema.d.ts|openapi-typescript|update.js" frontend/packages/eneo-js -g "!node_modules/**"` confirmed `FlowRunOutputPayload` lives in hand-maintained `resources.d.ts`; OpenAPI regeneration writes `src/types/schema.d.ts` and client version metadata.
   - `rg -n "webhook_delivered|webhook_error|with_webhook_delivery_status" backend/src backend/tests frontend/packages frontend/apps docs -g "!frontend/bun.lock" -g "!**/.venv/**"` -> remaining matches only in `flow_run_export_json.py` legacy scrub and the export regression test.
   - Full Flow suite check: `cd backend && .venv/bin/pytest tests/unittests/flows tests/integration/flows -q` -> failed with 1 unrelated integration fixture failure after 4839 passed / 8 deselected. The failure is `tests/integration/flows/test_flow_audit_outbox_delivery.py::test_flow_audit_outbox_delivery_dead_letters_bad_row_and_delivers_neighbors`, where `test_flow_audit_outbox_delivery.py:282-286` calls `_create_flow_and_run` three times and `_create_flow_and_run` calls `completion_model_factory(session, "gpt-4o-mini")` at `:84`; `completion_models.py:157-158` inserts/flushes a duplicate active nickname in the same tenant/provider, violating `uq_completion_models_active_nickname`. The same test fails when run alone, so it is unrelated to PG-11 output payload/delete behavior.
 - Remaining risk / follow-up:
@@ -683,22 +683,22 @@
 - Verified evidence before change:
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:31` scopes PG-12 to ordinal `CHECK` constraints, missing assistant FK indexes, and metadata tightening only if retained-bucket semantics are unambiguous.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:45-52` indexes the live metadata `extra="allow"` contract, missing ordinal positivity checks, and missing `assistant_id` indexes.
-  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:212-308` had `FlowSteps.assistant_id` and `step_order` without an assistant FK index or positivity check.
-  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:845-923` had `FlowStepResults.assistant_id`, `step_order`, and nullable `current_attempt_no` without the assistant FK index or ordinal checks.
-  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:1055-1162` had `FlowStepAttempts.step_order` and `attempt_no` without positivity checks.
-  - Fresh source review confirmed `backend/src/intric/flows/runtime/step_definition_parser.py:146-177,534-539` rejects published runtime step orders that are non-positive or non-contiguous.
-  - Fresh source review confirmed `backend/src/intric/flows/application/flow_draft_materialization.py:162-180` materializes authored draft steps as `index + 1`.
-  - Fresh source review confirmed `backend/src/intric/flows/infrastructure/flow_step_attempt_numbering.py:13-26` allocates runtime and rerun attempt numbers as `max(attempt_no, 0) + 1`, and `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py:247-268` uses that owner for rerun root attempts.
-  - Fresh source review confirmed `backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py:89-92` intentionally resets invalidated `FlowStepResults.current_attempt_no` to `NULL`, so the DB check must allow `NULL`.
-  - Fresh source review confirmed `backend/src/intric/flows/flow_run_export_json.py:286-317` uses `step_order=0` / `attempt_no=0` only as evidence artifact manifest fallback values, not as a table writer.
-  - Fresh metadata review confirmed `backend/src/intric/flows/flow_metadata.py:75-80,174-200` still allows unknown top-level metadata keys and `backend/tests/unittests/flows/test_flow_metadata.py:267-289` deliberately preserves `ai_builder` / `transcription` buckets for write and persisted-read modes.
-  - Additional metadata review confirmed `backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py:57-96` preserves unknown `ai_builder` subkeys, and `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:447-459` does not define those retained Flow metadata buckets as typed subcontracts.
+  - Fresh source review confirmed `backend/src/eneo/database/tables/flow_tables.py:212-308` had `FlowSteps.assistant_id` and `step_order` without an assistant FK index or positivity check.
+  - Fresh source review confirmed `backend/src/eneo/database/tables/flow_tables.py:845-923` had `FlowStepResults.assistant_id`, `step_order`, and nullable `current_attempt_no` without the assistant FK index or ordinal checks.
+  - Fresh source review confirmed `backend/src/eneo/database/tables/flow_tables.py:1055-1162` had `FlowStepAttempts.step_order` and `attempt_no` without positivity checks.
+  - Fresh source review confirmed `backend/src/eneo/flows/runtime/step_definition_parser.py:146-177,534-539` rejects published runtime step orders that are non-positive or non-contiguous.
+  - Fresh source review confirmed `backend/src/eneo/flows/application/flow_draft_materialization.py:162-180` materializes authored draft steps as `index + 1`.
+  - Fresh source review confirmed `backend/src/eneo/flows/infrastructure/flow_step_attempt_numbering.py:13-26` allocates runtime and rerun attempt numbers as `max(attempt_no, 0) + 1`, and `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py:247-268` uses that owner for rerun root attempts.
+  - Fresh source review confirmed `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py:89-92` intentionally resets invalidated `FlowStepResults.current_attempt_no` to `NULL`, so the DB check must allow `NULL`.
+  - Fresh source review confirmed `backend/src/eneo/flows/flow_run_export_json.py:286-317` uses `step_order=0` / `attempt_no=0` only as evidence artifact manifest fallback values, not as a table writer.
+  - Fresh metadata review confirmed `backend/src/eneo/flows/flow_metadata.py:75-80,174-200` still allows unknown top-level metadata keys and `backend/tests/unittests/flows/test_flow_metadata.py:267-289` deliberately preserves `ai_builder` / `transcription` buckets for write and persisted-read modes.
+  - Additional metadata review confirmed `backend/tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py:57-96` preserves unknown `ai_builder` subkeys, and `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py:447-459` does not define those retained Flow metadata buckets as typed subcontracts.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer for the data-model and metadata owners; it was noisy for file summaries, so all concrete claims were verified with direct source reads and exact `rg`.
   - Claude peer-loop session `eneo-flows-pg12-schema-hardening-20260630` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; valid feedback applied by adding a compact migration preflight for dirty existing rows, verifying the `attempt_no=0` export sentinel was not a table write path, dropping the redundant SQLAlchemy-metadata-only test layer, and pinning explicit index names.
   - Claude peer-loop session `eneo-flows-pg12-schema-hardening-20260630` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; its non-blocking recommendation to assert exact constraint names in runtime `IntegrityError` tests was applied and revalidated.
 - Files changed:
-  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/eneo/database/tables/flow_tables.py`
   - `backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py`
   - `backend/tests/integration/flows/test_flow_runtime_schema_hardening.py`
   - `backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py`
@@ -727,12 +727,12 @@
 - Validation commands and results:
   - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pytest -m migration_isolation tests/integration/migrations/test_flow_runtime_schema_hardening.py -q` -> pass, 2 passed.
   - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pytest tests/integration/flows/test_flow_runtime_schema_hardening.py -q` -> pass, 10 passed.
-  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/ruff check src/intric/database/tables/flow_tables.py alembic/versions/202606291900_flow_runtime_schema_hardening.py tests/integration/flows/test_flow_runtime_schema_hardening.py tests/integration/migrations/test_flow_runtime_schema_hardening.py` -> pass.
-  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pyright src/intric/database/tables/flow_tables.py tests/integration/flows/test_flow_runtime_schema_hardening.py tests/integration/migrations/test_flow_runtime_schema_hardening.py` -> pass, 0 errors.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/ruff check src/eneo/database/tables/flow_tables.py alembic/versions/202606291900_flow_runtime_schema_hardening.py tests/integration/flows/test_flow_runtime_schema_hardening.py tests/integration/migrations/test_flow_runtime_schema_hardening.py` -> pass.
+  - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH .venv/bin/pyright src/eneo/database/tables/flow_tables.py tests/integration/flows/test_flow_runtime_schema_hardening.py tests/integration/migrations/test_flow_runtime_schema_hardening.py` -> pass, 0 errors.
   - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH uv run pyright` -> pass, 0 errors.
   - `cd backend && PATH=/home/vscode/.local/bin:/workspace/backend/.venv/bin:$PATH uv run alembic heads` -> `202606291900_flow_runtime_schema (head)`.
-  - `rg -n "ck_flow_steps_step_order_positive|ck_flow_step_results_step_order_positive|ck_flow_step_results_current_attempt_no_positive|ck_flow_step_attempts_step_order_positive|ck_flow_step_attempts_attempt_no_positive|ix_flow_steps_assistant_id|ix_flow_step_results_assistant_id" backend/src/intric/database/tables/flow_tables.py backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py backend/tests/integration/flows/test_flow_runtime_schema_hardening.py backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py review-artifacts/implementation-progress-2026-06-29.md` -> only intended owner/migration/test/ledger matches.
-  - `git diff --check -- backend/src/intric/database/tables/flow_tables.py backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py backend/tests/integration/flows/test_flow_runtime_schema_hardening.py backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `rg -n "ck_flow_steps_step_order_positive|ck_flow_step_results_step_order_positive|ck_flow_step_results_current_attempt_no_positive|ck_flow_step_attempts_step_order_positive|ck_flow_step_attempts_attempt_no_positive|ix_flow_steps_assistant_id|ix_flow_step_results_assistant_id" backend/src/eneo/database/tables/flow_tables.py backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py backend/tests/integration/flows/test_flow_runtime_schema_hardening.py backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py review-artifacts/implementation-progress-2026-06-29.md` -> only intended owner/migration/test/ledger matches.
+  - `git diff --check -- backend/src/eneo/database/tables/flow_tables.py backend/alembic/versions/202606291900_flow_runtime_schema_hardening.py backend/tests/integration/flows/test_flow_runtime_schema_hardening.py backend/tests/integration/migrations/test_flow_runtime_schema_hardening.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / follow-up:
   - Migration lock duration is the main runtime risk for large existing tables; this PG slice keeps normal Alembic DDL because the roadmap asks for additive hardening, but production rollout should measure table size before applying.
   - Metadata tightening remains open and should be its own slice with typed bucket ownership and a preflight query proving existing rows will not be rejected.
@@ -745,13 +745,13 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:32` scopes PG-13 to template asset DELETE plus storage reclamation for missed template files.
   - `review-artifacts/ultracode-independent-review-2026-06-29/area-reviews/missed-files-assets.md:1-88` identifies that `FlowTemplateAssets.deleted_at` was read but never written and that template blobs could remain pinned indefinitely.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:96-110` indexes the missing DELETE route/client, `FlowTemplateAssetRepository` active-read filter, `Files.blob` storage, and `FlowRunHistoryPurgeRepository` reference guard.
-  - Fresh source review confirmed `backend/src/intric/flows/flow_template_asset_repo.py:100-108` filtered active template assets with `deleted_at IS NULL` and had no writer for `deleted_at`.
-  - Fresh source review confirmed `backend/src/intric/flows/api/flow_template_router.py:26-264` had list/inspect/upload/signed-url routes but no DELETE route.
-  - Fresh source review confirmed `frontend/packages/intric-js/src/endpoints/flows.js:409-465` had template list/upload/inspect/signed-url wrappers but no delete wrapper.
-  - Fresh source review confirmed publish writes both `template_asset_id` and `template_file_id` into published step `output_config` at `backend/src/intric/flows/application/flow_service.py:911-916`; PG-13 did not delete the PG-D4 `template_file_id` fallback.
-  - Fresh source review confirmed runtime resolves published template fills through the active template asset and matching file id at `backend/src/intric/flows/runtime/template_fill_runtime.py:341-390`.
-  - Fresh source review confirmed `backend/src/intric/database/tables/flow_tables.py:408-412` stores `FlowTemplateAssets.file_id` as a non-null `RESTRICT` FK to `Files.id`, so route-time hard deletion of the file would be wrong.
-  - Fresh source review confirmed `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:132-156` already owns guarded `Files` reclamation and checked `FlowTemplateAssets.file_id` without filtering soft-deleted rows.
+  - Fresh source review confirmed `backend/src/eneo/flows/flow_template_asset_repo.py:100-108` filtered active template assets with `deleted_at IS NULL` and had no writer for `deleted_at`.
+  - Fresh source review confirmed `backend/src/eneo/flows/api/flow_template_router.py:26-264` had list/inspect/upload/signed-url routes but no DELETE route.
+  - Fresh source review confirmed `frontend/packages/eneo-js/src/endpoints/flows.js:409-465` had template list/upload/inspect/signed-url wrappers but no delete wrapper.
+  - Fresh source review confirmed publish writes both `template_asset_id` and `template_file_id` into published step `output_config` at `backend/src/eneo/flows/application/flow_service.py:911-916`; PG-13 did not delete the PG-D4 `template_file_id` fallback.
+  - Fresh source review confirmed runtime resolves published template fills through the active template asset and matching file id at `backend/src/eneo/flows/runtime/template_fill_runtime.py:341-390`.
+  - Fresh source review confirmed `backend/src/eneo/database/tables/flow_tables.py:408-412` stores `FlowTemplateAssets.file_id` as a non-null `RESTRICT` FK to `Files.id`, so route-time hard deletion of the file would be wrong.
+  - Fresh source review confirmed `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:132-156` already owns guarded `Files` reclamation and checked `FlowTemplateAssets.file_id` without filtering soft-deleted rows.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer, but its graph output was stale/noisy for these owners; all concrete claims were verified with direct source reads and exact `rg`.
   - Read-only verifier agents checked published pin semantics, purge ownership/FK behavior, and API/client/audit ownership. Valid findings applied: all `FlowVersions` must be considered, reclamation must be retention-owned, `_flow_template_asset_file_exists()` must stay conservative, and audit should reuse `ActionType.FILE_DELETED` / `EntityType.FILE`.
@@ -762,17 +762,17 @@
   - Claude iteration 5 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; non-blocking recommendations applied during implementation by using an enum for the undetermined reason and updating the purge repo docstring.
   - Claude iteration 6 commit gate verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; valid non-blocking feedback applied by sharing the FlowVersions template-reference scan between delete checks and retention.
 - Files changed:
-  - `backend/src/intric/flows/published_definition.py`
-  - `backend/src/intric/flows/infrastructure/flow_version_repo.py`
-  - `backend/src/intric/flows/flow_template_asset_repo.py`
-  - `backend/src/intric/flows/flow_template_asset_service.py`
-  - `backend/src/intric/flows/api/flow_template_router.py`
-  - `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py`
-  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
-  - `backend/src/intric/data_retention/infrastructure/data_retention_worker.py`
-  - `backend/src/intric/main/container/container.py`
-  - `backend/src/intric/flows/flow_api_error_code.py`
-  - `backend/src/intric/flows/flow_error_taxonomy.py`
+  - `backend/src/eneo/flows/published_definition.py`
+  - `backend/src/eneo/flows/infrastructure/flow_version_repo.py`
+  - `backend/src/eneo/flows/flow_template_asset_repo.py`
+  - `backend/src/eneo/flows/flow_template_asset_service.py`
+  - `backend/src/eneo/flows/api/flow_template_router.py`
+  - `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py`
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_service.py`
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_worker.py`
+  - `backend/src/eneo/main/container/container.py`
+  - `backend/src/eneo/flows/flow_api_error_code.py`
+  - `backend/src/eneo/flows/flow_error_taxonomy.py`
   - `backend/tests/unittests/flows/test_published_definition_template_references.py`
   - `backend/tests/unittests/flows/test_flow_template_asset_service.py`
   - `backend/tests/unittests/flows/test_flow_template_router.py`
@@ -780,11 +780,11 @@
   - `backend/tests/integration/test_flow_runtime_retention_cleanup.py`
   - `backend/tests/unittests/data_retention/test_data_retention_worker.py`
   - `backend/tests/unit/test_flow_openapi_contract.py`
-  - `frontend/packages/intric-js/src/endpoints/flows.js`
-  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
-  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.js`
-  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.d.ts`
+  - `frontend/packages/eneo-js/src/endpoints/flows.js`
+  - `frontend/packages/eneo-js/src/endpoints/flows.test.js`
+  - `frontend/packages/eneo-js/src/types/schema.d.ts`
+  - `frontend/packages/eneo-js/src/flows/flow-api-error-codes.js`
+  - `frontend/packages/eneo-js/src/flows/flow-api-error-codes.d.ts`
   - `frontend/apps/web/messages/en.json`
   - `frontend/apps/web/messages/sv.json`
   - `frontend/apps/docs-site/src/content/guides/flows/reference/errors.mdx`
@@ -796,7 +796,7 @@
   - Template asset deletion emits a file audit event using existing `ActionType.FILE_DELETED` / `EntityType.FILE`, with template asset metadata, without claiming the blob was physically deleted in the request path.
   - Retention now reclaims safe soft-deleted template asset blobs: it hard-deletes safe tombstone rows first, then reuses the existing guarded `Files` deletion primitive.
   - Retention keeps soft-deleted template assets/files when published versions still reference them, or when snapshot inspection is unsafe because of unknown schema or unreadable template-reference values.
-  - `intric-js` exposes `flows.templates.delete({ id, fileId, signal })`.
+  - `eneo-js` exposes `flows.templates.delete({ id, fileId, signal })`.
 - Complexity deleted or owner clarified:
   - `FlowTemplateAssetRepository` is now the single writer for `FlowTemplateAssets.deleted_at`.
   - `FlowTemplateAssetService` owns delete authorization/business behavior and published-version conflict decisions; it does not call purge or hard-delete blobs.
@@ -821,12 +821,12 @@
   - `cd backend && .venv/bin/python scripts/generate_flow_api_error_codes_ts.py` -> pass.
   - `cd backend && .venv/bin/python scripts/generate_flow_consumer_error_catalog_docs.py` -> pass.
   - `cd backend && .venv/bin/python scripts/generate_flow_developer_error_taxonomy_docs.py` -> pass.
-  - `cd backend && .venv/bin/python -c "from intric.server.main import get_application; import json; print(json.dumps(get_application().openapi()))" > /tmp/eneo-openapi.json` inside the devcontainer, then `node update.js --schema-file /tmp/eneo-openapi.json` from `frontend/packages/intric-js` on the host because the devcontainer lacked Node/Bun -> pass.
-  - `cd frontend && bun x vitest packages/intric-js/src/endpoints/flows.test.js` -> pass, 30 passed.
-  - `cd frontend && bun run --filter @intric/intric-js check` -> pass.
-  - `cd frontend && bun run --filter @intric/intric-js lint` -> pass.
+  - `cd backend && .venv/bin/python -c "from eneo.server.main import get_application; import json; print(json.dumps(get_application().openapi()))" > /tmp/eneo-openapi.json` inside the devcontainer, then `node update.js --schema-file /tmp/eneo-openapi.json` from `frontend/packages/eneo-js` on the host because the devcontainer lacked Node/Bun -> pass.
+  - `cd frontend && bun x vitest packages/eneo-js/src/endpoints/flows.test.js` -> pass, 30 passed.
+  - `cd frontend && bun run --filter @eneo/eneo-js check` -> pass.
+  - `cd frontend && bun run --filter @eneo/eneo-js lint` -> pass.
   - `cd frontend/apps/web && bun run i18n:compile` -> pass.
-  - `cd frontend && bun run --filter @intric/web check` initially failed before Svelte diagnostics because Rollup's optional native package was missing from host `node_modules`; after `cd frontend && bun install --frozen-lockfile`, rerun passed with 0 errors and 1 pre-existing warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`.
+  - `cd frontend && bun run --filter @eneo/web check` initially failed before Svelte diagnostics because Rollup's optional native package was missing from host `node_modules`; after `cd frontend && bun install --frozen-lockfile`, rerun passed with 0 errors and 1 pre-existing warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`.
 - Remaining risk / follow-up:
   - Publish/delete concurrency is still not globally serialized. A publish that reads an active asset and commits its `FlowVersions` row after DELETE can produce a published snapshot pointing at a soft-deleted asset; retention remains blob-safe because it re-checks snapshots, but runtime can later fail with `flow_template_not_accessible`. Follow-up trigger: add authoring lifecycle locking if concurrent editing/publish becomes supported.
   - Retention intentionally fails closed on unknown published schema versions or unreadable template-reference values. This avoids data loss but can leave safe blobs retained until a schema-aware cleanup is added; the unsafe-skip counter/log makes that stall visible.
@@ -840,9 +840,9 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:33` scopes PG-14 to merging beat/manual queued redispatch while preserving caller-specific swallow-vs-propagate policy.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:100` identifies the stale queued redispatch duplication map and explicitly rejects a generic queue manager.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:17` indexes the beat/manual divergence and missing manual dispatch-failure audit.
-  - Fresh source review confirmed the live beat path owned claim/build/dispatch inside `backend/src/intric/flows/runtime/tasks.py`, the manual path duplicated those mechanics in `FlowRunService.redispatch_run`, and `backend/src/intric/flows/api/flow_run_execution_router.py` audited only manual success.
-  - Fresh source review after the change confirms `backend/src/intric/flows/application/stale_queued_redispatch.py:17-97` owns the typed queued-redispatch result contract and shared build/dispatch classification; `backend/src/intric/flows/application/flow_run_service.py:230-282` owns manual scoped claim plus application orchestration; `backend/src/intric/flows/runtime/tasks.py:752-777` preserves beat continue/swallow policy; `backend/src/intric/flows/api/flow_run_execution_router.py:1508-1539` keeps authorization visible and manual dispatch-failure audit-visible.
-  - Direct `rg -n "build_flow_run_dispatch_request|Failed to redispatch stale queued flow run|Skipping redispatch for run with invalid principal" backend/src/intric/flows` confirmed the stale queued build/dispatch classification lives in the leaf helper rather than duplicated in the beat and manual service paths.
+  - Fresh source review confirmed the live beat path owned claim/build/dispatch inside `backend/src/eneo/flows/runtime/tasks.py`, the manual path duplicated those mechanics in `FlowRunService.redispatch_run`, and `backend/src/eneo/flows/api/flow_run_execution_router.py` audited only manual success.
+  - Fresh source review after the change confirms `backend/src/eneo/flows/application/stale_queued_redispatch.py:17-97` owns the typed queued-redispatch result contract and shared build/dispatch classification; `backend/src/eneo/flows/application/flow_run_service.py:230-282` owns manual scoped claim plus application orchestration; `backend/src/eneo/flows/runtime/tasks.py:752-777` preserves beat continue/swallow policy; `backend/src/eneo/flows/api/flow_run_execution_router.py:1508-1539` keeps authorization visible and manual dispatch-failure audit-visible.
+  - Direct `rg -n "build_flow_run_dispatch_request|Failed to redispatch stale queued flow run|Skipping redispatch for run with invalid principal" backend/src/eneo/flows` confirmed the stale queued build/dispatch classification lives in the leaf helper rather than duplicated in the beat and manual service paths.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer for the runtime/API owners; the output was noisy for this small runtime slice, so all concrete claims were verified with direct source reads and exact `rg`.
   - Read-only verifier agents checked runtime ownership, manual API/audit behavior, and test coverage. Valid feedback applied: manual dispatch failure must be audit-visible with bounded non-empty error text, authorization must remain visible at the router boundary, and beat failure must continue to later stale runs.
@@ -851,10 +851,10 @@
   - Claude peer-loop session `pg14-queued-redispatch-20260630` iteration 3 commit-gate verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; valid feedback applied by moving manual orchestration back into `FlowRunService.redispatch_run`, moving the helper/result contract to a leaf module, restoring visible router authorization, removing manual commit-before-dispatch, and moving helper tests out of the router test file.
   - Claude peer-loop session `pg14-queued-redispatch-20260630` iteration 4 verification verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; optional P3 nits were noted for `StaleQueuedRedispatchDispatchError.cause` / `__cause__` assertion but were non-blocking and left out to keep the now-reviewed slice stable.
 - Files changed:
-  - `backend/src/intric/flows/application/stale_queued_redispatch.py`
-  - `backend/src/intric/flows/application/flow_run_service.py`
-  - `backend/src/intric/flows/runtime/tasks.py`
-  - `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - `backend/src/eneo/flows/application/stale_queued_redispatch.py`
+  - `backend/src/eneo/flows/application/flow_run_service.py`
+  - `backend/src/eneo/flows/runtime/tasks.py`
+  - `backend/src/eneo/flows/api/flow_run_execution_router.py`
   - `backend/tests/unittests/flows/test_flow_run_execution_router.py`
   - `backend/tests/unittests/flows/test_flow_run_service.py`
   - `backend/tests/unittests/flows/test_celery_runtime.py`
@@ -880,7 +880,7 @@
   - What not to preserve: duplicated build/dispatch branches, hidden authorization inside claim callbacks, router-owned runtime orchestration, and success-only manual audit visibility.
 - Validation commands and results:
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check <touched PG-14 backend files/tests> && /home/vscode/.local/bin/uv run ruff format --check <touched PG-14 backend files/tests>` -> pass.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/application/flow_dispatch.py src/intric/flows/application/stale_queued_redispatch.py src/intric/flows/application/flow_run_service.py src/intric/flows/runtime/tasks.py src/intric/flows/api/flow_run_execution_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/eneo/flows/application/flow_dispatch.py src/eneo/flows/application/stale_queued_redispatch.py src/eneo/flows/application/flow_run_service.py src/eneo/flows/runtime/tasks.py src/eneo/flows/api/flow_run_execution_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 0 errors.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 4 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_execution_router.py -k "redispatch_flow_run or dispatch_flow_run_after_commit or dispatch_flow_run_recoverably_after_commit"` -> pass, 8 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_service.py -k "redispatch_run or claim_stale_queued_run_for_redispatch or build_dispatch_request"` -> pass, 10 passed.
@@ -889,7 +889,7 @@
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_service.py` -> pass, 107 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_celery_runtime.py` -> pass, 43 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_stale_queued_redispatch.py` -> pass, 4 passed.
-  - `rg -n "build_flow_run_dispatch_request|Failed to redispatch stale queued flow run|Skipping redispatch for run with invalid principal" backend/src/intric/flows` -> only the shared helper owns stale queued dispatch classification; `FlowRunService.build_dispatch_request` remains for create/rerun dispatch request construction.
+  - `rg -n "build_flow_run_dispatch_request|Failed to redispatch stale queued flow run|Skipping redispatch for run with invalid principal" backend/src/eneo/flows` -> only the shared helper owns stale queued dispatch classification; `FlowRunService.build_dispatch_request` remains for create/rerun dispatch request construction.
 - Remaining risk / follow-up:
   - Manual redispatch claim rides the request transaction, so dispatch failure rolls back the claim and remains immediately retryable; beat keeps commit-before-dispatch because worker visibility requires it.
   - Broker/API error-envelope taxonomy is intentionally not redesigned in PG-14; this slice only makes the failure audit-visible and keeps the existing caller-visible exception behavior.
@@ -903,9 +903,9 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:34` scopes PG-15 to removing template asset capability flags from the domain while keeping API and run-contract readiness flags stable.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:106` identifies template asset capability flags as presentation state derived at API/readiness boundaries, not persisted asset identity.
   - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:100` indexes the duplicated `can_*` fields across domain, API, service projection, readiness, and frontend schema, and notes there are no DB columns for the flags.
-  - Fresh source review confirmed `backend/src/intric/flows/domain/flow.py:127-130` carried `can_edit`, `can_download`, `can_select`, and `can_inspect`; `backend/src/intric/flows/flow_template_asset_service.py:180-200` stamped those fields onto domain assets with `_with_capabilities`; and `backend/src/intric/flows/flow_template_asset_repo.py:146-164` never mapped those fields from persistence.
-  - Fresh source review after the change confirms `backend/src/intric/flows/domain/flow.py:111-128` contains only persisted template asset identity/content/status metadata; `backend/src/intric/flows/flow_template_asset_service.py:47-91` returns plain domain assets; `backend/src/intric/flows/api/flow_template_asset_models.py:63-103` owns the public authoring projection via `FlowTemplateAssetPublic.for_editor`; and `backend/src/intric/flows/api/flow_template_router.py:75-77,216` applies that projection at list/upload response boundaries.
-  - Direct `rg -n "can_edit|can_download|can_select|can_inspect" backend/src/intric/flows/domain backend/src/intric/flows/flow_template_asset_repo.py` now returns no matches.
+  - Fresh source review confirmed `backend/src/eneo/flows/domain/flow.py:127-130` carried `can_edit`, `can_download`, `can_select`, and `can_inspect`; `backend/src/eneo/flows/flow_template_asset_service.py:180-200` stamped those fields onto domain assets with `_with_capabilities`; and `backend/src/eneo/flows/flow_template_asset_repo.py:146-164` never mapped those fields from persistence.
+  - Fresh source review after the change confirms `backend/src/eneo/flows/domain/flow.py:111-128` contains only persisted template asset identity/content/status metadata; `backend/src/eneo/flows/flow_template_asset_service.py:47-91` returns plain domain assets; `backend/src/eneo/flows/api/flow_template_asset_models.py:63-103` owns the public authoring projection via `FlowTemplateAssetPublic.for_editor`; and `backend/src/eneo/flows/api/flow_template_router.py:75-77,216` applies that projection at list/upload response boundaries.
+  - Direct `rg -n "can_edit|can_download|can_select|can_inspect" backend/src/eneo/flows/domain backend/src/eneo/flows/flow_template_asset_repo.py` now returns no matches.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer, but it was noisy for this small API/domain slice; all concrete claims were verified with direct source reads and exact `rg`.
   - Read-only verifier agents confirmed API response-shape ownership, run-contract readiness derivation, and domain/persistence ownership. Valid feedback applied: keep the API projection beside `FlowTemplateAssetPublic`, use flag-less service mocks in router tests, keep readiness derivation independent, and do not touch generated clients because `FlowTemplateAssetPublic` schema fields remain unchanged.
@@ -914,10 +914,10 @@
 - Red proof:
   - Before the implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py::test_list_flow_template_files_projects_editor_capabilities tests/unittests/flows/test_flow_template_router.py::test_upload_flow_template_file_enforces_scope_and_uses_docx_template_save -q` failed as expected: domain still carried capability fields, `FlowTemplateAssetPublic.for_editor` did not exist, list still passed service capability parameters, and upload defaulted public flags to `False`.
 - Files changed:
-  - `backend/src/intric/flows/domain/flow.py`
-  - `backend/src/intric/flows/flow_template_asset_service.py`
-  - `backend/src/intric/flows/api/flow_template_asset_models.py`
-  - `backend/src/intric/flows/api/flow_template_router.py`
+  - `backend/src/eneo/flows/domain/flow.py`
+  - `backend/src/eneo/flows/flow_template_asset_service.py`
+  - `backend/src/eneo/flows/api/flow_template_asset_models.py`
+  - `backend/src/eneo/flows/api/flow_template_router.py`
   - `backend/tests/unittests/flows/test_flow_template_asset_models.py`
   - `backend/tests/unittests/flows/test_flow_template_router.py`
   - `backend/tests/unittests/flows/test_flow_template_asset_service.py`
@@ -941,10 +941,10 @@
   - Decision or measurement needed: decide whether a read-only template asset listing/inspection product flow is required; current authoring endpoints are edit-gated and had no live `can_edit=False` caller.
   - What not to preserve: service/domain capability stamping, the dead authoring `READ_ONLY` override, a generic capability framework, or frontend-only capability derivation.
 - Validation commands and results:
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/domain/flow.py src/intric/flows/flow_template_asset_service.py src/intric/flows/api/flow_template_asset_models.py src/intric/flows/api/flow_template_router.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py && /home/vscode/.local/bin/uv run ruff format --check <same files>` -> pass after applying `ruff format` to `flow_template_asset_service.py`.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/domain/flow.py src/intric/flows/flow_template_asset_service.py src/intric/flows/api/flow_template_asset_models.py src/intric/flows/api/flow_template_router.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/eneo/flows/domain/flow.py src/eneo/flows/flow_template_asset_service.py src/eneo/flows/api/flow_template_asset_models.py src/eneo/flows/api/flow_template_router.py src/eneo/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py && /home/vscode/.local/bin/uv run ruff format --check <same files>` -> pass after applying `ruff format` to `flow_template_asset_service.py`.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/eneo/flows/domain/flow.py src/eneo/flows/flow_template_asset_service.py src/eneo/flows/api/flow_template_asset_models.py src/eneo/flows/api/flow_template_router.py src/eneo/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py` -> pass, 0 errors.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_template_asset_models.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/unit/test_flow_openapi_contract.py -q` -> pass, 124 passed.
-  - `rg -n "can_edit|can_download|can_select|can_inspect" backend/src/intric/flows/domain backend/src/intric/flows/flow_template_asset_repo.py` -> no matches.
+  - `rg -n "can_edit|can_download|can_select|can_inspect" backend/src/eneo/flows/domain backend/src/eneo/flows/flow_template_asset_repo.py` -> no matches.
   - `rg -n "FlowTemplateAssetPublic\\.model_validate" backend/src backend/tests --glob "*.py"` -> only the dict-based public example test remains.
   - `rg -n "_with_capabilities" backend/src backend/tests --glob "*.py"` -> no matches.
 - Remaining risk / follow-up:
@@ -960,9 +960,9 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:89` requires the template work to stay staged and not delete `template_file_id` before runtime asset-first migration plus backfill.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:105` identifies the dual `template_asset_id` / `template_file_id` runtime identity path and calls for asset-first runtime resolution with a later fallback deletion.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:55-65` and `:374-395` keep Builder work behind the ship/no-ship decision gate, so this slice stayed in Flows runtime only.
-  - Fresh source review before the change confirmed `backend/src/intric/flows/runtime/template_fill_runtime.py:293-300` always required `template_file_id`, even when `template_asset_id` was present, and `backend/src/intric/flows/runtime/template_fill_runtime.py:341-399` loaded the file by `template_file_id` after only cross-checking the optional asset.
-  - Fresh source review confirmed publishing still writes both identifiers at `backend/src/intric/flows/application/flow_service.py:911-916`, and the authoring validator accepts either identifier at `backend/src/intric/flows/flow_validators_template.py:14-68`.
-  - Fresh source review after the change confirms `backend/src/intric/flows/runtime/template_fill_runtime.py:274-308` accepts asset-id-only template configs, `backend/src/intric/flows/runtime/template_fill_runtime.py:349-386` resolves through the asset's file id first, and `backend/src/intric/flows/runtime/template_fill_runtime.py:89,220-248` records the resolved file id in logs/provenance/model parameters.
+  - Fresh source review before the change confirmed `backend/src/eneo/flows/runtime/template_fill_runtime.py:293-300` always required `template_file_id`, even when `template_asset_id` was present, and `backend/src/eneo/flows/runtime/template_fill_runtime.py:341-399` loaded the file by `template_file_id` after only cross-checking the optional asset.
+  - Fresh source review confirmed publishing still writes both identifiers at `backend/src/eneo/flows/application/flow_service.py:911-916`, and the authoring validator accepts either identifier at `backend/src/eneo/flows/flow_validators_template.py:14-68`.
+  - Fresh source review after the change confirms `backend/src/eneo/flows/runtime/template_fill_runtime.py:274-308` accepts asset-id-only template configs, `backend/src/eneo/flows/runtime/template_fill_runtime.py:349-386` resolves through the asset's file id first, and `backend/src/eneo/flows/runtime/template_fill_runtime.py:89,220-248` records the resolved file id in logs/provenance/model parameters.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer, but its output was stale/noisy for this small runtime file; all concrete claims were verified with direct source reads and exact `rg`.
   - Read-only verifier agents checked runtime identity/fallback behavior, API/generated-client/frontend surface area, and sunset/no-permanent-dual-owner drift. Valid findings applied: keep the legacy file-id-only fallback, preserve existing mismatch rejection when both ids conflict, avoid API/frontend/generated-client edits, and record a concrete deletion trigger.
@@ -971,7 +971,7 @@
 - Red proof:
   - Before the implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_template_fill_runtime.py::test_execute_template_fill_step_resolves_asset_id_only_config -q` failed as expected with `TypedIOValidationException: Template fill requires a valid template_file_id.`
 - Files changed:
-  - `backend/src/intric/flows/runtime/template_fill_runtime.py`
+  - `backend/src/eneo/flows/runtime/template_fill_runtime.py`
   - `backend/tests/unittests/flows/test_template_fill_runtime.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -994,8 +994,8 @@
   - The asset-id-only branch is intentionally ahead of the publish path because current FlowService still writes both identifiers; this slice prepares runtime for the later backfill without widening the public contract.
 - Validation commands and results:
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_template_fill_runtime.py::test_execute_template_fill_step_resolves_asset_id_only_config -q` -> pass, 1 passed.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py && /home/vscode/.local/bin/uv run ruff format --check src/intric/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py` -> pass.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/eneo/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py && /home/vscode/.local/bin/uv run ruff format --check src/eneo/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/eneo/flows/runtime/template_fill_runtime.py tests/unittests/flows/test_template_fill_runtime.py` -> pass, 0 errors.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_template_fill_runtime.py -q` -> pass, 23 passed.
 - Remaining risk / follow-up:
   - Existing published definitions are still expected to carry both identifiers until the later backfill, so the asset-id-only path is mostly a forward-compatible runtime guard until PG-D4 continues.
@@ -1010,11 +1010,11 @@
   - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:47` scopes PG-D4 to staged template/evidence migration, with runtime asset-first resolution, backfill/proof, then later file fallback deletion.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:105` identifies the dual `template_asset_id` / `template_file_id` path and requires temporary staged compatibility to carry an explicit sunset trigger.
   - `review-artifacts/implementation-progress-2026-06-29.md:954-1007` records PG-D4.1's sunset trigger: keep the file-id fallback only until a backfill/audit proves every runtime-relevant template-fill definition carries a valid `template_asset_id` and preserved checksum.
-  - Fresh source review confirmed publish writes `template_asset_id`, `template_file_id`, and `template_checksum` at `backend/src/intric/flows/application/flow_service.py:911-916`.
-  - Fresh source review confirmed runtime parses asset/file/checksum config at `backend/src/intric/flows/runtime/template_fill_runtime.py:284-309`, resolves by asset id first while retaining file-id fallback at `backend/src/intric/flows/runtime/template_fill_runtime.py:359-386`, and verifies the loaded file checksum only when `template_checksum` is present at `backend/src/intric/flows/runtime/template_fill_runtime.py:411-415`.
-  - Fresh source review confirmed execution validates `definition_checksum` before parsing/execution at `backend/src/intric/flows/runtime/executor.py:611-617,2156-2170`, so this slice must not rewrite `flow_versions.definition_json` or `definition_checksum`.
-  - Fresh source review confirmed the existing retention scanner in `backend/src/intric/flows/published_definition.py:415-474` is key-based for blob retention, not suitable as the fallback-deletion readiness proof because the new proof must identify steps by persisted `output_mode == "template_fill"`.
-  - Fresh source review confirmed active template asset lookup excludes soft-deleted rows in `backend/src/intric/flows/flow_template_asset_repo.py:123-131`, and `backend/src/intric/database/tables/flow_tables.py:434-453` has no active unique constraint for `(tenant_id, flow_id, file_id)`, so duplicate file-to-asset mapping is a real file-id-only ambiguity.
+  - Fresh source review confirmed publish writes `template_asset_id`, `template_file_id`, and `template_checksum` at `backend/src/eneo/flows/application/flow_service.py:911-916`.
+  - Fresh source review confirmed runtime parses asset/file/checksum config at `backend/src/eneo/flows/runtime/template_fill_runtime.py:284-309`, resolves by asset id first while retaining file-id fallback at `backend/src/eneo/flows/runtime/template_fill_runtime.py:359-386`, and verifies the loaded file checksum only when `template_checksum` is present at `backend/src/eneo/flows/runtime/template_fill_runtime.py:411-415`.
+  - Fresh source review confirmed execution validates `definition_checksum` before parsing/execution at `backend/src/eneo/flows/runtime/executor.py:611-617,2156-2170`, so this slice must not rewrite `flow_versions.definition_json` or `definition_checksum`.
+  - Fresh source review confirmed the existing retention scanner in `backend/src/eneo/flows/published_definition.py:415-474` is key-based for blob retention, not suitable as the fallback-deletion readiness proof because the new proof must identify steps by persisted `output_mode == "template_fill"`.
+  - Fresh source review confirmed active template asset lookup excludes soft-deleted rows in `backend/src/eneo/flows/flow_template_asset_repo.py:123-131`, and `backend/src/eneo/database/tables/flow_tables.py:434-453` has no active unique constraint for `(tenant_id, flow_id, file_id)`, so duplicate file-to-asset mapping is a real file-id-only ambiguity.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer but was noisy for this small internal slice; all concrete claims were verified with direct source reads and exact `rg`.
   - Read-only verifier agents reviewed published-definition audit semantics, runtime/checksum/data-integrity safety, and public API/frontend/generated-client surface area. Valid findings applied: keep the audit in `published_definition.py`, project active assets through `flow_version_repo.py`, compare published checksum to the file-row checksum runtime uses, keep soft-delete liveness aligned with runtime instead of inventing status semantics, and record run-contract checksum readiness drift as a follow-up.
@@ -1025,16 +1025,16 @@
 - Red proof:
   - Before implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_published_definition_template_identity_audit.py` failed during collection with `ImportError: cannot import name 'PublishedTemplateIdentityAuditSnapshot'`, proving the typed deletion-readiness audit did not exist.
 - Files changed:
-  - `backend/src/intric/flows/published_definition.py`
-  - `backend/src/intric/flows/infrastructure/flow_version_repo.py`
+  - `backend/src/eneo/flows/published_definition.py`
+  - `backend/src/eneo/flows/infrastructure/flow_version_repo.py`
   - `backend/tests/unittests/flows/test_published_definition_template_identity_audit.py`
   - `backend/tests/integration/flows/test_flow_version_repository.py`
   - `backend/tests/unittests/flows/test_flow_template_asset_compatibility.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
-  - Added a read-only, typed audit result in `backend/src/intric/flows/published_definition.py:69-129` and audit logic in `backend/src/intric/flows/published_definition.py:181-412`.
+  - Added a read-only, typed audit result in `backend/src/eneo/flows/published_definition.py:69-129` and audit logic in `backend/src/eneo/flows/published_definition.py:181-412`.
   - The audit identifies runtime-relevant rows by known-schema `steps[*].output_mode == "template_fill"` and fails closed for unknown schema, unreadable steps/config, missing or invalid asset id, missing checksum, non-live asset, asset/file mismatch, checksum mismatch, and ambiguous file-id-only mapping.
-  - Added `audit_flow_version_template_identity_readiness` in `backend/src/intric/flows/infrastructure/flow_version_repo.py:43-100`, which scans all FlowVersion rows and projects active, non-deleted template assets joined to `Files.checksum`.
+  - Added `audit_flow_version_template_identity_readiness` in `backend/src/eneo/flows/infrastructure/flow_version_repo.py:43-100`, which scans all FlowVersion rows and projects active, non-deleted template assets joined to `Files.checksum`.
   - Existing publish behavior is unchanged, but compatibility tests now assert that legacy file-id publish paths emit the checksum along with the asset/file ids.
   - No FlowVersion data is mutated, no migration/backfill is added, no runtime `template_file_id` fallback is deleted, and no CLI/API/endpoint/frontend/generated-client surface is added.
 - Complexity deleted or owner clarified:
@@ -1062,11 +1062,11 @@
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/integration/flows/test_flow_version_repository.py` -> pass, 3 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_published_definition_template_references.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py tests/unittests/flows/test_template_fill_runtime.py` -> pass, 46 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_service.py::test_publish_flow_pins_template_metadata_for_template_fill` -> pass, 1 passed.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/published_definition.py src/intric/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass after formatting `published_definition.py` and the new audit test file.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/published_definition.py src/intric/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/eneo/flows/published_definition.py src/eneo/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff format --check src/eneo/flows/published_definition.py src/eneo/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass after formatting `published_definition.py` and the new audit test file.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/eneo/flows/published_definition.py src/eneo/flows/infrastructure/flow_version_repo.py tests/unittests/flows/test_published_definition_template_identity_audit.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/integration/flows/test_flow_version_repository.py` -> pass, 0 errors.
   - `git diff --cached --check` -> pass.
-  - `git diff --cached --name-only -- frontend backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web` -> no staged frontend/API/generated-client files.
+  - `git diff --cached --name-only -- frontend backend/src/eneo/flows/api frontend/packages/eneo-js frontend/apps/web` -> no staged frontend/API/generated-client files.
   - `git diff --cached -U0 -- backend/src backend/tests | rg -n "PG-|roadmap|phase|slice"` -> no matches.
 - Remaining risk / rollback:
   - This is proof-only code, not a data readiness claim; target database readiness is unknown until the audit is run in an attended data slice.
@@ -1080,11 +1080,11 @@
 - Verified evidence before change:
   - `review-artifacts/implementation-progress-2026-06-29.md:954-1007` records PG-D4.1's retained runtime `template_file_id` fallback and deletion trigger; this slice does not delete or weaken that fallback.
   - `review-artifacts/implementation-progress-2026-06-29.md:1005-1074` records PG-D4.2's read-only fallback-deletion audit and explicitly leaves run-contract checksum readiness drift as the adjacent follow-up.
-  - Fresh source review confirmed `FlowRunContractService` read the published `template_checksum` at `backend/src/intric/flows/flow_run_contract_service.py:127-130`, then successful asset lookup overwrote the response checksum with the current asset checksum and marked the item `ready` at `backend/src/intric/flows/flow_run_contract_service.py:143-167`.
-  - Fresh source review confirmed runtime still rejects a non-empty raw published checksum that differs from the loaded template file checksum at `backend/src/intric/flows/runtime/template_fill_runtime.py:411-415`, and uses raw non-empty string semantics at `backend/src/intric/flows/runtime/template_fill_runtime.py:511-514`.
+  - Fresh source review confirmed `FlowRunContractService` read the published `template_checksum` at `backend/src/eneo/flows/flow_run_contract_service.py:127-130`, then successful asset lookup overwrote the response checksum with the current asset checksum and marked the item `ready` at `backend/src/eneo/flows/flow_run_contract_service.py:143-167`.
+  - Fresh source review confirmed runtime still rejects a non-empty raw published checksum that differs from the loaded template file checksum at `backend/src/eneo/flows/runtime/template_fill_runtime.py:411-415`, and uses raw non-empty string semantics at `backend/src/eneo/flows/runtime/template_fill_runtime.py:511-514`.
   - Existing runtime coverage proves checksum drift rejection in `backend/tests/unittests/flows/test_template_fill_runtime.py:500-541` and `backend/tests/unittests/flows/test_template_fill_runtime.py:545-578`.
-  - Existing public contract shape already has `FlowTemplateReadinessPublic.status`, `checksum`, and `message_code` at `backend/src/intric/flows/flow_run_contract_models.py:240-252`; `FlowTemplateAssetStatus.NEEDS_ACTION` already exists at `backend/src/intric/flows/enums.py:348-352`; `FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH` already exists at `backend/src/intric/flows/flow_api_error_code.py:99`.
-  - Fresh source review confirmed upload/publish populate template asset and published checksums from the file checksum at `backend/src/intric/flows/flow_template_asset_service.py:77-85` and `backend/src/intric/flows/application/flow_service.py:911-914`.
+  - Existing public contract shape already has `FlowTemplateReadinessPublic.status`, `checksum`, and `message_code` at `backend/src/eneo/flows/flow_run_contract_models.py:240-252`; `FlowTemplateAssetStatus.NEEDS_ACTION` already exists at `backend/src/eneo/flows/enums.py:348-352`; `FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH` already exists at `backend/src/eneo/flows/flow_api_error_code.py:99`.
+  - Fresh source review confirmed upload/publish populate template asset and published checksums from the file checksum at `backend/src/eneo/flows/flow_template_asset_service.py:77-85` and `backend/src/eneo/flows/application/flow_service.py:911-914`.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer; it found the expected Flow area but noisy affected-flow output, so all concrete claims were verified with direct source reads and exact `rg`.
   - Read-only verifier agents reviewed run-contract/API-consumer semantics, runtime checksum parity, and test quality. Valid findings applied: keep the fix in `FlowRunContractService`, assert consumer-visible readiness fields, reuse `needs_action` and `typed_io_template_checksum_mismatch`, include both asset-id and file-id fallback paths, preserve raw whitespace mismatch behavior, and avoid schema/client/frontend edits.
@@ -1093,7 +1093,7 @@
 - Red proof:
   - Before implementation, `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_contract_service.py::test_get_run_contract_marks_template_checksum_drift_needs_action -q` failed for both asset-id and legacy file-id paths with `status=ready`, proving the run contract false-greened checksum drift.
 - Files changed:
-  - `backend/src/intric/flows/flow_run_contract_service.py`
+  - `backend/src/eneo/flows/flow_run_contract_service.py`
   - `backend/tests/unittests/flows/test_flow_run_contract_service.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1114,8 +1114,8 @@
 - Validation commands and results:
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_contract_service.py::test_get_run_contract_marks_template_checksum_drift_needs_action -q` -> red before implementation with `status=ready`, then pass, 4 passed.
   - `cd /workspace/backend && /home/vscode/.local/bin/uv run pytest tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_template_fill_runtime.py -q` -> pass, 39 passed.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py && /home/vscode/.local/bin/uv run ruff format --check src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py` -> pass.
-  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py` -> pass, 0 errors.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run ruff check src/eneo/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py && /home/vscode/.local/bin/uv run ruff format --check src/eneo/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py` -> pass.
+  - `cd /workspace/backend && /home/vscode/.local/bin/uv run pyright src/eneo/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_run_contract_service.py` -> pass, 0 errors.
 - Remaining risk / rollback:
   - The run-contract comparison uses the current `FlowTemplateAsset.checksum` read model because PG-D4.3 is scoped to `FlowRunContractService`; upload and publish populate that checksum from the file checksum, and exact `Files.checksum` read parity is recorded above as a separate hardening candidate if future source evidence shows the asset checksum can drift.
   - Rollback is low risk: remove the readiness checksum comparison, the new test, and this ledger entry. No schema, migration, persisted data, runtime execution, generated-client, frontend, or fallback-deletion rollback is needed.
@@ -1128,10 +1128,10 @@
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:337-371` scopes C8 to Builder structural simplification after ship intent is decided; this slice stays inside provider/proposal failure classification and does not start capability or MCP implementation.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:385-386` records proposal repair pruning as blocked on telemetry and separately records `finish_reason == "length"` as the provider truncation behavior that must not route into generic repair.
   - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:41-42` accepts typed truncation before repair and failed-turn telemetry as separate C8 concerns; this slice implements only the typed truncation branch.
-  - Fresh source review confirmed provider finish metadata is normalized at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:120-142`, with `LLMCompletionChoice.finish_reason` preserved at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:50-58`.
-  - Fresh source review confirmed first proposal completion is requested at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:230-238`, and before the fix the first response fell through from missing/invalid forced tool response into `_retry_forced_proposal_after_text` at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261-295`.
-  - Fresh source review confirmed repair calls use the same `ProposalTurnContext.max_output_tokens` at `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:180-198`, including self-correction at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:410-419` and forced proposal retry at `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:601-608`.
-  - Fresh source review confirmed `AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG` already exists at `backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:58-63`, has a registry entry at `backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:347-352`, and is already present in generated frontend schema output, so no public schema/client change was needed.
+  - Fresh source review confirmed provider finish metadata is normalized at `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:120-142`, with `LLMCompletionChoice.finish_reason` preserved at `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:50-58`.
+  - Fresh source review confirmed first proposal completion is requested at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:230-238`, and before the fix the first response fell through from missing/invalid forced tool response into `_retry_forced_proposal_after_text` at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:261-295`.
+  - Fresh source review confirmed repair calls use the same `ProposalTurnContext.max_output_tokens` at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:180-198`, including self-correction at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:410-419` and forced proposal retry at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:601-608`.
+  - Fresh source review confirmed `AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG` already exists at `backend/src/eneo/flows/ai_builder/ai_builder_error_contract.py:58-63`, has a registry entry at `backend/src/eneo/flows/ai_builder/ai_builder_error_contract.py:347-352`, and is already present in generated frontend schema output, so no public schema/client change was needed.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer; semantic search was noisy for this narrow Builder path, so all concrete claims were verified with direct source reads and exact `rg`.
   - `[no-peer-review]`: the user explicitly asked to skip the repo's Claude peer loop for this bounded slice and to use read-only `codex exec` peer gates instead.
@@ -1140,7 +1140,7 @@
 - Red proof:
   - Before the implementation, `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_propose_plan_explicit_truncation_yields_terminal_error_without_repair -q` failed with `['status'] != ['error']` and logged `missing_submission_tool` repair telemetry, proving explicit provider truncation entered forced proposal repair.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1163,12 +1163,12 @@
 - Validation commands and results:
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_propose_plan_explicit_truncation_yields_terminal_error_without_repair -q` -> red before implementation with `['status'] != ['error']`, then pass, 1 passed.
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py -q` -> pass, 59 passed.
-  - `cd /workspace/backend && uv run pyright src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
-  - `cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> initial format check requested formatting for the test file; after `uv run ruff format tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`, check passed.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `cd /workspace/backend && uv run pyright src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
+  - `cd /workspace/backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py && uv run ruff format --check src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> initial format check requested formatting for the test file; after `uv run ruff format tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`, check passed.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `git diff --cached --check` -> pass.
-  - `git diff --cached --name-only -- frontend backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web` -> no output.
-  - `git diff --cached -U0 -- backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|phase|slice" || true` -> only legitimate `phase` assertions and one pre-existing MCP fixture string reflowed by ruff; no scope-creep implementation.
+  - `git diff --cached --name-only -- frontend backend/src/eneo/flows/api frontend/packages/eneo-js frontend/apps/web` -> no output.
+  - `git diff --cached -U0 -- backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|phase|slice" || true` -> only legitimate `phase` assertions and one pre-existing MCP fixture string reflowed by ruff; no scope-creep implementation.
 - Remaining risk / rollback:
   - This classifies only explicit first-response provider truncation, by exact finish metadata. Truncation during repair/self-correction completions is intentionally left for a later bounded slice if release evidence requires it.
   - The repair loop remains unpruned until C8.2 telemetry/eval proof separates useful recovery from debt.
@@ -1182,9 +1182,9 @@
   - `/Users/cimen/Downloads/codex_flow_builder_release_hardening_capability_prep_prompt.md:107-116` defines C8.2 as one canonical failed proposal-turn outcome log/telemetry owner with request/session ids, target kind, branch, repair attempts, LLM calls, token counts, final failure kind, and provider finish reason, while forbidding prompts, user content, model output, resource secrets, and content-bearing tool args.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:385-386` records failed-turn telemetry as the prerequisite before proposal repair pruning; this slice measures and does not prune repair/fallback branches.
   - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:41-42` keeps failed-turn telemetry separate from C8.1 truncation terminalization.
-  - `backend/src/intric/flows/ai_builder/ai_builder_telemetry.py:120-129` explicitly aggregates committed assistant-message turns only, so rejected/parse-failed turns cannot be the canonical failed-turn source.
-  - Before the fix, `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:42-84` owned proposal telemetry constants/taxonomies and `ProposalTurnTelemetry`, but had only first-attempt, repair-invocation, and apply-failure logs.
-  - Before the fix, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:230-310` created the proposal turn tracker and yielded terminal errors for provider exception, empty choices, explicit truncation, and final missing tool after retry without emitting a terminal failed-turn outcome.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_telemetry.py:120-129` explicitly aggregates committed assistant-message turns only, so rejected/parse-failed turns cannot be the canonical failed-turn source.
+  - Before the fix, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:42-84` owned proposal telemetry constants/taxonomies and `ProposalTurnTelemetry`, but had only first-attempt, repair-invocation, and apply-failure logs.
+  - Before the fix, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:230-310` created the proposal turn tracker and yielded terminal errors for provider exception, empty choices, explicit truncation, and final missing tool after retry without emitting a terminal failed-turn outcome.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer; semantic search returned no useful nodes for this narrow Builder telemetry path, so source/file evidence used direct reads and exact `rg`.
   - `[no-peer-review]`: the user explicitly asked to skip the repo's default Claude peer loop for this bounded slice and to use read-only `codex exec` peer gates instead.
@@ -1193,8 +1193,8 @@
 - Red proof:
   - Before source changes, `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -k "failed_turn or empty_completion_choices or explicit_truncation or create_mode_forces_outline"` failed for empty choices, explicit truncation, and forced retry missing-tool with `len(payloads) == 0`, proving typed error events were emitted without `operation="failed_turn"` telemetry.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1218,13 +1218,13 @@
   - What not to preserve: invisible terminal failed proposal turns, duplicate ad hoc outcome dictionaries, content-bearing telemetry, exception-text telemetry, or broad MCP/capability work as a substitute for Builder reliability measurement.
 - Validation commands and results:
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -k "failed_turn or empty_completion_choices or explicit_truncation or create_mode_forces_outline"` -> red before implementation with three missing failed-turn payloads, then pass, 5 passed.
-  - `cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> initial import-order failures while moving the touched test imports; after `uv run ruff check --fix tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`, pass.
-  - `cd /workspace/backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 3 files already formatted.
+  - `cd /workspace/backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> initial import-order failures while moving the touched test imports; after `uv run ruff check --fix tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`, pass.
+  - `cd /workspace/backend && uv run ruff format --check src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 3 files already formatted.
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py` -> pass, 49 passed.
-  - `cd /workspace/backend && uv run pyright src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
+  - `cd /workspace/backend && uv run pyright src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 82 passed.
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py` -> final pass after commit-gate import cleanup, 105 passed.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Privacy notes:
   - The failed-turn outcome is built from existing ids, enum-like literals, token/finish metadata, counts, and stable error codes only.
   - Tests assert a truncated provider response containing sentinel model output plus user/system prompt sentinels does not leak those values into the failed-turn payload.
@@ -1242,18 +1242,18 @@
   - `/Users/cimen/Downloads/codex_flow_builder_release_hardening_capability_prep_prompt.md:134-150` defines this slice as structured-answer ingestion: no silently dropped structured answers, server-owned questions canonical, requirements confirmation/localization/slot state preserved, and tests for structured answers, architecture slots, malformed answers, and free-text fallback/adjudication.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:348-350` marks structured-question answer ingestion for architecture-driving slots as release-blocking when Builder ships.
   - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:40-42` accepts Builder structured-question answer drops as release-blocking and requires architecture-driving answers to be ingested or fail explicitly.
-  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:62-116` is the canonical explicit answer ingestion owner for Builder user turns; it attaches explicit `question_answer` metadata before free-text inference/adjudication.
-  - Before the fix, `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:347-361` returned `None` for invalid structured answer input, while `metadata_for_user_message` tolerated that converter result at `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:709-721`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py:46-67` already owns the supported structured-question id set and `is_supported_structured_question_id`, but this predicate was only tested and not enforced at ingestion.
-  - `backend/src/intric/flows/ai_builder/question_catalog.py:815-825` already owns canonical slot values and legacy-question-id-to-slot projection for slot-backed questions; before the final fix, a supported direct slot question could carry a non-canonical value that would persist as answered but not drive a canonical slot.
-  - `backend/src/intric/flows/ai_builder/planning_state_builder.py:511-721` reconstructs architecture-driving planning slots from answer signals, and `_resolve_slot_origin` marks explicit answers as `source="structured_answer"` at `backend/src/intric/flows/ai_builder/planning_state_builder.py:770-785`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:50` defines `invalid_question_payload`, and `backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:281-286` maps it to a 400/question-phase error.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py:62-116` is the canonical explicit answer ingestion owner for Builder user turns; it attaches explicit `question_answer` metadata before free-text inference/adjudication.
+  - Before the fix, `backend/src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py:347-361` returned `None` for invalid structured answer input, while `metadata_for_user_message` tolerated that converter result at `backend/src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py:709-721`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_canonicalization.py:46-67` already owns the supported structured-question id set and `is_supported_structured_question_id`, but this predicate was only tested and not enforced at ingestion.
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py:815-825` already owns canonical slot values and legacy-question-id-to-slot projection for slot-backed questions; before the final fix, a supported direct slot question could carry a non-canonical value that would persist as answered but not drive a canonical slot.
+  - `backend/src/eneo/flows/ai_builder/planning_state_builder.py:511-721` reconstructs architecture-driving planning slots from answer signals, and `_resolve_slot_origin` marks explicit answers as `source="structured_answer"` at `backend/src/eneo/flows/ai_builder/planning_state_builder.py:770-785`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_error_contract.py:50` defines `invalid_question_payload`, and `backend/src/eneo/flows/ai_builder/ai_builder_error_contract.py:281-286` maps it to a 400/question-phase error.
 - Structured-answer inventory:
   - Requirements confirmation: `requirements_confirmation` answers are ingested as top-level requirements confirmation metadata; existing coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py:384-410` stayed green.
   - Architecture-driving slot/state answers: supported structured answers with a real payload are ingested through `resolve_user_question_metadata` and then drive `PlanningState.resolved_slots`; new coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py:413-447` proves `input_material_mode=documents` becomes `primary_runtime_input` with `source="structured_answer"`.
   - Malformed/uningestable structured answers: explicit answers with missing `question_id`, unsupported `question_id`, supported id with no real answer payload, any direct slot-backed question value outside the canonical slot vocabulary, or a mixed direct-slot payload containing invalid values now fail typed with `invalid_question_payload`; new parametrized coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py:450-511`.
-  - Free-text fallback/adjudication: no explicit `question_answer` still uses the existing inference/adjudication path at `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:87-104`; existing coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py:347-381` and `:506-568` stayed green.
-  - Localization: `ui_language` remains carried from valid question-answer input or the explicit request field at `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:72-73` and `:106-110`; the requirements-confirmation localization test stayed green.
+  - Free-text fallback/adjudication: no explicit `question_answer` still uses the existing inference/adjudication path at `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py:87-104`; existing coverage at `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py:347-381` and `:506-568` stayed green.
+  - Localization: `ui_language` remains carried from valid question-answer input or the explicit request field at `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py:72-73` and `:106-110`; the requirements-confirmation localization test stayed green.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer; semantic search was noisy for this narrow Builder path, so source/file evidence used direct reads and exact `rg`.
   - `[no-peer-review]`: the user explicitly asked to skip the repo's default Claude peer loop for this bounded slice and to use read-only `codex exec` peer gates instead.
@@ -1263,7 +1263,7 @@
 - Red proof:
   - Before source changes, `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -k "resolve_user_question_metadata"` failed for all three invalid explicit structured-answer cases with `DID NOT RAISE AIBuilderBadRequestException`, proving the current path silently accepted uningestable structured answers.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1285,13 +1285,13 @@
 - Validation commands and results:
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -k "resolve_user_question_metadata"` -> red before implementation for three invalid explicit structured-answer cases, then pass after the first fix; after commit-gate value tightening, pass with 11 passed.
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -k "question_answer or structured_answer or resolve_user_question_metadata"` -> pass after commit-gate value tightening, 26 passed.
-  - `cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> initial format check requested formatting for the test file; after `uv run ruff format tests/unittests/flows/ai_builder/test_ai_builder_planner.py`, check passed.
-  - `cd /workspace/backend && uv run pyright src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
+  - `cd /workspace/backend && uv run ruff check src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && uv run ruff format --check src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> initial format check requested formatting for the test file; after `uv run ruff format tests/unittests/flows/ai_builder/test_ai_builder_planner.py`, check passed.
+  - `cd /workspace/backend && uv run pyright src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass after commit-gate value tightening, 331 passed.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `git diff --check` -> failed only on unrelated pre-existing `.devcontainer/devcontainer.json` trailing whitespace at lines 10-13; the C8.3 scoped diff check above and the staged diff check are the relevant gates for this slice.
-  - `git diff -U0 -- backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|phase|slice|Claude|Antigravity|edit/revise|materialization" || true` -> pass, no accidental scope vocabulary in source/test hunks.
-  - `git diff --name-only -- backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web backend/src/intric/flows/runtime` -> pass, no API/generated-client/frontend/runtime diff.
+  - `git diff -U0 -- backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|phase|slice|Claude|Antigravity|edit/revise|materialization" || true` -> pass, no accidental scope vocabulary in source/test hunks.
+  - `git diff --name-only -- backend/src/eneo/flows/api frontend/packages/eneo-js frontend/apps/web backend/src/eneo/flows/runtime` -> pass, no API/generated-client/frontend/runtime diff.
 - Privacy / safety notes:
   - Invalid-answer error context contains only a stable reason string. It does not include prompt text, user content, selected free-text values, model output, resource names, secrets, or tool arguments.
   - Direct slot-backed value legality is enforced with canonical server-owned slot values. Broader custom/free-text value policy for non-slot legacy question families remains deliberately out of scope.
@@ -1308,9 +1308,9 @@
   - `/Users/cimen/Downloads/codex_flow_builder_release_hardening_capability_prep_prompt.md:152-170` defines this slice as explicit edit/revise routing before generic repair: scoped revision, clarification/notice, or edit-aware terminal error; normal build/create requests remain unchanged.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:348-351` marks explicit edit/revise intent routing before repair as release-blocking when Builder ships.
   - `review-artifacts/chatgpt-pro-strategy-integration-2026-06-29.md:45` requires recognized edits to route to typed revision/clarification/notice/edit-aware terminal errors instead of undifferentiated `self_correction_quality_failure`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:147-172` is the canonical pre-submission routing point: `None` from the scoped revision owner means unrecognized intent and continues to normal active proposal submission.
-  - `backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py:86-132` owns deterministic selected-step revision attempts and finalization before any LLM proposal submission.
-  - `backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py:235-272` now maps scoped revision results to exactly one event path: text notice, plan/finalizer events, or typed proposal error.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py:147-172` is the canonical pre-submission routing point: `None` from the scoped revision owner means unrecognized intent and continues to normal active proposal submission.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py:86-132` owns deterministic selected-step revision attempts and finalization before any LLM proposal submission.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py:235-272` now maps scoped revision results to exactly one event path: text notice, plan/finalizer events, or typed proposal error.
   - Before the fix, owner-level scoped finalizer feedback returned `ScopedPlanRevisionOutcome(events=(), fall_through_to_active_submission=True)`, and processor-level behavior then entered the generic active-submission repair path and produced `proposal_tool_missing`.
 - Intent-routing inventory:
   - Recognized scoped revision success: selected-step model changes are finalized without LLM proposal submission; covered by `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:528-625` and `backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py:206-248`.
@@ -1325,8 +1325,8 @@
 - Red proof:
   - Before source changes, `docker exec ... cd /workspace/backend && if command -v uv; then uv run pytest ...; else .venv/bin/pytest ...; fi` for the two scoped finalization feedback tests failed with owner-level `len(result.events) == 0` and processor-level `proposal_tool_missing`, proving recognized scoped finalization feedback fell into generic proposal repair.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -1350,10 +1350,10 @@
   - `docker exec ... cd /workspace/backend && if command -v uv; then uv run pytest ...; else .venv/bin/pytest ...; fi` for the two scoped finalization feedback tests -> red before implementation with 2 failed; pass after implementation with 2 passed.
   - `docker exec -u vscode ... cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q` -> pass, 82 passed.
   - `docker exec ... cd /workspace/backend && ruff check ... && ruff format --check ...` on touched backend source/tests -> initial format check requested formatting for two touched files; after `ruff format`, pass.
-  - `backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
-  - `git diff -U0 -- backend/src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|slice|Claude|Antigravity|materialization|retention|audit|frontend|OpenAPI|generated-client" || true` -> pass, no accidental scope vocabulary in source/test hunks.
-  - `git diff --name-only -- backend/src/intric/flows/api frontend/packages/intric-js frontend/apps/web backend/src/intric/flows/runtime` -> pass, no API/generated-client/frontend/runtime diff.
+  - `backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py src/eneo/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `git diff -U0 -- backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_scoped_plan_revision.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py | rg -n "MCP|capability|PR ?#?480|C8|roadmap|slice|Claude|Antigravity|materialization|retention|audit|frontend|OpenAPI|generated-client" || true` -> pass, no accidental scope vocabulary in source/test hunks.
+  - `git diff --name-only -- backend/src/eneo/flows/api frontend/packages/eneo-js frontend/apps/web backend/src/eneo/flows/runtime` -> pass, no API/generated-client/frontend/runtime diff.
   - `rg -n "fall_through_to_active_submission|falls_through_when_scoped|scoped-feedback-fallthrough" backend/src backend/tests/unittests/flows/ai_builder` -> pass, no results.
 - Privacy / safety notes:
   - The new error event includes only `failure_kind`, request id, phase, and an action-oriented message. It does not include prompts, user text, model output, resource names, secrets, or tool arguments.
@@ -1371,7 +1371,7 @@
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:360` records that, if Builder ships, deterministic goldens must pass through materialization rather than only preflight/critic fences.
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:385` keeps proposal repair pruning blocked until failed-turn telemetry or deterministic proof exists.
   - Before the fix, `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:14-17` described command preparation and live evals, and `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:153-158` asserted only `assert_create_spec_prepares_through_authoring_command`.
-  - `backend/src/intric/flows/application/flow_authoring_command.py:132-172` is the canonical preparation owner, and `backend/src/intric/flows/application/flow_authoring_command.py:194-220` applies prepared changesets through the real `FlowDraftMaterializer`.
+  - `backend/src/eneo/flows/application/flow_authoring_command.py:132-172` is the canonical preparation owner, and `backend/src/eneo/flows/application/flow_authoring_command.py:194-220` applies prepared changesets through the real `FlowDraftMaterializer`.
   - `backend/tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py:728-748` defines 19 buildable goldens; target categories are represented by simple flow, form/intake at `golden_cases.py:155-164`, DOCX/PDF at `golden_cases.py:168-208` and `golden_cases.py:330-348`, and audio/transcription at `golden_cases.py:352-410`.
 - Golden inventory / proof depth:
   - Before: all buildable goldens were preflight-proofed, form-field checked, composition-column checked, and prepared through `FlowAuthoringCommandService.prepare`; materialization proof depth stayed in separate low-level materializer tests and live evals.
@@ -1408,7 +1408,7 @@
   - `cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/test_flow_authoring_command.py tests/unittests/flows/test_flow_draft_materialization_executor.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py -q` -> pass, 226 passed.
   - `cd /workspace/backend && uv run ruff check tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py && uv run ruff format --check tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py` -> initial format check requested formatting for `authoring_command_assertions.py`; after `uv run ruff format`, pass, 3 files already formatted.
   - `cd /workspace/backend && uv run pyright ...` on the touched test/source scope -> failed before the wrapper with devcontainer dependency-resolution errors such as unresolved `pydantic`; the repo wrapper below is the type gate for this slice.
-  - `cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/application/flow_authoring_command.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/application/flow_draft_materialization_executor.py tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py` -> pass, 0 errors.
+  - `cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/application/flow_authoring_command.py src/eneo/flows/application/flow_draft_materialization.py src/eneo/flows/application/flow_draft_materialization_executor.py tests/unittests/flows/ai_builder/authoring_command_assertions.py tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py` -> pass, 0 errors.
 - Privacy / safety notes:
   - The new tests use deterministic in-repo golden specs only. They make no live LLM calls, no network calls, no timing sleeps, no provider-output snapshots, and add no content-bearing telemetry or persisted runtime data.
 - Remaining risk / rollback:
@@ -1422,15 +1422,15 @@
 - Findings addressed: old terminal Flow AI Builder sessions, plans, conversation/planning/proposal JSON, and session-file pins had no explicit data-retention count/delete path, so Builder could retain user-like content and keep uploaded files pinned indefinitely.
 - Verified evidence before change:
   - `.codex/artifacts/codex-exec-flow-builder-next-roadmap-analysis-20260630.md` identifies Builder retention/deletion/count policy as the next clean release-hardening gate and names `DataRetentionService` as the retention orchestrator to reuse.
-  - `backend/src/intric/database/tables/flow_tables.py:2074-2079` defines Builder session statuses: `chatting`, `awaiting_approval`, `applied`, and `cancelled`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py:9-21` makes `applied` and `cancelled` terminal self-transition states, while `backend/src/intric/flows/ai_builder/ai_builder_repo.py:140-172` treats only `chatting` and `awaiting_approval` as resumable.
-  - `backend/src/intric/flows/ai_builder/ai_builder_repo.py:210-237` marks cancelled sessions and updates `updated_at`; `backend/src/intric/flows/ai_builder/ai_builder_repo.py:909-927` marks applied sessions through the same persisted session status/update owner.
-  - `backend/src/intric/database/tables/flow_tables.py:2121-2146` stores Builder conversation and planning JSON on `builder_sessions`; `backend/src/intric/database/tables/flow_tables.py:2222-2259` stores proposal JSON on `builder_plans`.
-  - `backend/src/intric/database/tables/flow_tables.py:2195-2219` declares `builder_session_files` as session-owned with `ondelete="CASCADE"` back to `builder_sessions`; `backend/src/intric/database/tables/flow_tables.py:2225-2255` does the same for `builder_plans`.
+  - `backend/src/eneo/database/tables/flow_tables.py:2074-2079` defines Builder session statuses: `chatting`, `awaiting_approval`, `applied`, and `cancelled`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_session_transitions.py:9-21` makes `applied` and `cancelled` terminal self-transition states, while `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:140-172` treats only `chatting` and `awaiting_approval` as resumable.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:210-237` marks cancelled sessions and updates `updated_at`; `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:909-927` marks applied sessions through the same persisted session status/update owner.
+  - `backend/src/eneo/database/tables/flow_tables.py:2121-2146` stores Builder conversation and planning JSON on `builder_sessions`; `backend/src/eneo/database/tables/flow_tables.py:2222-2259` stores proposal JSON on `builder_plans`.
+  - `backend/src/eneo/database/tables/flow_tables.py:2195-2219` declares `builder_session_files` as session-owned with `ondelete="CASCADE"` back to `builder_sessions`; `backend/src/eneo/database/tables/flow_tables.py:2225-2255` does the same for `builder_plans`.
   - `backend/alembic/versions/202603121400_add_ai_builder_tables.py:9-13` records reset/replay policy for unreleased Builder table-shape changes; the same migration already creates the plan-to-session cascade at `backend/alembic/versions/202603121400_add_ai_builder_tables.py:205-209`.
   - `backend/alembic/versions/20260419_builder_tenant_integrity.py:80-95` adds tenant-consistent cascade FKs for `builder_plans` and `builder_session_files`; `backend/alembic/versions/20260426_latest_plan_fk.py:66-76` preserves latest-plan integrity as a deferrable session-owned relationship.
-  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py:254-284` owns hierarchical retention-day resolution; `backend/src/intric/data_retention/infrastructure/data_retention_worker.py:113-351` owns the scheduled cleanup orchestration/result counts.
-  - `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:249-264` owns candidate-driven deletion of selected `files` rows only after reference checks, and `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:339-372` includes `builder_session_files` as one file-reference owner.
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:254-284` owns hierarchical retention-day resolution; `backend/src/eneo/data_retention/infrastructure/data_retention_worker.py:113-351` owns the scheduled cleanup orchestration/result counts.
+  - `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:249-264` owns candidate-driven deletion of selected `files` rows only after reference checks, and `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:339-372` includes `builder_session_files` as one file-reference owner.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer; semantic search was noisy/empty for this specific retention slice, so final evidence came from direct source reads and exact `rg`/`git grep`.
   - `[no-peer-review]`: the user explicitly asked to skip Claude/Antigravity for this bounded slice and use read-only `codex exec` peer gates instead.
@@ -1441,8 +1441,8 @@
   - `git grep -n "count_expired_builder_sessions\|delete_expired_builder_sessions" HEAD -- backend/src backend/tests` -> no matches before this working-tree implementation, proving there was no existing Builder retention count/delete path.
   - A test-only red run for `test_builder_retention_deletes_only_expired_terminal_sessions` was attempted before implementation, but the devcontainer runtime failed before collection because `backend/.venv/bin/python` pointed at a host Homebrew interpreter and native wheels such as `pydantic_core` were unavailable. After the repo pyright wrapper repaired the ignored devcontainer virtualenv, the new DB-bound behavior test passed on the implemented path.
 - Files changed:
-  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
-  - `backend/src/intric/data_retention/infrastructure/data_retention_worker.py`
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_service.py`
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_worker.py`
   - `backend/tests/integration/test_data_retention_hierarchical.py`
   - `backend/tests/unittests/data_retention/test_data_retention_worker.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -1471,13 +1471,13 @@
   - Retention anchor: `builder_sessions.updated_at`.
   - Deletion side effects: database cascade removes `builder_plans` and `builder_session_files`; global `files` rows remain until a separate file-GC owner/policy selects them for deletion.
 - Validation commands and results:
-  - `docker exec ... cd /workspace && python -m py_compile backend/src/intric/data_retention/infrastructure/data_retention_service.py backend/src/intric/data_retention/infrastructure/data_retention_worker.py backend/tests/integration/test_data_retention_hierarchical.py backend/tests/unittests/data_retention/test_data_retention_worker.py` -> pass.
+  - `docker exec ... cd /workspace && python -m py_compile backend/src/eneo/data_retention/infrastructure/data_retention_service.py backend/src/eneo/data_retention/infrastructure/data_retention_worker.py backend/tests/integration/test_data_retention_hierarchical.py backend/tests/unittests/data_retention/test_data_retention_worker.py` -> pass.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py::test_builder_retention_deletes_only_expired_terminal_sessions -q` -> pass, 1 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/data_retention/test_data_retention_worker.py -q` -> pass, 2 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py -q` -> pass, 16 passed.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_data_retention_hierarchical.py tests/unittests/data_retention/test_data_retention_worker.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/data_retention/infrastructure/data_retention_service.py src/eneo/data_retention/infrastructure/data_retention_worker.py tests/integration/test_data_retention_hierarchical.py tests/unittests/data_retention/test_data_retention_worker.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
   - `docker exec ... cd /workspace/backend && .venv/bin/pyright ...` -> failed with environment/config resolution errors such as unresolved `sqlalchemy`; the repo wrapper below is the project type gate used for this slice.
-  - `cd backend && scripts/run_pyright_in_devcontainer.sh src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_data_retention_hierarchical.py tests/unittests/data_retention/test_data_retention_worker.py` -> pass, 0 errors.
+  - `cd backend && scripts/run_pyright_in_devcontainer.sh src/eneo/data_retention/infrastructure/data_retention_service.py src/eneo/data_retention/infrastructure/data_retention_worker.py tests/integration/test_data_retention_hierarchical.py tests/unittests/data_retention/test_data_retention_worker.py` -> pass, 0 errors.
 - Privacy / safety notes:
   - The implementation adds no logging of prompts, user messages, model output, resource secrets, or file contents. It deletes old terminal Builder rows and reports only aggregate deletion counts.
 - Remaining risk / rollback:
@@ -1493,12 +1493,12 @@
 - Verified evidence before change:
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:356` requires resolving dead Builder audit vocabulary for `AI_BUILDER_PLAN_REJECTED` and delete-or-wire proof for `AI_BUILDER_PLAN_PROPOSED`.
   - `.codex/artifacts/codex-exec-flow-builder-next-roadmap-analysis-20260630.md` recommends keeping session created/cancelled, plan approved, and flow applied while deleting fake plan-rejected vocabulary and not wiring proposal audit unless a real audit requirement exists.
-  - `backend/src/intric/audit/domain/action_types.py:119-125` declared six `AI_BUILDER_*` actions before the fix.
-  - `backend/src/intric/audit/domain/category_mappings.py:115-120` mapped all six Builder actions to `user_actions` before the fix.
-  - Direct `rg` over `backend/src backend/tests` showed only four real emitted/tested actions: session created at `backend/src/intric/flows/ai_builder/ai_builder_router.py:492`, session cancelled at `backend/src/intric/flows/ai_builder/ai_builder_router.py:1080`, plan approved at `backend/src/intric/flows/ai_builder/ai_builder_router.py:1141`, and flow applied at `backend/src/intric/flows/ai_builder/ai_builder_router.py:1228`.
+  - `backend/src/eneo/audit/domain/action_types.py:119-125` declared six `AI_BUILDER_*` actions before the fix.
+  - `backend/src/eneo/audit/domain/category_mappings.py:115-120` mapped all six Builder actions to `user_actions` before the fix.
+  - Direct `rg` over `backend/src backend/tests` showed only four real emitted/tested actions: session created at `backend/src/eneo/flows/ai_builder/ai_builder_router.py:492`, session cancelled at `backend/src/eneo/flows/ai_builder/ai_builder_router.py:1080`, plan approved at `backend/src/eneo/flows/ai_builder/ai_builder_router.py:1141`, and flow applied at `backend/src/eneo/flows/ai_builder/ai_builder_router.py:1228`.
   - The same direct `rg` showed `AI_BUILDER_PLAN_PROPOSED` and `AI_BUILDER_PLAN_REJECTED` appeared only in `action_types.py` and `category_mappings.py`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:38-42` defines plan status as `proposed`, `approved`, `applied`, and `superseded`; `backend/tests/unittests/flows/ai_builder/test_ai_builder_models.py:256-263` already asserts `rejected` is not a plan status.
-  - `backend/src/intric/audit/schemas/audit_config_schemas.py:13-14`, `:151-153`, and `:223-234` derive action validation, `ActionType` schema, and action update max length directly from the enum, so deleting enum values intentionally contracts the audit-config/OpenAPI action vocabulary.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:38-42` defines plan status as `proposed`, `approved`, `applied`, and `superseded`; `backend/tests/unittests/flows/ai_builder/test_ai_builder_models.py:256-263` already asserts `rejected` is not a plan status.
+  - `backend/src/eneo/audit/schemas/audit_config_schemas.py:13-14`, `:151-153`, and `:223-234` derive action validation, `ActionType` schema, and action update max length directly from the enum, so deleting enum values intentionally contracts the audit-config/OpenAPI action vocabulary.
 - Builder audit action inventory:
   - `AI_BUILDER_SESSION_CREATED`: emitted by the create-session route and covered by a router audit test; kept and mapped to `user_actions`.
   - `AI_BUILDER_SESSION_CANCELLED`: emitted by the cancel-session route and covered by a router audit test; kept and mapped to `user_actions`.
@@ -1515,10 +1515,10 @@
 - Red proof:
   - Before deleting the enum values, `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unit/test_audit_category_mappings.py::TestCategoryMappings::test_ai_builder_actions_are_real_lifecycle_audit_events -q` failed because `AI_BUILDER_PLAN_PROPOSED` and `AI_BUILDER_PLAN_REJECTED` were extra Builder audit actions.
 - Files changed:
-  - `backend/src/intric/audit/domain/action_types.py`
-  - `backend/src/intric/audit/domain/category_mappings.py`
+  - `backend/src/eneo/audit/domain/action_types.py`
+  - `backend/src/eneo/audit/domain/category_mappings.py`
   - `backend/tests/unit/test_audit_category_mappings.py`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/eneo-js/src/types/schema.d.ts`
   - `frontend/apps/web/messages/en.json`
   - `frontend/apps/web/messages/sv.json`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -1546,15 +1546,15 @@
   - `rg -n "AI_BUILDER_PLAN_(PROPOSED|REJECTED)|ai_builder_plan_(proposed|rejected)" backend/src backend/tests` -> no matches after deletion.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unit/test_audit_category_mappings.py tests/unit/test_audit_config_service.py tests/unit/test_audit_bugs.py -q` -> pass, 86 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestCreateSessionEndpoint::test_logs_audit_event tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestCancelSessionEndpoint::test_cancels_session_and_logs_audit tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestApprovePlanEndpoint::test_logs_audit_event tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestApplyPlanEndpoint::test_logs_audit_event -q` -> pass, 4 passed.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/audit/domain/action_types.py src/intric/audit/domain/category_mappings.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format --check src/intric/audit/domain/action_types.py src/intric/audit/domain/category_mappings.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> initially requested formatting for the new test; after `ruff format`, pass, 4 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/audit src/intric/flows/ai_builder/ai_builder_router.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/audit/domain/action_types.py src/eneo/audit/domain/category_mappings.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format --check src/eneo/audit/domain/action_types.py src/eneo/audit/domain/category_mappings.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> initially requested formatting for the new test; after `ruff format`, pass, 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/audit src/eneo/flows/ai_builder/ai_builder_router.py tests/unit/test_audit_category_mappings.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass, 0 errors.
   - `docker exec ... cd /workspace/backend && .venv/bin/python - <<'PY' ... get_application().openapi() ... PY` -> pass; `ai_builder_plan_proposed` and `ai_builder_plan_rejected` absent from the `ActionType` enum, live Builder audit actions still present.
-  - `cd frontend && bun run --filter @intric/intric-js check` on the host because the devcontainer has no `bun`, `node`, or `npm` on `PATH` -> pass.
+  - `cd frontend && bun run --filter @eneo/eneo-js check` on the host because the devcontainer has no `bun`, `node`, or `npm` on `PATH` -> pass.
   - `cd frontend/apps/web && bun run i18n:compile` on the host because the devcontainer has no frontend runtime on `PATH` -> pass; no tracked `src/lib/paraglide` diff was produced.
-  - `cd frontend && bun x prettier --check packages/intric-js/src/types/schema.d.ts apps/web/messages/en.json apps/web/messages/sv.json` -> pass.
+  - `cd frontend && bun x prettier --check packages/eneo-js/src/types/schema.d.ts apps/web/messages/en.json apps/web/messages/sv.json` -> pass.
   - `cd frontend/apps/web && bun run test:unit -- 'src/routes/(app)/admin/audit-logs/audit-i18n.test.ts'` -> pass, 5 passed.
-  - `cd frontend && bun run --filter @intric/web check` -> pass with 0 errors and 1 pre-existing Svelte warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte`.
+  - `cd frontend && bun run --filter @eneo/web check` -> pass with 0 errors and 1 pre-existing Svelte warning in `frontend/apps/web/src/routes/(app)/account/+page.svelte`.
 - Privacy / safety notes:
   - The slice deletes dead vocabulary only. It adds no audit metadata, prompts, user messages, model output, file contents, resource names, secrets, or tool arguments.
 - Remaining risk / rollback:
@@ -1570,10 +1570,10 @@
   - `review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md`
   - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md`
 - Evidence reviewed:
-  - C8.6 retention source and tests in `backend/src/intric/data_retention/infrastructure/data_retention_service.py:64-67,472-534`, `backend/src/intric/data_retention/infrastructure/data_retention_worker.py:204-219,313-328`, and `backend/tests/integration/test_data_retention_hierarchical.py:790-890`.
-  - C8.7 audit source and tests in `backend/src/intric/audit/domain/action_types.py:119-123`, `backend/src/intric/audit/domain/category_mappings.py:115-118`, `backend/src/intric/flows/ai_builder/ai_builder_router.py:489-504,1075-1089,1135-1150,1222-1243`, and `backend/tests/unit/test_audit_category_mappings.py:104-119`.
-  - Lifecycle state source in `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:31-42`, `backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py:9-21`, `backend/src/intric/database/tables/flow_tables.py:2074-2259`, and `backend/src/intric/flows/ai_builder/ai_builder_repo.py:613-826,909-1013,1118-1137`.
-  - Repair-pruning readiness source in `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:281-303,322-370`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:242-295,324-339`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:58,574-585`.
+  - C8.6 retention source and tests in `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:64-67,472-534`, `backend/src/eneo/data_retention/infrastructure/data_retention_worker.py:204-219,313-328`, and `backend/tests/integration/test_data_retention_hierarchical.py:790-890`.
+  - C8.7 audit source and tests in `backend/src/eneo/audit/domain/action_types.py:119-123`, `backend/src/eneo/audit/domain/category_mappings.py:115-118`, `backend/src/eneo/flows/ai_builder/ai_builder_router.py:489-504,1075-1089,1135-1150,1222-1243`, and `backend/tests/unit/test_audit_category_mappings.py:104-119`.
+  - Lifecycle state source in `backend/src/eneo/flows/ai_builder/ai_builder_domain_models.py:31-42`, `backend/src/eneo/flows/ai_builder/ai_builder_session_transitions.py:9-21`, `backend/src/eneo/database/tables/flow_tables.py:2074-2259`, and `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:613-826,909-1013,1118-1137`.
+  - Repair-pruning readiness source in `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:281-303,322-370`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:242-295,324-339`, and `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:58,574-585`.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer and reported this docs-only changed-file set as low risk, with `ActionType`, `TestCategoryMappings`, and `test_ai_builder_actions_are_real_lifecycle_audit_events` as the key entities.
   - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded governance slice.
@@ -1617,20 +1617,20 @@
 - Slice id: C8.8 Flow AI Builder lifecycle / `PlanningState` ownership proof and invariant cleanup
 - Findings addressed: Gate 0 identified active send lease, `latest_plan_id`, `planning_state_version`, and conversation-derived planning snapshots as the remaining Builder lifecycle truth surface. Verification found one live drift: an approved plan could be marked applied through the no-lease apply path while a send turn still held an active lease.
 - Evidence reviewed:
-  - Active send lease ownership lives in `claim_ai_builder_send_turn` and `AIBuilderRepository` lock methods: `backend/src/intric/flows/ai_builder/ai_builder_send_lease.py:34-62`, `backend/src/intric/flows/ai_builder/ai_builder_repo.py:738-826`, and the all-or-none lock constraint in `backend/src/intric/database/tables/flow_tables.py:2126-2190`.
-  - `send_message` accepts `awaiting_approval`, claims a send lease, and only then moves the session back to `chatting`: `backend/src/intric/flows/ai_builder/ai_builder_planner.py:150-178`.
-  - Session transition rules allow `awaiting_approval -> applied`, but applying a plan uses the no-lease repository path: `backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py:9-21` and `backend/src/intric/flows/ai_builder/ai_builder_repo.py:922-940`.
-  - `latest_plan_id` same-session ownership is guarded by the database FK and existing proposal/revise tests: `backend/src/intric/database/tables/flow_tables.py:2163-2169` and `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:3292-3354`.
-  - `planning_state_version` CAS and conversation-derived snapshots already have typed repository owners and tests: `backend/src/intric/flows/ai_builder/ai_builder_repo.py:974-1045`, `backend/src/intric/flows/ai_builder/ai_builder_repo.py:1093-1145`, `backend/src/intric/flows/ai_builder/ai_builder_plan_store.py:83-130`, `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:1582-1624`, `:1897-2060`, and `backend/tests/unittests/flows/ai_builder/test_planning_state_jsonb_discipline.py:1-114`.
+  - Active send lease ownership lives in `claim_ai_builder_send_turn` and `AIBuilderRepository` lock methods: `backend/src/eneo/flows/ai_builder/ai_builder_send_lease.py:34-62`, `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:738-826`, and the all-or-none lock constraint in `backend/src/eneo/database/tables/flow_tables.py:2126-2190`.
+  - `send_message` accepts `awaiting_approval`, claims a send lease, and only then moves the session back to `chatting`: `backend/src/eneo/flows/ai_builder/ai_builder_planner.py:150-178`.
+  - Session transition rules allow `awaiting_approval -> applied`, but applying a plan uses the no-lease repository path: `backend/src/eneo/flows/ai_builder/ai_builder_session_transitions.py:9-21` and `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:922-940`.
+  - `latest_plan_id` same-session ownership is guarded by the database FK and existing proposal/revise tests: `backend/src/eneo/database/tables/flow_tables.py:2163-2169` and `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:3292-3354`.
+  - `planning_state_version` CAS and conversation-derived snapshots already have typed repository owners and tests: `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:974-1045`, `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:1093-1145`, `backend/src/eneo/flows/ai_builder/ai_builder_plan_store.py:83-130`, `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:1582-1624`, `:1897-2060`, and `backend/tests/unittests/flows/ai_builder/test_planning_state_jsonb_discipline.py:1-114`.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer for Builder lifecycle ownership; direct `rg` and source reads supplied the concrete evidence.
   - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded implementation slice.
   - Read-only Codex plan gate artifact `.codex/artifacts/c8-8-lifecycle-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; it chose `_update_session_status` as the owner because the active-send fence is a no-lease session status transition invariant.
   - Read-only Codex final gate artifact `.codex/artifacts/c8-8-lifecycle-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no blockers. Its optional full-lock-tuple assertion suggestion was not applied because the existing lease identity assertions cover active-lock preservation without adding redundant timestamp coupling.
 - Red proof:
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back -q'` failed before the source fix with `Failed: DID NOT RAISE <class 'intric.main.exceptions.BadRequestException'>`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back -q'` failed before the source fix with `Failed: DID NOT RAISE <class 'eneo.main.exceptions.BadRequestException'>`.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_repo.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_repo.py`
   - `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1653,10 +1653,10 @@
   - `docker exec ... cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back -q` -> pass after source fix, 1 passed.
   - `docker exec ... cd /workspace/backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rolls_back_plan_status_when_session_update_fails tests/integration/flows/test_ai_builder_session_api_regressions.py::test_mark_plan_applied_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_repo_cancel_session_clears_send_lock_fields tests/integration/flows/test_ai_builder_session_api_regressions.py::test_send_message_status_jump_under_lock_uses_lease -q` -> pass, 6 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_planning_state_jsonb_discipline.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q` -> pass, 44 passed.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format src/intric/flows/ai_builder/ai_builder_repo.py` -> pass, 1 file reformatted.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py && .venv/bin/ruff format --check src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py` -> pass, all checks passed and 2 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py` -> pass, 0 errors.
-  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_repo.py backend/tests/integration/flows/test_ai_builder_session_api_regressions.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff format src/eneo/flows/ai_builder/ai_builder_repo.py` -> pass, 1 file reformatted.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py && .venv/bin/ruff format --check src/eneo/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py` -> pass, all checks passed and 2 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_repo.py backend/tests/integration/flows/test_ai_builder_session_api_regressions.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `docker exec ... cd /workspace && git diff --cached --check` -> pass; staged files were exactly `ai_builder_repo.py`, `test_ai_builder_session_api_regressions.py`, and the progress ledger.
   - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < /tmp/c8-8-lifecycle-final-gate-20260630.prompt` -> pass; final gate green and commit-ready.
 - Remaining risk / rollback:
@@ -1669,9 +1669,9 @@
 - Findings addressed: server-decision dispatch carried a local duplicate slot-to-discovery-question-id bridge for renamed Builder slots even though `question_catalog` already owns the legacy/discovery question-id bridge.
 - Evidence reviewed:
   - `review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md:102` identifies the duplicate dispatch map/resolver and names `question_catalog.legacy_question_id_for_slot` as the canonical cleanup path.
-  - `backend/src/intric/flows/ai_builder/question_catalog.py:790-825` owns the `primary_runtime_input -> input_material_mode` and `terminal_output -> final_output_mode` bridge plus reverse legacy-question lookup.
-  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py:40-49` and `backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py:452-463` already reuse the catalog bridge for discovery question projection and planning-state answer signals.
-  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:40-52,142-152` still owns a separate direct slot-value validation allowlist; that set is not merged in this slice because it gates answer-value validation policy, not only slot/question-id naming.
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py:790-825` owns the `primary_runtime_input -> input_material_mode` and `terminal_output -> final_output_mode` bridge plus reverse legacy-question lookup.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_discovery_questions.py:40-49` and `backend/src/eneo/flows/ai_builder/ai_builder_discovery_profile_builder.py:452-463` already reuse the catalog bridge for discovery question projection and planning-state answer signals.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py:40-52,142-152` still owns a separate direct slot-value validation allowlist; that set is not merged in this slice because it gates answer-value validation policy, not only slot/question-id naming.
   - `backend/tests/unittests/flows/ai_builder/test_question_catalog.py:443-460` already pins the catalog bridge for renamed slots and reverse legacy question ids.
 - Verification agents used, with verdicts:
   - CRG was attempted as a first-pass reducer, but returned stale/noisy results for this small Builder slice; direct source reads and exact `rg` supplied the concrete evidence.
@@ -1679,7 +1679,7 @@
   - Read-only Codex plan gate artifact `.codex/artifacts/c8-9-question-slot-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; it agreed to delete the local dispatch map/resolver, keep the test behavioral, and defer `_DIRECT_SLOT_VALUE_QUESTION_IDS` to a separate proof because it is validation policy.
   - Read-only Codex final gate artifact `.codex/artifacts/c8-9-question-slot-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no blockers or required fixes.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1700,10 +1700,10 @@
   - `docker exec ... cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py -q` -> failed because `uv` is unavailable on this devcontainer shell `PATH`; the existing backend virtualenv commands below were used per prompt.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py -q` -> pass, 3 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py -q` -> pass, 81 passed.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py && .venv/bin/ruff format --check ...` -> initially requested formatting; after `ruff format`, pass, all checks passed and 3 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, 0 errors.
-  - `docker exec ... cd /workspace && ! rg -n "_SERVER_SLOT_TO_DISCOVERY_QUESTION_ID|_discovery_question_id_for_server_slot" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder` -> pass; deleted duplicate symbols are gone.
-  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py && .venv/bin/ruff format --check ...` -> initially requested formatting; after `ruff format`, pass, all checks passed and 3 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && ! rg -n "_SERVER_SLOT_TO_DISCOVERY_QUESTION_ID|_discovery_question_id_for_server_slot" backend/src/eneo/flows/ai_builder backend/tests/unittests/flows/ai_builder` -> pass; deleted duplicate symbols are gone.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
 - Remaining risk / rollback:
   - The direct structured-answer value-validation allowlist remains as an explicit follow-up because merging it into the catalog without proof could change ingestion semantics.
@@ -1715,9 +1715,9 @@
 - Findings addressed: `_DIRECT_SLOT_VALUE_QUESTION_IDS` duplicated the catalog's slot-backed legacy/discovery question-id facts inside structured-answer ingestion.
 - Evidence reviewed:
   - C8.9 deliberately left `_DIRECT_SLOT_VALUE_QUESTION_IDS` in `ai_builder_user_question_metadata.py` as a validation-policy follow-up because equivalence had not yet been proven.
-  - `backend/src/intric/flows/ai_builder/question_catalog.py:23-30` states that `question_catalog` owns the bridge between canonical slot-name keys and legacy discovery question ids, including `input_material_mode` and `final_output_mode`.
-  - `backend/src/intric/flows/ai_builder/question_catalog.py:790-830` owns the slot-name-to-legacy-id map, the extra non-slot legacy ids that resolve to slots, and the new `slot_backed_legacy_question_ids()` catalog read API.
-  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:129-139` keeps the validation policy in ingestion: only catalog slot-backed legacy ids receive direct legal-slot value validation before metadata is persisted.
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py:23-30` states that `question_catalog` owns the bridge between canonical slot-name keys and legacy discovery question ids, including `input_material_mode` and `final_output_mode`.
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py:790-830` owns the slot-name-to-legacy-id map, the extra non-slot legacy ids that resolve to slots, and the new `slot_backed_legacy_question_ids()` catalog read API.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py:129-139` keeps the validation policy in ingestion: only catalog slot-backed legacy ids receive direct legal-slot value validation before metadata is persisted.
   - Current-code equivalence measurement with `.venv/bin/python` showed the catalog-derived set is exactly `['document_material_scope', 'docx_output_mode', 'final_output_mode', 'input_material_mode', 'pdf_generation_mode', 'post_processing_goal', 'runtime_metadata_fields', 'structured_analysis_need', 'structured_io_contract']`; `catalog_minus_derived=[]`, `derived_minus_catalog=[]`, and supported non-direct ids remain `['comparison_scope', 'detail_level', 'document_kind', 'final_output_scope', 'final_pdf_type', 'flow_input_architecture', 'output_reader', 'output_style', 'output_tone', 'processing_scope']`.
 - Verification agents used, with verdicts:
   - CRG was attempted as a first-pass reducer, but returned stale/noisy results for this small Builder slice; direct source reads, exact `rg`, and current-code measurement supplied the concrete evidence.
@@ -1725,8 +1725,8 @@
   - Read-only Codex plan gate artifact `.codex/artifacts/c8-10-direct-structured-answer-allowlist-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`; valid guidance applied by naming the catalog view `slot_backed_legacy_question_ids()` so catalog owns the vocabulary fact while ingestion still owns validation policy.
   - Read-only Codex final gate artifact `.codex/artifacts/c8-10-direct-structured-answer-allowlist-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no required fixes.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/question_catalog.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py`
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py`
   - `backend/tests/unittests/flows/ai_builder/test_question_catalog.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -1748,10 +1748,10 @@
   - What not to preserve: ingestion-local duplicate slot-backed question-id sets, generic question registries, private consumer bridge helpers, or tests that only assert helper wiring.
 - Validation commands and results:
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q` -> pass, 108 passed.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
-  - `docker exec ... cd /workspace && rg -n "_DIRECT_SLOT_VALUE_QUESTION_IDS" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder || true` -> no matches; deleted duplicate symbol is gone.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/question_catalog.py backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_question_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/question_catalog.py src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/question_catalog.py src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && rg -n "_DIRECT_SLOT_VALUE_QUESTION_IDS" backend/src/eneo/flows/ai_builder backend/tests/unittests/flows/ai_builder || true` -> no matches; deleted duplicate symbol is gone.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/question_catalog.py backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py backend/tests/unittests/flows/ai_builder/test_question_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
 - Remaining risk / rollback:
   - `slot_backed_legacy_question_ids()` currently computes from the immutable catalog on call; this keeps the view obviously derived. If this ever becomes hot, it can be changed to a private derived constant without changing callers.
@@ -1763,9 +1763,9 @@
 - Findings addressed: `SUPPORTED_STRUCTURED_QUESTION_IDS` in `ai_builder_canonicalization.py` duplicated the catalog-owned slot-resolving legacy/discovery question ids while also carrying canonicalization-only non-slot support policy.
 - Evidence reviewed:
   - C8.10 deliberately left `SUPPORTED_STRUCTURED_QUESTION_IDS` in `ai_builder_canonicalization.py` as the broader supported structured-question policy after deleting the direct-answer allowlist duplicate.
-  - `backend/src/intric/flows/ai_builder/question_catalog.py:790-835` owns the slot-name to legacy/discovery question-id bridge, including the extra slot targets `flow_input_architecture -> primary_runtime_input` and `final_pdf_type -> terminal_output`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py:10-17,50-64,151-156` owns question aliases, non-slot structured-question support policy, support checks, and the public sorted support view.
-  - `backend/src/intric/flows/ai_builder/ai_builder_user_question_metadata.py:117-139` still performs unsupported-question rejection first and direct legal-slot value validation only for `slot_backed_legacy_question_ids()`, so C8.11 must not broaden direct value validation to the extra slot-resolving legacy ids.
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py:790-835` owns the slot-name to legacy/discovery question-id bridge, including the extra slot targets `flow_input_architecture -> primary_runtime_input` and `final_pdf_type -> terminal_output`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_canonicalization.py:10-17,50-64,151-156` owns question aliases, non-slot structured-question support policy, support checks, and the public sorted support view.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py:117-139` still performs unsupported-question rejection first and direct legal-slot value validation only for `slot_backed_legacy_question_ids()`, so C8.11 must not broaden direct value validation to the extra slot-resolving legacy ids.
   - Current-code measurement with `.venv/bin/python` showed the supported set partitions as: slot-backed direct ids `['document_material_scope', 'docx_output_mode', 'final_output_mode', 'input_material_mode', 'pdf_generation_mode', 'post_processing_goal', 'runtime_metadata_fields', 'structured_analysis_need', 'structured_io_contract']`; slot-mapped extra ids `['final_pdf_type', 'flow_input_architecture']`; canonicalization-only non-slot ids `['comparison_scope', 'detail_level', 'document_kind', 'final_output_scope', 'output_reader', 'output_style', 'output_tone', 'processing_scope']`; aliases `['file_handling_mode', 'final_output_format', 'final_output_type', 'output_format', 'primary_output_format', 'upload_mode']` all normalize to supported canonical ids and do not appear in the public support set.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer, but graph output was sparse for this narrow Builder slice; direct source reads, exact `rg`, and current-code measurement supplied the concrete evidence.
@@ -1774,8 +1774,8 @@
   - Read-only Codex final gate artifact `.codex/artifacts/c8-11-supported-structured-question-final-gate-20260630.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no` only because unrelated dirty files were present in the worktree; no C8.11 source/test issue was found.
   - Read-only Codex staged-diff final gate artifact `.codex/artifacts/c8-11-supported-structured-question-final-gate-staged-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, with no required fixes after staging exactly the five C8.11 files.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/question_catalog.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py`
+  - `backend/src/eneo/flows/ai_builder/question_catalog.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_canonicalization.py`
   - `backend/tests/unittests/flows/ai_builder/test_question_catalog.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -1800,10 +1800,10 @@
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py -q'` -> pass, 237 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/ruff check --fix tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, fixed one import-order issue introduced by the new import.
   - `docker exec ... cd /workspace/backend && .venv/bin/ruff format tests/unittests/flows/ai_builder/test_question_catalog.py` -> pass, 1 file reformatted.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/question_catalog.py src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/question_catalog.py src/eneo/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 4 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/question_catalog.py src/eneo/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py` -> pass, 0 errors.
   - `docker exec ... cd /workspace/backend && .venv/bin/python -c '<partition measurement>'` -> pass; catalog/direct/non-slot/alias partitions matched the evidence above.
-  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/question_catalog.py backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py backend/tests/unittests/flows/ai_builder/test_question_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/eneo/flows/ai_builder/question_catalog.py backend/src/eneo/flows/ai_builder/ai_builder_canonicalization.py backend/tests/unittests/flows/ai_builder/test_question_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the four Builder source/test files plus this progress ledger.
 - Remaining risk / rollback:
   - The non-slot support-policy set remains intentionally explicit. Moving it without proving a stronger owner would hide policy inside the catalog and make structured-answer support harder to review.
@@ -1815,12 +1815,12 @@
 - Findings addressed: `_NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS` still accepted `output_style`, `output_tone`, and `detail_level` as structured question ids even though current source shows they are answer/runtime-field/family concepts rather than active server-owned structured questions.
 - Evidence reviewed:
   - C8.11 deliberately left the eight non-slot ids explicit in `ai_builder_canonicalization.py` until each id could be checked against discovery/edit/source owners.
-  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py:50-61` owned the non-slot support policy before this slice; after the fix, `:50-57` keeps only the five live non-slot question ids.
-  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py:63-93`, `:144-190`, `:253-292`, `:325-362`, and `:365-413` define active discovery questions for `processing_scope`, `document_kind`, `comparison_scope`, `output_reader`, and `final_output_scope`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py:474-500` exposes those five ids from `question_suggestion_for_id`; the same table does not expose `output_style`, `output_tone`, or `detail_level`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py:261-280` treats the five live ids as active explicit structured answers and does not include the removed ids.
-  - `backend/src/intric/flows/ai_builder/ai_builder_edit_scope.py:365-388` activates case/output-style edit families from live explicit ids such as `comparison_scope`, `processing_scope`, `final_pdf_type`, `output_reader`, and `final_output_scope`, not from `output_style`, `output_tone`, or `detail_level`.
-  - `backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py:511-568` still reads `output_style`, `output_tone`, and `detail_level` as historical answer keys that suppress vague-question prompts; this is not a structured-question support owner.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_canonicalization.py:50-61` owned the non-slot support policy before this slice; after the fix, `:50-57` keeps only the five live non-slot question ids.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_discovery_questions.py:63-93`, `:144-190`, `:253-292`, `:325-362`, and `:365-413` define active discovery questions for `processing_scope`, `document_kind`, `comparison_scope`, `output_reader`, and `final_output_scope`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_discovery_questions.py:474-500` exposes those five ids from `question_suggestion_for_id`; the same table does not expose `output_style`, `output_tone`, or `detail_level`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_discovery_profile_builder.py:261-280` treats the five live ids as active explicit structured answers and does not include the removed ids.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_edit_scope.py:365-388` activates case/output-style edit families from live explicit ids such as `comparison_scope`, `processing_scope`, `final_pdf_type`, `output_reader`, and `final_output_scope`, not from `output_style`, `output_tone`, or `detail_level`.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_discovery_issue_rules.py:511-568` still reads `output_style`, `output_tone`, and `detail_level` as historical answer keys that suppress vague-question prompts; this is not a structured-question support owner.
   - Exact `rg` after the source change shows `output_style`, `output_tone`, and `detail_level` only in family/answer/runtime-field/test contexts, plus the new rejection tests; no active `question_suggestion_for_id` builder emits them as question ids.
 - Per-id verdicts:
   - `processing_scope`: active discovery question and case-scope/edit signal; retained as supported.
@@ -1840,7 +1840,7 @@
 - Red proof:
   - Before source changes, `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_rejects_unsupported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_user_question_metadata_rejects_uningestable_structured_answers -q` failed for `output_style`, `output_tone`, and `detail_level`, proving those stale ids were still accepted by the support predicate and structured-answer ingestion.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_canonicalization.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -1864,8 +1864,8 @@
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_rejects_unsupported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_user_question_metadata_rejects_uningestable_structured_answers -q` -> red before implementation, 6 failed / 6 passed, then pass after source change, covered by the focused and full-file runs below.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_supported_structured_question_ids_partition_catalog_and_policy_ids tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_accepts_supported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py::test_rejects_unsupported_structured_question_ids tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_user_question_metadata_rejects_uningestable_structured_answers -q` -> pass, 24 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q` -> pass, 194 passed.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 3 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 3 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_canonicalization.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py` -> pass, 0 errors.
   - `git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the three Builder source/test files plus this progress ledger.
   - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < staged-final-gate-prompt` -> pass; staged final gate green and commit-ready.
 - Remaining risk / rollback:
@@ -1879,10 +1879,10 @@
 - Evidence reviewed:
   - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:62,97-102` keeps repair/fallback pruning blocked until branch-level telemetry/eval evidence exists.
   - `review-artifacts/implementation-progress-2026-06-29.md:1213-1217,1233` records C8.2 as the direct proposal failed-turn owner and explicitly left deeper self-correction terminal failures out of scope.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` owns the typed failed-turn branch and terminal-failure value set; `:291-312` owns the typed content-free payload fields; `:332-380` owns the payload builder and log helper.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240-330` already logs direct proposal terminal failures for provider completion error, empty completion choices, explicit provider truncation, and forced-tool retry missing submission.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:470-650` owns the terminal self-correction returns for repair completion exception, empty repair choices, malformed repaired tool arguments, invalid repaired tool result, forced-text retry failure, and missing tool response; the red proof below showed those paths previously emitted zero failed-turn payloads.
-  - `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:62-99` records completed LLM responses into `ProposalTurnTelemetry`, including `counts_as_repair`; tests that bypass that production wrapper now explicitly record fake completion usage before asserting payload counts.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` owns the typed failed-turn branch and terminal-failure value set; `:291-312` owns the typed content-free payload fields; `:332-380` owns the payload builder and log helper.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:240-330` already logs direct proposal terminal failures for provider completion error, empty completion choices, explicit provider truncation, and forced-tool retry missing submission.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:470-650` owns the terminal self-correction returns for repair completion exception, empty repair choices, malformed repaired tool arguments, invalid repaired tool result, forced-text retry failure, and missing tool response; the red proof below showed those paths previously emitted zero failed-turn payloads.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py:62-99` records completed LLM responses into `ProposalTurnTelemetry`, including `counts_as_repair`; tests that bypass that production wrapper now explicitly record fake completion usage before asserting payload counts.
 - Terminal self-correction branch inventory:
   - `repair completion exception` -> branch `self_correction_completion_error`, final kind `provider_error`, final code `planner_upstream_error`.
   - `empty repair choices` -> branch `self_correction_empty_completion_choices`, final kind `invalid_repair_response`, final code `planner_invalid_repair_response`.
@@ -1899,8 +1899,8 @@
 - Red proof:
   - Before source changes, `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_uses_request_id_on_forced_retry_validation_error tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_handles_empty_completion_choices tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py::test_run_tool_self_correction_rejects_malformed_correction_tool_arguments -q` failed with zero captured failed-turn payloads for all three terminal repair branches, proving the telemetry gap.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -1925,9 +1925,9 @@
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q` -> pass, 35 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q` -> pass, 74 passed.
   - `docker exec ... cd /workspace/backend && .venv/bin/ruff format tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` -> pass, 1 file reformatted after initial `ruff format --check` reported formatting drift.
-  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 3 files already formatted.
-  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` -> pass, 0 errors.
-  - `docker exec ... cd /workspace && git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec ... cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py src/eneo/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py && .venv/bin/ruff format --check ...` -> pass, all checks passed and 3 files already formatted.
+  - `docker exec ... cd /workspace/backend && scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py src/eneo/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` -> pass, 0 errors.
+  - `docker exec ... cd /workspace && git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `docker exec ... cd /workspace && git diff --cached --name-only && git diff --cached --check` -> pass; staged files are exactly the three Builder source/test files plus this progress ledger.
   - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
 - Remaining risk / rollback:
@@ -1941,11 +1941,11 @@
 - Findings addressed: review of JSON-text fallback, forced-tool retry, self-correction repair, and direct failed-turn branches after C8.13 to decide whether any repair/fallback code can be safely pruned.
 - Evidence reviewed:
   - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:62,97-102` already records the release decision: do not prune repair/fallback branches until branch-level evidence proves a branch is dead or harmful.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` owns the typed failed-turn branch/failure literals; `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:291-312` owns the content-free failed-turn payload fields; `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:332-380` owns the payload builder and log helper.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240-330` logs direct terminal proposal outcomes for provider completion error, empty choices, provider truncation, and final forced-tool missing submission.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:502-516,547-616` routes malformed/invalid `propose_flow` tool submissions into self-correction, proving self-correction is reachable from the production proposal owner.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:314-321,621-642` routes text-only missing-tool output into forced retry, proving forced-tool retry is reachable from the production proposal owner.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:440-650` owns self-correction retry/success/terminal routing; `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:656-805` owns forced-tool retry and JSON-text fallback.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` owns the typed failed-turn branch/failure literals; `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:291-312` owns the content-free failed-turn payload fields; `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:332-380` owns the payload builder and log helper.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:240-330` logs direct terminal proposal outcomes for provider completion error, empty choices, provider truncation, and final forced-tool missing submission.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:502-516,547-616` routes malformed/invalid `propose_flow` tool submissions into self-correction, proving self-correction is reachable from the production proposal owner.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:314-321,621-642` routes text-only missing-tool output into forced retry, proving forced-tool retry is reachable from the production proposal owner.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:440-650` owns self-correction retry/success/terminal routing; `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:656-805` owns forced-tool retry and JSON-text fallback.
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:419-531` proves JSON-text fallback accepts fenced/plain JSON arguments and preserves validation feedback without spending another completion call.
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:336-417,535-588` proves forced-tool retry builds a typed invocation, surfaces user messages, preserves parse feedback, and leaves legitimate information requests unforced.
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:695-743,1223-1415` proves self-correction retry budget, terminal user-safe errors, a text-fallback-plus-invalid-tool retry that recovers to a plan, bounded text feedback retries, and legitimate information requests.
@@ -1995,18 +1995,18 @@
 - Findings addressed: resolved the `PG3-FU-1` follow-up by deleting the production-unreferenced `build_structured_reference_payload` helper instead of wiring a new prompt/product behavior path.
 - Evidence reviewed:
   - The prior `PG3-FU-1` follow-up recorded that after PG-3a.2 deleted `render_structured_reference_block`, `build_structured_reference_payload` was kept only for a later delete-or-wire decision.
-  - Before deletion, exact `rg -n "build_structured_reference_payload|ai_builder_flow_capability_reference|structured_reference|structured reference|reference_payload" backend/src backend/tests frontend --glob '!**/.venv/**' --glob '!frontend/bun.lock'` found `build_structured_reference_payload` only in `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:21,77` and its self-preserving test `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py:3-45`.
-  - CRG `importers_of backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py` found zero importers.
-  - `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py:35-124` already owns the proposal system prompt; `backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py:185,226` routes proposal request preparation through that owner.
-  - `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py:403,440` already owns resource reference material and rendering.
-  - The schema-value sources remain live through canonical tool/schema owners such as `backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py:179-193`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_intent.py:147-150,727-730`, and `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py:24-59`.
+  - Before deletion, exact `rg -n "build_structured_reference_payload|ai_builder_flow_capability_reference|structured_reference|structured reference|reference_payload" backend/src backend/tests frontend --glob '!**/.venv/**' --glob '!frontend/bun.lock'` found `build_structured_reference_payload` only in `backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py:21,77` and its self-preserving test `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py:3-45`.
+  - CRG `importers_of backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py` found zero importers.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_plan_proposal_task.py:35-124` already owns the proposal system prompt; `backend/src/eneo/flows/ai_builder/ai_builder_planner_request_preparation.py:185,226` routes proposal request preparation through that owner.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_resource_catalog.py:403,440` already owns resource reference material and rendering.
+  - The schema-value sources remain live through canonical tool/schema owners such as `backend/src/eneo/flows/ai_builder/ai_builder_edit_tool_schema.py:179-193`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_intent.py:147-150,727-730`, and `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py:24-59`.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer; exact deletion proof came from direct source reads and `rg`.
   - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity for this bounded deletion slice.
   - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c8-15-plan-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and conditional `COMMIT_READY: yes`; required fixes: none. Valid guidance applied: delete the helper and self-preserving test, do not wire a new prompt path, and keep post-delete `rg` scoped to source/test/frontend because this ledger intentionally records historical mentions.
   - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c8-15-final-gate-20260630.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes` for exactly the two deletions plus this progress-ledger update; required fixes: none.
 - Files changed:
-  - Deleted `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py`.
+  - Deleted `backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py`.
   - Deleted `backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py`.
   - Updated `review-artifacts/implementation-progress-2026-06-29.md`.
 - Behavior changed:
@@ -2029,8 +2029,8 @@
   - `cd /workspace/backend && changed_py=$(git -C /workspace diff --name-only --diff-filter=ACMRT -- "*.py" | sed "s#^backend/##"); if [ -n "$changed_py" ]; then .venv/bin/ruff check $changed_py; else echo "No remaining changed Python files to ruff check; Python diff is deletions only."; fi` -> pass; no remaining changed Python files.
   - `cd /workspace/backend && changed_py=$(git -C /workspace diff --name-only --diff-filter=ACMRT -- "*.py" | sed "s#^backend/##"); if [ -n "$changed_py" ]; then .venv/bin/ruff format --check $changed_py; else echo "No remaining changed Python files to ruff format-check; Python diff is deletions only."; fi` -> pass; no remaining changed Python files.
   - A broader adjacent `ruff format --check` was attempted on untouched nearby Builder files and reported pre-existing formatting drift in `ai_builder_planner_request_preparation.py`, `ai_builder_proposal_intent.py`, `test_ai_builder_plan_proposal_task.py`, and `test_ai_builder_tools.py`; those files are outside this deletion diff and were left untouched.
-  - `backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py src/intric/flows/ai_builder/ai_builder_proposal_intent.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py tests/unittests/flows/ai_builder/test_ai_builder_tools.py` -> pass, 0 errors.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_plan_proposal_task.py src/eneo/flows/ai_builder/ai_builder_planner_request_preparation.py src/eneo/flows/ai_builder/ai_builder_resource_catalog.py src/eneo/flows/ai_builder/ai_builder_edit_tool_schema.py src/eneo/flows/ai_builder/ai_builder_proposal_intent.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_flow_schema_values.py tests/unittests/flows/ai_builder/test_ai_builder_tools.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_flow_capability_reference.py backend/tests/unittests/flows/ai_builder/test_ai_builder_flow_capability_reference.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - `codex exec -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -s read-only -C /Users/cimen/eneo/eneo-flows-clean - < final-gate-prompt` -> pass; final gate green and commit-ready.
 - Remaining risk / rollback:
   - Risk is low: deletion is limited to zero-caller backend code and its self-preserving tests.
@@ -2130,8 +2130,8 @@
 - Findings addressed: old abandoned `chatting` and `awaiting_approval` Builder sessions now expire through the same tenant/space conversation retention policy as old terminal Builder sessions, while sessions with a fresh active send lease remain protected.
 - Evidence reviewed:
   - `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md` C9.1 selects `DataRetentionService` as the owner for active abandoned-session expiration and explicitly defers Builder-only global file-row cleanup.
-  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py:491-526` keeps count/delete on the shared `_build_due_builder_session_retention_query`, so the deletion predicate and count predicate remain one owner.
-  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py:64-90` now names active Builder statuses and protects fresh active send leases with the deterministic `now` already passed to retention.
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:491-526` keeps count/delete on the shared `_build_due_builder_session_retention_query`, so the deletion predicate and count predicate remain one owner.
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:64-90` now names active Builder statuses and protects fresh active send leases with the deterministic `now` already passed to retention.
   - `backend/tests/integration/test_data_retention_hierarchical.py:797-934` proves old terminal sessions, old abandoned active sessions, and old active expired-lock sessions are deleted; recent active sessions and fresh-lock active sessions are kept; session-file links cascade while global `Files` rows remain.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer for the touched retention service and integration test. Direct source reads verified the final claims.
@@ -2139,7 +2139,7 @@
   - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-2-active-builder-retention-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `STOP_OR_PROCEED: proceed`; valid guidance applied: use the existing `DataRetentionService` query, use the fixed `now` for lease expiry comparison, set all send-lock fields together in tests, keep eligible statuses explicit, and rename terminal-only log/test language.
   - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-c9-2-active-builder-retention-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, and `COMMIT_READY: yes`; required fixes: none; optional fixes: none.
 - Files changed:
-  - `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - `backend/src/eneo/data_retention/infrastructure/data_retention_service.py`
   - `backend/tests/integration/test_data_retention_hierarchical.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
@@ -2165,9 +2165,9 @@
   - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `9b6da3cb`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py::test_builder_retention_deletes_expired_and_abandoned_sessions -q'` -> failed red before source change with `assert 2 == 5`; passed after source change.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/test_data_retention_hierarchical.py -q'` -> passed, `16 passed`.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff format --check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed, `2 files already formatted`.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pyright --pythonpath .venv/bin/python src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed, `0 errors, 0 warnings, 0 informations`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff format --check src/eneo/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed, `2 files already formatted`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pyright --pythonpath .venv/bin/python src/eneo/data_retention/infrastructure/data_retention_service.py tests/integration/test_data_retention_hierarchical.py'` -> passed, `0 errors, 0 warnings, 0 informations`.
 - Remaining risk / rollback:
   - Runtime risk is bounded to Builder session retention: stale active sessions that exceed retention and have no fresh lease are now deleted on the existing retention path. A rollback is a normal revert of this commit, restoring terminal-only eligibility.
   - Concurrency risk is mitigated by the fresh-lease predicate and deterministic retention `now`; a session actively being processed with a non-expired lease is not selected.
@@ -2178,11 +2178,11 @@
 - Slice id: C9.3 Builder session-file / global `Files` row retention posture
 - Findings addressed: the Gate 1 packet still pointed at completed C9.2 active abandoned-session retention as the next lane and had not recorded an explicit first-release decision for Builder-uploaded global `Files` rows after Builder session pins are removed.
 - Evidence reviewed:
-  - C9.2 implemented terminal plus abandoned active Builder session retention in `DataRetentionService`; eligible statuses and fresh-lease protection are at `backend/src/intric/data_retention/infrastructure/data_retention_service.py:64-90`, and the shared count/delete predicate is at `backend/src/intric/data_retention/infrastructure/data_retention_service.py:491-556`.
+  - C9.2 implemented terminal plus abandoned active Builder session retention in `DataRetentionService`; eligible statuses and fresh-lease protection are at `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:64-90`, and the shared count/delete predicate is at `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:491-556`.
   - C9.2 behavior proof at `backend/tests/integration/test_data_retention_hierarchical.py:841-939` deletes due terminal/abandoned active sessions and `BuilderSessionFiles` links while keeping the global `Files` row.
-  - `BuilderSessionFiles` is a session-owned cascade link table at `backend/src/intric/database/tables/flow_tables.py:2195-2219`.
-  - `AIBuilderRepository` only attaches/detaches Builder file links: cancel detaches at `backend/src/intric/flows/ai_builder/ai_builder_repo.py:223-250`; append-session-message persistence inserts links from message metadata at `backend/src/intric/flows/ai_builder/ai_builder_repo.py:555-610`; attach/list/detach APIs are at `backend/src/intric/flows/ai_builder/ai_builder_repo.py:336-405`.
-  - `FlowRunHistoryPurgeRepository` is candidate-driven for Flow run/template file cleanup: run-history candidates are passed at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:91-104`, template candidates at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:155-160`, and `_delete_unreferenced_files` deletes only provided candidate ids after reference guards at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:249-264` with `BuilderSessionFiles` as one guard at `backend/src/intric/flows/infrastructure/flow_run_history_purge_repo.py:339-371`.
+  - `BuilderSessionFiles` is a session-owned cascade link table at `backend/src/eneo/database/tables/flow_tables.py:2195-2219`.
+  - `AIBuilderRepository` only attaches/detaches Builder file links: cancel detaches at `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:223-250`; append-session-message persistence inserts links from message metadata at `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:555-610`; attach/list/detach APIs are at `backend/src/eneo/flows/ai_builder/ai_builder_repo.py:336-405`.
+  - `FlowRunHistoryPurgeRepository` is candidate-driven for Flow run/template file cleanup: run-history candidates are passed at `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:91-104`, template candidates at `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:155-160`, and `_delete_unreferenced_files` deletes only provided candidate ids after reference guards at `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:249-264` with `BuilderSessionFiles` as one guard at `backend/src/eneo/flows/infrastructure/flow_run_history_purge_repo.py:339-371`.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer and pointed back to the C9.2 retention service/test surface; exact `rg` and direct source reads verified all concrete claims.
   - `[no-peer-review]`: the current user instruction explicitly required read-only Codex-exec gates instead of Claude/Antigravity because Claude was blocked by usage/spend limits.
@@ -2211,7 +2211,7 @@
   - Future cleanup acceptance criteria: name the candidate-id source, reuse or extract existing reference-guard semantics, prove cross-owner safety with behavior tests, and document whether migration/schema changes are required.
 - Validation commands and results:
   - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `e43f12ff`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
-  - `rg -n "BuilderSessionFiles|builder_session_files|_delete_unreferenced_files|delete\\(Files\\)|file_ids_from_metadata|session_files" backend/src/intric backend/tests --glob '!**/.venv/**'` -> no Builder-specific global file cleanup candidate source found; matches were Builder link attach/detach, Flow run/template candidate-driven cleanup, and the C9.2 retention proof.
+  - `rg -n "BuilderSessionFiles|builder_session_files|_delete_unreferenced_files|delete\\(Files\\)|file_ids_from_metadata|session_files" backend/src/eneo backend/tests --glob '!**/.venv/**'` -> no Builder-specific global file cleanup candidate source found; matches were Builder link attach/detach, Flow run/template candidate-driven cleanup, and the C9.2 retention proof.
   - `rg -n "Active abandoned|Next Implementation Lane|Builder-only global|global file|Files row|C9\\.2|C9\\.3" review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/flow-builder-release-governance-gate0-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> used before editing to confirm stale packet guidance and after editing to verify C9.3 posture text.
   - Backend pytest, ruff, and pyright were not run because this slice changed only review-artifact markdown and made no source/test changes.
 - Remaining risk / rollback:
@@ -2225,9 +2225,9 @@
 - Evidence reviewed:
   - C8.14 already recorded the concrete branch-family inventory and delete blockers at `review-artifacts/implementation-progress-2026-06-29.md:1938-1990`.
   - The Gate 1 packet still selected a repair/fallback branch-data review as the next lane at `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:72-90`, even though C8.14 had already completed the repo evidence inventory.
-  - Direct terminal proposal outcomes remain owned by `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:240-330` and failed-turn payload ownership remains in `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80,291-380`.
-  - JSON/text fallback, forced-tool retry, and self-correction remain live reachable branches at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:314-321,547-616,621-642` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:440-650,656-805`.
-  - Architecture-error terminal paths are separate from `ProposalFailedTurnBranch`; they record first-attempt architecture failure at `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:51-65` and sanitized proposal error events at `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:68-91`, with catch paths in `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:580-595`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:403-437`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:741-754`.
+  - Direct terminal proposal outcomes remain owned by `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:240-330` and failed-turn payload ownership remains in `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80,291-380`.
+  - JSON/text fallback, forced-tool retry, and self-correction remain live reachable branches at `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:314-321,547-616,621-642` and `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:440-650,656-805`.
+  - Architecture-error terminal paths are separate from `ProposalFailedTurnBranch`; they record first-attempt architecture failure at `backend/src/eneo/flows/ai_builder/ai_builder_architecture_errors.py:51-65` and sanitized proposal error events at `backend/src/eneo/flows/ai_builder/ai_builder_architecture_errors.py:68-91`, with catch paths in `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:580-595`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:403-437`, and `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:741-754`.
   - C8.5 deterministic materialization goldens at `backend/tests/unittests/flows/ai_builder/eval_matrix/test_eval_matrix.py:142-166` and `backend/tests/unittests/flows/ai_builder/eval_matrix/golden_cases.py:728-748` prove materialization coverage, not live provider-output branch value.
 - Verification agents used, with verdicts:
   - CRG was used as a first-pass reducer and pointed back to the Flow AI Builder proposal/repair surface; exact `rg` and direct source reads verified the branch owner claims.
@@ -2259,7 +2259,7 @@
   - Architecture-error terminal paths: keep as separate architecture classification; do not fold into failed-turn pruning by default.
 - Validation commands and results:
   - `git status --short --branch` -> branch/head matched `refactor/flows-clean` at `2ea8ea12`; unrelated dirty `.devcontainer`, `.gitignore`, and `frontend/bun.lock` files plus untracked `.devcontainer/devcontainer-lock.json` and `AGENTS.md.backup-20260629-220449` were left untouched.
-  - `rg -n "forced.*tool|forced_tool|text fallback|json text|self[-_ ]correction|repair|malformed|invalid_tool|failed_turn|architecture_error|ProposalTurnTelemetry" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder review-artifacts/implementation-progress-2026-06-29.md` -> verified source/test/ledger branch owners and existing coverage; no production branch-value artifact was claimed.
+  - `rg -n "forced.*tool|forced_tool|text fallback|json text|self[-_ ]correction|repair|malformed|invalid_tool|failed_turn|architecture_error|ProposalTurnTelemetry" backend/src/eneo/flows/ai_builder backend/tests/unittests/flows/ai_builder review-artifacts/implementation-progress-2026-06-29.md` -> verified source/test/ledger branch owners and existing coverage; no production branch-value artifact was claimed.
   - `rg -n "C8\\.2|C8\\.5|C8\\.13|C8\\.14|C9\\.4|repair/fallback|branch-level|prune|pruning" review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> verified the packet now records concrete C9.4 branch decisions and no longer points at a vague repo-only repair review.
   - `git diff --check -- review-artifacts/flow-builder-release-governance-packet-2026-06-30.md review-artifacts/implementation-progress-2026-06-29.md` -> pass.
   - Backend pytest, ruff, and pyright were not run because this slice changed only review-artifact markdown and made no source/test changes.
@@ -2327,7 +2327,7 @@
   - C9.5 no-data stop and no-worker-commit evidence remains at `review-artifacts/implementation-progress-2026-06-29.md:2270-2303`.
   - The outside review attachment recommended choosing one release posture: accept current branches, run controlled live-eval/staging, or delay Builder; it also recommends PG-10b as the next Flows-proper slice after the Builder posture decision.
   - The governance packet still named "Real branch-value data review" as the next lane at `review-artifacts/flow-builder-release-governance-packet-2026-06-30.md:79-98` before this edit.
-  - Existing branch owners are unchanged: `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`, and `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`.
+  - Existing branch owners are unchanged: `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py`, and `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py`.
   - Local branch visibility remains ahead of `origin/refactor/flows-clean`; outside review could verify only up to remote `faf91d7b`, so C9.0-C9.6 need to be pushed before remote reviewers can source-verify them.
 - Decision:
   - Accept the current bounded Flow AI Builder repair/fallback branches for first release.
@@ -2376,11 +2376,11 @@
   - First proposal attempts already terminalized explicit provider truncation, but repair completions could still route `finish_reason == "length"` into malformed-tool parsing, JSON/text fallback, forced-tool retry, or generic self-correction failure.
   - C9.6 accepted bounded fallback branches for first release, but did not exempt deterministic provider-boundary truncation bugs from proper terminal classification.
 - Evidence reviewed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:276-295` already classified first-attempt `choice.finish_reason == "length"` as `planner_output_too_long` / `provider_truncation` before fallback.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:501-503` selected self-correction `response.choices[0]` and went straight to message/tool/text handling before this fix.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:700-706` selected forced-retry `response.choices[0]` and went straight to missing-tool handling before this fix.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:642-653` also calls the shared forced-retry helper from first-attempt proposal submission, so the repair helper needs caller-owned error phase instead of a hard-coded self-correction phase.
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` and `:332-380` already owned `provider_truncation`, `provider_finish_reason`, and the content-free failed-turn payload; no telemetry schema change was needed.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:276-295` already classified first-attempt `choice.finish_reason == "length"` as `planner_output_too_long` / `provider_truncation` before fallback.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:501-503` selected self-correction `response.choices[0]` and went straight to message/tool/text handling before this fix.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:700-706` selected forced-retry `response.choices[0]` and went straight to missing-tool handling before this fix.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:642-653` also calls the shared forced-retry helper from first-attempt proposal submission, so the repair helper needs caller-owned error phase instead of a hard-coded self-correction phase.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py:60-80` and `:332-380` already owned `provider_truncation`, `provider_finish_reason`, and the content-free failed-turn payload; no telemetry schema change was needed.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec gates instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh for this slice.
   - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-c9-7-repair-truncation-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no` for the initial hard-coded self-correction-phase plan. Required guidance was applied: keep the fix in the repair owner, add caller-owned truncation phase to the existing forced-retry request, pass `proposal` phase from `ProposalSubmissionOwner`, and bring loose response doubles up to the normalized completion contract instead of adding source `getattr` compatibility.
@@ -2390,8 +2390,8 @@
   - Green after source change: same two tests plus `test_ai_builder_proposal_submission.py::test__retry_forced_proposal_after_text_uses_create_target_for_create_mode` -> pass, 3 passed.
   - Nearby regression: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q'` -> pass, 87 passed.
 - Files changed:
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py`
   - `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -2411,9 +2411,9 @@
 - Validation commands and results:
   - `.venv/bin/pytest` was used because `uv` is not on PATH in the devcontainer; no tools were installed and no environment config was changed.
   - Focused red/green and nearby regression commands are recorded above.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py && .venv/bin/ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py'` -> pass.
-  - `backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py` -> pass, 0 errors.
-  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/ai_builder/ai_builder_proposal_repair.py src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py && .venv/bin/ruff format --check src/eneo/flows/ai_builder/ai_builder_proposal_repair.py src/eneo/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py'` -> pass.
+  - `backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/ai_builder/ai_builder_proposal_repair.py src/eneo/flows/ai_builder/ai_builder_proposal_submission.py src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py` -> pass, 0 errors.
+  - `git diff --check -- backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / rollback:
   - Risk is limited to repair-response terminal classification. Non-length finish reasons and empty-choice paths are unchanged.
   - Rollback is low risk: remove `_provider_truncation_error_event`, the two `finish_reason == "length"` checks, the `truncation_error_phase` field and proposal caller assignment, the focused tests, and this C9.7 ledger entry.
@@ -2427,11 +2427,11 @@
   - The raw validation shape leaked a second public error contract into OpenAPI/generated clients and made Flow API consumers handle 422 differently from other API errors.
   - Explicit main-app `HTTPException(status_code=422, detail=[...])` paths could still bypass the `GeneralError` envelope even after adding a `RequestValidationError` handler.
 - Evidence reviewed:
-  - `backend/src/intric/server/exception_handlers.py:121-131` now owns the app validation `GeneralError` response content with `ErrorCodes.VALIDATION_ERROR`, stable `code="request_validation_error"`, request id, and sanitized details.
-  - `backend/src/intric/server/exception_handlers.py:210-231` now registers the main-app `RequestValidationError` handler in the same exception-handler owner that already maps application exceptions.
-  - `backend/src/intric/server/main.py:386-413` now keeps the existing main-app `HTTPException` handler but normalizes only status 422 through the same validation response helper while preserving headers.
-  - `backend/src/intric/server/main.py:317-349` now normalizes main-app OpenAPI 422 response schemas from `HTTPValidationError` to `GeneralError` and drops unused FastAPI validation schemas.
-  - `backend/src/intric/scim/app.py:59-77` remains the SCIM sub-app owner for `RequestValidationError` and preserves RFC 7644 status 400 / `scimType=invalidValue` behavior.
+  - `backend/src/eneo/server/exception_handlers.py:121-131` now owns the app validation `GeneralError` response content with `ErrorCodes.VALIDATION_ERROR`, stable `code="request_validation_error"`, request id, and sanitized details.
+  - `backend/src/eneo/server/exception_handlers.py:210-231` now registers the main-app `RequestValidationError` handler in the same exception-handler owner that already maps application exceptions.
+  - `backend/src/eneo/server/main.py:386-413` now keeps the existing main-app `HTTPException` handler but normalizes only status 422 through the same validation response helper while preserving headers.
+  - `backend/src/eneo/server/main.py:317-349` now normalizes main-app OpenAPI 422 response schemas from `HTTPValidationError` to `GeneralError` and drops unused FastAPI validation schemas.
+  - `backend/src/eneo/scim/app.py:59-77` remains the SCIM sub-app owner for `RequestValidationError` and preserves RFC 7644 status 400 / `scimType=invalidValue` behavior.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec gates instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh for this slice.
   - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-pg-10b-validation-error-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`; valid blocker applied: explicit main-app `HTTPException(422)` paths also needed normalization or OpenAPI would over-promise `GeneralError`.
@@ -2441,14 +2441,14 @@
   - Red before source change: the focused PG-10b tests failed because local and main-app request validation returned raw FastAPI validation shape, explicit `HTTPException(422)` returned raw `detail`, OpenAPI still exposed `HTTPValidationError`, and Flow 422 schemas resolved to `HTTPValidationError`.
   - Green after source change: main-app request validation, explicit main-app 422, Flow API contract, representative non-Flow route, OpenAPI schema, generated client schema, and SCIM regression coverage all passed in the validation commands below.
 - Files changed:
-  - `backend/src/intric/server/exception_handlers.py`
-  - `backend/src/intric/server/main.py`
+  - `backend/src/eneo/server/exception_handlers.py`
+  - `backend/src/eneo/server/main.py`
   - `backend/tests/unittests/server/test_exception_handlers.py`
   - `backend/tests/unit/test_http_exception_handler_contract.py`
   - `backend/tests/unit/test_route_error_contract.py`
   - `backend/tests/unit/test_flow_openapi_contract.py`
   - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/eneo-js/src/types/schema.d.ts`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
   - Main-app `RequestValidationError` now returns HTTP 422 with the public `GeneralError` envelope instead of raw FastAPI validation JSON.
@@ -2458,7 +2458,7 @@
   - SCIM mounted app behavior is unchanged: validation failures remain status 400 SCIM error bodies with `scimType=invalidValue`.
 - Complexity deleted or owner clarified:
   - The duplicate public FastAPI validation error shape was removed from the main-app API contract instead of wrapped route-by-route.
-  - Runtime validation translation stays in `backend/src/intric/server/exception_handlers.py`; OpenAPI response normalization stays in `backend/src/intric/server/main.py`; `GeneralError` remains the single public error envelope model.
+  - Runtime validation translation stays in `backend/src/eneo/server/exception_handlers.py`; OpenAPI response normalization stays in `backend/src/eneo/server/main.py`; `GeneralError` remains the single public error envelope model.
   - No new error DTO, compatibility shim, generic error framework, per-route 422 declarations, frontend UI change, migration, or service abstraction was added.
 - Architecture delta:
   - Canonical owner before: mapped application exceptions used `GeneralError`, but main-app FastAPI validation errors and explicit 422 HTTP exceptions could expose a separate raw FastAPI validation contract.
@@ -2469,9 +2469,9 @@
 - Validation commands and results:
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/server/test_exception_handlers.py tests/unit/test_http_exception_handler_contract.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/scim/test_error_responses.py -q'` -> pass, 113 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_consumer_api_contract.py -q'` -> pass, 18 passed.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/server/exception_handlers.py src/intric/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py && .venv/bin/ruff format --check src/intric/server/exception_handlers.py src/intric/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py'` -> pass.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/server/exception_handlers.py src/intric/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py'` -> pass, 0 errors.
-  - OpenAPI/generated-client drift check: dumped `app.openapi()` in the devcontainer with the same placeholder environment used by `scripts/pre_push_check.py`, generated a temporary schema with `bun x openapi-typescript ... --default-non-nullable=false`, formatted it with `bun x prettier`, and `cmp` matched `frontend/packages/intric-js/src/types/schema.d.ts`.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/server/exception_handlers.py src/eneo/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py && .venv/bin/ruff format --check src/eneo/server/exception_handlers.py src/eneo/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/server/exception_handlers.py src/eneo/server/main.py tests/unittests/server/test_exception_handlers.py tests/unit/test_route_error_contract.py tests/unit/test_flow_openapi_contract.py tests/unit/test_http_exception_handler_contract.py tests/integration/flows/test_flow_consumer_api_contract.py'` -> pass, 0 errors.
+  - OpenAPI/generated-client drift check: dumped `app.openapi()` in the devcontainer with the same placeholder environment used by `scripts/pre_push_check.py`, generated a temporary schema with `bun x openapi-typescript ... --default-non-nullable=false`, formatted it with `bun x prettier`, and `cmp` matched `frontend/packages/eneo-js/src/types/schema.d.ts`.
   - Local environment note: host-side `scripts/pre_push_check.py` initially rewrote the shared backend `.venv` with host executables; the devcontainer venv was repaired with `python3 -m pip install --user uv==0.5.9` and `~/.local/bin/uv sync --group dev`. No tracked repo config or source files were changed by that environment repair.
 - Remaining risk / rollback:
   - Runtime/API risk: clients that depended on raw FastAPI validation `detail` arrays for the main app must switch to `GeneralError.details.errors`. This is intentional because Flows/main API validation now has one contract.
@@ -2486,39 +2486,39 @@
   - PG-10b moved main-app validation 422 responses to the public `GeneralError` envelope, but the shared SDK adapter still assumed every 422 used FastAPI's legacy `detail[0]` validation array.
   - That could turn a useful validation response into a frontend `TypeError` before SDK or Flow UI consumers saw the backend message, request id, numeric error code, or string machine code.
 - Evidence reviewed:
-  - `backend/src/intric/server/exception_handlers.py:121-130` emits `GeneralError` validation content with `message`, numeric `intric_error_code`, string `code`, `request_id`, and safe `details.errors`.
-  - `frontend/packages/intric-js/src/client/client.js:386-391` previously dereferenced `this.response.detail[0]` for every HTTP 422.
+  - `backend/src/eneo/server/exception_handlers.py:121-130` emits `GeneralError` validation content with `message`, numeric `eneo_error_code`, string `code`, `request_id`, and safe `details.errors`.
+  - `frontend/packages/eneo-js/src/client/client.js:386-391` previously dereferenced `this.response.detail[0]` for every HTTP 422.
   - `frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts:134-138` already treats `error.response.code` as the string machine-code owner, so the SDK fix did not add a second string-code property.
   - `.codex/artifacts/codex-exec-flows-next-slice-synthesis-20260701.md:7592-7601` ranked this SDK adapter fallout as the next bounded slice after PG-10b.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
-  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-pg-10c-sdk-general-error-plan-20260701.md` returned `VERDICT: green_with_guardrails`, `GREEN_LIGHT: yes`; valid guidance applied by keeping the fix in `IntricError.getReadableMessage()`, preserving `IntricError.code` as numeric, keeping string code on `error.response.code`, adding a real `createClient`/mock-fetch 422 test, and recording the explicit package-test validation command because SDK package tests are not covered by the normal web Vitest include.
+  - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-pg-10c-sdk-general-error-plan-20260701.md` returned `VERDICT: green_with_guardrails`, `GREEN_LIGHT: yes`; valid guidance applied by keeping the fix in `EneoError.getReadableMessage()`, preserving `EneoError.code` as numeric, keeping string code on `error.response.code`, adding a real `createClient`/mock-fetch 422 test, and recording the explicit package-test validation command because SDK package tests are not covered by the normal web Vitest include.
   - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-pg-10c-sdk-general-error-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes` for the reviewed three-file slice only; no source/test changes were required.
 - Red / green proof:
-  - Red before source change: `cd frontend && bun x vitest run packages/intric-js/src/client/client.test.js` failed 5 tests because PG-10b `GeneralError` 422s and no-body 422s threw from `response.detail[0]`, while malformed/string-detail cases fell through to the old generic validation message.
+  - Red before source change: `cd frontend && bun x vitest run packages/eneo-js/src/client/client.test.js` failed 5 tests because PG-10b `GeneralError` 422s and no-body 422s threw from `response.detail[0]`, while malformed/string-detail cases fell through to the old generic validation message.
   - Green after source change: the same focused SDK test file passed with PG-10b `GeneralError`, legacy FastAPI detail arrays, string/malformed/no-body validation responses, numeric `error.code`, string `error.response.code`, and trace-header behavior covered.
 - Files changed:
-  - `frontend/packages/intric-js/src/client/client.js`
-  - `frontend/packages/intric-js/src/client/client.test.js`
+  - `frontend/packages/eneo-js/src/client/client.js`
+  - `frontend/packages/eneo-js/src/client/client.test.js`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
-  - `IntricError.getReadableMessage()` now handles HTTP 422 by reading the first safe `GeneralError.details.errors[].message`, then `GeneralError.message`, then legacy FastAPI `detail[0].ctx.reason` / `detail[0].msg`, then the existing error message or a generic validation message.
+  - `EneoError.getReadableMessage()` now handles HTTP 422 by reading the first safe `GeneralError.details.errors[].message`, then `GeneralError.message`, then legacy FastAPI `detail[0].ctx.reason` / `detail[0].msg`, then the existing error message or a generic validation message.
   - `getReadableMessage()` no longer throws for PG-10b `GeneralError`, malformed, string-detail, or no-body 422 responses.
-  - Numeric `IntricError.code` remains sourced from `intric_error_code` / `x-error-code`; string machine codes remain available at `error.response.code`.
+  - Numeric `EneoError.code` remains sourced from `eneo_error_code` / `x-error-code`; string machine codes remain available at `error.response.code`.
 - Complexity deleted or owner clarified:
   - The SDK adapter remains the single readable-message owner for HTTP-client errors; no Flow UI parsing, backend change, OpenAPI regeneration, wrapper, manager, or compatibility service was added.
   - The unsafe legacy 422 assumption was deleted while the cheap legacy FastAPI fallback remains for existing SDK compatibility.
 - Architecture delta:
   - Canonical owner before: the backend had one `GeneralError` validation envelope, but the SDK readable-message boundary still encoded the old FastAPI validation envelope as if it were universal.
   - Canonical owner after: backend error shape stays owned by the API; SDK readable-message fallback owns client-side presentation across both current `GeneralError` and legacy validation shapes.
-  - What not to preserve: frontend/UI components parsing validation envelopes directly, overloading `IntricError.code` with the new string code, or adding a second machine-code property while `response.code` already exists.
+  - What not to preserve: frontend/UI components parsing validation envelopes directly, overloading `EneoError.code` with the new string code, or adding a second machine-code property while `response.code` already exists.
   - Honest rating impact: PG-10c finishes an important PG-10b client-boundary fallout and improves API consumer DX, but it is a narrow SDK adapter fix and does not by itself make Flows/API 9/10.
 - Validation commands and results:
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/client/client.test.js` -> red before source change, pass after source change, 12 passed.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @intric/intric-js check` -> pass.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @intric/intric-js lint` -> initial Prettier failure on `src/client/client.test.js`, then pass after running Prettier on the two touched SDK files.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --write packages/intric-js/src/client/client.js packages/intric-js/src/client/client.test.js` -> formatted the touched SDK files only; `client.js` unchanged, `client.test.js` formatted.
-  - `git diff --check -- frontend/packages/intric-js/src/client/client.js frontend/packages/intric-js/src/client/client.test.js review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/eneo-js/src/client/client.test.js` -> red before source change, pass after source change, 12 passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @eneo/eneo-js check` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @eneo/eneo-js lint` -> initial Prettier failure on `src/client/client.test.js`, then pass after running Prettier on the two touched SDK files.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --write packages/eneo-js/src/client/client.js packages/eneo-js/src/client/client.test.js` -> formatted the touched SDK files only; `client.js` unchanged, `client.test.js` formatted.
+  - `git diff --check -- frontend/packages/eneo-js/src/client/client.js frontend/packages/eneo-js/src/client/client.test.js review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / rollback:
   - Risk is limited to SDK-readable messages for HTTP 422. Runtime backend behavior, OpenAPI, generated schema, Flow UI, SCIM, and Flow AI Builder are untouched.
   - Rollback is straightforward: restore the old 422 branch in `getReadableMessage()`, remove the focused tests, and remove this ledger entry.
@@ -2539,11 +2539,11 @@
   - Read-only Codex-exec JSONB research returned `yellow` and rated Flow JSONB/data-model maintainability around `7.7/10`, with the core warning that the problem is hidden schema without executable ownership, not JSONB itself.
   - Read-only Codex-exec roadmap synthesis returned `VERDICT: yellow`, `GREEN_LIGHT: yes` for the revised ordering, and `no` for claims that Flows is already 9/10 or release-complete.
 - Source claims spot-verified by the supervisor:
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:39-49` stores `envelope_name` as a plain string; `backend/tests/unittests/flows/test_flow_jsonb_ownership.py:49-62` imports only the owner module and does not prove the named model/parser exists.
-  - `backend/src/intric/flows/flow_run_error.py:115-124` has `dump_flow_run_error` and `parse_flow_run_error`, but `backend/src/intric/flows/domain/flow.py:198-201` hydrates `FlowRun.error` directly from the `error_json` alias.
-  - `backend/src/intric/flows/flow_metadata.py:50-76` allows extras for form schema and top-level Flow metadata, preserving unowned top-level buckets.
-  - `backend/src/intric/flows/application/flow_service.py:911-916` still publishes both `template_asset_id` and `template_file_id`; `backend/src/intric/flows/runtime/template_fill_runtime.py:284-309` and `:350-383` still accept file-id fallback.
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py:447-458` marks `module_registry.metadata_json` as deferred inventory rather than a Flow-owned JSONB contract.
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py:39-49` stores `envelope_name` as a plain string; `backend/tests/unittests/flows/test_flow_jsonb_ownership.py:49-62` imports only the owner module and does not prove the named model/parser exists.
+  - `backend/src/eneo/flows/flow_run_error.py:115-124` has `dump_flow_run_error` and `parse_flow_run_error`, but `backend/src/eneo/flows/domain/flow.py:198-201` hydrates `FlowRun.error` directly from the `error_json` alias.
+  - `backend/src/eneo/flows/flow_metadata.py:50-76` allows extras for form schema and top-level Flow metadata, preserving unowned top-level buckets.
+  - `backend/src/eneo/flows/application/flow_service.py:911-916` still publishes both `template_asset_id` and `template_file_id`; `backend/src/eneo/flows/runtime/template_fill_runtime.py:284-309` and `:350-383` still accept file-id fallback.
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py:447-458` marks `module_registry.metadata_json` as deferred inventory rather than a Flow-owned JSONB contract.
 - Revised roadmap after PG-10c:
   1. Create-run dispatch recoverability.
   2. Evidence export single public summary contract.
@@ -2582,10 +2582,10 @@
   - Resume and rerun already used `dispatch_flow_run_recoverably_after_commit`, leaving accepted queued work recoverable instead of asking clients to create a new run.
   - Stale queued redispatch already owns the recovery path, so the fix was to reuse that ownership and delete the terminalizing create-only wrapper rather than add a dispatch manager or retry framework.
 - Evidence reviewed:
-  - `backend/src/intric/flows/api/flow_run_execution_router.py:766-770` scheduled `dispatch_flow_run_after_commit` for initial create before this slice.
-  - `backend/src/intric/flows/api/flow_run_execution_router.py:1276-1280` and `:1455-1459` already scheduled `dispatch_flow_run_recoverably_after_commit` for resume and rerun.
-  - `backend/src/intric/flows/application/flow_dispatch.py:18-51` terminalized broker dispatch failure as `RUN_DISPATCH_FAILED` and told clients to retry by creating a new run.
-  - `backend/src/intric/flows/application/stale_queued_redispatch.py:63-97`, `backend/src/intric/flows/infrastructure/flow_run_repo.py:333-356`, and `:386-409` already provide queued-run list/claim/redispatch repair.
+  - `backend/src/eneo/flows/api/flow_run_execution_router.py:766-770` scheduled `dispatch_flow_run_after_commit` for initial create before this slice.
+  - `backend/src/eneo/flows/api/flow_run_execution_router.py:1276-1280` and `:1455-1459` already scheduled `dispatch_flow_run_recoverably_after_commit` for resume and rerun.
+  - `backend/src/eneo/flows/application/flow_dispatch.py:18-51` terminalized broker dispatch failure as `RUN_DISPATCH_FAILED` and told clients to retry by creating a new run.
+  - `backend/src/eneo/flows/application/stale_queued_redispatch.py:63-97`, `backend/src/eneo/flows/infrastructure/flow_run_repo.py:333-356`, and `:386-409` already provide queued-run list/claim/redispatch repair.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
   - Initial Codex-exec plan gate process hung and was interrupted with no verdict.
@@ -2596,10 +2596,10 @@
   - Green after source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_execution_router.py -q'` -> pass, 20 passed.
   - Green integration proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_consumer_api_contract.py -q'` -> pass, 18 passed.
 - Files changed:
-  - `backend/src/intric/flows/api/flow_run_execution_router.py`
-  - `backend/src/intric/flows/application/flow_dispatch.py`
-  - `backend/src/intric/flows/application/__init__.py`
-  - `backend/src/intric/flows/runtime/tasks.py`
+  - `backend/src/eneo/flows/api/flow_run_execution_router.py`
+  - `backend/src/eneo/flows/application/flow_dispatch.py`
+  - `backend/src/eneo/flows/application/__init__.py`
+  - `backend/src/eneo/flows/runtime/tasks.py`
   - `backend/tests/unittests/flows/test_flow_run_execution_router.py`
   - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
   - `backend/tests/unit/test_server_startup_imports.py`
@@ -2618,8 +2618,8 @@
   - What not to preserve: the unreleased create-only terminalization path that told API clients to create a replacement run after infrastructure dispatch failure.
   - Honest rating impact: this materially improves runtime reliability and API consumer DX, but Flows still needs evidence export summary cleanup and `flow_runs.error_json` read/corruption work before a 9/10 claim is credible.
 - Validation commands and results:
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/api/flow_run_execution_router.py src/intric/flows/application/flow_dispatch.py src/intric/flows/application/__init__.py src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py && .venv/bin/ruff format --check src/intric/flows/api/flow_run_execution_router.py src/intric/flows/application/flow_dispatch.py src/intric/flows/application/__init__.py src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py'` -> initial format-check failure on `test_flow_run_execution_router.py`, then pass after formatting the touched test file.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/api/flow_run_execution_router.py src/intric/flows/application/flow_dispatch.py src/intric/flows/application/__init__.py src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py'` -> pass, 0 errors. The first pyright attempt used host-style `backend/...` prefixes and failed path resolution before rerunning with backend-relative paths.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/api/flow_run_execution_router.py src/eneo/flows/application/flow_dispatch.py src/eneo/flows/application/__init__.py src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py && .venv/bin/ruff format --check src/eneo/flows/api/flow_run_execution_router.py src/eneo/flows/application/flow_dispatch.py src/eneo/flows/application/__init__.py src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py'` -> initial format-check failure on `test_flow_run_execution_router.py`, then pass after formatting the touched test file.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/api/flow_run_execution_router.py src/eneo/flows/application/flow_dispatch.py src/eneo/flows/application/__init__.py src/eneo/flows/runtime/tasks.py tests/unittests/flows/test_flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_server_startup_imports.py'` -> pass, 0 errors. The first pyright attempt used host-style `backend/...` prefixes and failed path resolution before rerunning with backend-relative paths.
   - `rg -n "dispatch_flow_run_after_commit" backend/src backend/tests || true` -> no matches after deletion.
 - Remaining risk / rollback:
   - Runtime risk is limited to broker/background dispatch failure after successful create: runs now remain queued instead of terminalizing failed immediately.
@@ -2634,10 +2634,10 @@
   - The typed summary did not yet carry all consumer-relevant legacy summary data, so deleting `summary_typed` safely required typed parity first rather than dropping compliance/debug information.
   - Generated TypeScript clients still saw the transition contract, making API consumer DX and maintainer DX worse than the backend's actual intended owner.
 - Evidence reviewed:
-  - `backend/src/intric/flows/flow_run_export_json.py` owned rendering of evidence export JSON and previously built both legacy and typed summary payloads.
-  - `backend/src/intric/flows/flow_run_evidence_export_summary.py` owned typed evidence summary models, but lacked typed fields for artifact details, RAG source names/details, usage tracking, citations, rerun lineage, and step-level input/RAG/artifact extras.
-  - `backend/src/intric/flows/api/flow_models.py` owned `FlowRunEvidenceExportResponse`, which previously surfaced both `summary` and `summary_typed`.
-  - `frontend/packages/intric-js/src/types/schema.d.ts` and `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts` carried the generated/client-visible transition shape.
+  - `backend/src/eneo/flows/flow_run_export_json.py` owned rendering of evidence export JSON and previously built both legacy and typed summary payloads.
+  - `backend/src/eneo/flows/flow_run_evidence_export_summary.py` owned typed evidence summary models, but lacked typed fields for artifact details, RAG source names/details, usage tracking, citations, rerun lineage, and step-level input/RAG/artifact extras.
+  - `backend/src/eneo/flows/api/flow_models.py` owned `FlowRunEvidenceExportResponse`, which previously surfaced both `summary` and `summary_typed`.
+  - `frontend/packages/eneo-js/src/types/schema.d.ts` and `frontend/packages/eneo-js/src/types/flow-resource-aliases.types.ts` carried the generated/client-visible transition shape.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
   - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-evidence-export-summary-contract-plan-20260701.md` returned `VERDICT: yellow`, `GREEN_LIGHT: no`, `BLOCKER: no`; valid guidance applied by making typed parity explicit before deletion, keeping top-level/schema-version literals at `flow-evidence-export.v7`, preserving `rag_sources_count`, reusing manifest artifact item typing, leaving intentionally open provenance-derived pockets as `JsonObject`/`JsonValue`, and adding OpenAPI coverage for the full public shape.
@@ -2646,19 +2646,19 @@
   - Red before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_run_evidence.py::test_evidence_export_summary_is_single_typed_contract tests/unit/test_flow_openapi_contract.py::test_openapi_flow_evidence_export_documents_single_typed_summary -q'` failed because exports still emitted `summary_typed` and OpenAPI still documented `summary_typed`.
   - Green after source change: the same focused tests passed with one typed public `summary`, no `summary_typed`, and rich summary fields present.
 - Files changed:
-  - `backend/src/intric/flows/flow_run_evidence_export_summary.py`
-  - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
-  - `backend/src/intric/flows/flow_run_export_json.py`
-  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/eneo/flows/flow_run_evidence_export_summary.py`
+  - `backend/src/eneo/flows/flow_run_evidence_export_manifest.py`
+  - `backend/src/eneo/flows/flow_run_export_json.py`
+  - `backend/src/eneo/flows/api/flow_models.py`
   - `backend/tests/unittests/flows/test_flow_run_evidence.py`
   - `backend/tests/unit/test_flow_openapi_contract.py`
   - `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
   - `backend/tests/unittests/flows/test_flow_router.py`
   - `backend/tests/unittests/flows/test_flow_run_service.py`
   - `frontend/apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts`
-  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
-  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - `frontend/packages/eneo-js/src/endpoints/flows.test.js`
+  - `frontend/packages/eneo-js/src/types/schema.d.ts`
+  - `frontend/packages/eneo-js/src/types/flow-resource-aliases.types.ts`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
   - Evidence export JSON now has exactly one public summary field: `summary: EvidenceExportSummary`.
@@ -2678,7 +2678,7 @@
   - Honest rating impact: this materially improves evidence export API consumer DX and maintainer DX, but Flows still needs `flow_runs.error_json` read/corruption handling and runtime/API smoke before a 9/10 claim is credible.
 - Generated client:
   - Dumped the devcontainer backend OpenAPI snapshot to `.codex/artifacts/openapi-evidence-summary-v7-unsorted-20260701.json`.
-  - Regenerated `frontend/packages/intric-js/src/types/schema.d.ts` with the existing `frontend/packages/intric-js/update.js --schema-file` workflow.
+  - Regenerated `frontend/packages/eneo-js/src/types/schema.d.ts` with the existing `frontend/packages/eneo-js/update.js --schema-file` workflow.
   - Updated the TypeScript flow resource smoke fixture to use the typed `summary` contract and no `summary_typed`.
   - Updated two frontend evidence-export test fixtures that still hard-coded the pre-release v6 export version.
 - Validation commands and results:
@@ -2686,13 +2686,13 @@
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unit/test_flow_openapi_contract.py -q'` -> pass, 89 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_evidence_api_contracts.py -q'` -> pass, 11 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py -q'` -> pass, 107 passed.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/flow_run_evidence_export_summary.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py && .venv/bin/ruff format --check src/intric/flows/flow_run_evidence_export_summary.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py'` -> initial format-check caught `flow_run_export_json.py`, then pass after formatting.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_evidence_export_summary.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py'` -> pass, 0 errors.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run lint` -> pass.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts` -> pass, 35 passed.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --check apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts packages/intric-js/src/endpoints/flows.test.js packages/intric-js/src/types/flow-resource-aliases.types.ts` -> initial failure on `flowRunEvidenceActions.test.ts`, then pass after formatting the touched file.
-  - `git diff --check -- backend/src/intric/flows/flow_run_evidence_export_summary.py backend/src/intric/flows/flow_run_evidence_export_manifest.py backend/src/intric/flows/flow_run_export_json.py backend/src/intric/flows/api/flow_models.py backend/tests/unittests/flows/test_flow_run_evidence.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/integration/flows/test_flow_evidence_api_contracts.py backend/tests/unittests/flows/test_flow_router.py backend/tests/unittests/flows/test_flow_run_service.py frontend/apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts frontend/packages/intric-js/src/endpoints/flows.test.js frontend/packages/intric-js/src/types/schema.d.ts frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/flow_run_evidence_export_summary.py src/eneo/flows/flow_run_evidence_export_manifest.py src/eneo/flows/flow_run_export_json.py src/eneo/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py && .venv/bin/ruff format --check src/eneo/flows/flow_run_evidence_export_summary.py src/eneo/flows/flow_run_evidence_export_manifest.py src/eneo/flows/flow_run_export_json.py src/eneo/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py'` -> initial format-check caught `flow_run_export_json.py`, then pass after formatting.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/flow_run_evidence_export_summary.py src/eneo/flows/flow_run_evidence_export_manifest.py src/eneo/flows/flow_run_export_json.py src/eneo/flows/api/flow_models.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_service.py'` -> pass, 0 errors.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run check` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run lint` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/eneo-js/src/endpoints/flows.test.js apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts` -> pass, 35 passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --check apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts packages/eneo-js/src/endpoints/flows.test.js packages/eneo-js/src/types/flow-resource-aliases.types.ts` -> initial failure on `flowRunEvidenceActions.test.ts`, then pass after formatting the touched file.
+  - `git diff --check -- backend/src/eneo/flows/flow_run_evidence_export_summary.py backend/src/eneo/flows/flow_run_evidence_export_manifest.py backend/src/eneo/flows/flow_run_export_json.py backend/src/eneo/flows/api/flow_models.py backend/tests/unittests/flows/test_flow_run_evidence.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/integration/flows/test_flow_evidence_api_contracts.py backend/tests/unittests/flows/test_flow_router.py backend/tests/unittests/flows/test_flow_run_service.py frontend/apps/web/src/lib/features/flows/components/flowRunEvidenceActions.test.ts frontend/packages/eneo-js/src/endpoints/flows.test.js frontend/packages/eneo-js/src/types/schema.d.ts frontend/packages/eneo-js/src/types/flow-resource-aliases.types.ts review-artifacts/implementation-progress-2026-06-29.md` -> pass.
 - Remaining risk / rollback:
   - Runtime/API risk: clients using the pre-release `summary_typed` field must read `summary` instead. This is intentional for the release contract.
   - Data risk is low: this changes the export response shape, not persisted Flow run state or migrations.
@@ -2707,9 +2707,9 @@
   - Corrupt persisted values could raise Pydantic validation during ordinary run reads instead of returning a stable failed-run diagnostic.
   - `FlowRunError` allowed unknown top-level keys, so hidden persisted schema could leak into the public contract if a row had extra fields.
 - Evidence reviewed:
-  - `backend/src/intric/flows/flow_run_error.py` already owned `FlowRunError`, `dump_flow_run_error`, and `parse_flow_run_error`.
-  - `backend/src/intric/flows/domain/flow.py` already mapped persisted `error_json` into public `FlowRun.error` through the `AliasChoices("error", "error_json")` field.
-  - `backend/src/intric/flows/infrastructure/flow_run_repo.py` already writes terminal run errors through `dump_flow_run_error(error)`.
+  - `backend/src/eneo/flows/flow_run_error.py` already owned `FlowRunError`, `dump_flow_run_error`, and `parse_flow_run_error`.
+  - `backend/src/eneo/flows/domain/flow.py` already mapped persisted `error_json` into public `FlowRun.error` through the `AliasChoices("error", "error_json")` field.
+  - `backend/src/eneo/flows/infrastructure/flow_run_repo.py` already writes terminal run errors through `dump_flow_run_error(error)`.
   - `.codex/artifacts/codex-exec-next-slice-flow-runs-error-json-20260701.md` selected this as the next bounded slice after the typed evidence summary contract.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
@@ -2721,11 +2721,11 @@
   - Green repository/API/OpenAPI/taxonomy proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/integration/flows/test_flow_run_repository.py::test_get_sanitizes_corrupt_persisted_run_error_json tests/integration/flows/test_flow_consumer_api_contract.py::test_flow_run_poll_sanitizes_corrupt_persisted_error_json tests/unit/test_flow_openapi_contract.py::test_openapi_flow_run_public_exposes_structured_error tests/unittests/flows/test_flow_api_error_codes.py tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages -q'` -> pass, 18 passed.
   - Green generated-doc proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_data_schema_is_generated_from_backend_metadata tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_when_things_fail_is_generated_from_error_taxonomy tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_consumer_error_reference_is_generated_from_taxonomy -q'` -> pass, 3 passed.
 - Files changed:
-  - `backend/src/intric/flows/flow_run_error.py`
-  - `backend/src/intric/flows/domain/flow.py`
-  - `backend/src/intric/flows/flow_api_error_code.py`
-  - `backend/src/intric/flows/flow_error_taxonomy.py`
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`
+  - `backend/src/eneo/flows/flow_run_error.py`
+  - `backend/src/eneo/flows/domain/flow.py`
+  - `backend/src/eneo/flows/flow_api_error_code.py`
+  - `backend/src/eneo/flows/flow_error_taxonomy.py`
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py`
   - `backend/tests/unittests/flows/test_flow_run_error.py`
   - `backend/tests/integration/flows/test_flow_run_repository.py`
   - `backend/tests/integration/flows/test_flow_consumer_api_contract.py`
@@ -2735,8 +2735,8 @@
   - `frontend/apps/docs-site/src/content/guides/flows/reference/errors.mdx`
   - `frontend/apps/web/messages/en.json`
   - `frontend/apps/web/messages/sv.json`
-  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.d.ts`
-  - `frontend/packages/intric-js/src/flows/flow-api-error-codes.js`
+  - `frontend/packages/eneo-js/src/flows/flow-api-error-codes.d.ts`
+  - `frontend/packages/eneo-js/src/flows/flow-api-error-codes.js`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
   - Production reads now route persisted `FlowRun.error` / `error_json` through `parse_flow_run_error`.
@@ -2753,9 +2753,9 @@
   - What not to preserve: raw historical strings as valid payloads, unknown top-level schema, broad JSONB infrastructure, read-time DB mutation, or API/router catch-alls hiding corrupt state.
   - Honest rating impact: this materially improves Flow JSONB ownership and API failed-run read reliability, but it is one runtime-data boundary and does not make Flows 9/10 by itself.
 - Validation commands and results:
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/flow_run_error.py src/intric/flows/domain/flow.py src/intric/flows/flow_api_error_code.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py && .venv/bin/ruff format --check src/intric/flows/flow_run_error.py src/intric/flows/domain/flow.py src/intric/flows/flow_api_error_code.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_error.py src/intric/flows/domain/flow.py src/intric/flows/flow_api_error_code.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/eneo/flows/flow_run_error.py src/eneo/flows/domain/flow.py src/eneo/flows/flow_api_error_code.py src/eneo/flows/flow_error_taxonomy.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py && .venv/bin/ruff format --check src/eneo/flows/flow_run_error.py src/eneo/flows/domain/flow.py src/eneo/flows/flow_api_error_code.py src/eneo/flows/flow_error_taxonomy.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/flow_run_error.py src/eneo/flows/domain/flow.py src/eneo/flows/flow_api_error_code.py src/eneo/flows/flow_error_taxonomy.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py tests/unittests/flows/test_flow_run_error.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run check` -> pass.
   - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/apps/web && bun run i18n:compile` -> pass.
 - Generated/docs updates:
   - Regenerated SDK Flow error-code constants with `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/python scripts/generate_flow_api_error_codes_ts.py'`.
@@ -2770,25 +2770,25 @@
 
 - Slice id: `sdk-consumer-runtime-contract-smoke`.
 - Findings addressed:
-  - Backend Flow consumer/API tests now cover the create/poll/read/evidence path, but the shipped `@intric/intric-js` wrapper did not have one focused receipt for the same public consumer sequence.
+  - Backend Flow consumer/API tests now cover the create/poll/read/evidence path, but the shipped `@eneo/eneo-js` wrapper did not have one focused receipt for the same public consumer sequence.
   - Existing SDK endpoint tests covered `runContract.get`, `runs.create`, idempotency, and `exportEvidence`, but not `runs.get`, `runs.steps`, or `runs.evidence`.
   - The generated type smoke used `FlowRunCreateRequest` and the SDK `FlowRun` alias, but did not pin raw `FlowRunPublic` or the generated `create_flow_run` / `get_flow_run` operation response aliases.
 - Evidence reviewed:
-  - `frontend/packages/intric-js/src/endpoints/flows.js` already owns the Flow SDK wrappers for `runContract.get`, `runs.create`, `runs.get`, `runs.steps`, `runs.evidence`, and `runs.exportEvidence`.
-  - `frontend/packages/intric-js/src/endpoints/flows.test.js` already owns route-wrapper behavior checks; no new harness was needed.
-  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts` already owns generated Flow type-smoke coverage.
+  - `frontend/packages/eneo-js/src/endpoints/flows.js` already owns the Flow SDK wrappers for `runContract.get`, `runs.create`, `runs.get`, `runs.steps`, `runs.evidence`, and `runs.exportEvidence`.
+  - `frontend/packages/eneo-js/src/endpoints/flows.test.js` already owns route-wrapper behavior checks; no new harness was needed.
+  - `frontend/packages/eneo-js/src/types/flow-resource-aliases.types.ts` already owns generated Flow type-smoke coverage.
   - `.codex/artifacts/codex-exec-next-slice-after-flow-run-error-json-20260701.md` selected this as the next bounded slice after the `flow_runs.error_json` read/corruption boundary.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
   - Read-only Codex plan gate artifact `.codex/artifacts/codex-exec-sdk-consumer-runtime-smoke-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: none`; valid guidance applied by keeping the slice in the existing SDK wrapper test/type-smoke owners and using exact `create_flow_run` 201 / `get_flow_run` 200 operation response aliases.
   - Read-only Codex final gate artifact `.codex/artifacts/codex-exec-sdk-consumer-runtime-smoke-final-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `COMMIT_READY: yes`, `BLOCKER: none`; it confirmed the scoped diff stays in the existing SDK wrapper test/type-smoke owners and does not pretend to prove live backend/Celery semantics.
 - Red / green proof:
-  - No source bug was fixed in this slice. The pre-change gap was coverage/readiness: direct `rg` found no `runs.get`, `runs.steps`, or `runs.evidence` tests in `frontend/packages/intric-js/src/endpoints/flows.test.js`.
-  - Green endpoint-wrapper proof: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js` -> pass, 31 passed.
-  - Green generated type-smoke proof: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - No source bug was fixed in this slice. The pre-change gap was coverage/readiness: direct `rg` found no `runs.get`, `runs.steps`, or `runs.evidence` tests in `frontend/packages/eneo-js/src/endpoints/flows.test.js`.
+  - Green endpoint-wrapper proof: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/eneo-js/src/endpoints/flows.test.js` -> pass, 31 passed.
+  - Green generated type-smoke proof: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run check` -> pass.
 - Files changed:
-  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
-  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - `frontend/packages/eneo-js/src/endpoints/flows.test.js`
+  - `frontend/packages/eneo-js/src/types/flow-resource-aliases.types.ts`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Behavior changed:
   - None. This is SDK wrapper/type-smoke coverage only.
@@ -2802,8 +2802,8 @@
   - What not to preserve: untested SDK read wrappers, top-level `file_ids` compatibility, or generated operation names that drift without a type-smoke failure.
   - Honest rating impact: this improves generated-client/API consumer DX confidence, but it is not live backend/Celery proof and does not by itself make Flows 9/10.
 - Validation commands and results:
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js` -> pass, 31 passed.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run packages/eneo-js/src/endpoints/flows.test.js` -> pass, 31 passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run check` -> pass.
 - Remaining risk / rollback:
   - Risk is limited to SDK test/type-smoke maintenance. No backend, generated schema, frontend product UI, Flow runtime, Flow AI Builder, DB, migration, or OpenAPI behavior changed.
   - Rollback: remove the added runtime consumer sequence test, operation-response type aliases, and this ledger entry.
@@ -2817,7 +2817,7 @@
   - Several `envelope_name` values are deliberately review labels, not Python symbols, so using the label as a convention would have forced fake pass-through classes.
   - Review-checkpoint JSON rows named the application service as owner even though the existing checkpoint repository is the concrete writer for `original_payload_json`, `current_payload_json`, `output_contract_json`, and `next_step_ids_json`.
 - Evidence reviewed:
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py` owns `FlowJsonbColumnOwner` and `FLOW_JSONB_COLUMN_OWNER_ENTRIES`.
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py` owns `FlowJsonbColumnOwner` and `FLOW_JSONB_COLUMN_OWNER_ENTRIES`.
   - `backend/tests/unittests/flows/test_flow_jsonb_ownership.py` owns the executable registry guard.
   - `.codex/artifacts/codex-exec-next-slice-after-sdk-smoke-20260701.md` selected this slice and marked the broad terminal-event roadmap item stale for Flows-first ordering.
   - Read-only Codex plan gate `.codex/artifacts/codex-exec-jsonb-owner-probes-plan-20260701.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, with the guardrail to use precise existing functions/classes and avoid broad service/repository class names as proof.
@@ -2825,7 +2825,7 @@
   - Pre-change gap: `test_flow_jsonb_owner_registry_entries_are_reviewable` only imported `owner.owner_module`; it did not fail if a live row had no executable owner symbol.
   - Green focused proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_jsonb_ownership.py -q'` -> pass, 7 passed.
 - Files changed:
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py`
   - `backend/tests/unittests/flows/test_flow_jsonb_ownership.py`
   - `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`
   - `review-artifacts/implementation-progress-2026-06-29.md`
@@ -2859,11 +2859,11 @@
   - Builder authoring metadata stamped `ai_builder.origin` but preserved arbitrary old `ai_builder` subkeys after only dropping `description`.
   - Capability manifest wording still documented top-level `metadata_json.transcription`, while the live transcription owner writes and reads `metadata_json.wizard.transcription_*`.
 - Evidence reviewed:
-  - `backend/src/intric/flows/flow_metadata.py` owns `FlowMetadata`, `parse_flow_metadata`, `normalize_flow_metadata_for_write`, and `normalize_persisted_flow_metadata`.
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py` now points `flows.metadata_json` at `intric.flows.flow_metadata` with `NORMALIZE_TO_EMPTY` persisted-read behavior.
-  - `backend/src/intric/flows/application/flow_service.py` uses `normalize_flow_metadata_for_write` on create/update writes and `normalize_persisted_flow_metadata` before publishing/metadata-preserving updates.
-  - `backend/src/intric/flows/application/flow_draft_materialization.py` owned the Builder draft metadata composition path that copied current metadata before this slice.
-  - `backend/src/intric/flows/ai_builder/ai_builder_authoring_policy.py` owns `ai_builder.origin` stamping.
+  - `backend/src/eneo/flows/flow_metadata.py` owns `FlowMetadata`, `parse_flow_metadata`, `normalize_flow_metadata_for_write`, and `normalize_persisted_flow_metadata`.
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py` now points `flows.metadata_json` at `eneo.flows.flow_metadata` with `NORMALIZE_TO_EMPTY` persisted-read behavior.
+  - `backend/src/eneo/flows/application/flow_service.py` uses `normalize_flow_metadata_for_write` on create/update writes and `normalize_persisted_flow_metadata` before publishing/metadata-preserving updates.
+  - `backend/src/eneo/flows/application/flow_draft_materialization.py` owned the Builder draft metadata composition path that copied current metadata before this slice.
+  - `backend/src/eneo/flows/ai_builder/ai_builder_authoring_policy.py` owns `ai_builder.origin` stamping.
   - Read-only dev DB probe for top-level `flows.metadata_json` keys returned `metadata_top_level_keys: none`; no local persisted unknown bucket blocked tightening.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
@@ -2877,11 +2877,11 @@
   - Builder authoring policy now stamps `ai_builder` as origin-only.
   - Capability manifest wording now points audio transcription to `metadata_json.wizard.transcription_enabled` and `wizard.transcription_model.id`, not a top-level `transcription` bucket.
 - Files changed:
-  - `backend/src/intric/flows/flow_metadata.py`
-  - `backend/src/intric/flows/application/flow_draft_materialization.py`
-  - `backend/src/intric/flows/ai_builder/ai_builder_authoring_policy.py`
-  - `backend/src/intric/flows/api/flow_models.py`
-  - `backend/src/intric/flows/flow_capability_manifest.py`
+  - `backend/src/eneo/flows/flow_metadata.py`
+  - `backend/src/eneo/flows/application/flow_draft_materialization.py`
+  - `backend/src/eneo/flows/ai_builder/ai_builder_authoring_policy.py`
+  - `backend/src/eneo/flows/api/flow_models.py`
+  - `backend/src/eneo/flows/flow_capability_manifest.py`
   - `backend/tests/unittests/flows/test_flow_metadata.py`
   - `backend/tests/unittests/flows/test_flow_service.py`
   - `backend/tests/unittests/flows/test_published_definition_contract.py`
@@ -2907,8 +2907,8 @@
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_jsonb_ownership.py -q'` -> pass, 7 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py -q'` -> pass, 154 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_validators.py::test_normalize_flow_metadata_for_write_maps_legacy_string_type_to_text -q'` -> pass, 1 passed.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/ai_builder/ai_builder_authoring_policy.py src/intric/flows/api/flow_models.py src/intric/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/ai_builder/ai_builder_authoring_policy.py src/intric/flows/api/flow_models.py src/intric/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py'` -> pass.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_metadata.py src/intric/flows/application/flow_draft_materialization.py src/intric/flows/ai_builder/ai_builder_authoring_policy.py src/intric/flows/api/flow_models.py src/intric/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py'` -> pass, 0 errors.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/eneo/flows/flow_metadata.py src/eneo/flows/application/flow_draft_materialization.py src/eneo/flows/ai_builder/ai_builder_authoring_policy.py src/eneo/flows/api/flow_models.py src/eneo/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py && uv run ruff format --check src/eneo/flows/flow_metadata.py src/eneo/flows/application/flow_draft_materialization.py src/eneo/flows/ai_builder/ai_builder_authoring_policy.py src/eneo/flows/api/flow_models.py src/eneo/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/flow_metadata.py src/eneo/flows/application/flow_draft_materialization.py src/eneo/flows/ai_builder/ai_builder_authoring_policy.py src/eneo/flows/api/flow_models.py src/eneo/flows/flow_capability_manifest.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/ai_builder/test_ai_builder_authoring_policy.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_capability_manifest.py'` -> pass, 0 errors.
 - Remaining risk / rollback:
   - Risk is limited to pre-release Flow metadata writes/reads that used arbitrary top-level JSON. They now fail on write or sanitize on persisted read.
   - No generated-client regeneration, frontend changes, migration, relational schema change, Flow AI Builder planner/session work, MCP/capability implementation, template identity cleanup, or `module_registry.metadata_json` decision was part of this slice.
@@ -2919,7 +2919,7 @@
 
 - Slice id: `template-identity-cutoff-audit-gated`.
 - Preflight audit result:
-  - Existing persisted FlowVersion audit was run through `audit_flow_version_template_identity_readiness` in `backend/src/intric/flows/infrastructure/flow_version_repo.py`.
+  - Existing persisted FlowVersion audit was run through `audit_flow_version_template_identity_readiness` in `backend/src/eneo/flows/infrastructure/flow_version_repo.py`.
   - Command shape: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run python - <<PY ... audit_flow_version_template_identity_readiness ... PY'`.
   - Result: `is_ready_for_template_file_fallback_deletion=true`, `blocked_template_fill_steps=0`, `blocker_counts=[]`, `samples=[]`, `total_versions=0`, `template_fill_steps=0`, `ready_template_fill_steps=0`.
   - Interpretation: no persisted target data blocks deleting the file-id-only identity fallback; the dev DB had no FlowVersion rows, so this is a green reset/pre-release audit, not evidence of migrated production history.
@@ -2929,10 +2929,10 @@
   - `FlowTemplateAssetRepository.get_by_flow_file` existed only to support the file-id fallback after asset ownership had become the canonical identity.
   - Legacy tests preserved file-id-only publish/runtime/readiness behavior even though Flows are unreleased and the audit is green.
 - Evidence reviewed:
-  - `backend/src/intric/flows/application/flow_service.py` owns publish-time template config pinning.
-  - `backend/src/intric/flows/runtime/step_definition_parser.py` and `backend/src/intric/flows/runtime/template_fill_runtime.py` own published/runtime parsing and loading.
-  - `backend/src/intric/flows/flow_run_contract_service.py` owns run-contract readiness projection.
-  - `backend/src/intric/flows/flow_validators_template.py` owns authored template-fill validation.
+  - `backend/src/eneo/flows/application/flow_service.py` owns publish-time template config pinning.
+  - `backend/src/eneo/flows/runtime/step_definition_parser.py` and `backend/src/eneo/flows/runtime/template_fill_runtime.py` own published/runtime parsing and loading.
+  - `backend/src/eneo/flows/flow_run_contract_service.py` owns run-contract readiness projection.
+  - `backend/src/eneo/flows/flow_validators_template.py` owns authored template-fill validation.
   - `frontend/apps/web/src/lib/features/flows/templateFillConfig.ts`, `FlowEditor.ts`, and `FlowTemplateState.svelte.ts` own frontend authored template config normalization and editor state.
 - Verification agents used, with verdicts:
   - `[no-peer-review]`: used read-only Codex-exec instead of Claude/Antigravity because the user explicitly required Codex-exec GPT-5.5 xhigh and Claude was blocked/limited.
@@ -2947,12 +2947,12 @@
   - Frontend authored config ignores file-id-only output config, requires `template_asset_id` for dry-run/readiness, and no longer carries stale `template_file_id` through template inspection.
   - `FlowTemplateAssetRepository.get_by_flow_file` was deleted; `rg -n "get_by_flow_file" backend/src backend/tests frontend docs --glob '!**/bun.lock'` returns no matches. `review-artifacts` keeps historical receipt text only.
 - Files changed:
-  - `backend/src/intric/flows/application/flow_service.py`
-  - `backend/src/intric/flows/runtime/template_fill_runtime.py`
-  - `backend/src/intric/flows/runtime/step_definition_parser.py`
-  - `backend/src/intric/flows/flow_validators_template.py`
-  - `backend/src/intric/flows/flow_run_contract_service.py`
-  - `backend/src/intric/flows/flow_template_asset_repo.py`
+  - `backend/src/eneo/flows/application/flow_service.py`
+  - `backend/src/eneo/flows/runtime/template_fill_runtime.py`
+  - `backend/src/eneo/flows/runtime/step_definition_parser.py`
+  - `backend/src/eneo/flows/flow_validators_template.py`
+  - `backend/src/eneo/flows/flow_run_contract_service.py`
+  - `backend/src/eneo/flows/flow_template_asset_repo.py`
   - `backend/tests/unittests/flows/test_template_fill_runtime.py`
   - `backend/tests/unittests/flows/test_flow_service.py`
   - `backend/tests/unittests/flows/test_flow_run_contract_service.py`
@@ -2974,7 +2974,7 @@
   - Rejection/resource guard: validators, runtime parser, and published step parser reject `output_config.template_file_id`; flow package export still treats stale `template_file_id` as an unportable resource reference and blocks export.
   - Resolved provenance: runtime logs/model parameters/evidence provenance, `flowEvidenceProvenance.ts`, `FlowTemplateAssetService` event payloads, and run-contract readiness output.
   - Audit/history/reference safety: `published_definition.py`, `flow_version_repo.py`, `flow_run_history_purge_repo.py`, and their tests still scan historical `template_file_id` references so retention/audit remains safe.
-  - Generated/docs output: `frontend/packages/intric-js/src/types/schema.d.ts`, `flow-resource-aliases.types.ts`, and docs examples expose readiness `template_file_id` as nullable resolved output, not authored identity.
+  - Generated/docs output: `frontend/packages/eneo-js/src/types/schema.d.ts`, `flow-resource-aliases.types.ts`, and docs examples expose readiness `template_file_id` as nullable resolved output, not authored identity.
 - Complexity deleted or owner clarified:
   - The asset table/service is the only template identity owner; file id is no longer a second lookup route.
   - Deleted a repository lookup method and a legacy promotion helper instead of adding a resolver service, compatibility wrapper, feature flag, or migration.
@@ -2990,11 +2990,11 @@
   - Adjacent template/runtime ownership: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/flows/test_published_definition_template_references.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py -q'` -> pass, 145 passed before a larger mixed-order run exposed unrelated `test_flow_executor_runtime.py` caplog order sensitivity; `test_flow_executor_runtime.py -q` alone was rerun and passed, 75 passed.
   - AI Builder stale-template cleanup proof: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_profile.py -q'` -> pass.
   - Package export stale-resource guard: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flow_packages/test_flow_package_export_service.py -q'` -> pass.
-  - Frontend behavior: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run apps/web/src/lib/features/flows/templateFillConfig.test.ts packages/intric-js/src/endpoints/flows.test.js` -> pass, 53 passed.
-  - Frontend generated type smoke: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check` -> pass.
+  - Frontend behavior: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x vitest run apps/web/src/lib/features/flows/templateFillConfig.test.ts packages/eneo-js/src/endpoints/flows.test.js` -> pass, 53 passed.
+  - Frontend generated type smoke: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run check` -> pass.
   - Scoped frontend format/lint: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun x prettier --check apps/web/src/lib/features/flows/templateFillConfig.ts apps/web/src/lib/features/flows/templateFillConfig.test.ts apps/web/src/lib/features/flows/FlowEditor.ts apps/web/src/lib/features/flows/components/FlowTemplateState.svelte.ts` -> pass; `cd /Users/cimen/eneo/eneo-flows-clean/frontend/apps/web && bun x eslint src/lib/features/flows/templateFillConfig.ts src/lib/features/flows/templateFillConfig.test.ts src/lib/features/flows/FlowEditor.ts src/lib/features/flows/components/FlowTemplateState.svelte.ts` -> pass.
   - Scoped backend lint/format/type: ruff check/format and `backend/scripts/run_pyright_in_devcontainer.sh` on touched backend source/tests -> pass, pyright `0 errors`.
-  - Optional app-wide web check: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @intric/web check` still fails on unrelated pre-existing diagnostics in `frontend/packages/intric-js/src/client/client.js:394` and `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`; touched Flow files had no diagnostics.
+  - Optional app-wide web check: `cd /Users/cimen/eneo/eneo-flows-clean/frontend && bun run --filter @eneo/web check` still fails on unrelated pre-existing diagnostics in `frontend/packages/eneo-js/src/client/client.js:394` and `frontend/apps/web/src/routes/(app)/account/+page.svelte:25`; touched Flow files had no diagnostics.
 - Remaining risk / rollback:
   - Risk is limited to unreleased template-fill configs that still author file-id-only identity; the green audit and pre-release posture allow deleting that path.
   - No historical `flow_versions.definition_json` mutation, schema migration, evidence export work, Builder planner/session change, MCP/capability work, or `module_registry.metadata_json` decision was part of this slice.
@@ -3010,10 +3010,10 @@
   - The existing platform module surface is the separate `Modules` table/router/repo, not the dormant Flow-local `ModuleRegistry` table.
   - `module_registry.metadata_json` was the only deferred JSONB registry row and the only reason the registry carried `DEFERRED_INVENTORY` enum values.
 - Files changed:
-  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/eneo/database/tables/flow_tables.py`
   - `backend/alembic/versions/579199d395dd_add_flow_tables_and_assistant_hidden.py`
-  - `backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py`
-  - `backend/src/intric/flows/infrastructure/flow_schema_docs_exporter.py`
+  - `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py`
+  - `backend/src/eneo/flows/infrastructure/flow_schema_docs_exporter.py`
   - `backend/tests/unittests/flows/test_flow_jsonb_ownership.py`
   - `frontend/apps/docs-site/src/content/docs/flows-for-developers/data-schema.mdx`
   - `docs/flows/flow-data-model-production-readiness-gate0.md`
@@ -3042,9 +3042,9 @@
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_jsonb_ownership.py -q'` -> pass, 7 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py -q'` -> pass, 69 passed.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run alembic heads'` -> pass, head `202606291900_flow_runtime_schema`.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/database/tables/flow_tables.py alembic/versions/579199d395dd_add_flow_tables_and_assistant_hidden.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff format --check src/intric/database/tables/flow_tables.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass. The Alembic file was excluded from format-check to avoid unrelated whole-file formatter churn; it was still covered by ruff check and Alembic head validation.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/database/tables/flow_tables.py src/intric/flows/infrastructure/flow_jsonb_ownership.py src/intric/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass, 0 errors.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/eneo/database/tables/flow_tables.py alembic/versions/579199d395dd_add_flow_tables_and_assistant_hidden.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py src/eneo/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff format --check src/eneo/database/tables/flow_tables.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py src/eneo/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass. The Alembic file was excluded from format-check to avoid unrelated whole-file formatter churn; it was still covered by ruff check and Alembic head validation.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/database/tables/flow_tables.py src/eneo/flows/infrastructure/flow_jsonb_ownership.py src/eneo/flows/infrastructure/flow_schema_docs_exporter.py tests/unittests/flows/test_flow_jsonb_ownership.py'` -> pass, 0 errors.
   - `rg -n "ModuleRegistry|module_registry|ModuleRegistryMetadata" backend/src backend/tests backend/alembic frontend/apps/docs-site/src/content docs review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md --glob '!frontend/node_modules' --glob '!backend/.venv'` -> remaining hits are the resolved roadmap row and historical progress entries only.
   - `rg -n "DEFERRED_INVENTORY|deferred_inventory|Deferred adjacent JSONB inventory" backend/src backend/tests frontend/apps/docs-site/src/content docs review-artifacts/flows-9-10-architecture-roadmap-2026-06-29.md review-artifacts/implementation-progress-2026-06-29.md --glob '!backend/.venv' --glob '!frontend/node_modules'` -> remaining hits are historical progress text and the live guard test asserting no `deferred_inventory` enum value.
 - Remaining risk / rollback:
@@ -3062,10 +3062,10 @@
   - The first plan to expose the entire `FlowApiErrorCode` catalog through `FlowRunError.code` was too broad: request-only codes such as `flow_not_published` are not valid terminal run-error payloads.
   - Three taxonomy/docs rows still claimed `flow_published_form_schema_invalid`, `flow_template_not_accessible`, and `flow_template_missing_content` could surface in a run error payload; the terminal run-error subset and production call-site audit did not support that.
 - Evidence reviewed:
-  - `backend/src/intric/flows/flow_api_error_code.py` owns `FlowApiErrorCode`, `FLOW_API_ERROR_CODES`, and `FLOW_RUN_TERMINAL_ERROR_CODES`.
-  - `backend/src/intric/flows/flow_run_error.py` owns the persisted/API run-error envelope, dump path, and persisted-read corruption downgrade.
-  - `backend/src/intric/flows/domain/flow.py` hydrates persisted `error_json` through `parse_flow_run_error`.
-  - Production `FlowRunError.from_source` call-site audit found no literal non-terminal codes; the only broad adapter path was `_flow_api_error_code_or_default` in `backend/src/intric/flows/runtime/executor.py`.
+  - `backend/src/eneo/flows/flow_api_error_code.py` owns `FlowApiErrorCode`, `FLOW_API_ERROR_CODES`, and `FLOW_RUN_TERMINAL_ERROR_CODES`.
+  - `backend/src/eneo/flows/flow_run_error.py` owns the persisted/API run-error envelope, dump path, and persisted-read corruption downgrade.
+  - `backend/src/eneo/flows/domain/flow.py` hydrates persisted `error_json` through `parse_flow_run_error`.
+  - Production `FlowRunError.from_source` call-site audit found no literal non-terminal codes; the only broad adapter path was `_flow_api_error_code_or_default` in `backend/src/eneo/flows/runtime/executor.py`.
 - Verification agents used, with verdicts:
   - Codex-exec plan gate artifact `.codex/artifacts/codex-exec-flow-run-error-code-typing-plan-v2-20260702.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: no` for the original full-catalog approach.
   - Claude plan artifact `.codex/artifacts/claude-peer-loop-flowrunerror-code-generated-client-typing-plan-20260701T233949Z.md` returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; valid critique applied by narrowing the schema to `FLOW_RUN_TERMINAL_ERROR_CODES`.
@@ -3075,7 +3075,7 @@
   - Codex-exec final gate artifact `.codex/artifacts/codex-exec-flow-run-error-code-typing-final-20260702.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`, `BLOCKER: no`, `COMMIT_READY: yes`.
 - Behavior changed:
   - `FlowRunError.code` is now enum-backed in memory and serialized as a stable string in Pydantic JSON mode.
-  - The public `FlowRunError.code` OpenAPI schema now enumerates exactly `FLOW_RUN_TERMINAL_ERROR_CODES`; generated `frontend/packages/intric-js/src/types/schema.d.ts` exposes the same union instead of `string`.
+  - The public `FlowRunError.code` OpenAPI schema now enumerates exactly `FLOW_RUN_TERMINAL_ERROR_CODES`; generated `frontend/packages/eneo-js/src/types/schema.d.ts` exposes the same union instead of `string`.
   - `parse_flow_run_error` now sanitizes uncataloged or non-terminal persisted codes to `flow_run_error_payload_invalid` instead of preserving speculative legacy-looking strings.
   - Executor bad-request translation now refuses to terminalize a run with request-only codes and logs `flow_executor.bad_request_non_terminal_code` before falling back to the terminal default.
   - Flow error taxonomy validation now rejects both missing terminal run-error surfaces and stale run-error surface claims for non-terminal codes.
@@ -3084,21 +3084,21 @@
   - Deleted the duplicate UI component test that preserved an unknown persisted run-level code. The lower-level runtime mapping still keeps one explicit wire-boundary guard for malformed external data.
   - Corrected generated docs so the three non-terminal taxonomy rows no longer claim run-error payload handling.
 - Files changed:
-  - `backend/src/intric/flows/flow_run_error.py`
-  - `backend/src/intric/flows/runtime/executor.py`
-  - `backend/src/intric/flows/flow_error_taxonomy.py`
+  - `backend/src/eneo/flows/flow_run_error.py`
+  - `backend/src/eneo/flows/runtime/executor.py`
+  - `backend/src/eneo/flows/flow_error_taxonomy.py`
   - `backend/tests/unittests/flows/test_flow_run_error.py`
   - `backend/tests/unit/test_flow_openapi_contract.py`
   - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
   - `backend/tests/unittests/flows/test_flow_docs_site_contract.py`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/eneo-js/src/types/schema.d.ts`
   - `frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.test.ts`
   - `frontend/apps/web/src/lib/features/flows/components/FlowRunErrorAlert.test.ts`
   - `frontend/apps/docs-site/src/content/guides/flows/reference/errors.mdx`
   - `frontend/apps/docs-site/src/content/docs/flows-for-developers/when-things-fail.mdx`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Generated/docs decision:
-  - Generated SDK types were regenerated from `.codex/artifacts/openapi-flow-run-error-code-typing-native-20260702.json` through `frontend/packages/intric-js/update.js`; no handwritten SDK override was added.
+  - Generated SDK types were regenerated from `.codex/artifacts/openapi-flow-run-error-code-typing-native-20260702.json` through `frontend/packages/eneo-js/update.js`; no handwritten SDK override was added.
   - Flow docs-site error reference pages were regenerated with `backend/scripts/generate_flow_docs.py` because public handling phase text changed.
   - No separate API guide rewrite was needed: existing guides already tell consumers to branch on typed `FlowApiErrorCode` values, and the generated error reference now carries the corrected surfaces.
 - Architecture delta:
@@ -3109,9 +3109,9 @@
 - Validation commands and results:
   - Red proof before implementation: focused backend tests failed because uncataloged/non-terminal persisted codes were accepted, direct non-terminal `FlowRunError` construction did not fail, and OpenAPI exposed no terminal-code enum.
   - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_api_error_codes.py tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_when_things_fail_is_generated_from_error_taxonomy tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_consumer_error_reference_is_generated_from_taxonomy tests/unittests/flows/test_flow_executor_runtime.py::test_run_error_from_bad_request_falls_back_and_logs_non_terminal_code tests/unittests/flows/test_flow_executor_runtime.py::test_run_error_from_bad_request_sanitizes_context tests/unittests/flows/test_flow_executor_runtime.py::test_run_error_from_bad_request_falls_back_and_logs_uncataloged_code -q'` -> pass, 128 passed.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/flow_run_error.py src/intric/flows/runtime/executor.py src/intric/flows/flow_error_taxonomy.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py && uv run ruff format --check src/intric/flows/flow_run_error.py src/intric/flows/runtime/executor.py src/intric/flows/flow_error_taxonomy.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py'` -> pass.
-  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_error.py src/intric/flows/runtime/executor.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/application/flow_run_terminalization.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/run_outcome.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py'` -> pass, 0 errors.
-  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run update -- --schema-file ../../../.codex/artifacts/openapi-flow-run-error-code-typing-native-20260702.json && bun run check && bun test` -> pass, 75 tests passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/eneo/flows/flow_run_error.py src/eneo/flows/runtime/executor.py src/eneo/flows/flow_error_taxonomy.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py && uv run ruff format --check src/eneo/flows/flow_run_error.py src/eneo/flows/runtime/executor.py src/eneo/flows/flow_error_taxonomy.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/flow_run_error.py src/eneo/flows/runtime/executor.py src/eneo/flows/flow_error_taxonomy.py src/eneo/flows/application/flow_run_terminalization.py src/eneo/flows/runtime/tasks.py src/eneo/flows/runtime/run_outcome.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py'` -> pass, 0 errors.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run update -- --schema-file ../../../.codex/artifacts/openapi-flow-run-error-code-typing-native-20260702.json && bun run check && bun test` -> pass, 75 tests passed.
   - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/apps/web && bun run i18n:compile && bun x vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts src/lib/features/flows/components/FlowRunErrorAlert.test.ts` -> pass, 45 tests passed.
 - Remaining risk / rollback:
   - Risk is limited to unreleased consumers or persisted rows that expected unknown run-level error codes to survive. They now read as `flow_run_error_payload_invalid`, which is safer and matches the closed public contract.
@@ -3128,10 +3128,10 @@
   - Runtime terminalization writes those fields from terminal run-error outcomes, while request-only rerun errors such as `flow_run_rerun_invalid_transition` and `flow_run_rerun_step_not_found` are raised as API errors rather than persisted rerun operation failure codes.
   - Debug/provenance fields still carry broader diagnostic strings and are intentionally excluded from this slice.
 - Evidence reviewed:
-  - `backend/src/intric/flows/flow_api_error_code.py` owns `FlowApiErrorCode` and `FLOW_RUN_TERMINAL_ERROR_CODES`.
-  - `backend/src/intric/flows/flow_run_error.py` already owns the public run-error typed alias and persisted-read degradation behavior, so the nullable public terminal-code alias belongs there instead of in a new registry or frontend shadow type.
-  - `backend/src/intric/flows/api/flow_models.py` owns the three public response fields and their field-specific descriptions.
-  - `backend/src/intric/flows/application/flow_run_terminalization.py` stamps terminal error codes onto active step results, attempts, and rerun operations; request-only rerun codes stay in the rerun service/API error path.
+  - `backend/src/eneo/flows/flow_api_error_code.py` owns `FlowApiErrorCode` and `FLOW_RUN_TERMINAL_ERROR_CODES`.
+  - `backend/src/eneo/flows/flow_run_error.py` already owns the public run-error typed alias and persisted-read degradation behavior, so the nullable public terminal-code alias belongs there instead of in a new registry or frontend shadow type.
+  - `backend/src/eneo/flows/api/flow_models.py` owns the three public response fields and their field-specific descriptions.
+  - `backend/src/eneo/flows/application/flow_run_terminalization.py` stamps terminal error codes onto active step results, attempts, and rerun operations; request-only rerun codes stay in the rerun service/API error path.
 - Behavior changed:
   - `FlowRunStepPublic.error_code`, `FlowStepAttemptPublic.error_code`, and `FlowRunRerunOperationPublic.failure_code` now validate as nullable terminal Flow API error codes and serialize as JSON strings.
   - `None` stays `None`; known terminal values stay unchanged.
@@ -3143,14 +3143,14 @@
   - Added behavior tests for request-only and uncataloged persisted values instead of preserving speculative unreleased compatibility.
   - Removed generated-client ambiguity for the three public fields without adding a handwritten SDK override.
 - Files changed:
-  - `backend/src/intric/flows/flow_run_error.py`
-  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/eneo/flows/flow_run_error.py`
+  - `backend/src/eneo/flows/api/flow_models.py`
   - `backend/tests/unittests/flows/test_flow_models.py`
   - `backend/tests/unit/test_flow_openapi_contract.py`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/eneo-js/src/types/schema.d.ts`
   - `review-artifacts/implementation-progress-2026-06-29.md`
 - Generated/docs decision:
-  - Generated SDK types were regenerated from `.codex/artifacts/openapi-public-step-error-code-typing-native-unsorted-20260702.json` through `frontend/packages/intric-js/update.js`; no generated file was hand-edited as source truth.
+  - Generated SDK types were regenerated from `.codex/artifacts/openapi-public-step-error-code-typing-native-unsorted-20260702.json` through `frontend/packages/eneo-js/update.js`; no generated file was hand-edited as source truth.
   - Docs-site authored content did not need an update: the only docs-site hits were database schema rows that correctly remain `varchar`, API examples with `error_code: null`, and existing guide prose that already tells consumers to branch on typed `FlowApiErrorCode` values.
 - Architecture delta:
   - Canonical owner before: the public fields lived in `flow_models.py` but were weaker than the terminal error-code catalog.
@@ -3166,10 +3166,10 @@
 - Validation commands and results:
   - Red proof before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_models.py::test_public_terminal_error_code_fields_sanitize_persisted_values tests/unit/test_flow_openapi_contract.py::test_openapi_public_flow_failure_code_fields_are_nullable_terminal_enums -q'` -> failed because non-terminal/uncataloged values passed through and OpenAPI exposed no closed enum.
   - Focused backend contract: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_flow_api_error_codes.py -q'` -> pass, 303 passed.
-  - SDK generated-client check: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check && bun test` -> pass, 75 tests passed.
-  - Scoped backend lint/format: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/flow_run_error.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py && uv run ruff format --check src/intric/flows/flow_run_error.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py'` -> pass.
-  - Scoped pyright: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_error.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
-  - Scoped diff check before final peer gates: `git diff --check -- backend/src/intric/flows/flow_run_error.py backend/src/intric/flows/api/flow_models.py backend/tests/unittests/flows/test_flow_models.py backend/tests/unit/test_flow_openapi_contract.py frontend/packages/intric-js/src/types/schema.d.ts` -> pass.
+  - SDK generated-client check: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/eneo-js && bun run check && bun test` -> pass, 75 tests passed.
+  - Scoped backend lint/format: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/eneo/flows/flow_run_error.py src/eneo/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py && uv run ruff format --check src/eneo/flows/flow_run_error.py src/eneo/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py'` -> pass.
+  - Scoped pyright: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/eneo/flows/flow_run_error.py src/eneo/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
+  - Scoped diff check before final peer gates: `git diff --check -- backend/src/eneo/flows/flow_run_error.py backend/src/eneo/flows/api/flow_models.py backend/tests/unittests/flows/test_flow_models.py backend/tests/unit/test_flow_openapi_contract.py frontend/packages/eneo-js/src/types/schema.d.ts` -> pass.
 - Remaining risk / rollback:
   - Risk is limited to unreleased consumers or corrupted rows that expected arbitrary strings in public step/attempt/rerun failure-code fields. They now read as `flow_run_error_payload_invalid`, which is safer and aligns with the terminal run-error contract.
   - `frontend/bun.lock` was already dirty before this slice and was left unstaged despite package commands printing `Saved lockfile`.
@@ -3180,8 +3180,8 @@
 
 - Candidate id: PG3-FU-2
 - Area: maintainability / clean architecture
-- Source evidence: `backend/src/intric/completion_models/infrastructure/completion_service.py:154-159` exposes `CompletionService.resolve_structured_output_capability`; `backend/src/intric/completion_models/infrastructure/adapters/tenant_model_adapter.py:404-410` adapts the shared resolver; after PG-3c, direct `rg "resolve_structured_output_capability\\(" backend/src backend/tests --glob '*.py'` shows only the shared owner/adapter and `backend/tests/unit/test_tenant_model_capabilities.py` references.
+- Source evidence: `backend/src/eneo/completion_models/infrastructure/completion_service.py:154-159` exposes `CompletionService.resolve_structured_output_capability`; `backend/src/eneo/completion_models/infrastructure/adapters/tenant_model_adapter.py:404-410` adapts the shared resolver; after PG-3c, direct `rg "resolve_structured_output_capability\\(" backend/src backend/tests --glob '*.py'` shows only the shared owner/adapter and `backend/tests/unit/test_tenant_model_capabilities.py` references.
 - Why it is not part of the current PG slice: `B-DEL-1` explicitly keeps the shared `StructuredOutputCapabilityDecision` type, and PG-3c is scoped to AI Builder's dead pass-through plumbing rather than completion-model capability API cleanup.
-- Likely canonical owner: `intric.completion_models.infrastructure.tenant_model_capabilities` if another runtime/API path needs local model capability decisions; otherwise no owner is needed.
+- Likely canonical owner: `eneo.completion_models.infrastructure.tenant_model_capabilities` if another runtime/API path needs local model capability decisions; otherwise no owner is needed.
 - Deletion/reuse/merge path if known: audit non-Builder product plans for structured-output capability decisions; either wire the shared resolver into a real provider-selection boundary or delete the unused service/adapter pass-through while keeping any independently useful pure capability helpers/tests.
 - Decision or measurement needed: determine whether structured-output capability resolution is part of a shipped completion-model contract outside AI Builder.

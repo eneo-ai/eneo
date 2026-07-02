@@ -12,16 +12,16 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import AsyncClient
 
-from intric.authentication.auth_service import AuthService
-from intric.database.database import sessionmanager
-from intric.database.tables.tenant_table import Tenants
-from intric.tenants.tenant_repo import TenantRepository
+from eneo.authentication.auth_service import AuthService
+from eneo.database.database import sessionmanager
+from eneo.database.tables.tenant_table import Tenants
+from eneo.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture
 def override_runtime_settings(test_settings):
     """Apply runtime settings changes through the global settings singleton."""
-    from intric.main.config import get_settings, set_settings
+    from eneo.main.config import get_settings, set_settings
 
     original_settings = get_settings()
 

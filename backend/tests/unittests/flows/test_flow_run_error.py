@@ -8,14 +8,14 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.domain.flow import FlowRun, FlowRunStatus
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
 )
-from intric.flows.flow_run_error import (
+from eneo.flows.flow_run_error import (
     FlowRunError,
     FlowRunErrorDetails,
     dump_flow_run_error,

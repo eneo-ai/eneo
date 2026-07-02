@@ -11,23 +11,23 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import UploadFile
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.authentication.signed_urls import verify_signed_token
-from intric.files.file_models import SignedURLRequest
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api import flow_template_router as flow_template_router_module
-from intric.flows.api.flow_template_router import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.signed_urls import verify_signed_token
+from eneo.files.file_models import SignedURLRequest
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api import flow_template_router as flow_template_router_module
+from eneo.flows.api.flow_template_router import (
     delete_flow_template_file,
     generate_flow_template_signed_url,
     inspect_flow_template,
     list_flow_template_files,
     upload_flow_template_file,
 )
-from intric.flows.domain.flow import FlowTemplateAsset
-from intric.flows.flow_access_policy import FlowApiAction
-from intric.main.exceptions import UnauthorizedException
-from intric.roles.permissions import Permission
+from eneo.flows.domain.flow import FlowTemplateAsset
+from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.main.exceptions import UnauthorizedException
+from eneo.roles.permissions import Permission
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _flow,

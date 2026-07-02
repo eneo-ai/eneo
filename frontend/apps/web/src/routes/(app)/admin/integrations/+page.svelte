@@ -3,9 +3,9 @@
   import type { PageProps } from "./$types";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";
   import IntegrationGrid from "$lib/features/integrations/components/IntegrationGrid.svelte";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { TenantIntegration } from "@intric/intric-js";
+  import type { TenantIntegration } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
@@ -31,7 +31,7 @@
   // Load SharePoint config status
   const loadSharePointStatus = createAsyncState(async () => {
     try {
-      const config = await data.intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const config = await data.eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get"
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped admin endpoint not in OpenAPI spec
       } as any);
@@ -156,7 +156,7 @@
           <!-- SharePoint Webhook Management (expanded when button clicked) -->
           {#if showWebhookManagement && sharePointConfigStatus === "configured"}
             <div class="border-border bg-background mt-6 rounded-lg border p-6">
-              <SharePointSubscriptions intric={data.intric} />
+              <SharePointSubscriptions eneo={data.eneo} />
             </div>
           {/if}
         </Settings.Row>

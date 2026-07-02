@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.infrastructure.office_change_key_service import (
+from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
 

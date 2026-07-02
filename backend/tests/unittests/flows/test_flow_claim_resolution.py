@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
-from intric.flows.runtime.claim_resolution import resolve_step_claim
-from intric.flows.runtime.models import RunExecutionState
+from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.runtime.claim_resolution import resolve_step_claim
+from eneo.flows.runtime.models import RunExecutionState
 
 
 def _result(step_order: int, *, status: FlowStepResultStatus) -> FlowStepResult:

@@ -1,5 +1,5 @@
 import { m } from "$lib/paraglide/messages";
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 import type { FlowStepValidationIssue } from "$lib/features/flows/flowStepTypes";
 import type {
   FlowSourceHintKind,
@@ -211,13 +211,13 @@ export function hasAdvancedSettingsActive(
 ): boolean {
   return Boolean(
     step.output_mode === "template_fill" ||
-      step.input_type === "any" ||
-      step.input_type === "file" ||
-      step.input_contract ||
-      step.output_contract ||
-      step.input_config ||
-      hasAdvancedOutputConfig(step) ||
-      hasInputTemplateOverride
+    step.input_type === "any" ||
+    step.input_type === "file" ||
+    step.input_contract ||
+    step.output_contract ||
+    step.input_config ||
+    hasAdvancedOutputConfig(step) ||
+    hasInputTemplateOverride
   );
 }
 

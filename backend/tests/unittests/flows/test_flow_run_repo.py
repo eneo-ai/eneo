@@ -7,15 +7,15 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from intric.flows import FlowFactory
-from intric.flows.domain.flow_run_exceptions import (
+from eneo.flows import FlowFactory
+from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
-from intric.flows.domain.run_step_input_exceptions import (
+from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
 
 class _Diagnostic:

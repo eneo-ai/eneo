@@ -10,18 +10,18 @@ from datetime import datetime
 from unittest.mock import patch
 from uuid import uuid4
 
-from intric.ai_models.completion_models.completion_model import CompletionModelPublic
-from intric.completion_models.domain.completion_model import CompletionModel
-from intric.completion_models.presentation.completion_model_assembler import (
+from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
+from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
-from intric.embedding_models.domain.embedding_model import EmbeddingModel
-from intric.embedding_models.presentation.embedding_model_models import (
+from eneo.embedding_models.domain.embedding_model import EmbeddingModel
+from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
-from intric.tenants.tenant import TenantInDB
-from intric.transcription_models.domain.transcription_model import TranscriptionModel
-from intric.transcription_models.presentation.transcription_model_models import (
+from eneo.tenants.tenant import TenantInDB
+from eneo.transcription_models.domain.transcription_model import TranscriptionModel
+from eneo.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
 )
 

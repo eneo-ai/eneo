@@ -1,12 +1,12 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import { SvelteSet } from "svelte/reactivity";
   import { Settings } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import { IconInfo } from "@intric/icons/info";
-  import { IconLockClosed } from "@intric/icons/lock-closed";
-  import { IconDownload } from "@intric/icons/download";
+  import { IconInfo } from "@eneo/icons/info";
+  import { IconLockClosed } from "@eneo/icons/lock-closed";
+  import { IconDownload } from "@eneo/icons/download";
   import { m } from "$lib/paraglide/messages";
   import { shouldShowTemplateAccessibilityHint } from "$lib/features/flows/templateFillAuthoringHints";
   import type {

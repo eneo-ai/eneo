@@ -4,16 +4,16 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getAppContext } from "$lib/core/AppContext";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
-  import { IconAttachment } from "@intric/icons/attachment";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconCheck } from "@intric/icons/check";
+  import { IconAttachment } from "@eneo/icons/attachment";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconCheck } from "@eneo/icons/check";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
   import type { AIBuilderPlanEditContext } from "./protocol";
@@ -33,7 +33,7 @@
     queueValidUploads,
     clearUploads
   } = initAttachmentManager({
-    intric: getIntric(),
+    eneo: getEneo(),
     options: { rules: attachmentRules }
   });
 
@@ -320,8 +320,7 @@
         placeholder={currentPlaceholder}
         disabled={!service.canSendMessage || $isUploading}
         rows="1"
-        class="composer-textarea"
-      ></textarea>
+        class="composer-textarea"></textarea>
     </label>
 
     <div class="composer-actions">

@@ -2,23 +2,23 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.application.flow_draft_materialization import (
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -331,15 +331,15 @@ def _prepare_valid_spec(
 def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.canonicalize_flow_spec_resources",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.canonicalize_flow_spec_resources",
             return_value=(_make_spec(), ["missing model ref"]),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.format_resource_resolution_feedback",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.format_resource_resolution_feedback",
             return_value="resource issue",
         ),
     ):
@@ -388,11 +388,11 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
     ):
@@ -432,11 +432,11 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
     ):
@@ -459,7 +459,7 @@ def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contr
 ):
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
     ):
@@ -532,7 +532,7 @@ def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_termina
 ):
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
     ):
@@ -579,7 +579,7 @@ def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_termin
 ):
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
     ):
@@ -611,7 +611,7 @@ def test_prepare_compiled_spec_for_session_rejects_unfoldable_json_text_terminal
 ):
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
     ):

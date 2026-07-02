@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 
 import {
   bumpSegmentCountInState,
@@ -252,9 +252,9 @@ describe("scanRecoverableSessionsForSteps", () => {
 });
 
 describe("purgeSession", () => {
-  it("calls intric.files.delete for uploaded segments and removes the IDB entry", async () => {
+  it("calls eneo.files.delete for uploaded segments and removes the IDB entry", async () => {
     const deleteSpy = vi.fn(async () => undefined);
-    const intric = { files: { delete: deleteSpy } } as unknown as Intric;
+    const eneo = { files: { delete: deleteSpy } } as unknown as Eneo;
 
     await persistRecordingSegment({
       flowId: "flow-1",
@@ -276,7 +276,7 @@ describe("purgeSession", () => {
       uploadedFileId: "file-uploaded"
     });
 
-    await purgeSession({ intric, flowId: "flow-1", stepId: "step-1", sessionId: "sess-A" });
+    await purgeSession({ eneo, flowId: "flow-1", stepId: "step-1", sessionId: "sess-A" });
 
     expect(deleteSpy).toHaveBeenCalledWith({ fileId: "file-uploaded" });
     const remaining = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
@@ -284,13 +284,13 @@ describe("purgeSession", () => {
   });
 
   it("swallows server delete errors and still drops the IDB entry", async () => {
-    const intric = {
+    const eneo = {
       files: {
         delete: vi.fn(async () => {
           throw new Error("boom");
         })
       }
-    } as unknown as Intric;
+    } as unknown as Eneo;
     await persistRecordingSegment({
       flowId: "flow-1",
       stepId: "step-1",
@@ -310,7 +310,7 @@ describe("purgeSession", () => {
       segmentIndex: 0,
       uploadedFileId: "file-uploaded"
     });
-    await purgeSession({ intric, flowId: "flow-1", stepId: "step-1", sessionId: "sess-A" });
+    await purgeSession({ eneo, flowId: "flow-1", stepId: "step-1", sessionId: "sess-A" });
     const remaining = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
     expect(remaining).toEqual([]);
   });

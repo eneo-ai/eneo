@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_source_values,
     builder_input_type_values,
     builder_output_mode_values,
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from intric.flows.enums import (
+from eneo.flows.enums import (
     AIBuilderInputSource,
     AIBuilderInputType,
     AIBuilderOutputMode,
     FlowOutputMode,
     FlowOutputType,
 )
-from intric.flows.flow_capability_manifest import (
+from eneo.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     RUNTIME_INPUT_MODE_BY_TYPE,
     resolve_document_generation_mode,

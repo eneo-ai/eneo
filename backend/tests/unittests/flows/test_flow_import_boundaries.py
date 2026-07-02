@@ -22,7 +22,7 @@ def _run_python_import_probe(source: str) -> str:
 def test_worker_settings_import_does_not_reenter_partially_initialized_user() -> None:
     _run_python_import_probe(
         """
-import intric.worker.arq as arq_worker
+import eneo.worker.arq as arq_worker
 assert arq_worker.WorkerSettings.functions
 """
     )
@@ -33,10 +33,10 @@ def test_flow_recovery_policy_import_keeps_runtime_principal_lazy() -> None:
         """
 import sys
 
-import intric.flows.application.flow_run_recovery_policy
+import eneo.flows.application.flow_run_recovery_policy
 
 eager_imports = {
-    name for name in ("intric.flows.principal", "intric.users.user")
+    name for name in ("eneo.flows.principal", "eneo.users.user")
     if name in sys.modules
 }
 if eager_imports:

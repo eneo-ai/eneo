@@ -3,11 +3,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.spaces.space_repo import (
+from eneo.spaces.space_repo import (
     SpaceRepositoryTenantMismatchError,
     SpaceRepositoryUserRequiredError,
 )
-from intric.users.user import UserState
+from eneo.users.user import UserState
 
 
 def _tenant(tenant_id):
@@ -25,7 +25,7 @@ def _user(*, tenant_id):
 
 
 def _repo(*, tenant_id=None, user=None):
-    from intric.spaces.space_repo import SpaceRepository
+    from eneo.spaces.space_repo import SpaceRepository
 
     return SpaceRepository(
         session=SimpleNamespace(),

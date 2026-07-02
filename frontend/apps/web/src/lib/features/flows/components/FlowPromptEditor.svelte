@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack, type Snippet } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowFormFieldVariableExpression,
@@ -556,8 +556,9 @@
             class="inline"
             style="width:0;overflow:hidden">&#8203;</span
           >{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span
-            class="{getChipClasses(seg.category ?? 'unknown')} inline !px-0 !py-0 !text-base sm:!text-sm"
-            >{seg.value}</span
+            class="{getChipClasses(
+              seg.category ?? 'unknown'
+            )} inline !px-0 !py-0 !text-base sm:!text-sm">{seg.value}</span
           >{/if}
       {/each}
       <span>&nbsp;</span>
@@ -584,8 +585,7 @@
       onblur={() => commitIfDirty(currentEditorValue)}
       value={currentEditorValue}
       {disabled}
-      {placeholder}
-    ></textarea>
+      {placeholder}></textarea>
 
     <!-- Autocomplete dropdown -->
     {#if autocompleteOpen && filteredSuggestions.length > 0 && !disabled}

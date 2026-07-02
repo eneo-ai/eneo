@@ -10,48 +10,69 @@ import pdfplumber
 import pytest
 from docx import Document
 
-from intric.flows.runtime.document_rendering.blocks import DocumentBlock, InlineTextRun
-from intric.flows.runtime.document_rendering.html_blocks import (
+from eneo.flows.runtime.document_rendering.blocks import DocumentBlock, InlineTextRun
+from eneo.flows.runtime.document_rendering.html_blocks import (
     blocks_to_html_document,
 )
-from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
-from intric.flows.runtime.document_rendering.markdown_blocks import (
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.document_rendering.markdown_blocks import (
     parse_markdown_blocks,
 )
-from intric.flows.runtime.document_rendering.renderers import RenderedDocument
-from intric.flows.runtime.document_rendering.service import (
+from eneo.flows.runtime.document_rendering.renderers import RenderedDocument
+from eneo.flows.runtime.document_rendering.service import (
     DocumentRenderService,
     default_document_render_service,
 )
-from intric.flows.runtime.document_rendering.weasyprint_renderer import (
+from eneo.flows.runtime.document_rendering.weasyprint_renderer import (
     WeasyPrintDocumentRenderer,
     _deny_external_fetch,
+    _load_weasyprint_api,
     configure_weasyprint_dependency_logging,
 )
-from intric.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import TypedIOValidationException
 
 _render_service = default_document_render_service()
+
+
+def _weasyprint_native_stack_available() -> bool:
+    try:
+        _load_weasyprint_api()
+    except (ImportError, OSError):
+        return False
+    return True
+
+
+requires_weasyprint_native_stack = pytest.mark.skipif(
+    not _weasyprint_native_stack_available(),
+    reason="WeasyPrint native libraries are not installed in this local environment.",
+)
 
 # --- PDF rendering ---
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_valid_blob():
-    blob, mimetype, filename = _render_service.render_document("Hello world", "pdf", step_order=1)
+    blob, mimetype, filename = _render_service.render_document(
+        "Hello world", "pdf", step_order=1
+    )
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     assert blob[:5] == b"%PDF-"
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_correct_mime():
     _, mimetype, _ = _render_service.render_document("Test", "pdf", step_order=1)
     assert mimetype == "application/pdf"
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_filename_pattern():
     _, _, filename = _render_service.render_document("Test", "pdf", step_order=3)
     assert filename == "step_3_output.pdf"
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_markdown_headings_and_lists_as_readable_document():
     text = "# Titel\n\n## Sammanfattning\n\n- punkt ett\n- punkt två\n\n1. nästa steg"
 
@@ -66,6 +87,7 @@ def test_render_pdf_markdown_headings_and_lists_as_readable_document():
     assert "## Sammanfattning" not in page_text
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_markdown_table_outputs_cells_without_separator_row():
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
 
@@ -99,6 +121,7 @@ def test_markdown_blocks_normalize_common_markdown_control_syntax():
     ]
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_markdown_inline_syntax_as_readable_text():
     text = (
         "Medarbetarsamtal – Sammanfattning & Plan\n\n"
@@ -181,7 +204,9 @@ def test_markdown_blocks_preserve_inline_run_semantics():
 
 
 def test_render_docx_valid_blob():
-    blob, mimetype, filename = _render_service.render_document("Hello world", "docx", step_order=1)
+    blob, mimetype, filename = _render_service.render_document(
+        "Hello world", "docx", step_order=1
+    )
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     # DOCX is a ZIP file — starts with PK magic bytes
@@ -252,7 +277,9 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
 
 
 def test_render_docx_preserves_inline_bold_runs():
-    blob, _, _ = _render_service.render_document("**Medarbetare:** Leona", "docx", step_order=1)
+    blob, _, _ = _render_service.render_document(
+        "**Medarbetare:** Leona", "docx", step_order=1
+    )
 
     doc = Document(io.BytesIO(blob))
     paragraph = doc.paragraphs[0]
@@ -362,6 +389,7 @@ def test_render_structured_docx_table_cells_preserve_pipe_characters():
     assert doc.tables[0].cell(1, 0).text == "A | B"
 
 
+@requires_weasyprint_native_stack
 def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
     """PDF fallback tables should prefer readable wrapping over lossy truncation."""
     long_value = (
@@ -384,6 +412,7 @@ def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
     assert "token" in normalized_text
 
 
+@requires_weasyprint_native_stack
 def test_render_structured_pdf_table_repeats_headers_after_page_break():
     rows = [
         {
@@ -444,7 +473,7 @@ def test_pdf_renderer_uses_safe_semantic_weasyprint_options():
         pass
 
     with patch(
-        "intric.flows.runtime.document_rendering.weasyprint_renderer."
+        "eneo.flows.runtime.document_rendering.weasyprint_renderer."
         "_load_weasyprint_api",
         return_value=(_FakeHtml, _FakeCss, _FakeFontConfiguration),
     ):
@@ -688,7 +717,9 @@ def test_render_docx_very_long_output():
 def test_render_docx_still_works_when_package_default_template_is_missing():
     """Renderer should not depend on python-docx package template layout."""
     with patch("docx.api._default_docx_path", return_value="/tmp/missing-default.docx"):
-        blob, _, _ = _render_service.render_document("Fallback template test", "docx", step_order=1)
+        blob, _, _ = _render_service.render_document(
+            "Fallback template test", "docx", step_order=1
+        )
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
     assert "Fallback template test" in all_text
@@ -711,15 +742,19 @@ def test_render_unsupported_error_code():
 # --- Unicode rendering ---
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_unicode_characters():
     """Em-dash, Swedish chars, curly quotes must render without error."""
     text = "Em-dash \u2014 and Swedish: \u00e5\u00e4\u00f6 and curly \u201cquotes\u201d"
-    blob, mimetype, filename = _render_service.render_document(text, "pdf", step_order=1)
+    blob, mimetype, filename = _render_service.render_document(
+        text, "pdf", step_order=1
+    )
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     assert blob[:5] == b"%PDF-"
 
 
+@requires_weasyprint_native_stack
 def test_render_pdf_font_fallback():
     """System font fallback should keep Unicode PDF rendering available."""
     blob, _, _ = _render_service.render_document(

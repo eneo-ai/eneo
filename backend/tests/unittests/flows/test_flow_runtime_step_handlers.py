@@ -8,33 +8,33 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.principal_types import PrincipalType
-from intric.flows.domain.flow import FlowRun, FlowRunStatus
-from intric.flows.enums import FlowOutputMode
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.runtime.executor import FlowRunExecutor
-from intric.flows.runtime.models import (
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.enums import FlowOutputMode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.runtime.executor import FlowRunExecutor
+from eneo.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
     StepExecutionOutput,
     StepInputValue,
 )
-from intric.flows.runtime.step_execution_result import (
+from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
     WebhookPayloadRef,
 )
-from intric.flows.runtime.step_execution_runtime import (
+from eneo.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
 )
-from intric.flows.runtime.step_handlers import resolve_handler_mode
-from intric.flows.runtime.step_handlers.base import PreparedAssistantStep
-from intric.flows.runtime.step_handlers.http_post import HttpPostStepHandler
-from intric.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
-from intric.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
-from intric.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.runtime.step_handlers import resolve_handler_mode
+from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
+from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
+from eneo.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
+from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
+from eneo.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def _run() -> FlowRun:
@@ -219,7 +219,7 @@ async def test_pass_through_handler_wraps_completion_output(monkeypatch) -> None
     completion_output = _step_output()
     complete_step_execution = AsyncMock(return_value=completion_output)
     monkeypatch.setattr(
-        "intric.flows.runtime.step_handlers.pass_through.complete_step_execution",
+        "eneo.flows.runtime.step_handlers.pass_through.complete_step_execution",
         complete_step_execution,
     )
 
@@ -258,7 +258,7 @@ async def test_template_fill_handler_wraps_template_fill_output(monkeypatch) -> 
     template_output = _step_output()
     execute_template_fill_step = AsyncMock(return_value=template_output)
     monkeypatch.setattr(
-        "intric.flows.runtime.step_handlers.template_fill.execute_template_fill_step",
+        "eneo.flows.runtime.step_handlers.template_fill.execute_template_fill_step",
         execute_template_fill_step,
     )
 

@@ -13,10 +13,10 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.files.file_models import FilePublic
-from intric.flows.ai_builder.ai_builder_api_models import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.files.file_models import FilePublic
+from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
@@ -28,7 +28,7 @@ from intric.flows.ai_builder.ai_builder_api_models import (
     SessionModelsResponse,
     SessionPlansResponse,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     ConversationMessage,
@@ -38,20 +38,20 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import (
+from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderNotFoundException,
     AIBuilderUnauthorizedException,
 )
-from intric.flows.ai_builder.ai_builder_events import (
+from eneo.flows.ai_builder.ai_builder_events import (
     build_done_event,
     build_plan_event,
     build_status_event,
     build_text_event,
     build_usage_event,
 )
-from intric.flows.ai_builder.ai_builder_router import (
+from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderPublicErrorRoute,
     _authorize_ai_builder_request,
     apply_plan,
@@ -67,18 +67,19 @@ from intric.flows.ai_builder.ai_builder_router import (
     revise_plan,
     send_message,
 )
-from intric.flows.ai_builder.ai_builder_router import (
+from eneo.flows.ai_builder.ai_builder_router import (
     router as ai_builder_router,
 )
-from intric.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
-from intric.flows.flow_access_policy import FlowApiAction
-from intric.main.exceptions import (
+from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
+from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.main.exceptions import (
     BadRequestException,
     ErrorCodes,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
+from tests.unit.api_key_test_utils import flatten_routes
 
 
 def test_ai_builder_openapi_errors_reference_public_error_contract() -> None:
@@ -148,7 +149,7 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
         "category": "conflict",
         "message": "Another AI Builder message is already being processed.",
         "phase": "router",
-        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
         "request_id": "req-route",
         "diagnostic_context": {
             "request_id": "req-route",
@@ -166,7 +167,7 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
         "category": "bad_request",
         "message": "No planner output budget is configured.",
         "phase": "planner",
-        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
         "request_id": "req-planner",
         "diagnostic_context": {
             "request_id": "req-planner",
@@ -185,7 +186,7 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
         "category": "bad_request",
         "message": "minimum_conversation_budget_tokens must be an integer.",
         "phase": "router",
-        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
         "request_id": "req-settings",
         "diagnostic_context": {
             "request_id": "req-settings",
@@ -203,7 +204,7 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
         "category": "unauthorized",
         "message": "You do not have permission to use the AI builder in this space.",
         "phase": "router",
-        "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
+        "eneo_error_code": int(ErrorCodes.UNAUTHORIZED),
         "request_id": "req-forbidden",
         "diagnostic_context": {
             "request_id": "req-forbidden",
@@ -222,7 +223,7 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
         "category": "not_found",
         "message": "AI Builder resource not found.",
         "phase": "router",
-        "intric_error_code": int(ErrorCodes.NOT_FOUND),
+        "eneo_error_code": int(ErrorCodes.NOT_FOUND),
         "request_id": "req-missing",
         "diagnostic_context": {
             "request_id": "req-missing",
@@ -248,7 +249,7 @@ def test_ai_builder_route_class_logs_raw_public_exception_fallback(
 
     with caplog.at_level(
         logging.ERROR,
-        logger="intric.flows.ai_builder.ai_builder_router",
+        logger="eneo.flows.ai_builder.ai_builder_router",
     ):
         response = client.get("/raw", headers={"x-request-id": "req-raw"})
 
@@ -360,9 +361,9 @@ def _make_apply_plan_client(container: MagicMock) -> TestClient:
     async def override_container():
         return container
 
-    for route in app.routes:
+    for route in flatten_routes(list(app.routes)):
         if (
-            isinstance(route, APIRoute)
+            isinstance(route.route, APIRoute)
             and route.path == "/ai-builder/plans/{plan_id}/apply"
         ):
             for dependency in route.dependant.dependencies:
@@ -467,7 +468,7 @@ def _make_plan_domain(
     session_id=None,
     status=PlanStatus.APPROVED,
 ) -> BuilderPlan:
-    from intric.flows.flow_authoring_spec import (
+    from eneo.flows.flow_authoring_spec import (
         AssistantSpec,
         FlowDraftSpecCore,
         InputSource,
@@ -1762,9 +1763,7 @@ class TestSendMessageEndpoint:
         assert error_payload["code"] == "planner_stream_failed"
         assert error_payload["category"] == "internal"
         assert error_payload["phase"] == "planner"
-        assert error_payload["intric_error_code"] == int(
-            ErrorCodes.INTERNAL_SERVER_ERROR
-        )
+        assert error_payload["eneo_error_code"] == int(ErrorCodes.INTERNAL_SERVER_ERROR)
         assert error_payload["request_id"] == "req-stream-1"
         assert error_payload["diagnostic_context"] == {
             "session_id": str(session.id),
@@ -1809,7 +1808,7 @@ class TestSendMessageEndpoint:
         assert error_payload["code"] == "session_message_in_progress"
         assert error_payload["category"] == "conflict"
         assert error_payload["phase"] == "router"
-        assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
+        assert error_payload["eneo_error_code"] == int(ErrorCodes.BAD_REQUEST)
         assert "already being processed" in error_payload["message"]
         assert error_payload["request_id"] == "req-stream-busy"
         assert error_payload["diagnostic_context"] == {
@@ -1856,7 +1855,7 @@ class TestSendMessageEndpoint:
         assert error_payload["code"] == "planner_budget_missing"
         assert error_payload["category"] == "bad_request"
         assert error_payload["phase"] == "planner"
-        assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
+        assert error_payload["eneo_error_code"] == int(ErrorCodes.BAD_REQUEST)
         assert error_payload["details"] == {"budget_owner": "space"}
         assert error_payload["request_id"] == "req-stream-budget"
         assert error_payload["diagnostic_context"] == {
@@ -2105,7 +2104,7 @@ class TestApplyPlanEndpoint:
         assert payload["code"] == "stale_revision"
         assert payload["category"] == "conflict"
         assert payload["phase"] == "router"
-        assert payload["intric_error_code"] == ErrorCodes.BAD_REQUEST
+        assert payload["eneo_error_code"] == ErrorCodes.BAD_REQUEST
 
     @pytest.mark.anyio
     async def test_published_flow_apply_error_preserves_diagnostic_flow_and_details(

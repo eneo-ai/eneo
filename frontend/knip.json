@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignore": ["**/paraglide/**", "**/tests/**"],
-  "ignoreDependencies": ["@intric/icons.*", "prettier", "prettier-plugin-.*"],
+  "ignoreDependencies": ["@eneo/icons.*", "prettier", "prettier-plugin-.*"],
   "ignoreWorkspaces": ["apps/docs-site"],
   "rules": {
     "exports": "off",
@@ -18,7 +18,7 @@
     "packages/ui": {
       "ignore": ["src/icons/Icon.svelte"]
     },
-    "packages/intric-js": {
+    "packages/eneo-js": {
       "ignoreDependencies": ["openapi-typescript"]
     },
     "packages/eslint-plugin": {}

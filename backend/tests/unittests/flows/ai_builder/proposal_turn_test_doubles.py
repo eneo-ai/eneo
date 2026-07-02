@@ -7,20 +7,20 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     FlowBuilderProposalContent,
 )
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
+from eneo.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
-from intric.flows.ai_builder.ai_builder_proposal_submission import (
+from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
-from intric.flows.ai_builder.ai_builder_token_usage import (
+from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
     CompletionTokenUsage,
 )

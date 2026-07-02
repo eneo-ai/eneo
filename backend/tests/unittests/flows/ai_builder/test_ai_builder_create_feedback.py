@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_feedback import (
+from eneo.flows.ai_builder.ai_builder_create_feedback import (
     CREATE_CRITIC_REMEDIATION,
     CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS,
     format_create_critic_feedback,
     format_create_intent_quality_feedback,
     format_create_quality_feedback,
 )
-from intric.flows.ai_builder.ai_builder_critic_invariants import (
+from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
     CriticIssue,
 )

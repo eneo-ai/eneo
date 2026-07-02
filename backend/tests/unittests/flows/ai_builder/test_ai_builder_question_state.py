@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_question_state import (
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_question_state import (
     derive_asked_question_state,
     last_answered_question,
 )

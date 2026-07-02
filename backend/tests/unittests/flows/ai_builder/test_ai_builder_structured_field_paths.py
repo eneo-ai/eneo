@@ -1,5 +1,5 @@
-from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
-from intric.flows.ai_builder.ai_builder_structured_field_paths import (
+from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
 )
 

@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type { FlowRunContract, FlowRunContractTemplateReadiness } from "@intric/intric-js";
+import type { FlowRunContract, FlowRunContractTemplateReadiness } from "@eneo/eneo-js";
 
 import {
   buildFlowRunIntent,

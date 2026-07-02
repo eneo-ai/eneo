@@ -5,9 +5,9 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.sql.schema import Column
 
-from intric.database.tables.flow_tables import FlowStepAttempts, FlowStepResults
-from intric.flows.domain.flow import FlowStepAttempt, FlowStepResult
-from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
+from eneo.database.tables.flow_tables import FlowStepAttempts, FlowStepResults
+from eneo.flows.domain.flow import FlowStepAttempt, FlowStepResult
+from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 
 
 def _flow_step_result_payload() -> dict[str, object]:

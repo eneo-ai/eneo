@@ -1,5 +1,5 @@
 import { createClassContext } from "$lib/core/helpers/createClassContext";
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
 import {
   FlowAIBuilderDriver,
@@ -50,10 +50,10 @@ export class FlowAIBuilderService {
       (this.#state.session?.status === "applied" && this.#state.session?.flow_id !== null)
   );
 
-  constructor(intric: Intric, spaceId: string, flowId: string | null) {
+  constructor(eneo: Eneo, spaceId: string, flowId: string | null) {
     const transport: AIBuilderClientTransport = {
-      fetch: intric.client.fetch,
-      stream: intric.client.stream
+      fetch: eneo.client.fetch,
+      stream: eneo.client.stream
     };
     this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, (state) => {
       this.#stateVersion += 1;

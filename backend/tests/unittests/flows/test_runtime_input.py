@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.runtime_input import parse_runtime_input_config
-from intric.main.exceptions import BadRequestException
+from eneo.flows.runtime_input import parse_runtime_input_config
+from eneo.main.exceptions import BadRequestException
 
 
 def test_parse_runtime_input_config_accepts_valid_json_contract_values() -> None:

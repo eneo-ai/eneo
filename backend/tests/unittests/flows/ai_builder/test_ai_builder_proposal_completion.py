@@ -5,19 +5,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import TargetKind
-from intric.flows.ai_builder.ai_builder_litellm_completion import (
+from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest,
     forced_tool_choice,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 
 def _make_response_with_text(

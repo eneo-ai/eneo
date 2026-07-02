@@ -5,47 +5,47 @@ import importlib.util
 from pathlib import Path
 
 AI_BUILDER_MODELS_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_models")
+    ("eneo", "flows", "ai_builder", "ai_builder_models")
 )
 AI_BUILDER_DOMAIN_MODELS_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_domain_models")
+    ("eneo", "flows", "ai_builder", "ai_builder_domain_models")
 )
 AI_BUILDER_PROPOSAL_PROCESSOR_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_processor")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_processor")
 )
 BANNED_PROPOSAL_PROCESSOR_IMPORTS = frozenset(
     {AI_BUILDER_PROPOSAL_PROCESSOR_MODULE, "ai_builder_proposal_processor"}
 )
 PROPOSAL_TOOL_MODULES = (
-    Path("src/intric/flows/ai_builder/ai_builder_create_proposal.py"),
-    Path("src/intric/flows/ai_builder/ai_builder_edit_proposal.py"),
+    Path("src/eneo/flows/ai_builder/ai_builder_create_proposal.py"),
+    Path("src/eneo/flows/ai_builder/ai_builder_edit_proposal.py"),
 )
 PROPOSAL_PLAN_STORE_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_plan_store")
+    ("eneo", "flows", "ai_builder", "ai_builder_plan_store")
 )
 PROPOSAL_POLICY_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_policy")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_policy")
 )
 PROPOSAL_FINALIZATION_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_finalization")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_finalization")
 )
 PROPOSAL_REPAIR_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_repair")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_repair")
 )
 PROPOSAL_SUBMISSION_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_submission")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_submission")
 )
 SCOPED_PLAN_REVISION_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_scoped_plan_revision")
+    ("eneo", "flows", "ai_builder", "ai_builder_scoped_plan_revision")
 )
 PROPOSAL_TOOL_CONTRACTS_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_tool_contracts")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_tool_contracts")
 )
 BANNED_PROPOSAL_TOOL_IMPORT_MODULES = frozenset(
     {
         PROPOSAL_PLAN_STORE_MODULE,
-        "intric.flows.ai_builder.ai_builder_events",
-        "intric.flows.ai_builder.ai_builder_repo",
+        "eneo.flows.ai_builder.ai_builder_events",
+        "eneo.flows.ai_builder.ai_builder_repo",
     }
 )
 BANNED_PROPOSAL_TOOL_NAMES = frozenset(
@@ -72,7 +72,7 @@ PROCESSOR_FINALIZATION_METHODS = frozenset(
     }
 )
 BACKEND_QUESTION_PERSISTENCE_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_backend_question_persistence.py"
+    "src/eneo/flows/ai_builder/ai_builder_backend_question_persistence.py"
 )
 BACKEND_QUESTION_PERSISTENCE_PUBLIC_NAMES = frozenset(
     {
@@ -90,13 +90,13 @@ FINALIZATION_REQUEST_COMPLETION_FIELD_NAMES = frozenset(
     {"litellm_model", "litellm_kwargs", "max_output_tokens"}
 )
 OBSOLETE_MODEL_TOOL_RUNTIME_PATHS = (
-    Path("src/intric/flows/ai_builder/ai_builder_question_recovery.py"),
-    Path("src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"),
+    Path("src/eneo/flows/ai_builder/ai_builder_question_recovery.py"),
+    Path("src/eneo/flows/ai_builder/ai_builder_confirm_requirements.py"),
 )
 OBSOLETE_MODEL_TOOL_RUNTIME_MODULES = frozenset(
     {
-        "intric.flows.ai_builder.ai_builder_question_recovery",
-        "intric.flows.ai_builder.ai_builder_confirm_requirements",
+        "eneo.flows.ai_builder.ai_builder_question_recovery",
+        "eneo.flows.ai_builder.ai_builder_confirm_requirements",
     }
 )
 PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
@@ -134,10 +134,10 @@ PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
 )
 PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_MODULES = frozenset(
     {
-        "intric.flows.ai_builder.ai_builder_backend_question_persistence",
-        "intric.flows.ai_builder.ai_builder_discovery_runtime",
-        "intric.flows.ai_builder.ai_builder_requirements_state",
-        "intric.flows.ai_builder.ai_builder_tool_names",
+        "eneo.flows.ai_builder.ai_builder_backend_question_persistence",
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime",
+        "eneo.flows.ai_builder.ai_builder_requirements_state",
+        "eneo.flows.ai_builder.ai_builder_tool_names",
     }
 )
 PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_NAMES = frozenset(
@@ -174,12 +174,12 @@ LEGACY_SUBMISSION_TOOL_CONSTANTS = frozenset(
 )
 AI_BUILDER_TOOL_NAME_OWNERS = {
     "ASK_STRUCTURED_QUESTION_TOOL_NAME": Path(
-        "src/intric/flows/ai_builder/ai_builder_tool_names.py"
+        "src/eneo/flows/ai_builder/ai_builder_tool_names.py"
     ),
     "CONFIRM_REQUIREMENTS_TOOL_NAME": Path(
-        "src/intric/flows/ai_builder/ai_builder_tool_names.py"
+        "src/eneo/flows/ai_builder/ai_builder_tool_names.py"
     ),
-    "PROPOSE_FLOW_TOOL_NAME": Path("src/intric/flows/ai_builder/ai_builder_tools.py"),
+    "PROPOSE_FLOW_TOOL_NAME": Path("src/eneo/flows/ai_builder/ai_builder_tools.py"),
 }
 PRIVATE_TOOL_NAME_DUPLICATES = frozenset(
     f"_{name}" for name in AI_BUILDER_TOOL_NAME_OWNERS
@@ -225,74 +225,70 @@ PROPOSAL_TURN_TEST_DOUBLES_MODULE = Path(
     "tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
 )
 AI_BUILDER_PLANNER_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_planner")
+    ("eneo", "flows", "ai_builder", "ai_builder_planner")
 )
 SERVER_DECISION_DISPATCH_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_server_decision_dispatch")
+    ("eneo", "flows", "ai_builder", "ai_builder_server_decision_dispatch")
 )
 PLANNER_REQUEST_PREPARATION_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_planner_request_preparation")
+    ("eneo", "flows", "ai_builder", "ai_builder_planner_request_preparation")
 )
 PLANNER_FAILURE_EVENTS_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_planner_failure_events")
+    ("eneo", "flows", "ai_builder", "ai_builder_planner_failure_events")
 )
-SEND_LEASE_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_send_lease")
-)
+SEND_LEASE_MODULE = ".".join(("eneo", "flows", "ai_builder", "ai_builder_send_lease"))
 USER_QUESTION_METADATA_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_user_question_metadata")
+    ("eneo", "flows", "ai_builder", "ai_builder_user_question_metadata")
 )
 SERVER_DECISION_DISPATCH_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py"
+    "src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py"
 )
 PLANNER_REQUEST_PREPARATION_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
+    "src/eneo/flows/ai_builder/ai_builder_planner_request_preparation.py"
 )
 PLANNER_FAILURE_EVENTS_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_planner_failure_events.py"
+    "src/eneo/flows/ai_builder/ai_builder_planner_failure_events.py"
 )
-SEND_LEASE_PATH = Path("src/intric/flows/ai_builder/ai_builder_send_lease.py")
+SEND_LEASE_PATH = Path("src/eneo/flows/ai_builder/ai_builder_send_lease.py")
 USER_QUESTION_METADATA_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_user_question_metadata.py"
+    "src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py"
 )
-PLANNER_PATH = Path("src/intric/flows/ai_builder/ai_builder_planner.py")
+PLANNER_PATH = Path("src/eneo/flows/ai_builder/ai_builder_planner.py")
 PROPOSAL_INTENT_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_proposal_intent")
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_intent")
 )
-PROPOSAL_INTENT_PATH = Path("src/intric/flows/ai_builder/ai_builder_proposal_intent.py")
-CREATE_PROPOSAL_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_proposal.py")
+PROPOSAL_INTENT_PATH = Path("src/eneo/flows/ai_builder/ai_builder_proposal_intent.py")
+CREATE_PROPOSAL_PATH = Path("src/eneo/flows/ai_builder/ai_builder_create_proposal.py")
 SCOPED_PLAN_REVISION_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py"
+    "src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py"
 )
-CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compiler.py")
+CREATE_COMPILER_PATH = Path("src/eneo/flows/ai_builder/ai_builder_create_compiler.py")
 CREATE_COMPILER_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_create_compiler")
+    ("eneo", "flows", "ai_builder", "ai_builder_create_compiler")
 )
-EDIT_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_compiler.py")
+EDIT_COMPILER_PATH = Path("src/eneo/flows/ai_builder/ai_builder_edit_compiler.py")
 EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES = frozenset[int]()
 AUTHORING_PROJECTION_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_authoring_projection")
+    ("eneo", "flows", "ai_builder", "ai_builder_authoring_projection")
 )
 FLOW_AUTHORING_SNAPSHOT_MODULE = ".".join(
-    ("intric", "flows", "application", "flow_authoring_snapshot")
+    ("eneo", "flows", "application", "flow_authoring_snapshot")
 )
 NEW_STEP_COMPILER_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_new_step_compiler")
+    ("eneo", "flows", "ai_builder", "ai_builder_new_step_compiler")
 )
 RUNTIME_INPUT_FIELDS_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_runtime_input_fields")
+    ("eneo", "flows", "ai_builder", "ai_builder_runtime_input_fields")
 )
 REPAIR_TRANSPORT_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_repair_transport")
+    ("eneo", "flows", "ai_builder", "ai_builder_repair_transport")
 )
-REPAIR_TRANSPORT_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_repair_transport.py"
-)
+REPAIR_TRANSPORT_PATH = Path("src/eneo/flows/ai_builder/ai_builder_repair_transport.py")
 TOOL_TURN_PERSISTENCE_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_tool_turn_persistence")
+    ("eneo", "flows", "ai_builder", "ai_builder_tool_turn_persistence")
 )
 TOOL_TURN_PERSISTENCE_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_tool_turn_persistence.py"
+    "src/eneo/flows/ai_builder/ai_builder_tool_turn_persistence.py"
 )
 CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
@@ -360,8 +356,8 @@ PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
         "pytest",
         "types",
         "unittest.mock",
-        "intric.flows.ai_builder.ai_builder_proposal_processor",
-        "intric.flows.ai_builder.ai_builder_proposal_submission",
+        "eneo.flows.ai_builder.ai_builder_proposal_processor",
+        "eneo.flows.ai_builder.ai_builder_proposal_submission",
     }
 )
 PURE_PROPOSAL_TURN_BUILDER_BANNED_NAMES = frozenset(
@@ -466,7 +462,7 @@ def test_plan_store_does_not_import_proposal_policy_or_own_feedback_formatting()
     None
 ):
     backend_root = Path(__file__).resolve().parents[4]
-    path = backend_root / Path("src/intric/flows/ai_builder/ai_builder_plan_store.py")
+    path = backend_root / Path("src/eneo/flows/ai_builder/ai_builder_plan_store.py")
     tree = ast.parse(path.read_text(), filename=str(path))
     violations: list[str] = []
 
@@ -489,19 +485,18 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
     assert finalization_spec is not None
 
     finalization_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_finalization.py"
     )
     processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
     )
     contracts_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
     )
     critic_paths = (
         backend_root
-        / Path("src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"),
-        backend_root
-        / Path("src/intric/flows/ai_builder/ai_builder_create_feedback.py"),
+        / Path("src/eneo/flows/ai_builder/ai_builder_plan_quality_critic.py"),
+        backend_root / Path("src/eneo/flows/ai_builder/ai_builder_create_feedback.py"),
     )
 
     finalization_tree = ast.parse(
@@ -557,8 +552,8 @@ def test_backend_question_persistence_has_no_discovery_runtime_owner() -> None:
 
     for module in _imported_modules(persistence_tree):
         if module in {
-            "intric.flows.ai_builder.ai_builder_discovery_runtime",
-            "intric.flows.ai_builder.ai_builder_slot_classifier",
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime",
+            "eneo.flows.ai_builder.ai_builder_slot_classifier",
         }:
             violations.append(f"{persistence_path}: imports {module}")
 
@@ -591,16 +586,14 @@ def test_backend_question_persistence_has_no_discovery_runtime_owner() -> None:
 def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     discovery_models_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_discovery_models.py"
+        "src/eneo/flows/ai_builder/ai_builder_discovery_models.py"
     )
-    events_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_events.py"
-    )
+    events_path = backend_root / Path("src/eneo/flows/ai_builder/ai_builder_events.py")
     mcp_intent_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+        "src/eneo/flows/ai_builder/ai_builder_mcp_intent.py"
     )
     conversation_metadata_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_conversation_metadata.py"
+        "src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py"
     )
     dispatch_path = backend_root / SERVER_DECISION_DISPATCH_PATH
     violations: list[str] = []
@@ -711,7 +704,7 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
 def test_compiled_proposal_finalization_has_no_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     finalization_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_finalization.py"
     )
     finalization_tree = ast.parse(
         finalization_path.read_text(), filename=str(finalization_path)
@@ -752,7 +745,7 @@ def test_compiled_proposal_finalization_has_no_completion_boundary() -> None:
 def test_proposal_processor_no_longer_owns_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
     )
     processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
 
@@ -782,13 +775,13 @@ def test_proposal_processor_no_longer_owns_completion_boundary() -> None:
 def test_litellm_completion_has_single_typed_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
+        "src/eneo/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     old_completion_paths = (
         backend_root
-        / Path("src/intric/flows/ai_builder/ai_builder_proposal_completion.py"),
+        / Path("src/eneo/flows/ai_builder/ai_builder_proposal_completion.py"),
         backend_root
-        / Path("src/intric/flows/ai_builder/ai_builder_planner_completion.py"),
+        / Path("src/eneo/flows/ai_builder/ai_builder_planner_completion.py"),
     )
     completion_text = completion_path.read_text()
     completion_tree = ast.parse(completion_text, filename=str(completion_path))
@@ -826,10 +819,10 @@ def test_litellm_completion_has_single_typed_completion_boundary() -> None:
 def test_litellm_completion_dependency_direction_stays_leaf_owned() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
+        "src/eneo/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     telemetry_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_telemetry.py"
     )
     completion_tree = ast.parse(
         completion_path.read_text(), filename=str(completion_path)
@@ -841,15 +834,15 @@ def test_litellm_completion_dependency_direction_stays_leaf_owned() -> None:
         if not isinstance(node, ast.ImportFrom):
             continue
         if node.module in {
-            "intric.flows.ai_builder.ai_builder_proposal_processor",
-            "intric.flows.ai_builder.ai_builder_planner",
+            "eneo.flows.ai_builder.ai_builder_proposal_processor",
+            "eneo.flows.ai_builder.ai_builder_planner",
         }:
             violations.append(f"{completion_path}:{node.lineno} imports {node.module}")
 
     for node in ast.walk(telemetry_tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if node.module == "intric.flows.ai_builder.ai_builder_litellm_completion":
+        if node.module == "eneo.flows.ai_builder.ai_builder_litellm_completion":
             violations.append(f"{telemetry_path}:{node.lineno} imports {node.module}")
 
     assert violations == []
@@ -862,7 +855,7 @@ def _assignment_target_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
 
 def test_ai_builder_tool_names_have_single_owners() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    src_root = backend_root / Path("src/intric/flows/ai_builder")
+    src_root = backend_root / Path("src/eneo/flows/ai_builder")
     violations: list[str] = []
     owner_definitions: dict[str, list[str]] = {
         name: [] for name in AI_BUILDER_TOOL_NAME_OWNERS
@@ -912,11 +905,11 @@ def test_ai_builder_tool_names_have_single_owners() -> None:
 def test_obsolete_model_visible_ask_confirm_runtime_is_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
     )
-    tools_path = backend_root / Path("src/intric/flows/ai_builder/ai_builder_tools.py")
+    tools_path = backend_root / Path("src/eneo/flows/ai_builder/ai_builder_tools.py")
     parsing_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_tool_parsing.py"
+        "src/eneo/flows/ai_builder/ai_builder_tool_parsing.py"
     )
     processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
     tools_tree = ast.parse(tools_path.read_text(), filename=str(tools_path))
@@ -978,7 +971,7 @@ def test_obsolete_model_visible_ask_confirm_runtime_is_deleted() -> None:
         *obsolete_parser_functions,
         *obsolete_tool_functions,
     }
-    source_root = backend_root / "src/intric/flows/ai_builder"
+    source_root = backend_root / "src/eneo/flows/ai_builder"
     for path in source_root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
@@ -997,17 +990,16 @@ def test_obsolete_model_visible_ask_confirm_runtime_is_deleted() -> None:
 def test_proposal_completion_has_single_request_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     contracts_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
     )
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
+        "src/eneo/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     submission_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_submission.py"
     )
     proposal_callers = [
-        backend_root
-        / Path("src/intric/flows/ai_builder/ai_builder_proposal_repair.py"),
+        backend_root / Path("src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"),
         submission_path,
     ]
     contracts_tree = ast.parse(contracts_path.read_text(), filename=str(contracts_path))
@@ -1086,7 +1078,9 @@ def test_edit_compiler_consumes_ordered_proposals_without_operation_ir() -> None
         violations.append(
             f"{edit_compiler_path}: missing compile_ordered_edit_proposal import"
         )
-    proposal_intent_imports = imported_names_by_module.get(PROPOSAL_INTENT_MODULE, set())
+    proposal_intent_imports = imported_names_by_module.get(
+        PROPOSAL_INTENT_MODULE, set()
+    )
     if "OrderedEditProposal" not in proposal_intent_imports:
         violations.append(
             f"{edit_compiler_path}: missing model-facing OrderedEditProposal import"
@@ -1158,11 +1152,11 @@ def test_edit_compiler_consumes_ordered_proposals_without_operation_ir() -> None
 def test_old_edit_operation_ir_files_are_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     deleted_paths = (
-        Path("src/intric/flows/ai_builder/ai_builder_edit_models.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_edit_normalizer.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_edit_validator.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_edit_mechanics.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_edit_effective_steps.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_edit_models.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_edit_normalizer.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_edit_validator.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_edit_mechanics.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_edit_effective_steps.py"),
     )
     violations = [str(path) for path in deleted_paths if (backend_root / path).exists()]
 
@@ -1172,19 +1166,19 @@ def test_old_edit_operation_ir_files_are_deleted() -> None:
 def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
+        "src/eneo/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     completion_tree = ast.parse(
         completion_path.read_text(), filename=str(completion_path)
     )
     violations: list[str] = []
     deleted_paths = (
-        Path("src/intric/flows/ai_builder/ai_builder_repair.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_structured_turn.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_planner_turn.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_orchestrator.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_response_format.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_repair.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_orchestration_pipeline.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_structured_turn.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_planner_turn.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_orchestrator.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_response_format.py"),
     )
     for path in deleted_paths:
         if (backend_root / path).exists():
@@ -1201,11 +1195,11 @@ def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
 
     completion_imports = _imported_modules(completion_tree)
     banned_imports = {
-        "intric.flows.ai_builder.ai_builder_repair",
-        "intric.flows.ai_builder.ai_builder_orchestration_pipeline",
-        "intric.flows.ai_builder.ai_builder_planner_turn",
-        "intric.flows.ai_builder.ai_builder_router",
-        "intric.flows.ai_builder.ai_builder_api_models",
+        "eneo.flows.ai_builder.ai_builder_repair",
+        "eneo.flows.ai_builder.ai_builder_orchestration_pipeline",
+        "eneo.flows.ai_builder.ai_builder_planner_turn",
+        "eneo.flows.ai_builder.ai_builder_router",
+        "eneo.flows.ai_builder.ai_builder_api_models",
     }
     for module in sorted(completion_imports & banned_imports):
         violations.append(f"{completion_path}: imports {module}")
@@ -1216,7 +1210,7 @@ def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
 def test_proposal_repair_has_typed_result_projection() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     repair_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
     )
     repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
     violations: list[str] = []
@@ -1270,7 +1264,7 @@ def test_proposal_repair_has_typed_result_projection() -> None:
 
 def test_stream_events_have_single_wire_encoder_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    source_root = backend_root / Path("src/intric/flows/ai_builder")
+    source_root = backend_root / Path("src/eneo/flows/ai_builder")
     encoder_path = source_root / "ai_builder_events.py"
     violations: list[str] = []
     raw_event_literals: list[str] = []
@@ -1314,13 +1308,13 @@ def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers()
 ):
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
     )
     repair_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
     )
     runtime_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
     )
     assert not runtime_path.exists()
     assert importlib.util.find_spec(PROPOSAL_REPAIR_MODULE) is not None
@@ -1334,7 +1328,7 @@ def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers()
         if isinstance(node, ast.ImportFrom) and node.module:
             if (
                 node.module
-                == "intric.flows.ai_builder.ai_builder_proposal_tool_contracts"
+                == "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts"
             ):
                 for alias in node.names:
                     if alias.name == "ProposalCompletionRequest":
@@ -1396,16 +1390,16 @@ def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers()
 def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
     )
     submission_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_submission.py"
     )
     repair_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
     )
     architecture_errors_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_architecture_errors.py"
+        "src/eneo/flows/ai_builder/ai_builder_architecture_errors.py"
     )
     assert importlib.util.find_spec(PROPOSAL_SUBMISSION_MODULE) is not None
 
@@ -1618,19 +1612,21 @@ def test_scoped_plan_revision_owns_direct_revision_without_llm_or_repair() -> No
     scoped_path = backend_root / SCOPED_PLAN_REVISION_PATH
     create_path = backend_root / CREATE_PROPOSAL_PATH
     submission_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_submission.py"
     )
     assert importlib.util.find_spec(SCOPED_PLAN_REVISION_MODULE) is not None
 
     scoped_text = scoped_path.read_text()
     scoped_tree = ast.parse(scoped_text, filename=str(scoped_path))
     create_tree = ast.parse(create_path.read_text(), filename=str(create_path))
-    submission_tree = ast.parse(submission_path.read_text(), filename=str(submission_path))
+    submission_tree = ast.parse(
+        submission_path.read_text(), filename=str(submission_path)
+    )
     violations: list[str] = []
 
     forbidden_scoped_modules = {
-        "intric.flows.ai_builder.ai_builder_litellm_completion",
-        "intric.flows.ai_builder.ai_builder_proposal_repair",
+        "eneo.flows.ai_builder.ai_builder_litellm_completion",
+        "eneo.flows.ai_builder.ai_builder_proposal_repair",
     }
     for module in _imported_modules(scoped_tree):
         if module in forbidden_scoped_modules:
@@ -1848,9 +1844,9 @@ def test_server_decision_dispatch_has_canonical_owner() -> None:
     if not dispatch_path.is_file():
         violations.append(f"{dispatch_path}: missing server decision owner module")
     deleted_paths = (
-        Path("src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"),
-        Path("src/intric/flows/ai_builder/ai_builder_dispatcher.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_accepted_action_rendering.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_planner_action_dispatch.py"),
+        Path("src/eneo/flows/ai_builder/ai_builder_dispatcher.py"),
     )
     for path in deleted_paths:
         if (backend_root / path).exists():
@@ -1898,7 +1894,7 @@ def test_server_decision_dispatch_has_canonical_owner() -> None:
             if module in {
                 AI_BUILDER_PLANNER_MODULE,
                 AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
-                "intric.flows.ai_builder.ai_builder_orchestrator",
+                "eneo.flows.ai_builder.ai_builder_orchestrator",
             }:
                 violations.append(f"{dispatch_path}: imports {module}")
         for node in ast.walk(dispatch_tree):
@@ -1931,7 +1927,9 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
     if importlib.util.find_spec(SEND_LEASE_MODULE) is None:
         violations.append(f"{send_lease_path}: missing send lease owner module")
     if importlib.util.find_spec(USER_QUESTION_METADATA_MODULE) is None:
-        violations.append(f"{metadata_path}: missing user question metadata owner module")
+        violations.append(
+            f"{metadata_path}: missing user question metadata owner module"
+        )
 
     planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
     planner_class = next(
@@ -1980,7 +1978,7 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
                 AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
                 SERVER_DECISION_DISPATCH_MODULE,
                 USER_QUESTION_METADATA_MODULE,
-                "intric.flows.ai_builder.ai_builder_litellm_completion",
+                "eneo.flows.ai_builder.ai_builder_litellm_completion",
             }:
                 violations.append(f"{send_lease_path}: imports {module}")
         for node in ast.walk(send_lease_tree):
@@ -1988,7 +1986,9 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
                 violations.append(f"{send_lease_path}:{node.lineno} references Any")
 
     if metadata_path.is_file():
-        metadata_tree = ast.parse(metadata_path.read_text(), filename=str(metadata_path))
+        metadata_tree = ast.parse(
+            metadata_path.read_text(), filename=str(metadata_path)
+        )
         public_names = _top_level_public_names(metadata_tree)
         if public_names != USER_QUESTION_METADATA_PUBLIC_NAMES:
             violations.append(f"{metadata_path}: public names {sorted(public_names)}")
@@ -1998,8 +1998,8 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
                 AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
                 SERVER_DECISION_DISPATCH_MODULE,
                 SEND_LEASE_MODULE,
-                "intric.flows.ai_builder.ai_builder_repo",
-                "intric.flows.ai_builder.ai_builder_litellm_completion",
+                "eneo.flows.ai_builder.ai_builder_repo",
+                "eneo.flows.ai_builder.ai_builder_litellm_completion",
             }:
                 violations.append(f"{metadata_path}: imports {module}")
         for node in ast.walk(metadata_tree):
@@ -2044,7 +2044,7 @@ def test_planner_request_preparation_has_canonical_owner() -> None:
         if helper_name in _top_level_names(planner_tree):
             violations.append(f"{planner_path}: defines {helper_name}")
     for module in _imported_modules(planner_tree):
-        if module == "intric.flows.ai_builder.ai_builder_discovery_runtime":
+        if module == "eneo.flows.ai_builder.ai_builder_discovery_runtime":
             violations.append(f"{planner_path}: imports {module}")
 
     if preparation_path.is_file():
@@ -2314,7 +2314,7 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
     repair_transport_path = backend_root / REPAIR_TRANSPORT_PATH
     persistence_path = backend_root / TOOL_TURN_PERSISTENCE_PATH
     proposal_repair_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
     )
     violations: list[str] = []
 
@@ -2387,13 +2387,11 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
 def test_forced_proposal_tool_choice_has_single_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     contracts_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
     )
-    ai_builder_source_root = backend_root / Path("src/intric/flows/ai_builder")
+    ai_builder_source_root = backend_root / Path("src/eneo/flows/ai_builder")
     duplicate_paths = [
-        path
-        for path in ai_builder_source_root.rglob("*.py")
-        if path != contracts_path
+        path for path in ai_builder_source_root.rglob("*.py") if path != contracts_path
     ]
     violations: list[str] = []
 
@@ -2444,7 +2442,7 @@ def _is_forced_tool_choice_literal(node: ast.AST) -> bool:
 
 def test_tool_call_argument_json_parsing_has_single_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    source_root = backend_root / "src/intric/flows/ai_builder"
+    source_root = backend_root / "src/eneo/flows/ai_builder"
 
     violations: list[str] = []
     for path in source_root.rglob("*.py"):
@@ -2462,7 +2460,7 @@ def test_tool_call_argument_json_parsing_has_single_owner() -> None:
 def test_normalized_tool_calls_are_not_runtime_probed() -> None:
     violations: list[str] = []
     for path in _python_files():
-        if "src/intric/flows/ai_builder" not in path.as_posix():
+        if "src/eneo/flows/ai_builder" not in path.as_posix():
             continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):

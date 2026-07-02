@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.published_definition import (
+from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     PublishedTemplateReferenceUndeterminedReason,
     scan_published_template_references,

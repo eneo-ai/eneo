@@ -6,12 +6,12 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 
-from intric.authentication.principal_types import PrincipalType
-from intric.database.database import sessionmanager
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import FlowRuntimeUploadedFiles, Flows
-from intric.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
-from intric.flows.principal import FlowPrincipal
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.database import sessionmanager
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import FlowRuntimeUploadedFiles, Flows
+from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from eneo.flows.principal import FlowPrincipal
 
 
 async def _create_runtime_upload(

@@ -1,4 +1,4 @@
-import type { FlowStep } from "@intric/intric-js";
+import type { FlowStep } from "@eneo/eneo-js";
 
 type InputType = FlowStep["input_type"];
 type InputSource = FlowStep["input_source"];
@@ -28,22 +28,14 @@ export type SelectableInputSourceOption = {
   legacyInvalid: boolean;
 };
 
-const INPUT_TYPE_ORDER: InputType[] = [
-  "text",
-  "json",
-  "document",
-  "file",
-  "image",
-  "audio",
-  "any",
-];
+const INPUT_TYPE_ORDER: InputType[] = ["text", "json", "document", "file", "image", "audio", "any"];
 
 const INPUT_SOURCE_ORDER: InputSource[] = [
   "flow_input",
   "previous_step",
   "all_previous_steps",
   "http_get",
-  "http_post",
+  "http_post"
 ];
 
 const ADVANCED_ONLY_INPUT_TYPES = new Set<InputType>(["file", "any"]);
@@ -53,12 +45,20 @@ const COMPATIBLE_COERCIONS: Record<OutputType, InputType[]> = {
   text: ["text", "json", "any"],
   json: ["text", "json", "any"],
   pdf: ["text", "any"],
-  docx: ["text", "any"],
+  docx: ["text", "any"]
 };
 
 export function mapOutputToInputType(outputType?: OutputType): InputType {
   if (!outputType) return "text";
-  const validInputTypes = new Set<InputType>(["text", "json", "image", "audio", "document", "file", "any"]);
+  const validInputTypes = new Set<InputType>([
+    "text",
+    "json",
+    "image",
+    "audio",
+    "document",
+    "file",
+    "any"
+  ]);
   return validInputTypes.has(outputType as InputType) ? (outputType as InputType) : "text";
 }
 
@@ -68,7 +68,7 @@ export function hasOutboundDeliveryOutputMode(outputMode: OutputMode): boolean {
 
 export function getValidInputTypes(
   inputSource: InputSource,
-  previousOutputType?: OutputType,
+  previousOutputType?: OutputType
 ): InputType[] {
   switch (inputSource) {
     case "flow_input":
@@ -79,7 +79,9 @@ export function getValidInputTypes(
     case "http_post":
       return ["text", "json", "any"];
     case "previous_step":
-      return previousOutputType ? [...(COMPATIBLE_COERCIONS[previousOutputType] ?? ["text", "any"])] : ["text", "any"];
+      return previousOutputType
+        ? [...(COMPATIBLE_COERCIONS[previousOutputType] ?? ["text", "any"])]
+        : ["text", "any"];
     default:
       return ["text"];
   }
@@ -102,15 +104,13 @@ export function getSelectableInputSourceOptions(params: {
 }): SelectableInputSourceOption[] {
   const { steps, stepOrder, currentInputSource } = params;
   const visible = getValidInputSources({ steps, stepOrder });
-  let options = INPUT_SOURCE_ORDER
-    .filter((value) => visible.includes(value))
-    .map((value) => ({ value, legacyInvalid: false }));
+  let options = INPUT_SOURCE_ORDER.filter((value) => visible.includes(value)).map((value) => ({
+    value,
+    legacyInvalid: false
+  }));
 
   if (currentInputSource && !options.some((option) => option.value === currentInputSource)) {
-    options = [
-      { value: currentInputSource, legacyInvalid: true },
-      ...options,
-    ];
+    options = [{ value: currentInputSource, legacyInvalid: true }, ...options];
   }
 
   return options;
@@ -144,7 +144,7 @@ export function getSelectableInputTypeOptions(params: {
   let options = visible.map((value) => ({
     value,
     disabled: value === "image",
-    legacyInvalid: false,
+    legacyInvalid: false
   }));
 
   if (currentInputType && !options.some((option) => option.value === currentInputType)) {
@@ -152,21 +152,21 @@ export function getSelectableInputTypeOptions(params: {
     if (currentIsValid) {
       const merged = insertInCanonicalOrder(
         options.map((option) => option.value),
-        currentInputType,
+        currentInputType
       );
       options = merged.map((value) => ({
         value,
         disabled: value === "image",
-        legacyInvalid: false,
+        legacyInvalid: false
       }));
     } else {
       options = [
         {
           value: currentInputType,
           disabled: false,
-          legacyInvalid: true,
+          legacyInvalid: true
         },
-        ...options,
+        ...options
       ];
     }
   }
@@ -181,7 +181,7 @@ export function getPreferredInputType(params: {
 }): InputType {
   const [firstOption] = getSelectableInputTypeOptions({
     ...params,
-    currentInputType: undefined,
+    currentInputType: undefined
   }).filter((option) => !option.disabled);
   return firstOption?.value ?? "text";
 }
@@ -197,7 +197,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
     issues.push({
       code: "typed_io_duplicate_step_order",
       field: "step_order",
-      stepOrder: stepOrders[0] ?? 1,
+      stepOrder: stepOrders[0] ?? 1
     });
     return issues;
   }
@@ -207,7 +207,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
     issues.push({
       code: "typed_io_non_contiguous_step_order",
       field: "step_order",
-      stepOrder: stepOrders.find((stepOrder, index) => stepOrder !== expectedOrders[index]) ?? 1,
+      stepOrder: stepOrders.find((stepOrder, index) => stepOrder !== expectedOrders[index]) ?? 1
     });
     return issues;
   }
@@ -218,22 +218,25 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
     issues.push({
       code: "typed_io_multiple_flow_input_steps",
       field: "input_source",
-      stepOrder: flowInputSteps[1].step_order,
+      stepOrder: flowInputSteps[1].step_order
     });
   } else if (flowInputSteps.length === 1 && flowInputSteps[0].step_order !== 1) {
     issues.push({
       code: "typed_io_flow_input_position_invalid",
       field: "input_source",
-      stepOrder: flowInputSteps[0].step_order,
+      stepOrder: flowInputSteps[0].step_order
     });
   }
 
   for (const step of sortedSteps) {
-    if (step.step_order === 1 && (step.input_source === "previous_step" || step.input_source === "all_previous_steps")) {
+    if (
+      step.step_order === 1 &&
+      (step.input_source === "previous_step" || step.input_source === "all_previous_steps")
+    ) {
       issues.push({
         code: "typed_io_invalid_input_source_position",
         field: "input_source",
-        stepOrder: step.step_order,
+        stepOrder: step.step_order
       });
       continue;
     }
@@ -242,7 +245,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       issues.push({
         code: "typed_io_unsupported_type",
         field: "input_type",
-        stepOrder: step.step_order,
+        stepOrder: step.step_order
       });
       continue;
     }
@@ -251,7 +254,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       issues.push({
         code: "typed_io_document_source_unsupported",
         field: "input_type",
-        stepOrder: step.step_order,
+        stepOrder: step.step_order
       });
       continue;
     }
@@ -260,7 +263,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       issues.push({
         code: "typed_io_audio_source_unsupported",
         field: "input_type",
-        stepOrder: step.step_order,
+        stepOrder: step.step_order
       });
       continue;
     }
@@ -269,7 +272,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       issues.push({
         code: "typed_io_file_source_unsupported",
         field: "input_type",
-        stepOrder: step.step_order,
+        stepOrder: step.step_order
       });
       continue;
     }
@@ -278,7 +281,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       issues.push({
         code: "typed_io_invalid_input_source_combination",
         field: "input_type",
-        stepOrder: step.step_order,
+        stepOrder: step.step_order
       });
       continue;
     }
@@ -289,7 +292,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
         issues.push({
           code: "typed_io_missing_previous_step",
           field: "input_source",
-          stepOrder: step.step_order,
+          stepOrder: step.step_order
         });
         continue;
       }
@@ -299,7 +302,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
           code: "typed_io_incompatible_type_chain",
           field: "input_type",
           stepOrder: step.step_order,
-          previousOutputType: previousStep.output_type,
+          previousOutputType: previousStep.output_type
         });
       }
     }

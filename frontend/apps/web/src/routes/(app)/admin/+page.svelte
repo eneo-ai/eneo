@@ -6,15 +6,15 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout/index.js";
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   import { getAppContext } from "$lib/core/AppContext.js";
-  import { getIntric } from "$lib/core/Intric.js";
+  import { getEneo } from "$lib/core/Eneo.js";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
   import { resolve } from "$app/paths";
 
   const { tenant, updateTenant } = getAppContext();
-  const intric = getIntric();
+  const eneo = getEneo();
   let { data } = $props();
 
   // Initialize from server data, re-sync after invalidateAll() refreshes props
@@ -38,7 +38,7 @@
     usingTemplates = next; // Optimistic UI update
 
     try {
-      const updatedSettings = await intric.settings.updateTemplates(next);
+      const updatedSettings = await eneo.settings.updateTemplates(next);
       console.log(`[Admin] Backend returned using_templates:`, updatedSettings.using_templates);
 
       // Update from server response
@@ -63,7 +63,7 @@
     auditLoggingEnabled = next; // Optimistic UI update
 
     try {
-      const updatedSettings = await intric.settings.updateAuditLogging(next);
+      const updatedSettings = await eneo.settings.updateAuditLogging(next);
       console.log(
         `[Admin] Backend returned audit_logging_enabled:`,
         updatedSettings.audit_logging_enabled
@@ -91,7 +91,7 @@
     provisioningEnabled = next; // Optimistic UI update
 
     try {
-      const updatedSettings = await intric.settings.updateProvisioning(next);
+      const updatedSettings = await eneo.settings.updateProvisioning(next);
       console.log(`[Admin] Backend returned provisioning:`, updatedSettings.provisioning);
 
       // Update from server response
@@ -111,7 +111,7 @@
     showModelPricing = next; // Optimistic UI update
 
     try {
-      const updated = await intric.settings.updateModelPricingVisibility(next);
+      const updated = await eneo.settings.updateModelPricingVisibility(next);
       showModelPricing = updated.show_model_pricing;
       updateTenant({ show_model_pricing: updated.show_model_pricing });
       await invalidateAll();

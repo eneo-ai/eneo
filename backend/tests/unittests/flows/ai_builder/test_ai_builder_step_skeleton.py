@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_compiler import (
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
 )
-from intric.flows.ai_builder.ai_builder_proposal_intent import (
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
-from intric.flows.ai_builder.ai_builder_step_skeleton import (
+from eneo.flows.ai_builder.ai_builder_step_skeleton import (
     _LEGAL_STEP_SKELETON_POLICIES,
     StepSkeleton,
     StepSkeletonSemanticContent,
     default_structured_output_fields,
     materialize_step_skeleton,
 )
-from intric.flows.ai_builder.pattern_registry import (
+from eneo.flows.ai_builder.pattern_registry import (
     ANALYSIS_OR_QUALITY_REVIEW_STEP,
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
@@ -25,7 +25,7 @@ from intric.flows.ai_builder.pattern_registry import (
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,

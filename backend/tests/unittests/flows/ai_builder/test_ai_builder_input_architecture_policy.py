@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 

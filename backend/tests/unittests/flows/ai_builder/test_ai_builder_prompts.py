@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
-from intric.flows.ai_builder.ai_builder_edit_scope import (
+from eneo.flows.ai_builder.ai_builder_edit_scope import (
     EditScopeResolution,
 )
-from intric.flows.ai_builder.ai_builder_prompts import (
+from eneo.flows.ai_builder.ai_builder_prompts import (
     build_flow_context,
     build_plan_summary,
     build_step_ref_mapping,
     trim_conversation_for_context,
 )
-from intric.flows.assistant_authoring_snapshot import (
+from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
-from intric.flows.domain.flow import Flow, FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,

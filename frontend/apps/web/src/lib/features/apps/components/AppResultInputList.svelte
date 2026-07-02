@@ -1,7 +1,7 @@
 <script lang="ts">
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
-  import { IconFileText } from "@intric/icons/file-text";
-  import type { AppRun } from "@intric/intric-js";
+  import { IconFileText } from "@eneo/icons/file-text";
+  import type { AppRun } from "@eneo/eneo-js";
   export let run: Pick<AppRun, "input">;
   import { m } from "$lib/paraglide/messages";
 </script>

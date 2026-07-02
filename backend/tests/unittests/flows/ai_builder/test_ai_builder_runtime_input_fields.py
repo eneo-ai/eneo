@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     BASIC_CASE_METADATA,
     DETAILED_CASE_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
@@ -12,7 +12,7 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_input_fields_declared_absent,
     runtime_metadata_allows_input_fields,
 )
-from intric.flows.ai_builder.question_catalog import legal_slot_values
+from eneo.flows.ai_builder.question_catalog import legal_slot_values
 
 
 def test_runtime_metadata_state_constants_match_question_catalog() -> None:

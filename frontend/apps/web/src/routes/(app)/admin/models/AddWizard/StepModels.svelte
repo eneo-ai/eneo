@@ -14,7 +14,7 @@
   import { ArrowLeft, TriangleAlert } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
 
   import {
     formatProviderLabel,
@@ -66,7 +66,7 @@
     onSkip: () => void;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Draft state -------------------------------------------------------
 
@@ -108,7 +108,7 @@
     liveLoadedFor = requested;
     liveModels = [];
     liveModelsError = null;
-    void loadLiveModels(intric, providerId, modelType).then((result) => {
+    void loadLiveModels(eneo, providerId, modelType).then((result) => {
       // Drop stale responses if the user has since switched provider/mode.
       if (
         liveLoadedFor?.providerId !== requested.providerId ||

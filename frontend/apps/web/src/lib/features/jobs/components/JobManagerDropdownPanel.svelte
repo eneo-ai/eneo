@@ -3,7 +3,7 @@
 
   import { getJobManager } from "../JobManager";
   import JobListView from "./JobListView.svelte";
-  import { ProgressBar } from "@intric/ui";
+  import { ProgressBar } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import ExpiringKeysNotification from "$lib/features/api-keys/ExpiringKeysNotification.svelte";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";

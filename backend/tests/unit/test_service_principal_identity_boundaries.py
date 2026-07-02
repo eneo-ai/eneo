@@ -3,13 +3,13 @@ from pathlib import Path
 
 from sqlalchemy import CheckConstraint
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyUpdateRequest,
     ApiKeyV2,
     ApiKeyV2InDB,
 )
-from intric.database.tables.files_table import Files
-from intric.database.tables.flow_tables import FlowRuns
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import FlowRuns
 
 REPO_ROOT = Path(__file__).parents[2]
 
@@ -36,8 +36,8 @@ def test_service_key_scope_cannot_drift_through_update_contract():
 
 def test_flow_and_file_runtime_ownership_does_not_use_exact_key_owner_columns():
     scanned_roots = (
-        REPO_ROOT / "src" / "intric" / "flows",
-        REPO_ROOT / "src" / "intric" / "files",
+        REPO_ROOT / "src" / "eneo" / "flows",
+        REPO_ROOT / "src" / "eneo" / "files",
     )
     hits: list[str] = []
     for root in scanned_roots:
@@ -59,8 +59,8 @@ def test_flow_and_file_runtime_does_not_synthesize_user_identities():
     # not rebuild a UserInDB shape after actor resolution.
     pattern = re.compile(r"\bUserInDB\(")
     scanned_roots = (
-        REPO_ROOT / "src" / "intric" / "flows",
-        REPO_ROOT / "src" / "intric" / "files",
+        REPO_ROOT / "src" / "eneo" / "flows",
+        REPO_ROOT / "src" / "eneo" / "files",
     )
     hits: list[str] = []
 
@@ -74,7 +74,7 @@ def test_flow_and_file_runtime_does_not_synthesize_user_identities():
 
 
 def test_flow_runtime_does_not_use_user_container_overrides():
-    runtime_root = REPO_ROOT / "src" / "intric" / "flows" / "runtime"
+    runtime_root = REPO_ROOT / "src" / "eneo" / "flows" / "runtime"
     pattern = re.compile(r"\boverride_user\b|\bcontainer_overrides\b")
     hits: list[str] = []
 
@@ -87,7 +87,7 @@ def test_flow_runtime_does_not_use_user_container_overrides():
 
 def test_flow_run_actor_stays_free_of_container_user_bridge_imports():
     actor_source = (
-        REPO_ROOT / "src" / "intric" / "flows" / "runtime" / "flow_run_actor.py"
+        REPO_ROOT / "src" / "eneo" / "flows" / "runtime" / "flow_run_actor.py"
     ).read_text(encoding="utf-8")
 
     assert "TenantInDB" not in actor_source
@@ -95,7 +95,7 @@ def test_flow_run_actor_stays_free_of_container_user_bridge_imports():
 
 
 def test_flow_runtime_does_not_use_user_wired_template_asset_service():
-    runtime_root = REPO_ROOT / "src" / "intric" / "flows" / "runtime"
+    runtime_root = REPO_ROOT / "src" / "eneo" / "flows" / "runtime"
     offenders: list[str] = []
 
     for path in sorted(runtime_root.rglob("*.py")):
@@ -130,8 +130,8 @@ def test_flow_and_file_runtime_ownership_uses_stable_service_principal_columns()
         "ck_files_owner_identity",
     )
     assert "principal_service_id" in (
-        REPO_ROOT / "src" / "intric" / "flows" / "domain" / "flow.py"
+        REPO_ROOT / "src" / "eneo" / "flows" / "domain" / "flow.py"
     ).read_text(encoding="utf-8")
     assert "owner_service_id" in (
-        REPO_ROOT / "src" / "intric" / "files" / "file_models.py"
+        REPO_ROOT / "src" / "eneo" / "files" / "file_models.py"
     ).read_text(encoding="utf-8")

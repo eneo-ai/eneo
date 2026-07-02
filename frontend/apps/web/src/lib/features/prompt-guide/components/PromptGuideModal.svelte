@@ -26,7 +26,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { tick, untrack } from "svelte";
   import { extractFinalPrompt } from "../extractFinalPrompt";
@@ -71,7 +71,7 @@
     open = $bindable(false),
     runId = $bindable<string | null>(null)
   }: Props = $props();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let turns = $state<Turn[]>([]);
   let inputText = $state("");
@@ -147,7 +147,7 @@
 
   async function abandonRunIfNeeded(runIdToAbandon: string) {
     try {
-      await intric.helpAssistants.runs.setStatus({
+      await eneo.helpAssistants.runs.setStatus({
         run_id: runIdToAbandon,
         status: "abandoned"
       });
@@ -220,14 +220,14 @@
 
     try {
       const result = runId
-        ? await intric.helpAssistants.runs.continueTurn({
+        ? await eneo.helpAssistants.runs.continueTurn({
             run_id: runId,
             question,
             stream: true,
             onAnswer,
             abortController: controller
           })
-        : await intric.helpAssistants.runs.start({
+        : await eneo.helpAssistants.runs.start({
             kind: "prompt_guide",
             target_type: targetType,
             target_id: targetId,

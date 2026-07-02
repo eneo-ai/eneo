@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.domain.flow import RerunStepInputOverride
-from intric.flows.flow_run_input_envelope import (
+from eneo.flows.domain.flow import RerunStepInputOverride
+from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
     RERUN_PRESERVED_INPUT_PAYLOAD_KEYS,
@@ -17,9 +17,9 @@ from intric.flows.flow_run_input_envelope import (
     build_rerun_execution_input_envelope,
     read_semantic_flow_input_payload,
 )
-from intric.flows.flow_run_payload_validation import reject_reserved_input_payload_keys
-from intric.flows.runtime.step_input_resolution import resolve_input_source_text
-from intric.main.exceptions import BadRequestException
+from eneo.flows.flow_run_payload_validation import reject_reserved_input_payload_keys
+from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
+from eneo.main.exceptions import BadRequestException
 
 
 def test_preserved_keys_include_runtime_transcription_cache() -> None:

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import type { FlowStep } from "@eneo/eneo-js";
   import {
     parsePromptSegments,
     getChipClasses,

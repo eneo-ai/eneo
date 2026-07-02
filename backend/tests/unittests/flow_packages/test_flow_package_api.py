@@ -14,51 +14,51 @@ import pytest
 from fastapi import HTTPException, Request, UploadFile
 from pydantic import ValidationError
 
-from intric.actors.actors.space_actor import SpaceActor
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.flow_packages.api import flow_package_router
-from intric.flow_packages.api.flow_package_models import (
+from eneo.actors.actors.space_actor import SpaceActor
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.flow_packages.api import flow_package_router
+from eneo.flow_packages.api.flow_package_models import (
     FlowPackageExportRequest,
     FlowPackageImportRequest,
     FlowPackageValidationPublic,
 )
-from intric.flow_packages.application.flow_package_export_service import (
+from eneo.flow_packages.application.flow_package_export_service import (
     FlowPackageExportResult,
 )
-from intric.flow_packages.application.flow_package_import_planner import (
+from eneo.flow_packages.application.flow_package_import_planner import (
     FlowPackageImportPlannerCandidates,
 )
-from intric.flow_packages.application.flow_package_install_service import (
+from eneo.flow_packages.application.flow_package_install_service import (
     FlowPackageInstallResult,
 )
-from intric.flow_packages.domain.flow_package_checksum import (
+from eneo.flow_packages.domain.flow_package_checksum import (
     compose_content_checksum,
     hash_json_value,
 )
-from intric.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
-from intric.flow_packages.domain.flow_package_errors import (
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageExportError,
     FlowPackageExportErrorCode,
     FlowPackageValidationError,
     FlowPackageZipUnsafeReason,
 )
-from intric.flow_packages.domain.flow_package_import_plan import (
+from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlanStatus,
     FlowPackageModelCandidate,
     FlowPackageModelDependencyResolution,
 )
-from intric.flow_packages.domain.flow_package_import_record import (
+from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportFailurePayload,
     FlowPackageImportSelection,
 )
-from intric.flow_packages.domain.flow_package_manifest import (
+from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifest,
 )
-from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
-from intric.flow_packages.domain.flow_package_requirements import (
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelIdentity,
     FlowPackageModelKind,
     FlowPackageModelMatchingPreferences,
@@ -66,14 +66,14 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementKind,
     FlowPackageRequirementSet,
 )
-from intric.flow_packages.infrastructure import flow_package_zip_reader as reader
-from intric.flows.api.flow_access_context import (
+from eneo.flow_packages.infrastructure import flow_package_zip_reader as reader
+from eneo.flows.api.flow_access_context import (
     FlowAccessContext,
     FlowSpaceAccessContext,
 )
-from intric.flows.domain.flow import Flow
-from intric.flows.flow_access_policy import FlowApiAction
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow
+from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -82,20 +82,20 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import (
+from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.json_types import JsonObject
-from intric.main.container.container import Container
-from intric.main.exceptions import (
+from eneo.json_types import JsonObject
+from eneo.main.container.container import Container
+from eneo.main.exceptions import (
     BadRequestException,
     FileTooLargeException,
     UnauthorizedException,
 )
-from intric.spaces.space import Space
+from eneo.spaces.space import Space
 
 
 @pytest.mark.anyio

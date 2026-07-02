@@ -8,7 +8,7 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from intric.flows.api.flow_api_error_metadata import (  # noqa: E402
+from eneo.flows.api.flow_api_error_metadata import (  # noqa: E402
     render_flow_error_taxonomy_docs_page,
 )
 

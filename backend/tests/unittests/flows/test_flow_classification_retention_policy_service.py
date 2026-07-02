@@ -4,14 +4,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.application.flow_classification_retention_policy_service import (
+from eneo.flows.application.flow_classification_retention_policy_service import (
     FlowClassificationRetentionPolicyService,
 )
-from intric.flows.domain.flow_classification_retention_policy import (
+from eneo.flows.domain.flow_classification_retention_policy import (
     FlowClassificationRetentionPolicy,
 )
-from intric.main.exceptions import NotFoundException
-from intric.roles.permissions import Permission
+from eneo.main.exceptions import NotFoundException
+from eneo.roles.permissions import Permission
 
 
 def _user() -> SimpleNamespace:

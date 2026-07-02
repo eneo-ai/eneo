@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from intric.flows.api.flow_http_test_models import (
+from eneo.flows.api.flow_http_test_models import (
     HTTP_TEST_REQUEST_EXAMPLE,
     HTTP_TEST_RESPONSE_EXAMPLE,
     HttpTestRequest,
     HttpTestResponse,
 )
-from intric.flows.http_transport import HttpAuthoredConfig, HttpTransportError
+from eneo.flows.http_transport import HttpAuthoredConfig, HttpTransportError
 
 
 def _http_test_payload(**overrides: object) -> dict[str, object]:

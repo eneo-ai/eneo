@@ -6,21 +6,21 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import (
+from eneo.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.database.tables.roles_table import Roles
-from intric.database.tables.users_table import users_roles_table
-from intric.flows.api import flow_run_execution_router
-from intric.flows.enums import FlowRunReviewCheckpointState
-from intric.flows.flow_run_dispatch_request import FlowRunDispatchRequest
-from intric.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
-from intric.main.exceptions import ErrorCodes
-from intric.main.models import GeneralError
-from intric.roles.permissions import Permission
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.users_table import users_roles_table
+from eneo.flows.api import flow_run_execution_router
+from eneo.flows.enums import FlowRunReviewCheckpointState
+from eneo.flows.flow_run_dispatch_request import FlowRunDispatchRequest
+from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
+from eneo.roles.permissions import Permission
 
 
 async def _noop_dispatch_flow_run_recoverably_after_commit(
@@ -41,7 +41,7 @@ async def _flow_run_first_page_count(client, *, flow_id: str, token: str) -> int
 def _validation_error_types(payload: dict[str, object], *, request_id: str) -> set[str]:
     error = GeneralError.model_validate(payload)
     assert error.message == "Request validation failed."
-    assert error.intric_error_code == ErrorCodes.VALIDATION_ERROR
+    assert error.eneo_error_code == ErrorCodes.VALIDATION_ERROR
     assert error.code == "request_validation_error"
     assert error.request_id == request_id
     details = error.details
@@ -515,7 +515,7 @@ async def test_list_flows_scope_mismatch_returns_general_error(
     assert response.status_code == 403, response.text
     error = GeneralError.model_validate(response.json())
     assert error.message == "API key space scope does not match requested space."
-    assert error.intric_error_code == ErrorCodes.UNAUTHORIZED
+    assert error.eneo_error_code == ErrorCodes.UNAUTHORIZED
     assert error.code == "insufficient_scope"
     assert error.context == {"auth_layer": "api_key_scope"}
     assert error.request_id == "flow-scope-mismatch-test"
@@ -1277,7 +1277,7 @@ async def test_flow_runtime_file_delete_rejects_attached_run_input(
     )
     assert delete_response.status_code == 409, delete_response.text
     payload = delete_response.json()
-    assert payload["intric_error_code"] == ErrorCodes.CONFLICT
+    assert payload["eneo_error_code"] == ErrorCodes.CONFLICT
     assert payload["code"] == "flow_runtime_file_attached"
     assert payload["context"] == {"flow_id": flow_id, "file_id": uploaded["id"]}
     assert payload["request_id"] == "flow-runtime-file-attached-delete"
@@ -1331,7 +1331,7 @@ async def test_flow_runtime_file_delete_rejects_attached_rerun_input(
     )
     assert delete_response.status_code == 409, delete_response.text
     payload = delete_response.json()
-    assert payload["intric_error_code"] == ErrorCodes.CONFLICT
+    assert payload["eneo_error_code"] == ErrorCodes.CONFLICT
     assert payload["code"] == "flow_runtime_file_attached"
     assert payload["context"] == {"flow_id": flow_id, "file_id": rerun_upload["id"]}
     assert payload["request_id"] == "flow-runtime-file-rerun-attached-delete"
@@ -1485,7 +1485,7 @@ async def test_flow_runtime_file_delete_hides_other_principal_attached_file(
     )
     assert delete_response.status_code == 404, delete_response.text
     payload = delete_response.json()
-    assert payload["intric_error_code"] == ErrorCodes.NOT_FOUND
+    assert payload["eneo_error_code"] == ErrorCodes.NOT_FOUND
     assert payload["code"] == "not_found"
     assert payload["request_id"] == "flow-runtime-file-cross-owner-delete"
 
@@ -1714,7 +1714,7 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
         missing_resume_idempotency_payload["message"]
         == "Review resume requires an Idempotency-Key header."
     )
-    assert "intric_error_code" in missing_resume_idempotency_payload
+    assert "eneo_error_code" in missing_resume_idempotency_payload
 
     resume_response = await client.post(
         _runtime_path(

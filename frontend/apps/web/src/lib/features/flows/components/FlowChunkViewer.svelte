@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { FlowRunDebugRagReferenceChunk, Intric } from "@intric/intric-js";
+  import type { FlowRunDebugRagReferenceChunk, Eneo } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
   import { tick, type Snippet } from "svelte";
   import {
@@ -21,7 +21,7 @@
   } from "./flowRunKnowledgePresentation";
 
   let {
-    intric,
+    eneo,
     infoBlobId,
     title = null,
     sourceIdShort = null,
@@ -29,7 +29,7 @@
     matchedChunkCount = null,
     children
   }: {
-    intric: Intric;
+    eneo: Eneo;
     infoBlobId: string;
     title?: string | null;
     sourceIdShort?: string | null;
@@ -97,7 +97,7 @@
     loadingDocument = true;
     loadError = false;
     try {
-      const blob = await intric.infoBlobs.get({ id: infoBlobId });
+      const blob = await eneo.infoBlobs.get({ id: infoBlobId });
       documentText = blob.text ?? "";
       sourceUrl = blob.metadata?.url ?? null;
     } catch (error) {

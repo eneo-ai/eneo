@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.runtime import celery_preflight
+from eneo.flows.runtime import celery_preflight
 
 
 def test_preflight_reports_missing_document_modules(monkeypatch: pytest.MonkeyPatch):

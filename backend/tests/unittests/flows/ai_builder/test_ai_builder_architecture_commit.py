@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_architecture_commit import (
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     architecture_commit_hash,
     canonical_architecture_commit_payload,
     finalize_architecture_commit,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommitDraft,
     StepTriple,

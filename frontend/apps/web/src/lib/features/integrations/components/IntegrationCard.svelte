@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Integration, UserIntegration } from "@intric/intric-js";
+  import type { Integration, UserIntegration } from "@eneo/eneo-js";
   import type { Snippet } from "svelte";
   import IntegrationVendorIcon from "./IntegrationVendorIcon.svelte";
   import { integrationData } from "../IntegrationData";

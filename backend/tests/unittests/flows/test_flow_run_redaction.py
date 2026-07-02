@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.flow_run_redaction import (
+from eneo.flows.flow_run_redaction import (
     redact_payload,
     redact_payload_with_manifest,
     redact_string,
@@ -29,7 +29,10 @@ def test_redact_payload_redacts_nested_sensitive_fields_and_bearer_tokens():
 def test_redact_url_secrets_removes_credentials_and_sensitive_query_values():
     value = "https://user:pass@example.com/path?token=abc&safe=yes"
 
-    assert redact_url_secrets(value) == "https://example.com/path?token=%5BREDACTED%5D&safe=yes"
+    assert (
+        redact_url_secrets(value)
+        == "https://example.com/path?token=%5BREDACTED%5D&safe=yes"
+    )
 
 
 def test_redact_payload_matches_hyphenated_and_case_insensitive_keys():

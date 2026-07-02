@@ -5,9 +5,9 @@ import ipaddress
 import httpx
 import pytest
 
-from intric.flows.runtime import http_runtime as http_runtime_module
-from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper
-from intric.main.exceptions import TypedIOValidationException
+from eneo.flows.runtime import http_runtime as http_runtime_module
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.main.exceptions import TypedIOValidationException
 
 
 class _Resolver:
@@ -50,7 +50,9 @@ async def test_send_request_enforces_stream_cap(monkeypatch) -> None:
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()
@@ -83,7 +85,9 @@ async def test_send_request_skips_body_read_for_webhook(monkeypatch) -> None:
         headers = {"X-Test": "1"}
 
         async def aiter_bytes(self):
-            raise AssertionError("aiter_bytes should not be called when read_response_body=False")
+            raise AssertionError(
+                "aiter_bytes should not be called when read_response_body=False"
+            )
 
         async def aclose(self) -> None:
             return None
@@ -99,7 +103,9 @@ async def test_send_request_skips_body_read_for_webhook(monkeypatch) -> None:
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()
@@ -119,7 +125,9 @@ async def test_send_request_skips_body_read_for_webhook(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_request_closes_stream_when_peer_assertion_fails(monkeypatch) -> None:
+async def test_send_request_closes_stream_when_peer_assertion_fails(
+    monkeypatch,
+) -> None:
     helper = _build_helper()
     close_state = {"closed": False}
 
@@ -144,7 +152,9 @@ async def test_send_request_closes_stream_when_peer_assertion_fails(monkeypatch)
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()

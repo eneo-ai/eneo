@@ -5,17 +5,16 @@
 */
 
 import { createContext } from "$lib/core/context";
-import type { Flow, FlowSparse, Intric } from "@intric/intric-js";
+import type { Flow, FlowSparse, Eneo } from "@eneo/eneo-js";
 import { get, writable } from "svelte/store";
 
-const [getFlowsManager, setFlowsManager] = createContext<ReturnType<typeof FlowsManager>>(
-  "Manages flows"
-);
+const [getFlowsManager, setFlowsManager] =
+  createContext<ReturnType<typeof FlowsManager>>("Manages flows");
 
 type FlowsManagerParams = {
   flows: FlowSparse[];
   spaceId: string;
-  intric: Intric;
+  eneo: Eneo;
 };
 
 function initFlowsManager(data: FlowsManagerParams) {
@@ -25,7 +24,7 @@ function initFlowsManager(data: FlowsManagerParams) {
 }
 
 function FlowsManager(data: FlowsManagerParams) {
-  const { intric } = data;
+  const { eneo } = data;
 
   const flows = writable<FlowSparse[]>(data.flows);
   const spaceId = writable(data.spaceId);
@@ -33,7 +32,7 @@ function FlowsManager(data: FlowsManagerParams) {
   async function refreshFlows() {
     try {
       const $spaceId = get(spaceId);
-      const result = await intric.flows.list({ spaceId: $spaceId });
+      const result = await eneo.flows.list({ spaceId: $spaceId });
       const items = result.items ?? result;
       flows.set(items as FlowSparse[]);
       return items;
@@ -44,13 +43,13 @@ function FlowsManager(data: FlowsManagerParams) {
 
   async function createFlow(name: string): Promise<Flow> {
     const $spaceId = get(spaceId);
-    const created = await intric.flows.create({ spaceId: $spaceId, name, steps: [] });
+    const created = await eneo.flows.create({ spaceId: $spaceId, name, steps: [] });
     await refreshFlows();
     return created as Flow;
   }
 
   async function deleteFlow(flowId: string) {
-    await intric.flows.delete({ id: flowId });
+    await eneo.flows.delete({ id: flowId });
     await refreshFlows();
   }
 

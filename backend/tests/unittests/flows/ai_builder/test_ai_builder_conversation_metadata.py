@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
     loose_tool_call_name,
@@ -23,15 +23,15 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     slot_classification_metadata_from_result,
     tool_calls_from_message,
 )
-from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 
 _AI_BUILDER_SRC = (
-    Path(__file__).resolve().parents[4] / "src" / "intric" / "flows" / "ai_builder"
+    Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
 )
 
 

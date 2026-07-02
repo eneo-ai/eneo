@@ -35,7 +35,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Revert back to intric hosting
+    # Revert back to the previous hosting endpoint
     conn = op.get_bind()
     
     conn.execute(

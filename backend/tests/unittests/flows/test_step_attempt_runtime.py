@@ -4,22 +4,22 @@ from datetime import datetime, timezone
 from typing import get_type_hints
 from uuid import uuid4
 
-from intric.flows.domain.flow import (
+from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.flow_run_provenance import (
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenance,
     parse_attempt_provenance,
 )
-from intric.flows.runtime.claim_resolution import StepClaimResolution
-from intric.flows.runtime.executor import _build_attempt_provenance
-from intric.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
-from intric.flows.runtime.step_attempt_runtime import (
+from eneo.flows.runtime.claim_resolution import StepClaimResolution
+from eneo.flows.runtime.executor import _build_attempt_provenance
+from eneo.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
+from eneo.flows.runtime.step_attempt_runtime import (
     StepFailurePlan,
     build_generic_failure_plan,
     build_step_gate_decision,
@@ -27,12 +27,12 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_typed_failure_plan,
     build_typed_failure_run_error_message,
 )
-from intric.flows.runtime.step_execution_result import (
+from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
-from intric.flows.runtime.step_result_builder import build_completed_step_result
+from eneo.flows.runtime.step_result_builder import build_completed_step_result
 
 
 def _claimed_result(*, step_order: int = 1) -> FlowStepResult:

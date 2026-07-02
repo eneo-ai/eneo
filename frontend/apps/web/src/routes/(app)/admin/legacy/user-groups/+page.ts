@@ -7,8 +7,8 @@
 export const load = async (event) => {
   event.depends("admin:user-groups:load");
 
-  const { intric } = await event.parent();
-  const userGroups = await intric.userGroups.list();
+  const { eneo } = await event.parent();
+  const userGroups = await eneo.userGroups.list();
 
   return {
     userGroups

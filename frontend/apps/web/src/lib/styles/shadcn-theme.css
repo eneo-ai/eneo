@@ -51,7 +51,7 @@
   /* ─── Chart palette (mapped from Eneo's chart tokens) ─── */
   --chart-1: var(--chart-red);
   --chart-2: var(--chart-green);
-  --chart-3: var(--chart-intric);
+  --chart-3: var(--chart-eneo);
   --chart-4: var(--chart-yellow);
   --chart-5: var(--chart-violet);
 

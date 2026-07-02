@@ -5,14 +5,14 @@ from dataclasses import dataclass
 
 import pytest
 
-from intric.flows.step_lineage import (
+from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     existing_step_order_from_ref,
     existing_step_ref_for_order,
     resolve_reference_step_orders,
     resolve_upstream_step_orders,
 )
-from intric.flows.template_reference_analyzer import (
+from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
 )

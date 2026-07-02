@@ -6,9 +6,9 @@ for completion model migration.
 from uuid import uuid4
 
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
-from intric.completion_models.presentation.completion_model_models import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
+from eneo.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
     ValidationResult,
 )

@@ -11,10 +11,10 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from intric.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_mermaid import (  # noqa: E402
     render_flow_docs_mermaid_block,
 )
-from intric.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
+from eneo.flows.infrastructure.flow_docs_related_cards import (  # noqa: E402
     FLOW_DOCS_RELATED_NEXTRA_CARDS_IMPORT,
     FlowDocsRelatedNextraCard,
     render_flow_docs_related_nextra_cards,
@@ -100,15 +100,15 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "Step input rows",
-                "backend/src/intric/database/tables/flow_tables.py",
+                "backend/src/eneo/database/tables/flow_tables.py",
             ),
             _source(
                 "Rerun operation rows",
-                "backend/src/intric/database/tables/flow_tables.py",
+                "backend/src/eneo/database/tables/flow_tables.py",
             ),
             _source(
                 "Rerun accept path",
-                "backend/src/intric/flows/application/flow_run_rerun_service.py",
+                "backend/src/eneo/flows/application/flow_run_rerun_service.py",
             ),
         ),
     ),
@@ -124,11 +124,11 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "Review checkpoint exceptions",
-                "backend/src/intric/flows/domain/review_checkpoint_exceptions.py",
+                "backend/src/eneo/flows/domain/review_checkpoint_exceptions.py",
             ),
             _source(
                 "Rerun service translation",
-                "backend/src/intric/flows/application/flow_run_rerun_service.py",
+                "backend/src/eneo/flows/application/flow_run_rerun_service.py",
             ),
         ),
     ),
@@ -143,14 +143,14 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
             "Review tenant filters and cross-principal denial tests together.",
         ),
         source_refs=(
-            _source("Flow principal", "backend/src/intric/flows/principal.py"),
+            _source("Flow principal", "backend/src/eneo/flows/principal.py"),
             _source(
                 "Runtime actor",
-                "backend/src/intric/flows/runtime/flow_run_actor.py",
+                "backend/src/eneo/flows/runtime/flow_run_actor.py",
             ),
             _source(
                 "Run access policy",
-                "backend/src/intric/flows/application/flow_run_access_policy.py",
+                "backend/src/eneo/flows/application/flow_run_access_policy.py",
             ),
         ),
     ),
@@ -166,15 +166,15 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "HTTP validator",
-                "backend/src/intric/flows/flow_validators_http.py",
+                "backend/src/eneo/flows/flow_validators_http.py",
             ),
             _source(
                 "HTTP transport package",
-                "backend/src/intric/flows/http_transport/__init__.py",
+                "backend/src/eneo/flows/http_transport/__init__.py",
             ),
             _source(
                 "HTTP runtime",
-                "backend/src/intric/flows/runtime/http_runtime.py",
+                "backend/src/eneo/flows/runtime/http_runtime.py",
             ),
         ),
     ),
@@ -190,11 +190,11 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "Checkpoint repository",
-                "backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py",
             ),
             _source(
                 "Checkpoint service",
-                "backend/src/intric/flows/application/flow_run_review_checkpoint_service.py",
+                "backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py",
             ),
         ),
     ),
@@ -210,11 +210,11 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "JSONB owner registry",
-                "backend/src/intric/flows/infrastructure/flow_jsonb_ownership.py",
+                "backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py",
             ),
             _source(
                 "Schema docs exporter",
-                "backend/src/intric/flows/infrastructure/flow_schema_docs_exporter.py",
+                "backend/src/eneo/flows/infrastructure/flow_schema_docs_exporter.py",
             ),
             _source(
                 "Data schema docs",
@@ -234,11 +234,11 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "Error-code enum",
-                "backend/src/intric/flows/flow_api_error_code.py",
+                "backend/src/eneo/flows/flow_api_error_code.py",
             ),
             _source(
                 "Failure taxonomy",
-                "backend/src/intric/flows/flow_error_taxonomy.py",
+                "backend/src/eneo/flows/flow_error_taxonomy.py",
             ),
             _source(
                 "Developer failure page",
@@ -272,11 +272,11 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "Checkpoint states",
-                "backend/src/intric/flows/enums.py",
+                "backend/src/eneo/flows/enums.py",
             ),
             _source(
                 "Checkpoint table",
-                "backend/src/intric/database/tables/flow_tables.py",
+                "backend/src/eneo/database/tables/flow_tables.py",
             ),
             _source(
                 "Lifecycle docs",
@@ -296,15 +296,15 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         source_refs=(
             _source(
                 "Rerun service",
-                "backend/src/intric/flows/application/flow_run_rerun_service.py",
+                "backend/src/eneo/flows/application/flow_run_rerun_service.py",
             ),
             _source(
                 "Rerun repository",
-                "backend/src/intric/flows/infrastructure/flow_run_rerun_repo.py",
+                "backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py",
             ),
             _source(
                 "Rerun graph",
-                "backend/src/intric/flows/flow_run_rerun_graph.py",
+                "backend/src/eneo/flows/flow_run_rerun_graph.py",
             ),
         ),
     ),

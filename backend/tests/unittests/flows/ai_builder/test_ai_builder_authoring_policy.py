@@ -6,15 +6,15 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
-from intric.flows.application.flow_authoring_command import (
+from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
+from eneo.flows.application.flow_authoring_command import (
     AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
 )
-from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from intric.flows.flow_authoring_spec import (
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,

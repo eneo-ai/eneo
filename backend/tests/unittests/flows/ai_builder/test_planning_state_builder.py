@@ -13,22 +13,22 @@ from datetime import datetime, timezone
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_architecture_derivation import (
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     slot_classification_metadata_from_result,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationConfidence,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.planning_state import (
+from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
@@ -39,14 +39,14 @@ from intric.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
-from intric.flows.ai_builder.planning_state_builder import (
+from eneo.flows.ai_builder.planning_state_builder import (
     _MODEL_VALUE_ACCEPTANCE_POLICIES,
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     merge_llm_resolved_slots,
 )
-from intric.flows.ai_builder.question_catalog import legal_slot_values
+from eneo.flows.ai_builder.question_catalog import legal_slot_values
 
 
 def _state(

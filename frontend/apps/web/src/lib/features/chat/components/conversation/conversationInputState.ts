@@ -1,4 +1,4 @@
-import { IntricError } from "@intric/intric-js";
+import { EneoError } from "@eneo/eneo-js";
 
 const QUERY_ERROR_CODE = 9003;
 
@@ -20,7 +20,7 @@ export function isConversationSubmitDisabled(state: {
 }
 
 export function getContextErrorInfo(error: unknown): ContextErrorInfo | null {
-  if (error instanceof IntricError) {
+  if (error instanceof EneoError) {
     const details = error.response?.details;
     const used = details?.tokens_used;
     const limit = details?.token_limit;

@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import type { CustomHeader } from "./httpConfigTypes";

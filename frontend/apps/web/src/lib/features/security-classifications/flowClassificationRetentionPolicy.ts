@@ -1,4 +1,4 @@
-import type { FlowClassificationRetentionPolicy, SecurityClassification } from "@intric/intric-js";
+import type { FlowClassificationRetentionPolicy, SecurityClassification } from "@eneo/eneo-js";
 
 export const FLOW_CLASSIFICATION_RETENTION_MIN_DAYS = 1;
 export const FLOW_CLASSIFICATION_RETENTION_MAX_DAYS = 2555;
@@ -22,8 +22,7 @@ export type FlowClassificationRetentionRow = {
 };
 
 export type FlowClassificationRetentionParseResult =
-  | { ok: true; days: number }
-  | { ok: false; reason: "empty" | "integer" | "out_of_range" };
+  { ok: true; days: number } | { ok: false; reason: "empty" | "integer" | "out_of_range" };
 
 export function createFlowClassificationRetentionDrafts(
   policies: FlowClassificationRetentionPolicy[]

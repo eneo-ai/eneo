@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { get } from "svelte/store";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Flow, FlowStep, Intric } from "@intric/intric-js";
+import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
 
 import { createFlowEditor, getUnifiedFlowSaveStatus } from "./FlowEditor";
 
@@ -38,13 +38,13 @@ function makeStep(stepOrder: number, overrides: Partial<FlowStep> = {}): FlowSte
   };
 }
 
-function makeIntric(
+function makeEneo(
   overrides: {
     assistantGet?: (...args: unknown[]) => unknown;
     assistantUpdate?: (...args: unknown[]) => unknown;
     flowUpdate?: (...args: unknown[]) => unknown;
   } = {}
-): Intric {
+): Eneo {
   return {
     files: {
       delete: vi.fn()
@@ -60,7 +60,7 @@ function makeIntric(
     assistants: {
       listPrompts: vi.fn()
     }
-  } as unknown as Intric;
+  } as unknown as Eneo;
 }
 
 async function settleEditorInitialization(): Promise<void> {
@@ -177,7 +177,7 @@ describe("FlowEditor basic settings commands", () => {
       { owner: "metadata" },
       { description: "Description", data_retention_days: 30 }
     );
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       const originalSteps = get(editor.state.update).steps;
 
@@ -196,7 +196,7 @@ describe("FlowEditor basic settings commands", () => {
   });
 
   it("accepts an empty name while preserving publish-readiness behavior", () => {
-    const editor = createFlowEditor({ flow: makeFlow(), intric: makeIntric() });
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo() });
     try {
       editor.setName("");
 
@@ -213,7 +213,7 @@ describe("FlowEditor basic settings commands", () => {
       { owner: "metadata" },
       { name: "Original name", description: "Original", data_retention_days: 14 }
     );
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       const originalSteps = get(editor.state.update).steps;
 
@@ -239,7 +239,7 @@ describe("FlowEditor basic settings commands", () => {
       { owner: "metadata" },
       { name: "Flow", description: "Description", data_retention_days: 30 }
     );
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       const originalSteps = get(editor.state.update).steps;
 
@@ -279,7 +279,7 @@ describe("FlowEditor basic settings commands", () => {
       { owner: "metadata" },
       { name: "Flow", description: "Description", data_retention_days: 30 }
     );
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       editor.setDataRetentionDaysFromInput("2.9");
       expect(get(editor.state.update).data_retention_days).toBe(30);
@@ -318,7 +318,7 @@ describe("FlowEditor form field reference rewrites", () => {
         })
       ]
     });
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       await editor.rewriteInputFieldVariableReferences("case_id", "kundnamn");
 
@@ -341,7 +341,7 @@ describe("FlowEditor form field reference rewrites", () => {
         })
       ]
     });
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       await editor.rewriteInputFieldVariableReferences("datum", "mötesdatum");
 
@@ -362,7 +362,7 @@ describe("FlowEditor form field reference rewrites", () => {
         })
       ]
     });
-    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       await editor.rewriteInputFieldVariableReferences("case_id", "flow_input");
 
@@ -391,7 +391,7 @@ describe("FlowEditor step mutation commands", () => {
     }));
     const editor = createFlowEditor({
       flow,
-      intric: makeIntric({ assistantGet })
+      eneo: makeEneo({ assistantGet })
     });
     try {
       await settleEditorInitialization();
@@ -407,7 +407,7 @@ describe("FlowEditor step mutation commands", () => {
   it("replaces one step while preserving neighbors and step order", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       const currentSteps = get(editor.state.update).steps;
@@ -434,7 +434,7 @@ describe("FlowEditor step mutation commands", () => {
   it("tracks review policy changes in the persisted step diff", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       const [step] = get(editor.state.update).steps;
@@ -454,7 +454,7 @@ describe("FlowEditor step mutation commands", () => {
   it("ignores invalid replace indexes without changing the step array", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       const originalSteps = get(editor.state.update).steps;
@@ -473,7 +473,7 @@ describe("FlowEditor step mutation commands", () => {
   it("removes a step, renumbers survivors, and selects the next step", async () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2), makeStep(3)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-2");
@@ -493,7 +493,7 @@ describe("FlowEditor step mutation commands", () => {
   it("falls back to the previous step when removing the last step", async () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-2");
@@ -510,7 +510,7 @@ describe("FlowEditor step mutation commands", () => {
   it("clears the active step when removing the only step", async () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-1");
@@ -527,7 +527,7 @@ describe("FlowEditor step mutation commands", () => {
   it("ignores invalid remove indexes without changing steps or active step", async () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-1");
@@ -557,7 +557,7 @@ describe("FlowEditor step mutation commands", () => {
           })
         ]
       }),
-      intric: makeIntric({
+      eneo: makeEneo({
         assistantGet: vi.fn(async () => ({
           prompt: { text: "{{step_1.output.text}}", description: "" }
         })),
@@ -585,7 +585,7 @@ describe("FlowEditor step mutation commands", () => {
     });
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [tempFirst, tempSecond] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       await editor.applyStepsWithSafeOrderRemap([
@@ -608,7 +608,7 @@ describe("FlowEditor step mutation commands", () => {
     });
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), secondStep, makeStep(3)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       await editor.moveStepAtIndex(0, 1);
@@ -628,7 +628,7 @@ describe("FlowEditor step mutation commands", () => {
   it("preserves active step identity across moves", async () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2), makeStep(3)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-1");
@@ -645,7 +645,7 @@ describe("FlowEditor step mutation commands", () => {
   it("ignores invalid move indexes without changing the step array", async () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       const originalSteps = get(editor.state.update).steps;
@@ -679,7 +679,7 @@ describe("FlowEditor active step selection commands", () => {
   it("selects a known step id", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-2");
@@ -693,7 +693,7 @@ describe("FlowEditor active step selection commands", () => {
   it("ignores unknown step ids and preserves the previous active step", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-1");
@@ -708,7 +708,7 @@ describe("FlowEditor active step selection commands", () => {
   it("selects the first step when none is selected", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectFirstStepIfUnselected();
@@ -722,7 +722,7 @@ describe("FlowEditor active step selection commands", () => {
   it("preserves an existing active step when selecting the first step if unselected", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectStep("step-2");
@@ -737,7 +737,7 @@ describe("FlowEditor active step selection commands", () => {
   it("does not select anything when there are no steps", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectFirstStepIfUnselected();
@@ -751,7 +751,7 @@ describe("FlowEditor active step selection commands", () => {
   it("lets explicit selection override first-step auto selection", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.selectFirstStepIfUnselected();
@@ -766,7 +766,7 @@ describe("FlowEditor active step selection commands", () => {
   it("selects a step from a freshly replaced resource", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1)] }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       editor.setResource(
@@ -799,7 +799,7 @@ describe("FlowEditor HTTP step config validation", () => {
           })
         ]
       }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       const errors = get(editor.state.validationErrors);
@@ -825,7 +825,7 @@ describe("FlowEditor HTTP step config validation", () => {
           })
         ]
       }),
-      intric: makeIntric()
+      eneo: makeEneo()
     });
     try {
       const errors = get(editor.state.validationErrors);
@@ -846,7 +846,7 @@ describe("FlowEditor save flushing", () => {
     }));
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric({ flowUpdate })
+      eneo: makeEneo({ flowUpdate })
     });
     try {
       const steps = get(editor.state.update).steps;
@@ -877,7 +877,7 @@ describe("FlowEditor save flushing", () => {
     }));
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
-      intric: makeIntric({ flowUpdate })
+      eneo: makeEneo({ flowUpdate })
     });
     try {
       editor.setName("Renamed flow");
@@ -900,7 +900,7 @@ describe("FlowEditor save flushing", () => {
     }));
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1)] }),
-      intric: makeIntric({ flowUpdate })
+      eneo: makeEneo({ flowUpdate })
     });
     try {
       const persistedStep = get(editor.state.update).steps[0];
@@ -933,7 +933,7 @@ function renderEditorMetadata({
   flow: Flow;
   operation: "replace-form" | "empty-form" | "wizard";
 }): { metadataJson: unknown; hasUnsavedChanges: boolean } {
-  const editor = createFlowEditor({ flow, intric: makeIntric() });
+  const editor = createFlowEditor({ flow, eneo: makeEneo() });
   try {
     if (operation === "replace-form") {
       editor.replaceFormSchemaFields([

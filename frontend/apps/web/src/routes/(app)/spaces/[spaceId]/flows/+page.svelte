@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { FlowSparse, Intric } from "@intric/intric-js";
+  import type { FlowSparse, Eneo } from "@eneo/eneo-js";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initFlowsManager } from "$lib/features/flows/FlowsManager";
@@ -13,7 +13,7 @@
   let {
     data
   }: {
-    data: { flows: FlowSparse[]; intric: Intric };
+    data: { flows: FlowSparse[]; eneo: Eneo };
   } = $props();
 
   const {
@@ -29,7 +29,7 @@
     initFlowsManager({
       flows: data.flows,
       spaceId: $currentSpace.id,
-      intric: data.intric
+      eneo: data.eneo
     })
   );
 
@@ -52,7 +52,7 @@
     {#if user.hasPermission("flows_manage")}
       <div class="flex items-center gap-2">
         <FlowPackageImportDialog
-          intric={data.intric}
+          eneo={data.eneo}
           spaceId={$currentSpace.id}
           spaceRouteId={$currentSpace.routeId}
         />

@@ -13,50 +13,51 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-import intric.flows.api.flow_http_test_router as flow_http_test_router_module
-from intric.actors.actors.space_actor import SpaceRole
-from intric.assistants.api.assistant_models import AssistantUpdatePublic
-from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.audit.domain.action_types import ActionType
-from intric.authentication.auth_dependencies import ScopeFilter
-from intric.flows.api import flow_access_context as flow_access_context_module
-from intric.flows.api.flow_assistant_router import (
+import eneo.flows.api.flow_http_test_router as flow_http_test_router_module
+from eneo.actors.actors.space_actor import SpaceRole
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api.flow_assistant_router import (
     create_flow_assistant,
     update_flow_assistant,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     create_flow,
     get_published_flow_runtime,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     get_flow as definition_get_flow,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     list_flows as definition_list_flows,
 )
-from intric.flows.api.flow_authoring_router import (
+from eneo.flows.api.flow_authoring_router import (
     update_flow as definition_update_flow,
 )
-from intric.flows.api.flow_http_test_models import HttpTestRequest
-from intric.flows.api.flow_http_test_router import (
+from eneo.flows.api.flow_http_test_models import HttpTestRequest
+from eneo.flows.api.flow_http_test_router import (
     router as flow_http_test_router,
 )
-from intric.flows.api.flow_http_test_router import (
+from eneo.flows.api.flow_http_test_router import (
     test_flow_http as flow_definition_test_flow_http,
 )
-from intric.flows.api.flow_models import (
+from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowCreateRequest,
     FlowStepCreateRequest,
     FlowStepUpdateRequest,
     FlowUpdateRequest,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
-from intric.flows.http_transport import SECRET_SENTINEL
-from intric.flows.http_transport.request_preview import HttpRequestPreview
-from intric.flows.http_transport.test_action import HttpTestResult
-from intric.main.exceptions import UnauthorizedException
-from intric.roles.permissions import Permission
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.flows.http_transport.request_preview import HttpRequestPreview
+from eneo.flows.http_transport.test_action import HttpTestResult
+from eneo.main.exceptions import UnauthorizedException
+from eneo.roles.permissions import Permission
+from tests.unit.api_key_test_utils import flatten_routes
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _flow,
@@ -71,8 +72,8 @@ def _http_test_client(container, monkeypatch) -> TestClient:
     app = FastAPI()
     app.include_router(flow_http_test_router)
 
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    for route in flatten_routes(list(app.routes)):
+        if not isinstance(route.route, APIRoute):
             continue
         for dependency in route.dependant.dependencies:
             app.dependency_overrides[dependency.call] = lambda: container

@@ -1,13 +1,13 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.governance_policy.domain.governance_policy import (
+from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
     PolicyMcpServer,
     PolicyScope,
 )
-from intric.governance_policy.domain.policy_resolver import (
+from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
     select_effective_completion_model,

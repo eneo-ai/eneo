@@ -9,8 +9,8 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.model_providers.domain.model_provider_service import ModelProviderService
+from eneo.main.exceptions import BadRequestException
+from eneo.model_providers.domain.model_provider_service import ModelProviderService
 
 
 def _build_service_with_provider(

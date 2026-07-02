@@ -4,13 +4,13 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from intric.scim.app import scim_app
-from intric.scim.auth import require_scim_auth
-from intric.scim.deps import get_scim_user_service
-from intric.scim.domain.errors import ScimUserConflictError, ScimUserNotFoundError
-from intric.scim.schemas.user import ScimMeta, ScimUser
-from intric.scim.services.user_service import ScimUserService
-from intric.server.main import app
+from eneo.scim.app import scim_app
+from eneo.scim.auth import require_scim_auth
+from eneo.scim.deps import get_scim_user_service
+from eneo.scim.domain.errors import ScimUserConflictError, ScimUserNotFoundError
+from eneo.scim.schemas.user import ScimMeta, ScimUser
+from eneo.scim.services.user_service import ScimUserService
+from eneo.server.main import app
 
 TEST_TOKEN = "test-scim-token"
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}

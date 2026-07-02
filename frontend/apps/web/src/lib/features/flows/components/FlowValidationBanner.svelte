@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
-  import { IconInfo } from "@intric/icons/info";
+  import type { FlowStep } from "@eneo/eneo-js";
+  import { IconInfo } from "@eneo/icons/info";
   import { fade, slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";

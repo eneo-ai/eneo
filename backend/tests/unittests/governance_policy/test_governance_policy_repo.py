@@ -1,11 +1,11 @@
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from intric.governance_policy.domain.governance_policy import (
+from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyScope,
 )
-from intric.governance_policy.infrastructure.governance_policy_repo_impl import (
+from eneo.governance_policy.infrastructure.governance_policy_repo_impl import (
     GovernancePolicyRepoImpl,
 )
 
