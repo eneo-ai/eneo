@@ -3,8 +3,8 @@
 This package provides:
 - LuaScripts: Centralized atomic Lua scripts for Redis operations
 - redis_lease: Self-renewing, owner-checked distributed lock
-- r: Redis client instance
-- get_redis: Factory function for Redis client
+- r: Legacy lazy proxy for the Redis client (attribute access only)
+- get_redis: Factory function for Redis client — prefer this in new code
 - get_worker_health: Worker health check via Redis
 - WorkerHealth: Named tuple for health status
 - parse_arq_health_string: Parser for ARQ health check strings

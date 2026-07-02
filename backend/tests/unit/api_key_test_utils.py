@@ -179,7 +179,15 @@ def flatten_routes(
 
         path = getattr(route, "path", "")
         if not path:
-            continue
+            # Every recognized node kind (lazy include, mount, plain route) has
+            # a path. A pathless entry means FastAPI changed the private lazy
+            # include attributes this walker duck-types on — fail loudly so
+            # the route-contract suites can't silently lose coverage.
+            raise AssertionError(
+                "flatten_routes: unrecognized pathless route entry "
+                f"{type(route).__module__}.{type(route).__qualname__}; "
+                "update the include_context/original_router detection above"
+            )
         flattened.append(
             RouteContractView(
                 route=route,

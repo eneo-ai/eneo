@@ -43,7 +43,13 @@ def reset_redis_client() -> aioredis.Redis:
 
 
 class _RedisClientProxy:
-    """Lazy compatibility proxy for modules that import the legacy `r` client."""
+    """Lazy compatibility proxy for modules that import the legacy `r` client.
+
+    Only plain attribute access is forwarded (``r.publish``, ``r.pubsub`` …).
+    Despite the cast below, ``r`` is NOT a real Redis instance: dunder-based
+    protocols and ``isinstance`` checks bypass ``__getattr__`` and will fail.
+    New code should call ``get_redis()`` instead of importing ``r``.
+    """
 
     def __getattr__(self, name: str) -> Any:
         return getattr(get_redis(), name)
