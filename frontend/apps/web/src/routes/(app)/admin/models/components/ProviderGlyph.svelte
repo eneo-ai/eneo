@@ -1,12 +1,15 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
+  import { resolveProviderLogoType } from "$lib/features/ai-models/providerLogoAliases";
+
   /**
    * ProviderGlyph — provider logos with chip styling.
    *
    * Logos are auto-discovered from `$lib/assets/provider-logos/*` via a Vite
    * glob import. To add a new provider: drop a
-   * `{provider_type}.{svg,png,jpg,webp}` in the folder. No code change needed.
+   * `{provider_type}.{svg,png,jpg,webp}` in the folder. `resolveProviderLogoType`
+   * is display-only and never changes provider identity or LiteLLM routing.
    */
   export let providerType: string = "";
   export let size: "sm" | "md" | "lg" = "md";
@@ -31,14 +34,8 @@
     if (!logos[name]) logos[name] = url as string; // SVG takes priority (sorted first)
   }
 
-  function normalize(t: string): string {
-    if (t === "bedrock_converse") return "bedrock";
-    if (t.startsWith("vertex_ai")) return "vertex_ai";
-    return t;
-  }
-
-  $: resolvedType = normalize(providerType);
-  $: logoUrl = logos[resolvedType];
+  $: resolvedLogoType = resolveProviderLogoType(providerType) ?? "";
+  $: logoUrl = logos[resolvedLogoType];
   $: sizeConfig = sizes[size];
 </script>
 
@@ -54,17 +51,17 @@
     hover:translate-y-[-1px]
     hover:shadow-sm
   "
-  title={resolvedType}
+  title={providerType}
 >
   {#if logoUrl}
     <img
       src={logoUrl}
-      alt={resolvedType}
+      alt={providerType}
       class="{sizeConfig.img} object-contain dark:brightness-90 dark:contrast-125"
-      class:dark-invert={resolvedType === "openai" ||
-        resolvedType === "anthropic" ||
-        resolvedType === "ollama" ||
-        resolvedType === "replicate"}
+      class:dark-invert={resolvedLogoType === "openai" ||
+        resolvedLogoType === "anthropic" ||
+        resolvedLogoType === "ollama" ||
+        resolvedLogoType === "replicate"}
     />
   {:else}
     <!-- Fallback: generic grid icon for unknown providers -->
