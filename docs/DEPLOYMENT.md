@@ -166,6 +166,8 @@ docker network create proxy_tier
 docker compose up -d
 ```
 
+> **Note on networks**: `proxy_tier` is the only network you create manually. The compose file also defines two managed networks: `data_net` (internal — PostgreSQL and Redis are isolated from the internet and from Traefik/frontend) and `module_net` (reserved for optional module containers). See the [network isolation section](deployment/README.md#network-isolation) for details.
+
 The initial startup may take a few minutes as Docker downloads the necessary container images. Once done, you can visit `https://your-domain.com` in your browser.
 
 ### Step 4: First-Time Login (Critical Security Step)

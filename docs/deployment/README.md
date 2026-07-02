@@ -20,8 +20,8 @@ cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 
 # 2. Edit docker-compose.yml (replace your-domain.com with your actual domain):
-#    - Line 38: your-email@domain.com (Let's Encrypt email)
-#    - Lines 65, 68, 91, 94: your-domain.com (4 locations)
+#    - Line 55: your-email@domain.com (Let's Encrypt email)
+#    - Lines 88, 91, 116, 119: your-domain.com (4 locations)
 
 # 3. Configure env_db.env:
 #    - POSTGRES_PASSWORD=your-secure-password
@@ -52,6 +52,41 @@ docker logs eneo_db_init
 # Should see: "Great! Your Tenant and User are all set up."
 
 # 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
+```
+
+## Network Isolation
+
+The stack uses three Docker networks:
+
+| Network | Services | Purpose |
+|---|---|---|
+| `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
+| `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
+| `module_net` | Traefik, backend | Reserved for optional module containers |
+
+The backend is the only service on all three networks. PostgreSQL and Redis are not reachable from the frontend or Traefik containers, and have no outbound internet access.
+
+### Upgrading an existing installation
+
+Installations created from an earlier version of this file had every service on `proxy_tier`. The new topology is applied by recreating the containers:
+
+```bash
+docker compose up -d
+```
+
+Containers are recreated with new network membership; the `eneo_postgres_data` and `eneo_redis_data` volumes are untouched. Expected downtime is a few seconds.
+
+**Check before upgrading:** anything *outside* this compose file that connected to `db:5432` or `redis:6379` over `proxy_tier` (external backup jobs, admin tools) will lose access. Run such tools with `docker exec` (e.g. `docker exec eneo_db pg_dump ...`) or attach them to `eneo_data_net` explicitly.
+
+**Verify after upgrading:**
+
+```bash
+# Should FAIL (frontend can no longer resolve the database):
+docker exec eneo_frontend getent hosts db
+
+# Should succeed:
+docker exec eneo_backend python -c "import socket; socket.getaddrinfo('db', 5432)"
+curl -fsS https://your-domain.com/version
 ```
 
 ## Troubleshooting
