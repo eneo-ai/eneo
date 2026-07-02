@@ -552,7 +552,8 @@ class ModelProviderService:
         provider_type = provider.provider_type.lower()
         base_kwargs: dict[str, Any] = {
             "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1,
+            "max_completion_tokens": 1,
+            "drop_params": True,
             "api_key": api_key,
         }
 

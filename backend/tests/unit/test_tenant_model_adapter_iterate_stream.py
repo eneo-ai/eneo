@@ -8,7 +8,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import ResponseType
+from eneo.ai_models.completion_models.completion_model import ModelKwargs, ResponseType
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     PROVIDER_UNAVAILABLE_CODE,
     PROVIDER_UNAVAILABLE_MESSAGE,
@@ -144,12 +144,82 @@ class _ResourceMCPProxy(_FakeMCPProxy):
         ]
 
 
+class _FakeCredentialResolver:
+    def __init__(self, provider_type: str):
+        self.provider_type = provider_type
+
+    def get_api_key(self, *, required=False):  # noqa: ARG002
+        return "test-key"
+
+    def get_credential_field(self, *, field, required=False):  # noqa: ARG002
+        values = {
+            "endpoint": "https://models.example",
+            "api_version": "2026-01-01",
+            "deployment_name": "gpt-5-prod",
+        }
+        return values.get(field)
+
+
 def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
     adapter.provider_type = "openai"
     adapter.model = SimpleNamespace(name="test-model")
     return adapter
+
+
+def _make_prepare_kwargs_adapter(
+    *, provider_type: str = "azure", reasoning: bool = True, model_name: str = "gpt-5"
+) -> TenantModelAdapter:
+    model = SimpleNamespace(
+        name=model_name,
+        provider_id=uuid4(),
+        max_output_tokens=4096,
+        reasoning=reasoning,
+    )
+    return TenantModelAdapter(
+        model=model,
+        credential_resolver=_FakeCredentialResolver(provider_type),
+        provider_type=provider_type,
+    )
+
+
+def test_prepare_kwargs_uses_max_completion_tokens_for_azure_reasoning_model():
+    adapter = _make_prepare_kwargs_adapter(provider_type="azure", reasoning=True)
+
+    kwargs = adapter._prepare_kwargs(model_kwargs=ModelKwargs())
+
+    assert kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in kwargs
+
+
+def test_prepare_kwargs_uses_max_completion_tokens_for_azure_non_reasoning_model():
+    adapter = _make_prepare_kwargs_adapter(
+        provider_type="azure", reasoning=False, model_name="gpt-4o-2"
+    )
+
+    kwargs = adapter._prepare_kwargs(model_kwargs=ModelKwargs())
+
+    assert kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in kwargs
+
+
+def test_prepare_kwargs_remaps_explicit_max_tokens_for_azure_reasoning_model():
+    adapter = _make_prepare_kwargs_adapter(provider_type="azure", reasoning=True)
+
+    kwargs = adapter._prepare_kwargs(model_kwargs={"max_tokens": 123})
+
+    assert kwargs["max_completion_tokens"] == 123
+    assert "max_tokens" not in kwargs
+
+
+def test_prepare_kwargs_keeps_max_tokens_for_hosted_vllm_model():
+    adapter = _make_prepare_kwargs_adapter(provider_type="hosted_vllm", reasoning=False)
+
+    kwargs = adapter._prepare_kwargs(model_kwargs=ModelKwargs())
+
+    assert kwargs["max_tokens"] == 4096
+    assert "max_completion_tokens" not in kwargs
 
 
 def test_build_tool_result_with_references_uses_self_describing_resource_blocks():

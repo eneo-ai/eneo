@@ -419,6 +419,39 @@ class TenantModelAdapter(CompletionModelAdapter):
             },
         )
 
+    def _uses_max_completion_tokens(self) -> bool:
+        """Azure rejects max_tokens on some deployments even without reasoning metadata."""
+        provider_type = self.provider_type.lower()
+        if provider_type == "azure":
+            return True
+        return provider_type == "openai" and bool(
+            getattr(self.model, "reasoning", False)
+        )
+
+    def _set_output_token_limit_param(self, model_kwargs_dict: dict[str, Any]) -> None:
+        max_output_tokens = self.model.max_output_tokens
+
+        if self._uses_max_completion_tokens():
+            explicit_max_tokens = model_kwargs_dict.pop("max_tokens", None)
+            if "max_completion_tokens" not in model_kwargs_dict:
+                model_kwargs_dict["max_completion_tokens"] = (
+                    explicit_max_tokens
+                    if explicit_max_tokens is not None
+                    else max_output_tokens
+                )
+                logger.debug(
+                    "Using max_completion_tokens=%s",
+                    model_kwargs_dict["max_completion_tokens"],
+                )
+            return
+
+        if (
+            "max_tokens" not in model_kwargs_dict
+            and "max_completion_tokens" not in model_kwargs_dict
+        ):
+            model_kwargs_dict["max_tokens"] = max_output_tokens
+            logger.debug("Using max_tokens=%s", max_output_tokens)
+
     def _raise_provider_unavailable(
         self, *, phase: str, exc: BaseException
     ) -> NoReturn:
@@ -722,14 +755,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 ] in (None, "none", ""):
                     del model_kwargs_dict["reasoning_effort"]
 
-            # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
-            # require it explicitly or return empty responses
-            if (
-                "max_tokens" not in model_kwargs_dict
-                and "max_completion_tokens" not in model_kwargs_dict
-            ):
-                model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
-                logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
+            # Ensure an output-token cap is set. Azure rejects the legacy
+            # max_tokens parameter on some deployments even when LiteLLM
+            # reports it as supported.
+            self._set_output_token_limit_param(model_kwargs_dict)
 
             kwargs.update(model_kwargs_dict)
 
