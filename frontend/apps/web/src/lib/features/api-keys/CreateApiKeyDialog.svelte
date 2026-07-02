@@ -141,14 +141,7 @@
   // Fine-grained permissions (HuggingFace-style)
   type ResourcePermission = "none" | "read" | "write" | "admin";
   type ResourcePermissionKey =
-    | "assistants"
-    | "apps"
-    | "spaces"
-    | "knowledge"
-    | "conversations"
-    | "files"
-    | "jobs"
-    | "prompts";
+    "assistants" | "apps" | "spaces" | "knowledge" | "conversations" | "files" | "jobs" | "prompts";
 
   const ALL_RESOURCE_PERMISSION_KEYS: ReadonlyArray<ResourcePermissionKey> = [
     "assistants",

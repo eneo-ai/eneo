@@ -1,5 +1,6 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -30,7 +31,7 @@ class ChatSessionMcpStateRepo:
         self.session = session
 
     @asynccontextmanager
-    async def _tx(self) -> AsyncIterator[None]:
+    async def _tx(self) -> AsyncGenerator[None]:
         if self.session.in_transaction():
             yield
             return

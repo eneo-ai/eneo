@@ -1,5 +1,6 @@
 import json
 from typing import Any, Awaitable, Callable, Optional, cast
+from urllib.parse import ParseResult, parse_qs, urlparse
 from uuid import UUID
 
 import aiohttp
@@ -19,6 +20,18 @@ from eneo.main.logging import get_logger
 logger = get_logger(__name__)
 
 TokenRefreshCallback = Callable[[UUID], Awaitable[dict[str, str]]]
+
+
+def _relative_graph_link(url: str) -> str:
+    """Reduce an absolute Graph URL to the relative path+query the client expects."""
+    parsed: ParseResult = urlparse(url)
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{parsed.path.lstrip('/')}{query}"
+
+
+def _token_from_delta_link(delta_link: str) -> Optional[str]:
+    query_params: dict[str, list[str]] = parse_qs(urlparse(delta_link).query)
+    return query_params.get("token", [None])[0]
 
 
 class DeltaTokenExpiredException(Exception):
@@ -76,17 +89,12 @@ class SharePointContentClient(BaseClient):
 
     async def _get_all_paged_items(self, endpoint: str) -> list[SharePointItem]:
         """Follow @odata.nextLink pagination and collect all items across pages."""
-        from urllib.parse import urlparse
-
         all_items: list[SharePointItem] = []
         next_link: Optional[str] = endpoint
 
         while next_link:
             if next_link.startswith("http"):
-                parsed = urlparse(next_link)
-                next_link = (
-                    f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
-                )
+                next_link = _relative_graph_link(next_link)
 
             response = await self.client.get(next_link, headers=self.headers)
             all_items.extend(response.get("value", []))
@@ -525,32 +533,23 @@ class SharePointContentClient(BaseClient):
             while next_link:
                 # Handle full URL or relative endpoint
                 if next_link.startswith("http"):
-                    # Extract just the path and query from the full URL
-                    from urllib.parse import urlparse
-
-                    parsed = urlparse(next_link)
-                    next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+                    next_link = _relative_graph_link(next_link)
 
                 response = await self.client.get(next_link, headers=self.headers)
 
                 # Check for @odata.nextLink (more pages to fetch)
-                next_link = response.get("@odata.nextLink")
+                next_link = cast(str | None, response.get("@odata.nextLink"))
 
                 # Check for @odata.deltaLink (final page with token)
                 if "@odata.deltaLink" in response:
-                    delta_link = response["@odata.deltaLink"]
+                    delta_link = cast(str, response["@odata.deltaLink"])
                     break
 
             if not delta_link:
                 logger.warning(f"No deltaLink found for drive {drive_id}")
                 return None
 
-            # Extract just the token parameter from the deltaLink
-            from urllib.parse import ParseResult, parse_qs, urlparse
-
-            parsed: ParseResult = urlparse(delta_link)
-            query_params: dict[str, list[str]] = parse_qs(parsed.query)
-            token = query_params.get("token", [None])[0]
+            token = _token_from_delta_link(delta_link)
 
             if not token:
                 logger.warning(f"Could not extract token from deltaLink: {delta_link}")
@@ -600,10 +599,7 @@ class SharePointContentClient(BaseClient):
             while next_link:
                 # Handle full URL or relative endpoint
                 if next_link.startswith("http"):
-                    from urllib.parse import urlparse
-
-                    parsed = urlparse(next_link)
-                    next_link = f"{parsed.path.lstrip('/')}{parsed.query and '?' + parsed.query}"
+                    next_link = _relative_graph_link(next_link)
 
                 response = await self.client.get(next_link, headers=self.headers)
 
@@ -612,17 +608,13 @@ class SharePointContentClient(BaseClient):
                 all_changes.extend(items)
 
                 # Check for next page
-                next_link = response.get("@odata.nextLink")
+                next_link = cast(str | None, response.get("@odata.nextLink"))
 
                 # Check for new delta token
                 if "@odata.deltaLink" in response:
-                    delta_link = response["@odata.deltaLink"]
-                    from urllib.parse import ParseResult, parse_qs, urlparse
-
-                    parsed: ParseResult = urlparse(delta_link)
-                    query_params: dict[str, list[str]] = parse_qs(parsed.query)
-                    token = query_params.get("token", [None])[0]
-                    new_delta_token = token
+                    new_delta_token = _token_from_delta_link(
+                        cast(str, response["@odata.deltaLink"])
+                    )
                     break
 
             if not new_delta_token:

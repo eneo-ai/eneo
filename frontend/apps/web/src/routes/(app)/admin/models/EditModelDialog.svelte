@@ -111,8 +111,7 @@
   // explicit null (rather than omission) when the user cleared it, since
   // the backend distinguishes "field omitted" from "field set to null".
   function securityClassificationPatch():
-    | { security_classification: { id: string } | null }
-    | Record<string, never> {
+    { security_classification: { id: string } | null } | Record<string, never> {
     const next = draft.securityClassification?.id ?? null;
     const prev = model.security_classification?.id ?? null;
     if (next === prev) return {};

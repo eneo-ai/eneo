@@ -52,27 +52,25 @@
   const resources = $derived.by((): Resource[] => {
     switch (scopeType) {
       case "space":
-        return spaces.map(
-          (s: SpaceSparse): Resource => ({ id: s.id, name: s.name, type: "space" as const })
-        );
+        return spaces.map((s: SpaceSparse): Resource => ({
+          id: s.id,
+          name: s.name,
+          type: "space" as const
+        }));
       case "assistant":
-        return assistants.map(
-          (a: ResourceOption): Resource => ({
-            id: a.id,
-            name: a.name,
-            type: "assistant" as const,
-            spaceName: a.spaceName
-          })
-        );
+        return assistants.map((a: ResourceOption): Resource => ({
+          id: a.id,
+          name: a.name,
+          type: "assistant" as const,
+          spaceName: a.spaceName
+        }));
       case "app":
-        return apps.map(
-          (a: ResourceOption): Resource => ({
-            id: a.id,
-            name: a.name,
-            type: "app" as const,
-            spaceName: a.spaceName
-          })
-        );
+        return apps.map((a: ResourceOption): Resource => ({
+          id: a.id,
+          name: a.name,
+          type: "app" as const,
+          spaceName: a.spaceName
+        }));
       default:
         return [];
     }

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from time import monotonic
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -48,7 +48,7 @@ async def redis_lease(
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
     renew_interval_seconds: float | None = None,
     refresh_timeout_seconds: float | None = None,
-) -> AsyncIterator[bool]:
+) -> AsyncGenerator[bool]:
     """Acquire a self-renewing distributed lock for the duration of the block.
 
     Yields ``True`` if the lock was acquired (a watchdog keeps it alive until the

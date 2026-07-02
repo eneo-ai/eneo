@@ -1,8 +1,8 @@
 import asyncio
-from collections.abc import Coroutine, Sequence
+from collections.abc import AsyncGenerator, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
@@ -139,7 +139,7 @@ class SessionService:
         self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
 
     @asynccontextmanager
-    async def _write_transaction(self) -> AsyncIterator[None]:
+    async def _write_transaction(self) -> AsyncGenerator[None]:
         """Open a short write transaction only when one is not already active."""
         session = self.session_repo.session
         if session.in_transaction():

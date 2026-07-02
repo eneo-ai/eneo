@@ -20,6 +20,7 @@ from eneo.audit.domain.repositories.audit_log_repository import (
     AuditLogRawRow,
     AuditLogRepository,
 )
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 logger = logging.getLogger(__name__)
@@ -319,7 +320,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         result = await self.session.execute(query)
-        return result.rowcount
+        return affected_row_count(result)
 
     @override
     async def hard_delete_old_logs(
@@ -356,7 +357,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             batch_subquery = base_subquery.limit(RETENTION_BATCH_SIZE)
             query = sa.delete(AuditLogTable).where(AuditLogTable.id.in_(batch_subquery))
             result = await self.session.execute(query)
-            batch_deleted = result.rowcount
+            batch_deleted = affected_row_count(result)
 
             if batch_deleted == 0:
                 break

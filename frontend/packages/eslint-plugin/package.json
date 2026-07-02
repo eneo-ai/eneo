@@ -8,7 +8,7 @@
     "test": "bun test"
   },
   "devDependencies": {
-    "eslint": "^9.28.0",
-    "svelte-eslint-parser": "^1.1.2"
+    "eslint": "^9.39.4",
+    "svelte-eslint-parser": "^1.8.0"
   }
 }

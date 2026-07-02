@@ -21,7 +21,9 @@
 type StripNullish<T> = T extends null | undefined ? never : T;
 
 export type CompareOptions<T> = {
-  [K in keyof T]?:  // For primitive values or when comparing the whole value
+  [
+    K in keyof T // For primitive values or when comparing the whole value
+  ]?:
     | true
 
     // For arrays of objects: specify which fields to compare in each item

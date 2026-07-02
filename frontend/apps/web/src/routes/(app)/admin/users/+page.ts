@@ -38,8 +38,7 @@ export const load = async (event) => {
   const counts =
     ((
       (response as unknown as Record<string, unknown>).metadata as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
     )?.counts as { active?: number; inactive?: number } | null) ?? null;
 
   return {

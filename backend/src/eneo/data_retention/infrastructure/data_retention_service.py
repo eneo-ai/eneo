@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -122,7 +123,7 @@ class DataRetentionService:
             )
             query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))  # type: ignore[attr-defined]
             result = await self.session.execute(query)
-            batch_deleted = result.rowcount
+            batch_deleted = affected_row_count(result)
 
             if batch_deleted == 0:
                 break
@@ -227,7 +228,7 @@ class DataRetentionService:
             )
             query = sa.delete(Sessions).where(Sessions.id.in_(batch_subquery))
             result = await self.session.execute(query)
-            batch_deleted = result.rowcount
+            batch_deleted = affected_row_count(result)
 
             if batch_deleted == 0:
                 break

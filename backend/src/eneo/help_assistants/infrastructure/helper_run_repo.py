@@ -20,6 +20,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.help_assistants.domain.factory import HelperAssistantsFactory
@@ -152,7 +153,7 @@ class HelperRunRepo:
             HelpAssistantRuns.created_at < threshold,
         )
         result = await self.session.execute(stmt)
-        return result.rowcount
+        return affected_row_count(result)
 
     async def is_helper_session(self, session_id: UUID) -> bool:
         stmt = sa.select(sa.exists().where(HelpAssistantRuns.session_id == session_id))

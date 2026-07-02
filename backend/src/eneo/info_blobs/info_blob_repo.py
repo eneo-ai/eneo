@@ -4,6 +4,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.orm import defer, selectinload
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.collections_table import CollectionsTable
@@ -612,7 +613,7 @@ class InfoBlobRepository:
         )
 
         result = await self.session.execute(stmt)
-        return result.rowcount
+        return affected_row_count(result)
 
     async def get_content_hash(self, website_id: UUID, title: str) -> bytes | None:
         """Get content hash for a specific page.

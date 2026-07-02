@@ -1,8 +1,7 @@
 import { components } from "./schema";
 
 export type Assistant =
-  | components["schemas"]["AssistantPublic"]
-  | components["schemas"]["DefaultAssistant"];
+  components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
 
 export type AssistantSparse = Omit<components["schemas"]["AssistantSparse"], "user_id">;
 export type AssistantResponse = Omit<

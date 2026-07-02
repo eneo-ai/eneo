@@ -12,7 +12,7 @@ import pytest
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-skip migration_isolation tests unless explicitly requested.
+    """Mark integration tests and auto-skip migration_isolation unless requested.
 
     This hook ensures migration tests ONLY run when explicitly requested with:
         pytest -m migration_isolation tests/
@@ -22,6 +22,12 @@ def pytest_collection_modifyitems(config, items):
         pytest -m integration tests/     → skipped
         pytest -m "not integration" ...  → skipped
     """
+    integration_root = Path(__file__).parent.resolve()
+    integration_marker = pytest.mark.integration
+    for item in items:
+        if Path(item.path).resolve().is_relative_to(integration_root):
+            item.add_marker(integration_marker)
+
     # Check if migration_isolation marker was explicitly requested
     marker_expr = config.getoption("-m", default="")
     if (
@@ -125,11 +131,11 @@ from testcontainers.redis import RedisContainer
 
 from alembic import command
 from alembic.config import Config
-from init_db import add_tenant_user
 from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
+from init_db import add_tenant_user
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -348,6 +354,11 @@ def override_settings_for_session(test_settings: Settings):
 
     # Set test settings
     set_settings(test_settings)
+
+    from eneo.worker.redis import reset_redis_client
+
+    reset_redis_client()
+    Container.redis_client.reset()
 
     # CRITICAL: Mutate the existing API_KEY_HEADER object's internal model.name
     #
@@ -568,9 +579,9 @@ async def app(setup_database):
     # Verify app initialization
     print("\n=== Application Verification ===")
     print("✓ FastAPI app initialized")
-    routes = [route.path for route in application.routes]
-    assert "/api/healthz" in routes
-    print(f"✓ Routes registered: {len(routes)} routes")
+    # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
+    # Endpoint-level route contracts are covered by the route contract tests.
+    print(f"✓ Routes registered: {len(application.routes)} route entries")
     print("✓ Ready for testing\n")
 
     yield application

@@ -20,20 +20,25 @@ fileConfig(config.config_file_name)
 target_metadata = Base.metadata
 
 
+def _migration_database_url() -> str:
+    configured_url = config.get_main_option("sqlalchemy.url")
+    if configured_url:
+        return configured_url
+
+    settings = get_settings()
+    if settings.testing:
+        print("Running migration for test_database")
+        return f"{settings.sync_database_url}_test"
+    return settings.sync_database_url
+
+
 def run_migrations_online() -> None:
     """
     Run migrations in 'online' mode
     """
 
-    # handle testing config for migrations
-    if get_settings().testing:
-        print("Running migration for test_database")
-        DB_URL = f"{get_settings().sync_database_url}_test"
-    else:
-        DB_URL = get_settings().sync_database_url
-
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = str(DB_URL)
+    configuration["sqlalchemy.url"] = _migration_database_url()
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -55,7 +60,7 @@ def run_migrations_offline() -> None:
     """
 
     context.configure(
-        url=get_settings().sync_database_url,
+        url=_migration_database_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         compare_type=True,

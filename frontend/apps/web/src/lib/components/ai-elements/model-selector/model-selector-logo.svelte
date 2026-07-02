@@ -1,9 +1,11 @@
 <script lang="ts" module>
+  import { resolveProviderLogoType } from "$lib/features/ai-models/providerLogoAliases";
+
   // Logos are auto-discovered from `$lib/assets/provider-logos/*` (same source as
   // the admin ProviderGlyph). `provider` accepts either a model vendor/org
   // ("OpenAI", "Anthropic", "Google") or a hosting provider_type ("azure",
-  // "bedrock_converse") — aliases map vendors without a logo of their own onto
-  // the closest asset.
+  // "bedrock_converse"). `resolveProviderLogoType` is display-only; it never
+  // changes the persisted provider type or LiteLLM routing.
   const logoModules = import.meta.glob("$lib/assets/provider-logos/*.{svg,png,jpg,jpeg,webp}", {
     eager: true,
     query: "?url",
@@ -17,20 +19,9 @@
     if (!logos[name]) logos[name] = url as string; // SVG takes priority (sorted first)
   }
 
-  const aliases: Record<string, string> = {
-    google: "gemini",
-    meta: "meta_llama",
-    microsoft: "azure",
-    amazon: "bedrock",
-    bedrock_converse: "bedrock"
-  };
-
   function resolveLogo(provider: string | null | undefined): string | undefined {
-    if (!provider) return undefined;
-    let key = provider.toLowerCase().trim().replace(/\s+/g, "_");
-    if (key.startsWith("vertex_ai")) key = "vertex_ai";
-    key = aliases[key] ?? key;
-    return logos[key];
+    const logoType = resolveProviderLogoType(provider);
+    return logoType ? logos[logoType] : undefined;
   }
 </script>
 

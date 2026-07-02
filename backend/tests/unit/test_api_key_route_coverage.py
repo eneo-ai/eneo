@@ -9,6 +9,7 @@ Phase 5 + Phase 8A-D from the implementation plan.
 import ast
 import importlib
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,7 +21,12 @@ from eneo.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
 )
 from eneo.main.config import get_settings
-from tests.unit.api_key_test_utils import walk_routes
+from tests.unit.api_key_test_utils import (
+    route_dependency_closures,
+    route_has_dependency_named,
+    runtime_router_routes,
+    walk_routes,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,52 +34,27 @@ from tests.unit.api_key_test_utils import walk_routes
 
 
 def _get_router():
-    from eneo.server.routers import router
-
-    return router
+    return SimpleNamespace(routes=runtime_router_routes())
 
 
 def _route_has_resource_permission_dep(route) -> bool:
     """Check if a route has _resource_permission_dep dependency."""
-    deps = getattr(route, "dependencies", [])
-    return any(
-        hasattr(dep, "dependency")
-        and getattr(dep.dependency, "__name__", "") == "_resource_permission_dep"
-        for dep in deps
-    )
+    return route_has_dependency_named(route, "_resource_permission_dep")
 
 
 def _route_has_scope_check_dep(route) -> bool:
-    deps = getattr(route, "dependencies", [])
-    return any(
-        hasattr(dep, "dependency")
-        and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-        for dep in deps
-    )
+    return route_has_dependency_named(route, "_scope_check_dep")
 
 
 def _route_has_dep_name(route, dep_name: str) -> bool:
-    deps = getattr(route, "dependencies", [])
-    return any(
-        hasattr(dep, "dependency")
-        and getattr(dep.dependency, "__name__", "") == dep_name
-        for dep in deps
-    )
+    return route_has_dependency_named(route, dep_name)
 
 
 def _route_resource_permission_types(route) -> set[str]:
     resource_types: set[str] = set()
-    for dep in getattr(route, "dependencies", []):
-        fn = getattr(dep, "dependency", None)
-        if getattr(fn, "__name__", "") != "_resource_permission_dep":
-            continue
-        code = getattr(fn, "__code__", None)
-        closure = getattr(fn, "__closure__", None)
-        if code is None or closure is None:
-            continue
-        for name, cell in zip(code.co_freevars, closure):
-            if name == "resource_type":
-                resource_types.add(str(cell.cell_contents))
+    for closure in route_dependency_closures(route, "_resource_permission_dep"):
+        if "resource_type" in closure:
+            resource_types.add(str(closure["resource_type"]))
     return resource_types
 
 
@@ -367,20 +348,10 @@ class TestReadOverrideWiring:
         - resource_type (str)
         We look for the frozenset cell.
         """
-        deps = getattr(route, "dependencies", [])
-        for dep in deps:
-            if not hasattr(dep, "dependency"):
-                continue
-            fn = dep.dependency
-            if getattr(fn, "__name__", "") == "_resource_permission_dep":
-                if hasattr(fn, "__closure__") and fn.__closure__:
-                    for cell in fn.__closure__:
-                        try:
-                            val = cell.cell_contents
-                        except ValueError:
-                            continue
-                        if isinstance(val, frozenset):
-                            return val
+        for closure in route_dependency_closures(route, "_resource_permission_dep"):
+            val = closure.get("read_override_endpoints")
+            if isinstance(val, frozenset):
+                return val
         return None
 
     def test_assistants_router_has_assistants_read_overrides(self):
@@ -428,12 +399,7 @@ class TestTenantAdminApiKeyGuards:
     """
 
     def _has_dependency(self, route, dep_name: str) -> bool:
-        deps = getattr(route, "dependencies", [])
-        return any(
-            hasattr(dep, "dependency")
-            and getattr(dep.dependency, "__name__", "") == dep_name
-            for dep in deps
-        )
+        return route_has_dependency_named(route, dep_name)
 
     def _routes_for_prefix(self, prefix: str):
         router = _get_router()
