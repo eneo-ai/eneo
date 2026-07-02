@@ -3053,6 +3053,72 @@
   - Unrelated dirty files left untouched: `.devcontainer/devcontainer.json`, `.gitignore`, `frontend/bun.lock`, `.devcontainer/devcontainer-lock.json`, and `AGENTS.md.backup-20260629-220449`.
   - Exact next bounded recommendation: ask the next supervisor Codex-exec strategy gate to choose between `FlowRunError.code` enum/generated-client typing and Flow terminal failure observability delete-or-wire. Do not dispatch either without that strategy gate.
 
+## FlowRunError Code Generated-Client Typing
+
+- Slice id: `flow-run-error-code-generated-client-typing`.
+- Commit target: `fix(flows): type run error codes in public schema`.
+- Findings addressed:
+  - `FlowRunError.code` was validated as a regex string, so OpenAPI and the generated SDK exposed terminal run errors as plain `string` even though `FlowApiErrorCode` already owns the public vocabulary.
+  - The first plan to expose the entire `FlowApiErrorCode` catalog through `FlowRunError.code` was too broad: request-only codes such as `flow_not_published` are not valid terminal run-error payloads.
+  - Three taxonomy/docs rows still claimed `flow_published_form_schema_invalid`, `flow_template_not_accessible`, and `flow_template_missing_content` could surface in a run error payload; the terminal run-error subset and production call-site audit did not support that.
+- Evidence reviewed:
+  - `backend/src/intric/flows/flow_api_error_code.py` owns `FlowApiErrorCode`, `FLOW_API_ERROR_CODES`, and `FLOW_RUN_TERMINAL_ERROR_CODES`.
+  - `backend/src/intric/flows/flow_run_error.py` owns the persisted/API run-error envelope, dump path, and persisted-read corruption downgrade.
+  - `backend/src/intric/flows/domain/flow.py` hydrates persisted `error_json` through `parse_flow_run_error`.
+  - Production `FlowRunError.from_source` call-site audit found no literal non-terminal codes; the only broad adapter path was `_flow_api_error_code_or_default` in `backend/src/intric/flows/runtime/executor.py`.
+- Verification agents used, with verdicts:
+  - Codex-exec plan gate artifact `.codex/artifacts/codex-exec-flow-run-error-code-typing-plan-v2-20260702.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: no` for the original full-catalog approach.
+  - Claude plan artifact `.codex/artifacts/claude-peer-loop-flowrunerror-code-generated-client-typing-plan-20260701T233949Z.md` returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; valid critique applied by narrowing the schema to `FLOW_RUN_TERMINAL_ERROR_CODES`.
+  - Claude terminal-subset verification artifact `.codex/artifacts/claude-peer-loop-flowrunerror-code-terminal-subset-plan-verification-20260701T234450Z.md` returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; valid required follow-up applied by auditing production call sites, deriving the schema/test from the terminal set, asserting `RUN_ERROR_PAYLOAD_INVALID` is terminal, and preserving the field description.
+  - Claude final artifact `.codex/artifacts/claude-peer-loop-flowrunerror-code-generated-client-typing-final-20260702T001256Z.md` returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 8`; valid feedback applied by returning `run_error.code.value` from the two executor result branches and asserting the public result field is a plain `str`.
+  - Claude final verification artifact `.codex/artifacts/claude-peer-loop-flowrunerror-code-generated-client-typing-final-verification-20260702T001634Z.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9`.
+  - Codex-exec final gate artifact `.codex/artifacts/codex-exec-flow-run-error-code-typing-final-20260702.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`, `BLOCKER: no`, `COMMIT_READY: yes`.
+- Behavior changed:
+  - `FlowRunError.code` is now enum-backed in memory and serialized as a stable string in Pydantic JSON mode.
+  - The public `FlowRunError.code` OpenAPI schema now enumerates exactly `FLOW_RUN_TERMINAL_ERROR_CODES`; generated `frontend/packages/intric-js/src/types/schema.d.ts` exposes the same union instead of `string`.
+  - `parse_flow_run_error` now sanitizes uncataloged or non-terminal persisted codes to `flow_run_error_payload_invalid` instead of preserving speculative legacy-looking strings.
+  - Executor bad-request translation now refuses to terminalize a run with request-only codes and logs `flow_executor.bad_request_non_terminal_code` before falling back to the terminal default.
+  - Flow error taxonomy validation now rejects both missing terminal run-error surfaces and stale run-error surface claims for non-terminal codes.
+- Deleted compatibility or stale behavior:
+  - Replaced the historical-string-code preservation test with a corruption-downgrade test for uncataloged and request-only codes.
+  - Deleted the duplicate UI component test that preserved an unknown persisted run-level code. The lower-level runtime mapping still keeps one explicit wire-boundary guard for malformed external data.
+  - Corrected generated docs so the three non-terminal taxonomy rows no longer claim run-error payload handling.
+- Files changed:
+  - `backend/src/intric/flows/flow_run_error.py`
+  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/src/intric/flows/flow_error_taxonomy.py`
+  - `backend/tests/unittests/flows/test_flow_run_error.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_docs_site_contract.py`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunErrorAlert.test.ts`
+  - `frontend/apps/docs-site/src/content/guides/flows/reference/errors.mdx`
+  - `frontend/apps/docs-site/src/content/docs/flows-for-developers/when-things-fail.mdx`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Generated/docs decision:
+  - Generated SDK types were regenerated from `.codex/artifacts/openapi-flow-run-error-code-typing-native-20260702.json` through `frontend/packages/intric-js/update.js`; no handwritten SDK override was added.
+  - Flow docs-site error reference pages were regenerated with `backend/scripts/generate_flow_docs.py` because public handling phase text changed.
+  - No separate API guide rewrite was needed: existing guides already tell consumers to branch on typed `FlowApiErrorCode` values, and the generated error reference now carries the corrected surfaces.
+- Architecture delta:
+  - Canonical owner before: `flow_run_error.py` owned the payload shape but used an open regex string, leaving generated clients unable to distinguish valid terminal codes.
+  - Canonical owner after: `flow_api_error_code.py` owns the terminal-code subset, `flow_run_error.py` enforces it at the payload boundary, and `flow_error_taxonomy.py` keeps public docs surfaces aligned with that subset.
+  - What not to preserve: uncataloged run-level codes, request-only codes in persisted run errors, broad compatibility strings, handwritten frontend shadow types, or typing step/attempt/rerun error fields in this slice.
+  - Honest rating impact: improves API consumer DX, generated-client clarity, and data corruption behavior, but does not by itself make Flows 9.5/10; step/attempt/rerun error-code typing and terminal observability remain separate candidates.
+- Validation commands and results:
+  - Red proof before implementation: focused backend tests failed because uncataloged/non-terminal persisted codes were accepted, direct non-terminal `FlowRunError` construction did not fail, and OpenAPI exposed no terminal-code enum.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_api_error_codes.py tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_developer_docs_when_things_fail_is_generated_from_error_taxonomy tests/unittests/flows/test_flow_docs_site_contract.py::test_flow_consumer_error_reference_is_generated_from_taxonomy tests/unittests/flows/test_flow_executor_runtime.py::test_run_error_from_bad_request_falls_back_and_logs_non_terminal_code tests/unittests/flows/test_flow_executor_runtime.py::test_run_error_from_bad_request_sanitizes_context tests/unittests/flows/test_flow_executor_runtime.py::test_run_error_from_bad_request_falls_back_and_logs_uncataloged_code -q'` -> pass, 128 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/flow_run_error.py src/intric/flows/runtime/executor.py src/intric/flows/flow_error_taxonomy.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py && uv run ruff format --check src/intric/flows/flow_run_error.py src/intric/flows/runtime/executor.py src/intric/flows/flow_error_taxonomy.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_error.py src/intric/flows/runtime/executor.py src/intric/flows/flow_error_taxonomy.py src/intric/flows/application/flow_run_terminalization.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/run_outcome.py tests/unittests/flows/test_flow_run_error.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_docs_site_contract.py'` -> pass, 0 errors.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run update -- --schema-file ../../../.codex/artifacts/openapi-flow-run-error-code-typing-native-20260702.json && bun run check && bun test` -> pass, 75 tests passed.
+  - `cd /Users/cimen/eneo/eneo-flows-clean/frontend/apps/web && bun run i18n:compile && bun x vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts src/lib/features/flows/components/FlowRunErrorAlert.test.ts` -> pass, 45 tests passed.
+- Remaining risk / rollback:
+  - Risk is limited to unreleased consumers or persisted rows that expected unknown run-level error codes to survive. They now read as `flow_run_error_payload_invalid`, which is safer and matches the closed public contract.
+  - `frontend/bun.lock` was already dirty before this slice and was left unstaged despite package commands printing `Saved lockfile`.
+  - Rollback: restore the open string `FlowRunError.code`, remove the executor terminal-code guard, restore the historical-code preservation test, regenerate schema/docs, and restore UI unknown-run-code component coverage. That would reintroduce generated-client ambiguity and should only be used if an explicit migration/ops decision accepts open run codes.
+  - Exact next bounded recommendation: ask a fresh strategy gate to choose between step/attempt/rerun error-code typing and Flow terminal failure observability delete-or-wire; do not mix them into this slice.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

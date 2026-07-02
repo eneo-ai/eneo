@@ -24,7 +24,10 @@ from intric.flows.api.flow_runtime_paths import (
     build_flow_runtime_paths,
 )
 from intric.flows.enums import RerunDependencyKind
-from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
+    FlowApiErrorCode,
+)
 from intric.flows.flow_metadata import FlowFormFieldType
 from intric.main.exceptions import ErrorCodes
 from intric.server.main import get_application
@@ -1840,6 +1843,18 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert {"code", "message"}.issubset(set(error_schema.get("required", [])))
     assert error_schema.get("additionalProperties") is False
     assert "Clients should branch on `code`" in error_schema.get("description", "")
+
+    code_schema = _resolve_component_ref(
+        openapi_spec,
+        error_schema.get("properties", {}).get("code", {}),
+    )
+    assert _extract_enum_values(openapi_spec, code_schema) == {
+        code.value for code in FLOW_RUN_TERMINAL_ERROR_CODES
+    }
+    assert "pattern" not in code_schema
+    assert "Stable machine-readable run error code" in code_schema.get(
+        "description", ""
+    )
 
     details_property = error_schema.get("properties", {}).get("details", {})
     details_options = (

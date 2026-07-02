@@ -750,7 +750,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.PUBLISHED_FORM_SCHEMA_INVALID: _entry(
         category="Published definition",
-        surfaced_through="API response and run error payload",
+        surfaced_through="API error response",
         cause="The published flow form configuration is invalid.",
         consumer_action="Ask an editor to fix form fields and republish before running.",
         user_action="Ask a flow editor to fix the form fields.",
@@ -897,7 +897,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE: _entry(
         category="Template asset",
-        surfaced_through="API response and run error payload",
+        surfaced_through="API error response",
         cause="The template file is not accessible to the caller or runtime actor.",
         consumer_action="Use a template stored in the flow or space with the right permissions.",
         user_action="Choose a template you can access.",
@@ -918,7 +918,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.TEMPLATE_MISSING_CONTENT: _entry(
         category="Template asset",
-        surfaced_through="API response and run error payload",
+        surfaced_through="API error response",
         cause="The selected template record has no readable binary content.",
         consumer_action="Ask for a new upload or restore the template file content.",
         user_action="Choose or upload the template again.",
@@ -1032,6 +1032,11 @@ def validate_flow_error_taxonomy(
         if (
             code in FLOW_RUN_TERMINAL_ERROR_CODES
             and "run error payload" not in entry.surfaced_through.lower()
+        ):
+            raise ValueError(f"Flow error taxonomy surface mismatch for {code.value}")
+        if (
+            code not in FLOW_RUN_TERMINAL_ERROR_CODES
+            and "run error payload" in entry.surfaced_through.lower()
         ):
             raise ValueError(f"Flow error taxonomy surface mismatch for {code.value}")
         _validate_short_sentence(code, "cause", entry.cause)

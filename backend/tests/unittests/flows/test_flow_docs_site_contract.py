@@ -1780,6 +1780,9 @@ def test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages() -> Non
         assert FLOW_ERROR_TAXONOMY[code].category == "Typed input/output"
     for code in FLOW_RUN_TERMINAL_ERROR_CODES:
         assert "run error payload" in FLOW_ERROR_TAXONOMY[code].surfaced_through.lower()
+    for code, entry in FLOW_ERROR_TAXONOMY.items():
+        if "run error payload" in entry.surfaced_through.lower():
+            assert code in FLOW_RUN_TERMINAL_ERROR_CODES
 
 
 def test_flow_error_taxonomy_handling_phase_is_derived_from_surface() -> None:

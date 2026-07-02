@@ -126,13 +126,14 @@ describe("flowRuntimeErrorMapping", () => {
     });
   });
 
-  it("returns null for unknown persisted run error codes", () => {
-    const error: FlowRunError = {
+  it("returns null for unknown wire run error codes", () => {
+    // Wire data is untyped; keep the runtime guard even though generated run codes are closed.
+    const error = {
       schema_version: 1,
       code: "provider_timeout",
       message: "Provider timed out.",
       source: "executor_failed"
-    };
+    } as FlowRunError;
 
     expect(describeFlowRunError(error)).toBeNull();
   });
@@ -395,7 +396,10 @@ describe("review policy run error helpers", () => {
   it("keeps unrelated errors visible for any step", () => {
     expect(
       isReviewPolicyRunErrorRelevantForStep(
-        reviewPolicyError({ code: "provider_timeout", step_order: null }),
+        reviewPolicyError({
+          code: FLOW_API_ERROR_CODE.DEFINITION_INVALID,
+          step_order: null
+        }),
         1,
         null
       )

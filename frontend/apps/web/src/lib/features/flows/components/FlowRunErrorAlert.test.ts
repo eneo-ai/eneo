@@ -109,18 +109,6 @@ describe("FlowRunErrorAlert", () => {
     expect(body).toContain("Provider timed out.");
   });
 
-  it("keeps the generic summary for unknown persisted run error codes", () => {
-    const { body } = render(FlowRunErrorAlert, {
-      props: {
-        error: runError({ code: "provider_timeout" }),
-        message: "Provider timed out."
-      }
-    });
-
-    expect(body).toContain(m.flow_run_error_desc());
-    expect(body).toContain("Provider timed out.");
-  });
-
   it("keeps review-policy affected-step guidance ahead of the generic catalog message", () => {
     const { body } = render(FlowRunErrorAlert, {
       props: {

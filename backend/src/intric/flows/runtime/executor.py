@@ -56,6 +56,7 @@ from intric.flows.enums import (
     is_terminal_flow_run_status,
 )
 from intric.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
     FLOW_TYPED_IO_ERROR_CODES,
     FlowApiErrorCode,
 )
@@ -219,7 +220,7 @@ def _flow_api_error_code_or_default(
     if raw_code is None:
         return default_code
     try:
-        return FlowApiErrorCode(raw_code)
+        code = FlowApiErrorCode(raw_code)
     except ValueError:
         logger.warning(
             "flow_executor.bad_request_uncataloged_code code=%s default_code=%s",
@@ -227,6 +228,14 @@ def _flow_api_error_code_or_default(
             default_code.value,
         )
         return default_code
+    if code in FLOW_RUN_TERMINAL_ERROR_CODES:
+        return code
+    logger.warning(
+        "flow_executor.bad_request_non_terminal_code code=%s default_code=%s",
+        raw_code,
+        default_code.value,
+    )
+    return default_code
 
 
 def _review_open_terminal_invariant_error_code(
@@ -655,7 +664,7 @@ class FlowRunExecutor:
             await self._commit()
             return {
                 "status": "failed",
-                "error": run_error.code,
+                "error": run_error.code.value,
             }
         except FlowRuntimeInvariantError as exc:
             source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
@@ -726,7 +735,7 @@ class FlowRunExecutor:
             await self._commit()
             return {
                 "status": "failed",
-                "error": run_error.code,
+                "error": run_error.code.value,
             }
 
         try:

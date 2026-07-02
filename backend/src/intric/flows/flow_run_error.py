@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-from typing import Literal, TypeAlias, cast
+from typing import Annotated, Literal, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    WithJsonSchema,
+)
 
 from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
+    FlowApiErrorCode,
+)
 
 FlowRunErrorJson: TypeAlias = dict[str, object]
 
@@ -14,6 +24,29 @@ _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
 _MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 _INVALID_PERSISTED_ERROR_MESSAGE = "Persisted flow run error payload is invalid."
+_CODE_DESCRIPTION = "Stable machine-readable run error code."
+_TERMINAL_ERROR_CODE_VALUES = tuple(
+    sorted(code.value for code in FLOW_RUN_TERMINAL_ERROR_CODES)
+)
+
+
+def _ensure_terminal_run_error_code(code: FlowApiErrorCode) -> FlowApiErrorCode:
+    if code not in FLOW_RUN_TERMINAL_ERROR_CODES:
+        raise ValueError("Flow run error code must be a terminal run error code.")
+    return code
+
+
+FlowRunTerminalErrorCode: TypeAlias = Annotated[
+    FlowApiErrorCode,
+    AfterValidator(_ensure_terminal_run_error_code),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "enum": list(_TERMINAL_ERROR_CODE_VALUES),
+            "description": _CODE_DESCRIPTION,
+        }
+    ),
+]
 
 
 class FlowRunErrorDetails(BaseModel):
@@ -61,12 +94,7 @@ class FlowRunError(BaseModel):
         default=1,
         description="Schema version for the structured run error payload.",
     )
-    code: str = Field(
-        min_length=1,
-        max_length=128,
-        pattern=r"^[a-z][a-z0-9_]*$",
-        description="Stable machine-readable run error code.",
-    )
+    code: FlowRunTerminalErrorCode = Field(description=_CODE_DESCRIPTION)
     message: str = Field(
         min_length=1,
         max_length=_MAX_MESSAGE_LENGTH,
@@ -105,7 +133,7 @@ class FlowRunError(BaseModel):
         details: FlowRunErrorDetails | None = None,
     ) -> FlowRunError:
         return cls(
-            code=code.value,
+            code=code,
             message=_bound_message(message),
             source=source,
             step_id=step_id,
@@ -129,7 +157,7 @@ def parse_flow_run_error(value: object) -> FlowRunError | None:
         return FlowRunError.model_validate(value)
     except ValidationError:
         return FlowRunError(
-            code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
+            code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID,
             message=_INVALID_PERSISTED_ERROR_MESSAGE,
         )
 

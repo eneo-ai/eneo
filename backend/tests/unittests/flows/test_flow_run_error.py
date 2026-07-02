@@ -11,7 +11,10 @@ from pydantic import ValidationError
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.domain.flow import FlowRun, FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
+    FlowApiErrorCode,
+)
 from intric.flows.flow_run_error import (
     FlowRunError,
     FlowRunErrorDetails,
@@ -37,7 +40,7 @@ def test_flow_run_error_from_source_preserves_machine_code_and_step_context() ->
     )
 
     assert error == FlowRunError(
-        code="flow_review_policy_invalid",
+        code=FlowApiErrorCode.REVIEW_POLICY_INVALID,
         message="Step 3 (Analysera bakgrund): review_policy is invalid.",
         source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
         step_id=step_id,
@@ -96,7 +99,7 @@ def test_flow_run_error_details_reject_unknown_public_keys() -> None:
 
 def _assert_corrupt_run_error(error: FlowRunError | None) -> None:
     assert error == FlowRunError(
-        code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
+        code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID,
         message="Persisted flow run error payload is invalid.",
     )
 
@@ -145,18 +148,48 @@ def test_parse_flow_run_error_sanitizes_corrupt_persisted_values(
     assert leaked_text not in serialized
 
 
-def test_parse_flow_run_error_accepts_historical_string_codes() -> None:
+@pytest.mark.parametrize(
+    "code",
+    [
+        "legacy_uncataloged_code",
+        FlowApiErrorCode.FLOW_NOT_PUBLISHED.value,
+    ],
+)
+def test_parse_flow_run_error_sanitizes_non_terminal_or_uncataloged_codes(
+    code: str,
+) -> None:
     error = parse_flow_run_error(
         {
             "schema_version": 1,
-            "code": "legacy_uncataloged_code",
-            "message": "Stored before the public taxonomy was closed.",
+            "code": code,
+            "message": "Stored before the run-error taxonomy was closed.",
             "source": "executor_failed",
         }
     )
 
+    _assert_corrupt_run_error(error)
+    serialized = json.dumps(dump_flow_run_error(error), sort_keys=True)
+    assert code not in serialized
+
+
+def test_parse_flow_run_error_accepts_terminal_string_codes() -> None:
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": FlowApiErrorCode.RUN_TASK_FAILURE.value,
+            "message": "Task failed before run completion.",
+            "source": "task_failure",
+        }
+    )
+
     assert error is not None
-    assert error.code == "legacy_uncataloged_code"
+    assert error.code == FlowApiErrorCode.RUN_TASK_FAILURE
+    assert dump_flow_run_error(error) == {
+        "schema_version": 1,
+        "code": FlowApiErrorCode.RUN_TASK_FAILURE.value,
+        "message": "Task failed before run completion.",
+        "source": "task_failure",
+    }
 
 
 def test_flow_run_read_model_sanitizes_corrupt_persisted_error_json() -> None:
@@ -182,13 +215,26 @@ def test_flow_run_read_model_sanitizes_corrupt_persisted_error_json() -> None:
     _assert_corrupt_run_error(run.error)
 
 
-def test_flow_run_error_requires_machine_readable_code() -> None:
+def test_flow_run_error_requires_cataloged_code() -> None:
     with pytest.raises(ValidationError):
         FlowRunError(
             code="Invalid Code With Spaces",
             message="Invalid error code.",
             source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
         )
+
+
+def test_flow_run_error_requires_terminal_code() -> None:
+    with pytest.raises(ValidationError):
+        FlowRunError(
+            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+            message="Request-time code cannot be used as a terminal run error.",
+            source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        )
+
+
+def test_run_error_payload_invalid_code_is_terminal() -> None:
+    assert FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID in FLOW_RUN_TERMINAL_ERROR_CODES
 
 
 def test_flow_run_error_from_source_truncates_unbounded_messages() -> None:

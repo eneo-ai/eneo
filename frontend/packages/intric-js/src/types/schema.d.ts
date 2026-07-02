@@ -14549,7 +14549,9 @@ export interface components {
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
      *       "metadata_json": {
-     *         "category": "hr"
+     *         "wizard": {
+     *           "transcription_enabled": true
+     *         }
      *       },
      *       "name": "Employee Review Summary",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
@@ -15323,10 +15325,84 @@ export interface components {
        */
       schema_version?: 1;
       /**
-       * Code
        * @description Stable machine-readable run error code.
+       * @enum {string}
        */
-      code: string;
+      code:
+        | "flow_assistant_snapshot_drift"
+        | "flow_definition_checksum_mismatch"
+        | "flow_definition_flow_id_invalid"
+        | "flow_definition_invalid"
+        | "flow_definition_no_executable_steps"
+        | "flow_definition_schema_version_missing"
+        | "flow_definition_schema_version_unsupported"
+        | "flow_definition_steps_invalid"
+        | "flow_deleted"
+        | "flow_dispatch_failed"
+        | "flow_input_contract_inapplicable"
+        | "flow_llm_request_timeout"
+        | "flow_missing_principal"
+        | "flow_review_expired"
+        | "flow_review_open_active_conflict_invariant"
+        | "flow_review_open_multiple_active_checkpoints_invariant"
+        | "flow_review_open_step_result_incomplete_invariant"
+        | "flow_review_policy_invalid"
+        | "flow_review_rejected"
+        | "flow_run_cancelled"
+        | "flow_run_error_payload_invalid"
+        | "flow_run_rerun_attempt_lineage_conflict_invariant"
+        | "flow_run_rerun_multiple_active_operations_invariant"
+        | "flow_run_user_cancelled"
+        | "flow_runtime_actor_invalid"
+        | "flow_runtime_input_not_consumed"
+        | "flow_service_principal_disabled"
+        | "flow_step_attempt_start_failed"
+        | "flow_step_execution_failed"
+        | "flow_step_missing"
+        | "flow_task_failure"
+        | "flow_task_timeout"
+        | "flow_unsupported_output_mode"
+        | "flow_unsupported_output_type"
+        | "flow_webhook_delivery_failed"
+        | "flow_worker_stalled"
+        | "typed_io_audio_invalid_file_type"
+        | "typed_io_audio_missing_file"
+        | "typed_io_audio_source_unsupported"
+        | "typed_io_audio_too_many_files"
+        | "typed_io_contract_violation"
+        | "typed_io_document_source_unsupported"
+        | "typed_io_empty_extraction"
+        | "typed_io_file_not_found"
+        | "typed_io_file_source_unsupported"
+        | "typed_io_http_connection_error"
+        | "typed_io_http_invalid_config"
+        | "typed_io_http_invalid_url"
+        | "typed_io_http_malformed_response"
+        | "typed_io_http_non_success"
+        | "typed_io_http_response_too_large"
+        | "typed_io_http_ssrf_blocked"
+        | "typed_io_http_timeout"
+        | "typed_io_input_too_large"
+        | "typed_io_invalid_file_type"
+        | "typed_io_invalid_input_source_combination"
+        | "typed_io_invalid_input_source_position"
+        | "typed_io_invalid_json_input"
+        | "typed_io_invalid_output_mode_combination"
+        | "typed_io_invalid_schema"
+        | "typed_io_missing_required_files"
+        | "typed_io_output_parse_failed"
+        | "typed_io_render_failed"
+        | "typed_io_template_checksum_mismatch"
+        | "typed_io_template_render_failed"
+        | "typed_io_transcript_too_large"
+        | "typed_io_transcription_config_invalid"
+        | "typed_io_transcription_empty"
+        | "typed_io_transcription_failed"
+        | "typed_io_transcription_model_missing"
+        | "typed_io_transcription_model_unavailable"
+        | "typed_io_transcription_not_enabled"
+        | "typed_io_unsupported_type"
+        | "typed_io_validation_failed";
       /**
        * Message
        * @description Human-readable technical detail for logs, support and fallback UI. This text is not a stable client contract.
@@ -17692,7 +17768,9 @@ export interface components {
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
      *       "metadata_json": {
-     *         "category": "hr"
+     *         "wizard": {
+     *           "transcription_enabled": true
+     *         }
      *       },
      *       "name": "Employee Review Summary",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
@@ -21346,7 +21424,9 @@ export interface components {
      *       "data_retention_days": 30,
      *       "description": "Transcribe, redact, and summarize citizen audio submissions.",
      *       "metadata_json": {
-     *         "category": "municipality-intake"
+     *         "wizard": {
+     *           "transcription_enabled": true
+     *         }
      *       },
      *       "name": "Municipality Intake Transcription v2",
      *       "steps": [
@@ -41145,7 +41225,9 @@ export interface operations {
            *           "owner_user_id": "00000000-0000-0000-0000-000000000030",
            *           "published_version": 3,
            *           "metadata_json": {
-           *             "category": "hr"
+           *             "wizard": {
+           *               "transcription_enabled": true
+           *             }
            *           },
            *           "data_retention_days": 30,
            *           "created_at": "2026-03-17T09:30:00Z",

@@ -3244,6 +3244,7 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         "status": "failed",
         "error": FlowApiErrorCode.DEFINITION_STEPS_INVALID.value,
     }
+    assert type(result["error"]) is str
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
         executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
@@ -3380,7 +3381,7 @@ async def test_execute_rejects_question_binding_input_contract_before_step_execu
     run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
         "error"
     ]
-    assert run_error.code == FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value
+    assert run_error.code == FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE
     assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
     assert run_error.step_order == 2
 
@@ -3402,7 +3403,7 @@ def test_run_error_from_bad_request_sanitizes_context(user) -> None:
         default_code=FlowApiErrorCode.DEFINITION_INVALID,
     )
 
-    assert error.code == FlowApiErrorCode.REVIEW_POLICY_INVALID.value
+    assert error.code == FlowApiErrorCode.REVIEW_POLICY_INVALID
     assert error.step_order == 3
     assert error.details is not None
     assert error.details.model_dump(exclude_none=True) == {
@@ -3425,9 +3426,29 @@ def test_run_error_from_bad_request_falls_back_and_logs_uncataloged_code(
             default_code=FlowApiErrorCode.DEFINITION_INVALID,
         )
 
-    assert error.code == FlowApiErrorCode.DEFINITION_INVALID.value
+    assert error.code == FlowApiErrorCode.DEFINITION_INVALID
     assert "flow_executor.bad_request_uncataloged_code" in caplog.text
     assert "flow_private_parser_code" in caplog.text
+
+
+def test_run_error_from_bad_request_falls_back_and_logs_non_terminal_code(
+    user, caplog
+) -> None:
+    executor, _, _, _ = _build_executor(user)
+
+    with caplog.at_level(logging.WARNING):
+        error = executor._run_error_from_bad_request(
+            BadRequestException(
+                "Parser returned a request-time code.",
+                code=FlowApiErrorCode.FLOW_NOT_PUBLISHED.value,
+            ),
+            source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+            default_code=FlowApiErrorCode.DEFINITION_INVALID,
+        )
+
+    assert error.code == FlowApiErrorCode.DEFINITION_INVALID
+    assert "flow_executor.bad_request_non_terminal_code" in caplog.text
+    assert FlowApiErrorCode.FLOW_NOT_PUBLISHED.value in caplog.text
 
 
 # --- RunExecutionState ---
@@ -4347,6 +4368,7 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
         "status": "failed",
         "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
     }
+    assert type(result["error"]) is str
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
