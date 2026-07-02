@@ -8,11 +8,19 @@ to prevent regression.
 import ast
 import importlib
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
 from eneo.authentication.auth_dependencies import FILES_READ_OVERRIDES
-
+from tests.unit.api_key_test_utils import (
+    route_dependency_closures,
+    runtime_app_routes,
+    runtime_router_routes,
+)
+from tests.unit.api_key_test_utils import (
+    route_has_dependency_named as _route_has_dependency_named_from_route,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,15 +28,11 @@ from eneo.authentication.auth_dependencies import FILES_READ_OVERRIDES
 
 
 def _get_router():
-    from eneo.server.routers import router
-
-    return router
+    return SimpleNamespace(routes=runtime_router_routes())
 
 
 def _get_app():
-    from eneo.server.main import app
-
-    return app
+    return SimpleNamespace(routes=runtime_app_routes())
 
 
 def _find_route_by_path_and_method(router, path_prefix: str, method: str = None):
@@ -48,12 +52,7 @@ def _find_route_by_path_and_method(router, path_prefix: str, method: str = None)
 
 def _route_has_dependency_named(route, dep_name: str) -> bool:
     """Check if a route has a dependency with a specific __name__."""
-    deps = getattr(route, "dependencies", [])
-    for dep in deps:
-        if hasattr(dep, "dependency"):
-            if getattr(dep.dependency, "__name__", "") == dep_name:
-                return True
-    return False
+    return _route_has_dependency_named_from_route(route, dep_name)
 
 
 def _endpoint_has_dependency_named(endpoint_fn, dep_name: str) -> bool:
@@ -246,22 +245,12 @@ class TestSignedUrlReadOverride:
             if not path.startswith("/files"):
                 continue
             if _route_has_dependency_named(route, "_resource_permission_dep"):
-                # Verify it has a frozenset in closure (read overrides)
-                deps = getattr(route, "dependencies", [])
-                for dep in deps:
-                    fn = getattr(dep, "dependency", None)
-                    if fn and getattr(fn, "__name__", "") == "_resource_permission_dep":
-                        if hasattr(fn, "__closure__") and fn.__closure__:
-                            for cell in fn.__closure__:
-                                try:
-                                    val = cell.cell_contents
-                                except ValueError:
-                                    continue
-                                if (
-                                    isinstance(val, frozenset)
-                                    and "generate_signed_url" in val
-                                ):
-                                    return  # Found it
+                for closure in route_dependency_closures(
+                    route, "_resource_permission_dep"
+                ):
+                    val = closure.get("read_override_endpoints")
+                    if isinstance(val, frozenset) and "generate_signed_url" in val:
+                        return  # Found it
                 pytest.fail(
                     "/files route has resource guard but no generate_signed_url override"
                 )
@@ -282,13 +271,9 @@ class TestVersionEndpointPublic:
         for route in app.routes:
             path = getattr(route, "path", "")
             if path == "/version":
-                deps = getattr(route, "dependencies", [])
-                for dep in deps:
-                    dep_fn = getattr(dep, "dependency", None)
-                    dep_name = getattr(dep_fn, "__name__", "") if dep_fn else ""
-                    assert dep_name != "get_current_active_user", (
-                        "/version should not require auth (get_current_active_user found)"
-                    )
+                assert not _route_has_dependency_named(
+                    route, "get_current_active_user"
+                ), "/version should not require auth (get_current_active_user found)"
                 return
         pytest.fail("/version endpoint not found in app routes")
 

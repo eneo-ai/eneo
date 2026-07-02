@@ -60,11 +60,7 @@
     untrack(
       () =>
         (data.template.input_type || "text-field") as
-          | "text-upload"
-          | "text-field"
-          | "audio-upload"
-          | "audio-recorder"
-          | "image-upload"
+          "text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload"
     )
   );
 

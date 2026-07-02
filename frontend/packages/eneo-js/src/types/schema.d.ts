@@ -7834,11 +7834,7 @@ export interface components {
      * @enum {string}
      */
     ApiKeySearchMatchReason:
-      | "exact_secret"
-      | "key_suffix"
-      | "name_or_description"
-      | "owner"
-      | "creator";
+      "exact_secret" | "key_suffix" | "name_or_description" | "owner" | "creator";
     /**
      * ApiKeyState
      * @enum {string}
@@ -9191,7 +9187,10 @@ export interface components {
       grant_type?: string | null;
       /** Username */
       username: string;
-      /** Password */
+      /**
+       * Password
+       * Format: password
+       */
       password: string;
       /**
        * Scope
@@ -9200,31 +9199,25 @@ export interface components {
       scope?: string;
       /** Client Id */
       client_id?: string | null;
-      /** Client Secret */
+      /**
+       * Client Secret
+       * Format: password
+       */
       client_secret?: string | null;
     };
     /** Body_create_icon_api_v1_icons__post */
     Body_create_icon_api_v1_icons__post: {
-      /**
-       * File
-       * Format: binary
-       */
+      /** File */
       file: string;
     };
     /** Body_upload_file_api_v1_files__post */
     Body_upload_file_api_v1_files__post: {
-      /**
-       * Upload File
-       * Format: binary
-       */
+      /** Upload File */
       upload_file: string;
     };
     /** Body_upload_file_api_v1_groups__id__info_blobs_upload__post */
     Body_upload_file_api_v1_groups__id__info_blobs_upload__post: {
-      /**
-       * File
-       * Format: binary
-       */
+      /** File */
       file: string;
     };
     /**
@@ -11822,11 +11815,7 @@ export interface components {
      * @enum {string}
      */
     InputFieldType:
-      | "text-field"
-      | "text-upload"
-      | "audio-upload"
-      | "audio-recorder"
-      | "image-upload";
+      "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
     /** Integration */
     Integration: {
       /**
@@ -17675,6 +17664,10 @@ export interface components {
       msg: string;
       /** Error Type */
       type: string;
+      /** Input */
+      input?: unknown;
+      /** Context */
+      ctx?: Record<string, never>;
     };
     /**
      * ValidationResult
@@ -22371,8 +22364,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -22788,8 +22780,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */

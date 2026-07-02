@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, update
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.app_template_table import AppTemplates
 
 if TYPE_CHECKING:
@@ -273,7 +274,7 @@ class AppTemplateRepository:
         result = await self.session.execute(stmt)
         await self.session.flush()
 
-        return result.rowcount > 0
+        return affected_row_count(result) > 0
 
     async def get_deleted_for_tenant(self, tenant_id: "UUID") -> list["AppTemplate"]:
         """Get soft-deleted templates for audit trail view.

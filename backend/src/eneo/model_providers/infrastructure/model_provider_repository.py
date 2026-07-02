@@ -3,6 +3,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.main.exceptions import NotFoundException
 from eneo.model_providers.domain.model_provider import ModelProvider
@@ -115,7 +116,7 @@ class ModelProviderRepository:
 
         result = await self.session.execute(stmt)
 
-        if result.rowcount == 0:
+        if affected_row_count(result) == 0:
             raise NotFoundException("ModelProvider", provider_id)
 
     async def count_models_for_provider(self, provider_id: UUID) -> int:

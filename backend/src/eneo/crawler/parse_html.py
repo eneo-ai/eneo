@@ -60,8 +60,10 @@ def parse_response(response: Response) -> CrawledPage | None:
     soup = BeautifulSoup(response.body, "lxml")
 
     # Replace relative links with absolute
-    for url in soup.find_all("a", href=True):
-        url["href"] = urljoin(response.url, url["href"])
+    for link in soup.find_all("a", href=True):
+        href = link.get("href")
+        if isinstance(href, str):
+            link["href"] = urljoin(response.url, href)
 
     content = html2text(str(soup))
     # response.css() is from untyped Scrapy; its return type is partially unknown.

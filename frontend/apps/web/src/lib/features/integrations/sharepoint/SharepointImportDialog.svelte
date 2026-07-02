@@ -20,11 +20,7 @@
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
 
   type PreviewCategory =
-    | "my_teams"
-    | "public_teams_not_member"
-    | "other_sites"
-    | "onedrive"
-    | "unknown";
+    "my_teams" | "public_teams_not_member" | "other_sites" | "onedrive" | "unknown";
 
   type CategorizedIntegrationKnowledgePreview = IntegrationKnowledgePreview & {
     category?: PreviewCategory;

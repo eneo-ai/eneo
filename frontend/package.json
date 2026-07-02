@@ -19,23 +19,26 @@
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
   },
-  "packageManager": "bun@1.3.0",
+  "packageManager": "bun@1.3.14",
   "engines": {
     "node": ">=18"
   },
   "resolutions": {
     "cookie": "0.7.2",
     "esbuild": ">0.25.0",
-    "prettier": "3.5.3"
+    "prettier": "3.9.4"
   },
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "devDependencies": {
-    "knip": "^6.15.0",
-    "prettier": "3.5.3",
-    "prettier-plugin-svelte": "^3.3.3",
-    "prettier-plugin-tailwindcss": "^0.6.11"
+    "knip": "^6.23.0",
+    "prettier": "3.9.4",
+    "prettier-plugin-svelte": "^4.1.1",
+    "prettier-plugin-tailwindcss": "^0.8.0"
+  },
+  "patchedDependencies": {
+    "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch"
   }
 }

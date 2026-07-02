@@ -30,7 +30,11 @@ from eneo.authentication.auth_models import (
 from eneo.conversations.conversations_router import _validate_conversation_scope
 from eneo.roles.permissions import Permission
 from eneo.users.user import UserState
-from tests.unit.api_key_test_utils import make_api_key
+from tests.unit.api_key_test_utils import (
+    make_api_key,
+    route_has_dependency_named,
+    runtime_router_routes,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -735,18 +739,11 @@ class TestScopeRouteGuardCoverage:
 
     def test_admin_routes_have_scope_check(self):
         """All admin route mounts should have resource_type='admin' scope check."""
-        from eneo.server.routers import router
-
         admin_routes_found = []
-        for route in router.routes:
+        for route in runtime_router_routes():
             prefix = getattr(route, "path", "")
             if prefix.startswith("/admin"):
-                deps = getattr(route, "dependencies", [])
-                has_scope_dep = any(
-                    hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-                    for dep in deps
-                )
+                has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 admin_routes_found.append((prefix, has_scope_dep))
                 assert has_scope_dep, (
                     f"Admin route {prefix} missing require_api_key_scope_check dependency"
@@ -760,12 +757,10 @@ class TestScopeRouteGuardCoverage:
 
     def test_api_key_routes_have_scope_check(self):
         """API key management routes should have admin scope check."""
-        from eneo.server.routers import router
-
         # api_key_router is mounted without prefix — routes are flattened as
         # top-level APIRoute objects with the scope dependency attached.
         api_key_routes = []
-        for route in router.routes:
+        for route in runtime_router_routes():
             path = getattr(route, "path", "")
             # Match /api-keys* but NOT /admin/api-keys* or /users/api-keys*
             if path.startswith("/api-keys"):
@@ -775,20 +770,13 @@ class TestScopeRouteGuardCoverage:
             f"Expected >= 3 api-key routes, found {len(api_key_routes)}"
         )
         for route in api_key_routes:
-            deps = getattr(route, "dependencies", [])
-            has_scope_dep = any(
-                hasattr(dep, "dependency")
-                and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-                for dep in deps
-            )
+            has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
             assert has_scope_dep, (
                 f"API key route {route.path} missing _scope_check_dep dependency"
             )
 
     def test_core_resource_routes_have_scope_metadata(self):
         """Core resource routes (spaces, assistants, apps, etc.) have scope checks."""
-        from eneo.server.routers import router
-
         # Routes are flattened by FastAPI — match by prefix (startswith).
         required_prefixes = {
             "/spaces",
@@ -804,17 +792,13 @@ class TestScopeRouteGuardCoverage:
         }
         found_prefixes = set()
         routes_missing_scope_dep = []
-        for route in router.routes:
+        for route in runtime_router_routes():
             path = getattr(route, "path", "")
             for req in required_prefixes:
                 if path.startswith(req):
                     found_prefixes.add(req)
-                    deps = getattr(route, "dependencies", [])
-                    has_scope_dep = any(
-                        hasattr(dep, "dependency")
-                        and getattr(dep.dependency, "__name__", "")
-                        == "_scope_check_dep"
-                        for dep in deps
+                    has_scope_dep = route_has_dependency_named(
+                        route, "_scope_check_dep"
                     )
                     if not has_scope_dep:
                         routes_missing_scope_dep.append(path)
@@ -830,24 +814,14 @@ class TestScopeRouteGuardCoverage:
 
     def test_settings_patch_endpoints_have_router_level_admin_guards(self):
         """Settings PATCH endpoints should have router-level admin scope + key guards."""
-        from eneo.server.routers import router
-
         patch_routes = []
-        for route in router.routes:
+        for route in runtime_router_routes():
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", set())
             if path.startswith("/settings") and "PATCH" in methods:
-                deps = getattr(route, "dependencies", [])
-                has_scope_dep = any(
-                    hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-                    for dep in deps
-                )
-                has_admin_key_dep = any(
-                    hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "")
-                    == "_api_key_permission_dep"
-                    for dep in deps
+                has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
+                has_admin_key_dep = route_has_dependency_named(
+                    route, "_api_key_permission_dep"
                 )
                 patch_routes.append((path, has_scope_dep, has_admin_key_dep))
 
@@ -864,20 +838,13 @@ class TestScopeRouteGuardCoverage:
 
     def test_template_admin_routes_have_scope_check(self):
         """Template admin router mounts should have admin scope check."""
-        from eneo.server.routers import router
-
         # Template admin routers are mounted with prefix="" but their internal
         # routes start with /admin/templates/. Find mounts with "admin-templates" tag.
         found = 0
-        for route in router.routes:
+        for route in runtime_router_routes():
             tags = getattr(route, "tags", [])
             if "admin-templates" in (tags or []):
-                deps = getattr(route, "dependencies", [])
-                has_scope_dep = any(
-                    hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-                    for dep in deps
-                )
+                has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 assert has_scope_dep, (
                     "Template admin route mount missing _scope_check_dep dependency"
                 )
@@ -895,10 +862,8 @@ class TestScopeRouteGuardCoverage:
         tenant directory. Those guards are no-ops for bearer tokens — see
         TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
         """
-        from eneo.server.routers import router
-
         admin_routes = []
-        for route in router.routes:
+        for route in runtime_router_routes():
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", set())
             if (
@@ -906,17 +871,9 @@ class TestScopeRouteGuardCoverage:
                 or path.startswith("/users/admin")
                 or path.startswith("/users/api-keys")
             ):
-                deps = getattr(route, "dependencies", [])
-                has_scope_dep = any(
-                    hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-                    for dep in deps
-                )
-                has_admin_key_dep = any(
-                    hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "")
-                    == "_api_key_permission_dep"
-                    for dep in deps
+                has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
+                has_admin_key_dep = route_has_dependency_named(
+                    route, "_api_key_permission_dep"
                 )
                 admin_routes.append(
                     (path, sorted(methods), has_scope_dep, has_admin_key_dep)
@@ -1667,9 +1624,7 @@ class TestFileDeleteScopeEnforcement:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr(
-            "eneo.users.user_service.ApiKeyPolicyService", _PolicyStub
-        )
+        monkeypatch.setattr("eneo.users.user_service.ApiKeyPolicyService", _PolicyStub)
 
     @staticmethod
     def _patch_settings(monkeypatch):

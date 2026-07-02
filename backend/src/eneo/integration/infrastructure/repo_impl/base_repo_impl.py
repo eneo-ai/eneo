@@ -6,6 +6,7 @@ from sqlalchemy.future import select
 from sqlalchemy.sql.base import ExecutableOption
 
 from eneo.base.base_entity import Entity, EntityMapper
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.base_class import BasePublic
 from eneo.main.exceptions import NotFoundException
 
@@ -92,7 +93,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
     async def delete(self, id: "UUID") -> bool:
         stmt = sa.delete(self._db_model).where(self._db_model.id == id)
         result = await self.session.execute(stmt)
-        return (result.rowcount or 0) > 0
+        return affected_row_count(result) > 0
 
     async def lookup(self, keys: list[UUID]) -> list[Entity]:
         if not keys:

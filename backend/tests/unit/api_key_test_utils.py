@@ -100,6 +100,121 @@ class RouteInfo:
     scope_check_config: ScopeCheckConfig | None
 
 
+@dataclass(frozen=True)
+class RouteContractView:
+    """A flattened view of a route plus dependencies inherited from includes."""
+
+    route: Any
+    path: str
+    dependencies: list[Any]
+    tags: list[str]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.route, name)
+
+    @property
+    def endpoint(self) -> Any:
+        return getattr(self.route, "endpoint", None)
+
+    @property
+    def methods(self) -> set[str] | None:
+        return getattr(self.route, "methods", None)
+
+    @property
+    def dependant(self) -> Any:
+        return getattr(self.route, "dependant", None)
+
+
+def _join_path(prefix: str, path: str) -> str:
+    if not prefix:
+        return path
+    if not path:
+        return prefix
+    return f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+
+
+def flatten_routes(
+    routes: list[Any],
+    *,
+    prefix: str = "",
+    dependencies: list[Any] | None = None,
+    tags: list[str] | None = None,
+) -> list[RouteContractView]:
+    """Flatten FastAPI/Starlette routes across lazy include and mount nodes."""
+    flattened: list[RouteContractView] = []
+    inherited_dependencies = list(dependencies or [])
+    inherited_tags = list(tags or [])
+
+    for route in routes:
+        include_context = getattr(route, "include_context", None)
+        original_router = getattr(route, "original_router", None)
+        if include_context is not None and original_router is not None:
+            flattened.extend(
+                flatten_routes(
+                    list(getattr(original_router, "routes", []) or []),
+                    prefix=_join_path(prefix, getattr(include_context, "prefix", "")),
+                    dependencies=[
+                        *inherited_dependencies,
+                        *list(getattr(include_context, "dependencies", []) or []),
+                    ],
+                    tags=[
+                        *inherited_tags,
+                        *list(getattr(include_context, "tags", []) or []),
+                    ],
+                )
+            )
+            continue
+
+        mounted_routes = getattr(getattr(route, "app", None), "routes", None)
+        if mounted_routes is not None and getattr(route, "path", None):
+            flattened.extend(
+                flatten_routes(
+                    list(mounted_routes),
+                    prefix=_join_path(prefix, getattr(route, "path", "")),
+                    dependencies=inherited_dependencies,
+                    tags=inherited_tags,
+                )
+            )
+            continue
+
+        path = getattr(route, "path", "")
+        if not path:
+            # Every recognized node kind (lazy include, mount, plain route) has
+            # a path. A pathless entry means FastAPI changed the private lazy
+            # include attributes this walker duck-types on — fail loudly so
+            # the route-contract suites can't silently lose coverage.
+            raise AssertionError(
+                "flatten_routes: unrecognized pathless route entry "
+                f"{type(route).__module__}.{type(route).__qualname__}; "
+                "update the include_context/original_router detection above"
+            )
+        flattened.append(
+            RouteContractView(
+                route=route,
+                path=_join_path(prefix, path),
+                dependencies=[
+                    *inherited_dependencies,
+                    *list(getattr(route, "dependencies", []) or []),
+                ],
+                tags=[*inherited_tags, *list(getattr(route, "tags", []) or [])],
+            )
+        )
+
+    return flattened
+
+
+def runtime_router_routes() -> list[RouteContractView]:
+    from eneo.server.routers import router
+
+    return flatten_routes(list(router.routes))
+
+
+def runtime_app_routes() -> list[RouteContractView]:
+    from eneo.server.main import app
+
+    return flatten_routes(list(app.routes))
+
+
 def _extract_closure_vars(dep_fn: Any) -> dict[str, Any]:
     if not hasattr(dep_fn, "__closure__") or dep_fn.__closure__ is None:
         return {}
@@ -127,6 +242,36 @@ def _collect_dep_names(dependant: Any) -> list[Any]:
     return callables
 
 
+def route_dependency_callables(route: Any) -> list[Any]:
+    """Return every dependency callable FastAPI registered for a route.
+
+    FastAPI exposes router-level and endpoint-level dependencies through
+    different attributes, and that surface has shifted across releases. Keep
+    structural route-contract tests on this single introspection path.
+    """
+    router_dep_fns: list[Any] = [
+        getattr(dep, "dependency", None)
+        for dep in getattr(route, "dependencies", []) or []
+    ]
+    endpoint_dep_fns: list[Any] = _collect_dep_names(getattr(route, "dependant", None))
+    return [fn for fn in router_dep_fns + endpoint_dep_fns if fn is not None]
+
+
+def route_has_dependency_named(route: Any, dep_name: str) -> bool:
+    return any(
+        getattr(fn, "__name__", "") == dep_name
+        for fn in route_dependency_callables(route)
+    )
+
+
+def route_dependency_closures(route: Any, dep_name: str) -> list[dict[str, Any]]:
+    return [
+        _extract_closure_vars(fn)
+        for fn in route_dependency_callables(route)
+        if getattr(fn, "__name__", "") == dep_name
+    ]
+
+
 def walk_routes() -> list[RouteInfo]:
     """Enumerate every (path, method) in the live FastAPI router.
 
@@ -138,12 +283,10 @@ def walk_routes() -> list[RouteInfo]:
     """
     from fastapi.routing import APIRoute
 
-    from eneo.server.routers import router
-
     infos: list[RouteInfo] = []
 
-    for route in router.routes:
-        if not isinstance(route, APIRoute):
+    for route in runtime_router_routes():
+        if not isinstance(route.route, APIRoute):
             continue
         path = route.path
         if not path or path == "/":
@@ -159,17 +302,7 @@ def walk_routes() -> list[RouteInfo]:
         has_api_key_permission_dep = False
         has_file_delete_scope_guard_dep = False
 
-        # Router-level dependencies (passed to include_router(dependencies=[...]))
-        router_dep_fns: list[Any] = [
-            getattr(dep, "dependency", None) for dep in route.dependencies
-        ]
-        # Endpoint-level dependencies (Depends(...) in function signature).
-        # Walk the Dependant tree to cover sub-deps like factory-produced closures.
-        endpoint_dep_fns: list[Any] = _collect_dep_names(route.dependant)
-
-        for fn in router_dep_fns + endpoint_dep_fns:
-            if fn is None:
-                continue
+        for fn in route_dependency_callables(route):
             dep_name = getattr(fn, "__name__", "")
             closure = _extract_closure_vars(fn)
 

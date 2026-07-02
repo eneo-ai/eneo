@@ -139,4 +139,19 @@ IGNORED_WARNINGS: list[WarningFilter] = [
             "then delete this entry."
         ),
     ),
+    WarningFilter(
+        pattern=r"The @wait_container_is_ready decorator is deprecated.*",
+        category="DeprecationWarning",
+        module="testcontainers.redis",
+        reason=(
+            "testcontainers 4.14.2 still emits this at import time from its "
+            "RedisContainer module, before our integration fixtures can switch "
+            "container wait strategy usage."
+        ),
+        resolution=(
+            "Upgrade testcontainers once RedisContainer no longer imports the "
+            "deprecated decorator, or replace the integration Redis fixture with "
+            "a custom DockerContainer wired to structured wait strategies."
+        ),
+    ),
 ]

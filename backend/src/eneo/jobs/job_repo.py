@@ -3,6 +3,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.job_table import Jobs
@@ -78,7 +79,7 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return result.rowcount > 0
+        return affected_row_count(result) > 0
 
     async def mark_job_failed_if_running(self, id: UUID, error_message: str) -> int:
         """Atomically mark a job as FAILED only if it's currently IN_PROGRESS or QUEUED.
@@ -106,7 +107,7 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return result.rowcount
+        return affected_row_count(result)
 
     async def mark_stale_jobs_failed(
         self,

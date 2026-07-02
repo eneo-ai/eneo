@@ -11,8 +11,17 @@ import { eneoIcons } from "@eneo/ui/icons/vite-plugin-eneo-icons";
 const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
 const pkg = JSON.parse(json);
+const browserTarget = "es2022";
 
 export default defineConfig({
+  build: {
+    target: browserTarget
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: browserTarget
+    }
+  },
   plugins: [
     paraglideVitePlugin({
       project: "./project.inlang",

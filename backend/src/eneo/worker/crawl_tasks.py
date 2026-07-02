@@ -13,6 +13,7 @@ from arq import Retry
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -615,7 +616,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
                     )
                     result = await session.execute(stmt)
-                    if result.rowcount == 0:
+                    if affected_row_count(result) == 0:
                         logger.debug(
                             "Duplicate crawl skip ignored; job status already changed",
                             extra={

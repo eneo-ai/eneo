@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.assistant_table import AssistantsGroups
@@ -73,7 +74,7 @@ class GroupRepository:
         result = await self.session.execute(
             sa.delete(CollectionsTable).where(CollectionsTable.id == group_id)
         )
-        return result.rowcount
+        return affected_row_count(result)
 
     async def move_group_owner(
         self, group_id: UUID, new_owner_space_id: UUID
