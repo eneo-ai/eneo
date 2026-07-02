@@ -59,7 +59,7 @@ from intric.flows.flow_run_contract_models import (
 from intric.flows.flow_run_contract_models import (
     FormFieldPublic as FormFieldPublic,
 )
-from intric.flows.flow_run_error import FlowRunError
+from intric.flows.flow_run_error import FlowRunError, NullablePublicTerminalErrorCode
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.flows.flow_run_evidence_export_summary import EvidenceExportSummary
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -945,9 +945,8 @@ class FlowRunStepPublic(BaseModel):
     model_parameters_json: dict[str, Any] | None = None
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
-    error_code: str | None = Field(
+    error_code: NullablePublicTerminalErrorCode = Field(
         default=None,
-        max_length=128,
         description=(
             "Stable machine-readable step failure code. Clients should branch on "
             "this code when present and treat error_message as technical detail."
@@ -1429,7 +1428,10 @@ class FlowRunRerunOperationPublic(BaseModel):
     requested_by_principal_type: PrincipalType
     requested_by_user_id: UUID | None = None
     requested_by_service_principal: FlowServicePrincipalActorPublic | None = None
-    failure_code: str | None = None
+    failure_code: NullablePublicTerminalErrorCode = Field(
+        default=None,
+        description="Stable machine-readable rerun failure code.",
+    )
     failure_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -1525,7 +1527,10 @@ class FlowStepAttemptPublic(BaseModel):
     superseded_by_attempt_id: UUID | None = None
     celery_task_id: str | None = None
     status: FlowStepAttemptStatus
-    error_code: str | None = None
+    error_code: NullablePublicTerminalErrorCode = Field(
+        default=None,
+        description="Stable machine-readable attempt failure code.",
+    )
     error_message: str | None = None
     requested_model: str | None = None
     response_model: str | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -42,6 +43,7 @@ from intric.flows.enums import (
     FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_metadata import FlowFormFieldType
 from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_error import FlowRunError
@@ -880,6 +882,34 @@ def _flow_step_attempt_public_payload() -> dict[str, object]:
     }
 
 
+def _flow_run_rerun_operation_public_payload() -> dict[str, object]:
+    return {
+        "id": str(uuid4()),
+        "tenant_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "flow_run_id": str(uuid4()),
+        "rerun_step_id": str(uuid4()),
+        "rerun_step_order": 1,
+        "root_attempt_no": 2,
+        "root_attempt_id": None,
+        "status": "failed",
+        "request_fingerprint": "rerun-fingerprint",
+        "expected_run_revision": 1,
+        "accepted_run_revision": 2,
+        "reason": "Retry the failed step.",
+        "input_payload_json": {"question": "Updated input"},
+        "root_step_input_override_requested": False,
+        "requested_by_principal_type": "user",
+        "requested_by_user_id": str(uuid4()),
+        "failure_code": None,
+        "failure_message": None,
+        "started_at": "2026-03-20T12:01:00Z",
+        "finished_at": "2026-03-20T12:01:05Z",
+        "created_at": "2026-03-20T12:01:00Z",
+        "updated_at": "2026-03-20T12:01:05Z",
+    }
+
+
 @pytest.mark.parametrize("bad_value", (_MISSING, None), ids=("missing", "none"))
 @pytest.mark.parametrize(
     "field_name", ("flow_run_id", "flow_id", "tenant_id", "step_id")
@@ -919,6 +949,49 @@ def test_flow_run_step_public_exposes_nullable_error_code() -> None:
     step = FlowRunStepPublic.model_validate(payload)
 
     assert step.error_code == "flow_step_execution_failed"
+
+
+@pytest.mark.parametrize(
+    ("model", "payload_factory", "field_name"),
+    [
+        (FlowRunStepPublic, _flow_run_step_public_payload, "error_code"),
+        (FlowStepAttemptPublic, _flow_step_attempt_public_payload, "error_code"),
+        (
+            FlowRunRerunOperationPublic,
+            _flow_run_rerun_operation_public_payload,
+            "failure_code",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("raw_code", "expected_code"),
+    [
+        (None, None),
+        (
+            FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+            FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+        ),
+        (
+            FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION.value,
+            FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
+        ),
+        ("not_a_flow_error_code", FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value),
+    ],
+    ids=("none", "terminal", "cataloged_non_terminal", "uncataloged"),
+)
+def test_public_terminal_error_code_fields_sanitize_persisted_values(
+    model: type[BaseModel],
+    payload_factory: Callable[[], dict[str, object]],
+    field_name: str,
+    raw_code: str | None,
+    expected_code: str | None,
+) -> None:
+    payload = payload_factory()
+    payload[field_name] = raw_code
+
+    public_model = model.model_validate(payload)
+
+    assert public_model.model_dump(mode="json")[field_name] == expected_code
 
 
 def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:

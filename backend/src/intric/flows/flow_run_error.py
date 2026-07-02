@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     ValidationError,
@@ -44,6 +45,43 @@ FlowRunTerminalErrorCode: TypeAlias = Annotated[
             "type": "string",
             "enum": list(_TERMINAL_ERROR_CODE_VALUES),
             "description": _CODE_DESCRIPTION,
+        }
+    ),
+]
+
+
+def _coerce_nullable_public_terminal_error_code(
+    value: object,
+) -> FlowApiErrorCode | None:
+    # Public reads degrade stale persisted codes instead of raising API 500s.
+    if value is None:
+        return None
+    if isinstance(value, FlowApiErrorCode):
+        code = value
+    elif isinstance(value, str):
+        try:
+            code = FlowApiErrorCode(value)
+        except ValueError:
+            return FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID
+    else:
+        return FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID
+    if code in FLOW_RUN_TERMINAL_ERROR_CODES:
+        return code
+    return FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID
+
+
+NullablePublicTerminalErrorCode: TypeAlias = Annotated[
+    FlowApiErrorCode | None,
+    BeforeValidator(_coerce_nullable_public_terminal_error_code),
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": list(_TERMINAL_ERROR_CODE_VALUES),
+                },
+                {"type": "null"},
+            ],
         }
     ),
 ]

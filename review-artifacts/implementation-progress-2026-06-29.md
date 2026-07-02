@@ -3119,6 +3119,63 @@
   - Rollback: restore the open string `FlowRunError.code`, remove the executor terminal-code guard, restore the historical-code preservation test, regenerate schema/docs, and restore UI unknown-run-code component coverage. That would reintroduce generated-client ambiguity and should only be used if an explicit migration/ops decision accepts open run codes.
   - Exact next bounded recommendation: ask a fresh strategy gate to choose between step/attempt/rerun error-code typing and Flow terminal failure observability delete-or-wire; do not mix them into this slice.
 
+## Public Step Error Code Typing
+
+- Slice id: `public-step-error-code-typing`.
+- Commit target: `fix(flows): type public step error codes`.
+- Findings addressed:
+  - After `FlowRunError.code` was typed, three public/generated-client fields still exposed terminal failure codes as open strings: `FlowRunStepPublic.error_code`, `FlowStepAttemptPublic.error_code`, and `FlowRunRerunOperationPublic.failure_code`.
+  - Runtime terminalization writes those fields from terminal run-error outcomes, while request-only rerun errors such as `flow_run_rerun_invalid_transition` and `flow_run_rerun_step_not_found` are raised as API errors rather than persisted rerun operation failure codes.
+  - Debug/provenance fields still carry broader diagnostic strings and are intentionally excluded from this slice.
+- Evidence reviewed:
+  - `backend/src/intric/flows/flow_api_error_code.py` owns `FlowApiErrorCode` and `FLOW_RUN_TERMINAL_ERROR_CODES`.
+  - `backend/src/intric/flows/flow_run_error.py` already owns the public run-error typed alias and persisted-read degradation behavior, so the nullable public terminal-code alias belongs there instead of in a new registry or frontend shadow type.
+  - `backend/src/intric/flows/api/flow_models.py` owns the three public response fields and their field-specific descriptions.
+  - `backend/src/intric/flows/application/flow_run_terminalization.py` stamps terminal error codes onto active step results, attempts, and rerun operations; request-only rerun codes stay in the rerun service/API error path.
+- Behavior changed:
+  - `FlowRunStepPublic.error_code`, `FlowStepAttemptPublic.error_code`, and `FlowRunRerunOperationPublic.failure_code` now validate as nullable terminal Flow API error codes and serialize as JSON strings.
+  - `None` stays `None`; known terminal values stay unchanged.
+  - Persisted cataloged non-terminal values and uncataloged strings degrade at the public read boundary to `flow_run_error_payload_invalid`.
+  - DB columns remain string-valued and no migration was added.
+  - `FlowRunDebugAttempt.error_code`, `FlowRunDebugRag.error_code`, and other debug/provenance code fields were deliberately not typed because their producers can carry non-public diagnostic codes.
+- Deleted compatibility or stale behavior:
+  - Replaced open-string public model behavior with a closed terminal-code contract.
+  - Added behavior tests for request-only and uncataloged persisted values instead of preserving speculative unreleased compatibility.
+  - Removed generated-client ambiguity for the three public fields without adding a handwritten SDK override.
+- Files changed:
+  - `backend/src/intric/flows/flow_run_error.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/tests/unittests/flows/test_flow_models.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Generated/docs decision:
+  - Generated SDK types were regenerated from `.codex/artifacts/openapi-public-step-error-code-typing-native-unsorted-20260702.json` through `frontend/packages/intric-js/update.js`; no generated file was hand-edited as source truth.
+  - Docs-site authored content did not need an update: the only docs-site hits were database schema rows that correctly remain `varchar`, API examples with `error_code: null`, and existing guide prose that already tells consumers to branch on typed `FlowApiErrorCode` values.
+- Architecture delta:
+  - Canonical owner before: the public fields lived in `flow_models.py` but were weaker than the terminal error-code catalog.
+  - Canonical owner after: `flow_api_error_code.py` owns the terminal code set, `flow_run_error.py` owns reusable public read-boundary degradation, and `flow_models.py` applies that contract to the three public response fields.
+  - What not to preserve: uncataloged public step/attempt/rerun codes, request-only rerun codes in persisted terminal fields, frontend shadow unions, handwritten generated-client patches, or DB migrations for string columns.
+  - Honest rating impact: improves API consumer DX, generated-client clarity, and corrupted-read resilience, but it does not by itself make Flows 9.5/10; observability delete-or-wire and broader runtime diagnostics remain separate candidates.
+- Verification agents used, with verdicts:
+  - Codex-exec worker plan gate artifact `.codex/artifacts/codex-exec-public-step-error-code-worker-plan-20260702.md` returned green after incorporating the revised Claude plan.
+  - Claude Opus plan artifact `.codex/artifacts/claude-peer-loop-public-step-error-code-typing-plan-review-20260702T013615Z.md` returned `VERDICT: changes_required`; valid feedback was applied by keeping `flow_api_error_code.py` pure, moving the nullable public alias into `flow_run_error.py`, using `BeforeValidator`, and testing null/terminal/request-only/uncataloged values for all three fields.
+  - Claude Opus revised-plan verification artifact `.codex/artifacts/claude-peer-loop-public-step-error-code-typing-revised-plan-verification-20260702T014049Z.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+  - Claude Opus final verification artifact `.codex/artifacts/claude-peer-loop-public-step-error-code-typing-final-verification-20260702T015556Z.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; its optional sanitizer why-comment feedback was applied.
+  - Codex-exec final staged gate artifact `.codex/artifacts/codex-exec-public-step-error-code-final-20260702.md` returned `VERDICT: green`, `GREEN_LIGHT: yes`, `BLOCKER: no`, `COMMIT_READY: yes`.
+- Validation commands and results:
+  - Red proof before source change: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/test_flow_models.py::test_public_terminal_error_code_fields_sanitize_persisted_values tests/unit/test_flow_openapi_contract.py::test_openapi_public_flow_failure_code_fields_are_nullable_terminal_enums -q'` -> failed because non-terminal/uncataloged values passed through and OpenAPI exposed no closed enum.
+  - Focused backend contract: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_flow_api_error_codes.py -q'` -> pass, 303 passed.
+  - SDK generated-client check: `cd /Users/cimen/eneo/eneo-flows-clean/frontend/packages/intric-js && bun run check && bun test` -> pass, 75 tests passed.
+  - Scoped backend lint/format: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/flow_run_error.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py && uv run ruff format --check src/intric/flows/flow_run_error.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py'` -> pass.
+  - Scoped pyright: `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace && backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/flow_run_error.py src/intric/flows/api/flow_models.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
+  - Scoped diff check before final peer gates: `git diff --check -- backend/src/intric/flows/flow_run_error.py backend/src/intric/flows/api/flow_models.py backend/tests/unittests/flows/test_flow_models.py backend/tests/unit/test_flow_openapi_contract.py frontend/packages/intric-js/src/types/schema.d.ts` -> pass.
+- Remaining risk / rollback:
+  - Risk is limited to unreleased consumers or corrupted rows that expected arbitrary strings in public step/attempt/rerun failure-code fields. They now read as `flow_run_error_payload_invalid`, which is safer and aligns with the terminal run-error contract.
+  - `frontend/bun.lock` was already dirty before this slice and was left unstaged despite package commands printing `Saved lockfile`.
+  - Rollback: restore the three fields to `str | None`, remove the nullable terminal-code alias, regenerate SDK schema, and restore the open-string tests. That would reintroduce API/SDK ambiguity and should only happen if a real persisted-data decision accepts open public terminal fields.
+  - Exact next bounded recommendation: ask a strategy gate to choose between Flow terminal failure observability delete-or-wire and the next API/runtime diagnostic clarity slice; do not mix those into this slice.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-2

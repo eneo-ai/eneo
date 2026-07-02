@@ -2560,16 +2560,42 @@ def test_openapi_flow_run_step_public_exposes_runtime_input_file_ids(
     assert items.get("format") == "uuid"
 
 
-def test_openapi_flow_run_step_public_exposes_nullable_error_code(
+@pytest.mark.parametrize(
+    ("component_name", "field_name", "description_fragment"),
+    [
+        (
+            "FlowRunStepPublic",
+            "error_code",
+            "Clients should branch on this code",
+        ),
+        (
+            "FlowStepAttemptPublic",
+            "error_code",
+            "Stable machine-readable attempt failure code",
+        ),
+        (
+            "FlowRunRerunOperationPublic",
+            "failure_code",
+            "Stable machine-readable rerun failure code",
+        ),
+    ],
+)
+def test_openapi_public_flow_failure_code_fields_are_nullable_terminal_enums(
     openapi_spec: dict,
+    component_name: str,
+    field_name: str,
+    description_fragment: str,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
-    step_result = schemas.get("FlowRunStepPublic", {})
-    error_code = step_result.get("properties", {}).get("error_code", {})
+    component_schema = schemas.get(component_name, {})
+    error_code = component_schema.get("properties", {}).get(field_name, {})
 
-    assert "error_code" not in step_result.get("required", [])
+    assert field_name not in component_schema.get("required", [])
     assert _schema_allows_null(error_code)
-    assert "Clients should branch on this code" in error_code.get("description", "")
+    assert _extract_enum_values(openapi_spec, error_code) == {
+        code.value for code in FLOW_RUN_TERMINAL_ERROR_CODES
+    }
+    assert description_fragment in error_code.get("description", "")
 
 
 def test_openapi_flow_run_step_diagnostics_are_typed(
