@@ -7,9 +7,11 @@ Quick deployment reference for Eneo using Docker Compose.
 ## Files in This Directory
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
+- `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))
 - `env_backend.template` - Backend configuration (API keys, OIDC, multi-tenancy)
 - `env_frontend.template` - Frontend configuration (URLs, OIDC)
 - `env_db.template` - Database credentials
+- `env_modules.template` / `env_module_ttt.template` - Module configuration (only needed when enabling modules)
 
 ## Quick Start
 
@@ -62,7 +64,7 @@ The stack uses three Docker networks:
 |---|---|---|
 | `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
 | `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
-| `module_net` | Traefik, backend | Reserved for optional module containers |
+| `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
 
 The backend is the only service on all three networks. PostgreSQL and Redis are not reachable from the frontend or Traefik containers, and have no outbound internet access.
 
