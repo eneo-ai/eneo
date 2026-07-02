@@ -121,8 +121,7 @@ jobs:
           make docs:regen
           git diff --exit-code -- \
             frontend/apps/docs-site/src/content/docs/flows-for-developers \
-            frontend/apps/docs-site/src/content/guides/flows \
-            frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx
+            frontend/apps/docs-site/src/content/guides/flows
 
   backend-tests:
     name: Backend tests

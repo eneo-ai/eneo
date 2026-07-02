@@ -12,9 +12,8 @@ ratchet keeps that honest: every row is classified `buildable`, `gap`, or
 `planned`, and a gap that silently becomes authorable fails the suite.
 
 Canonical command preparation and deterministic create-mode materialization are
-asserted here; LLM-output quality (prompt-token cost, edit/revise behaviour on
-real planner output) lives in the local live-eval runner
-(`scripts/flow_ai_builder_live_eval.py`), which needs a running API and model.
+asserted here; LLM-output quality on real planner output belongs in a committed
+release or QA runbook when that gate is owned.
 """
 
 from __future__ import annotations

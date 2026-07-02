@@ -1034,7 +1034,6 @@ def test_flow_docs_regen_is_wired_into_ci() -> None:
     assert "git diff --exit-code" in workflow
     assert "frontend/apps/docs-site/src/content/docs/flows-for-developers" in workflow
     assert "frontend/apps/docs-site/src/content/guides/flows" in workflow
-    assert "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx" in workflow
 
 
 def test_flow_docs_regen_orchestrator_covers_every_docs_generator() -> None:

@@ -5,7 +5,8 @@ Builder can author. The suite proves every one passes the critic draft preflight
 with no architecture blocker, resolves its declared form fields, matches its
 declared composition columns, and reaches deterministic create-mode
 materialization through the canonical authoring command owner. LLM-output
-quality remains the live-eval runner's job, not this deterministic fence.
+quality on real planner output belongs in a committed release or QA runbook,
+not this deterministic fence.
 
 The set covers every AI-Builder-expressible capability row across the composition
 columns, meeting each row's complexity policy and the global coverage thresholds
