@@ -74,7 +74,7 @@ Installations created from an earlier version of this file had every service on 
 docker compose up -d
 ```
 
-Containers are recreated with new network membership; the `eneo_postgres_data` and `eneo_redis_data` volumes are untouched. Expected downtime is a few seconds.
+Containers are recreated with new network membership; the Compose-managed PostgreSQL and Redis volumes are untouched (normally `eneo_eneo_postgres_data` and `eneo_eneo_redis_data` as Docker volumes). Expected downtime is a few seconds.
 
 **Check before upgrading:** anything *outside* this compose file that connected to `db:5432` or `redis:6379` over `proxy_tier` (external backup jobs, admin tools) will lose access. Run such tools with `docker exec` (e.g. `docker exec eneo_db pg_dump ...`) or attach them to `eneo_data_net` explicitly.
 

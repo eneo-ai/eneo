@@ -20,8 +20,9 @@
 #   4. frontend starts
 #
 # VOLUME MANAGEMENT:
-#   The "name: eneo" ensures consistent volume names (eneo_postgres_data, etc.)
-#   regardless of which directory you run commands from.
+#   The "name: eneo" fixes the Compose project name regardless of which
+#   directory you run commands from. Docker creates volumes with that project
+#   prefix, for example eneo_eneo_postgres_data.
 #   To completely reset: docker compose down -v && docker compose up -d
 #
 # NETWORK ISOLATION:

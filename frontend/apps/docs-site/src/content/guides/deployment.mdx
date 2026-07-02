@@ -157,6 +157,35 @@ Navigate to `https://your-domain.com`
 
 ---
 
+## Network Isolation
+
+The Docker Compose stack uses three networks:
+
+| Network | Services | Purpose |
+|---------|----------|---------|
+| `proxy_tier` (external) | Traefik, frontend, backend, worker | Ingress and outbound access for APIs, OIDC, and crawls |
+| `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer without internet egress, isolated from Traefik and frontend |
+| `module_net` | Traefik, backend | Reserved for optional module containers |
+
+PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend or Traefik containers, and they have no outbound internet access.
+
+<Callout type="warning">
+  **Existing installations:** Older deployment files put every service on `proxy_tier`. Running `docker compose up -d` with the current template recreates containers with the new network membership while keeping PostgreSQL and Redis volumes intact. External backup jobs or admin tools that connected to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec` or attach to `eneo_data_net`.
+</Callout>
+
+Verify the isolation after upgrading:
+
+```bash
+# Should fail: frontend can no longer resolve the database
+docker exec eneo_frontend getent hosts db
+
+# Should succeed
+docker exec eneo_backend python -c "import socket; socket.getaddrinfo('db', 5432)"
+curl -fsS https://your-domain.com/version
+```
+
+---
+
 ## Environment Configuration
 
 <Tabs items={['Backend', 'Frontend', 'Database']}>
@@ -656,11 +685,11 @@ gunzip -c backup_20250108.sql.gz | docker compose exec -T db psql -U eneo eneo
 docker compose down
 
 # Backup PostgreSQL data volume
-docker run --rm -v eneo_postgres_data:/data -v $(pwd):/backup ubuntu \
+docker run --rm -v eneo_eneo_postgres_data:/data -v $(pwd):/backup ubuntu \
   tar czf /backup/postgres_volume_$(date +%Y%m%d).tar.gz /data
 
 # Backup Redis data volume (optional)
-docker run --rm -v eneo_redis_data:/data -v $(pwd):/backup ubuntu \
+docker run --rm -v eneo_eneo_redis_data:/data -v $(pwd):/backup ubuntu \
   tar czf /backup/redis_volume_$(date +%Y%m%d).tar.gz /data
 ```
 
@@ -677,6 +706,10 @@ docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).s
 ### Update version tags (if pinned)
 
 Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
+
+### Review network changes
+
+If your current deployment predates the three-network template, `docker compose up -d` recreates containers with the new network membership. External backup jobs or admin tools that connected to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec` or attach to `eneo_data_net`.
 
 ### Pull and deploy
 
