@@ -108,7 +108,6 @@
   import FlowStepReviewSection from "./FlowStepReviewSection.svelte";
   import FlowStepSecuritySection from "./FlowStepSecuritySection.svelte";
   import FlowStepAdvancedSection from "./FlowStepAdvancedSection.svelte";
-  import FlowStepDeleteSection from "./FlowStepDeleteSection.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import {
     buildFlowStepMcpCompatibilityMap,
@@ -130,7 +129,6 @@
     transcriptionModelLabel = null,
     formSchema,
     onStepChanged,
-    onRemoveStep,
     onJsonValidationChanged,
     onOpenTranscriptionSettings
   }: {
@@ -152,7 +150,6 @@
         }
       | undefined;
     onStepChanged?: (detail: { index: number; step: FlowStep }) => void;
-    onRemoveStep?: (index: number) => void;
     onJsonValidationChanged?: (detail: { hasErrors: boolean; fields: string[] }) => void;
     onOpenTranscriptionSettings?: () => void;
   } = $props();
@@ -1248,14 +1245,6 @@
             />
           </FlowStepChapter>
         {/if}
-
-        <FlowStepDeleteSection
-          step={activeStep}
-          {isPublished}
-          onRemoveStep={() => {
-            if (activeIndex >= 0) onRemoveStep?.(activeIndex);
-          }}
-        />
       </Settings.Page>
     </div>
   </div>

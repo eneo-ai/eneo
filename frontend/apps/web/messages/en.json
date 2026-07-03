@@ -4525,6 +4525,7 @@
   "flow_step_review_policy_view": "Review and approve output",
   "flow_step_review_section": "Human review",
   "flow_step_remove": "Remove step",
+  "flow_step_more_actions": "More actions",
   "flow_step_remove_confirm": "Are you sure you want to remove this step?",
   "flow_step_remove_confirm_named": "Are you sure you want to remove the step \"{name}\"?",
   "flow_step_section_behavior": "Behavior",

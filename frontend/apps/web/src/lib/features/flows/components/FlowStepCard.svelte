@@ -2,6 +2,7 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { IconTrash } from "@eneo/icons/trash";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
   import {
@@ -40,6 +41,8 @@
     onMoveDown?: () => void;
     onRemove?: () => void;
   } = $props();
+
+  let menuOpen = $state(false);
 
   const INPUT_SOURCE_LABELS: Record<string, () => string> = {
     flow_input: () => m.flow_input_source_flow_input(),
@@ -266,7 +269,7 @@
   {#if !isPublished}
     <div
       class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100"
-      class:opacity-100={isActive}
+      class:opacity-100={isActive || menuOpen}
     >
       <button
         type="button"
@@ -316,18 +319,31 @@
           <path d="M8 4v8M4 9l4 3 4-3" />
         </svg>
       </button>
-      <button
-        type="button"
-        class="text-secondary hover:bg-hover-dimmer hover:text-negative-stronger focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
-        onclick={(e) => {
-          e.stopPropagation();
-          onRemove?.();
-        }}
-        title={m.flow_step_remove()}
-        aria-label={m.flow_step_remove()}
-      >
-        <IconTrash class="size-3" />
-      </button>
+      <DropdownMenu.Root bind:open={menuOpen}>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              title={m.flow_step_more_actions()}
+              aria-label={m.flow_step_more_actions()}
+            >
+              <svg class="size-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <circle cx="3" cy="8" r="1.3" />
+                <circle cx="8" cy="8" r="1.3" />
+                <circle cx="13" cy="8" r="1.3" />
+              </svg>
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Item variant="destructive" onclick={() => onRemove?.()}>
+            <IconTrash class="size-3.5" />
+            {m.flow_step_remove()}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
     </div>
   {/if}
 </div>

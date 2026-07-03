@@ -998,18 +998,6 @@
                     const { index, step } = detail;
                     flowEditor.replaceStepAtIndex(index, step);
                   }}
-                  onRemoveStep={async (idx) => {
-                    try {
-                      await flowEditor.removeStepAtIndex(idx);
-                    } catch (error) {
-                      const message =
-                        error instanceof EneoError
-                          ? error.getReadableMessage()
-                          : "Kunde inte ta bort steget.";
-                      toast.error(message);
-                      return;
-                    }
-                  }}
                 />
               </div>
             </div>

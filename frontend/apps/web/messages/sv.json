@@ -4525,6 +4525,7 @@
   "flow_step_review_policy_view": "Granska och godkänn output",
   "flow_step_review_section": "Mänsklig granskning",
   "flow_step_remove": "Ta bort steg",
+  "flow_step_more_actions": "Fler åtgärder",
   "flow_step_remove_confirm": "Är du säker på att du vill ta bort det här steget?",
   "flow_step_remove_confirm_named": "Är du säker på att du vill ta bort steget \"{name}\"?",
   "flow_step_section_behavior": "Beteende",
