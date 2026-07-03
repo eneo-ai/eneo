@@ -103,7 +103,7 @@
     <label class="flex flex-col gap-1.5">
       <span class="text-xs font-medium">{m.http_test_variables_label()}</span>
       <textarea
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-xs shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-xs shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
         aria-label={m.http_test_variables_label()}
         value={testVariablesText}
         disabled={isPublished || testing}

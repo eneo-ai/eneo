@@ -92,7 +92,7 @@
           </div>
         {:else}
           <input
-            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
             type="password"
             placeholder="Token"
             value={typeof auth.token === "string" ? auth.token : ""}
@@ -106,7 +106,7 @@
     {#if auth.mode === "api_key"}
       <div class="grid gap-2 sm:grid-cols-2">
         <input
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           type="text"
           placeholder={m.http_auth_header_name()}
           value={auth.header_name}
@@ -129,7 +129,7 @@
           </div>
         {:else}
           <input
-            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
             type="password"
             placeholder={m.http_auth_api_key_value()}
             value={typeof auth.key === "string" ? auth.key : ""}
@@ -143,7 +143,7 @@
     {#if auth.mode === "basic_auth"}
       <div class="grid gap-2 sm:grid-cols-2">
         <input
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           type="text"
           placeholder={m.http_auth_username()}
           value={auth.username}
@@ -166,7 +166,7 @@
           </div>
         {:else}
           <input
-            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
             type="password"
             placeholder={m.http_auth_password()}
             value={typeof auth.password === "string" ? auth.password : ""}

@@ -44,7 +44,7 @@
 </div>
 <Textarea
   rows={4}
-  class="bg-primary hover:border-stronger font-mono text-base shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] sm:text-sm"
+  class="bg-primary hover:border-stronger font-mono text-base shadow-xs sm:text-sm"
   {value}
   disabled={isPublished}
   aria-invalid={Boolean(error)}

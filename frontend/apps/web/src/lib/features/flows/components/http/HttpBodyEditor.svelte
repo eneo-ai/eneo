@@ -79,7 +79,7 @@
 
       {#if body.mode === "json_template" || body.mode === "text_template"}
         <textarea
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger min-h-[120px] w-full rounded-lg border px-3 py-2 font-mono text-xs shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50 {isJsonInvalid
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger min-h-[120px] w-full rounded-lg border px-3 py-2 font-mono text-xs shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50 {isJsonInvalid
             ? 'border-danger-default/60'
             : ''}"
           value={body.template ?? ""}

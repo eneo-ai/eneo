@@ -210,7 +210,7 @@
     {#if step.output_config && !step.output_config.auth}
       <Settings.Row title={m.flow_step_webhook_url()} description="">
         <input
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           value={step.output_config?.url ?? ""}
           disabled={isPublished}
           oninput={(e) => onWebhookUrlChange?.({ value: e.currentTarget.value })}

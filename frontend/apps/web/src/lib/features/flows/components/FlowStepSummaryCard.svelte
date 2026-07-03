@@ -71,6 +71,8 @@
 <div
   class="border-default/60 bg-secondary/12 mb-4 rounded-xl border px-4 py-3"
   style="font-variant-numeric: tabular-nums"
+  aria-live="polite"
+  aria-atomic="true"
 >
   <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm leading-snug">
     <span class="text-secondary min-w-0 truncate" title={source}>
