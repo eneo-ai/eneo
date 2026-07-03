@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { OUTPUT_TYPES, OUTPUT_MODES } from "$lib/features/flows/components/flowStepEditHelpers";
 
 type InputType = FlowStep["input_type"];
 type InputSource = FlowStep["input_source"];
@@ -309,4 +310,30 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
   }
 
   return issues;
+}
+
+export function getAvailableOutputTypes(
+  step: Pick<FlowStep, "output_mode"> | null | undefined
+): typeof OUTPUT_TYPES {
+  if (step?.output_mode === "transcribe_only") {
+    return OUTPUT_TYPES.filter((type) => type.value === "text");
+  }
+  if (step?.output_mode === "template_fill") {
+    return OUTPUT_TYPES.filter((type) => type.value === "docx");
+  }
+  return OUTPUT_TYPES;
+}
+
+export function getAvailableOutputModes(params: {
+  step: Pick<FlowStep, "input_type" | "output_mode"> | null | undefined;
+  isAdvancedMode: boolean;
+}): typeof OUTPUT_MODES {
+  const { step, isAdvancedMode } = params;
+  const base =
+    step?.input_type === "audio"
+      ? OUTPUT_MODES
+      : OUTPUT_MODES.filter((mode) => mode.value !== "transcribe_only");
+  return isAdvancedMode || step?.output_mode === "template_fill"
+    ? base
+    : base.filter((mode) => mode.value !== "template_fill");
 }

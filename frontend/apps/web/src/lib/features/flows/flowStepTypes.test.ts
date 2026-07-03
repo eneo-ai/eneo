@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
+import type { FlowStep } from "@eneo/eneo-js";
 import {
+  getAvailableOutputModes,
+  getAvailableOutputTypes,
   getFlowStepValidationIssues,
   getSelectableInputTypeOptions,
   getValidInputTypes,
   hasOutboundDeliveryOutputMode,
-  mapOutputToInputType,
+  mapOutputToInputType
 } from "./flowStepTypes";
+
+function outputStep(overrides: Partial<FlowStep> = {}): FlowStep {
+  return {
+    input_type: "text",
+    output_mode: "pass_through",
+    ...overrides
+  } as FlowStep;
+}
 
 describe("mapOutputToInputType", () => {
   it("maps rendered document outputs back to text for chaining", () => {
@@ -47,7 +58,7 @@ describe("getSelectableInputTypeOptions", () => {
       inputSource: "flow_input",
       previousOutputType: undefined,
       currentInputType: "text",
-      isAdvancedMode: false,
+      isAdvancedMode: false
     });
 
     expect(options.map((option) => option.value)).toEqual(["text", "json", "document", "audio"]);
@@ -58,7 +69,7 @@ describe("getSelectableInputTypeOptions", () => {
       inputSource: "flow_input",
       previousOutputType: undefined,
       currentInputType: "text",
-      isAdvancedMode: true,
+      isAdvancedMode: true
     });
 
     expect(options.map((option) => option.value)).toEqual([
@@ -68,7 +79,7 @@ describe("getSelectableInputTypeOptions", () => {
       "file",
       "image",
       "audio",
-      "any",
+      "any"
     ]);
     expect(options.find((option) => option.value === "image")?.disabled).toBe(true);
   });
@@ -78,7 +89,7 @@ describe("getSelectableInputTypeOptions", () => {
       inputSource: "previous_step",
       previousOutputType: "pdf",
       currentInputType: "json",
-      isAdvancedMode: false,
+      isAdvancedMode: false
     });
 
     expect(options.map((option) => option.value)).toEqual(["json", "text"]);
@@ -90,7 +101,7 @@ describe("getSelectableInputTypeOptions", () => {
       inputSource: "previous_step",
       previousOutputType: "json",
       currentInputType: "any",
-      isAdvancedMode: false,
+      isAdvancedMode: false
     });
 
     expect(options.map((option) => option.value)).toEqual(["text", "json", "any"]);
@@ -98,11 +109,79 @@ describe("getSelectableInputTypeOptions", () => {
   });
 });
 
+describe("getAvailableOutputTypes", () => {
+  it("restricts transcribe_only steps to text output", () => {
+    const values = getAvailableOutputTypes(outputStep({ output_mode: "transcribe_only" })).map(
+      (type) => type.value
+    );
+    expect(values).toEqual(["text"]);
+  });
+
+  it("restricts template_fill steps to docx output", () => {
+    const values = getAvailableOutputTypes(outputStep({ output_mode: "template_fill" })).map(
+      (type) => type.value
+    );
+    expect(values).toEqual(["docx"]);
+  });
+
+  it("offers every output type for a plain pass_through step", () => {
+    const values = getAvailableOutputTypes(outputStep()).map((type) => type.value);
+    expect(values).toEqual(["text", "json", "pdf", "docx"]);
+  });
+
+  it("offers every output type when there is no active step", () => {
+    const values = getAvailableOutputTypes(null).map((type) => type.value);
+    expect(values).toEqual(["text", "json", "pdf", "docx"]);
+  });
+});
+
+describe("getAvailableOutputModes", () => {
+  it("hides transcribe_only unless the input is audio", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "text" }),
+      isAdvancedMode: true
+    }).map((mode) => mode.value);
+    expect(values).not.toContain("transcribe_only");
+  });
+
+  it("exposes transcribe_only for audio input", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "audio" }),
+      isAdvancedMode: true
+    }).map((mode) => mode.value);
+    expect(values).toContain("transcribe_only");
+  });
+
+  it("hides template_fill in user mode", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "text" }),
+      isAdvancedMode: false
+    }).map((mode) => mode.value);
+    expect(values).not.toContain("template_fill");
+  });
+
+  it("keeps template_fill visible in user mode when the step already uses it", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "text", output_mode: "template_fill" }),
+      isAdvancedMode: false
+    }).map((mode) => mode.value);
+    expect(values).toContain("template_fill");
+  });
+
+  it("shows template_fill in advanced mode", () => {
+    const values = getAvailableOutputModes({
+      step: outputStep({ input_type: "text" }),
+      isAdvancedMode: true
+    }).map((mode) => mode.value);
+    expect(values).toContain("template_fill");
+  });
+});
+
 describe("getFlowStepValidationIssues", () => {
   it("rejects duplicate flow_input steps", () => {
     const issues = getFlowStepValidationIssues([
       { step_order: 1, input_source: "flow_input", input_type: "text", output_type: "text" },
-      { step_order: 2, input_source: "flow_input", input_type: "text", output_type: "text" },
+      { step_order: 2, input_source: "flow_input", input_type: "text", output_type: "text" }
     ]);
 
     expect(issues.map((issue) => issue.code)).toContain("typed_io_multiple_flow_input_steps");
@@ -111,7 +190,7 @@ describe("getFlowStepValidationIssues", () => {
   it("allows zero-flow_input HTTP-only flows", () => {
     const issues = getFlowStepValidationIssues([
       { step_order: 1, input_source: "http_get", input_type: "text", output_type: "text" },
-      { step_order: 2, input_source: "http_post", input_type: "text", output_type: "text" },
+      { step_order: 2, input_source: "http_post", input_type: "text", output_type: "text" }
     ]);
 
     expect(issues).toEqual([]);
@@ -120,16 +199,16 @@ describe("getFlowStepValidationIssues", () => {
   it("flags incompatible legacy previous-step chains", () => {
     const issues = getFlowStepValidationIssues([
       { step_order: 1, input_source: "flow_input", input_type: "text", output_type: "pdf" },
-      { step_order: 2, input_source: "previous_step", input_type: "json", output_type: "text" },
+      { step_order: 2, input_source: "previous_step", input_type: "json", output_type: "text" }
     ]);
 
     expect(issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: "typed_io_incompatible_type_chain",
-          stepOrder: 2,
-        }),
-      ]),
+          stepOrder: 2
+        })
+      ])
     );
   });
 });

@@ -19,10 +19,17 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import {
+    getAvailableOutputModes,
+    getAvailableOutputTypes,
     getFlowStepValidationIssues,
     getSelectableInputSourceOptions,
     getSelectableInputTypeOptions
   } from "$lib/features/flows/flowStepTypes";
+  import {
+    needsTranscribeOnlyOutputModeReset,
+    needsTranscribeOnlyOutputTypeCoercion,
+    shouldAutoClearLegacyTemplate
+  } from "$lib/features/flows/flowStepEditorGuards";
   import {
     getOutputHintKind,
     getSourceHintKind,
@@ -73,7 +80,6 @@
     getOutputTypeLabel,
     getInputSourceLabel,
     getIssueMessage,
-    OUTPUT_TYPES,
     OUTPUT_MODES
   } from "./flowStepEditHelpers";
   import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
@@ -98,6 +104,7 @@
   import FlowStepInputTemplateSection from "./FlowStepInputTemplateSection.svelte";
   import FlowStepTemplateFillSection from "./FlowStepTemplateFillSection.svelte";
   import FlowStepOutputSection from "./FlowStepOutputSection.svelte";
+  import FlowStepTypedIoBanners from "./FlowStepTypedIoBanners.svelte";
   import FlowStepReviewSection from "./FlowStepReviewSection.svelte";
   import FlowStepSecuritySection from "./FlowStepSecuritySection.svelte";
   import FlowStepAdvancedSection from "./FlowStepAdvancedSection.svelte";
@@ -677,24 +684,10 @@
   );
 
   // Output type/mode options
-  const availableOutputTypes = $derived(
-    activeStep?.output_mode === "transcribe_only"
-      ? OUTPUT_TYPES.filter((type) => type.value === "text")
-      : activeStep?.output_mode === "template_fill"
-        ? OUTPUT_TYPES.filter((type) => type.value === "docx")
-        : OUTPUT_TYPES
+  const availableOutputTypes = $derived(getAvailableOutputTypes(activeStep));
+  const availableOutputModes = $derived(
+    getAvailableOutputModes({ step: activeStep, isAdvancedMode })
   );
-  const availableOutputModes = $derived.by(() => {
-    const base =
-      activeStep?.input_type === "audio"
-        ? OUTPUT_MODES
-        : OUTPUT_MODES.filter((mode) => mode.value !== "transcribe_only");
-    const visible =
-      isAdvancedMode || activeStep?.output_mode === "template_fill"
-        ? base
-        : base.filter((mode) => mode.value !== "template_fill");
-    return visible;
-  });
   const isTranscribeOnly = $derived(activeStep?.output_mode === "transcribe_only");
 
   // Instruction & input template derived
@@ -837,11 +830,14 @@
   $effect(() => {
     if (
       activeStep?.id &&
-      !isPublished &&
-      hasInputTemplateOverride &&
-      instructionText.trim().length > 0 &&
-      inputTemplateText.trim() === instructionText.trim() &&
-      !assistantState.autoClearedLegacyTemplateByStepId.has(activeStep.id)
+      shouldAutoClearLegacyTemplate({
+        stepId: activeStep.id,
+        isPublished,
+        hasInputTemplateOverride,
+        instructionText,
+        inputTemplateText,
+        alreadyAutoCleared: assistantState.autoClearedLegacyTemplateByStepId.has(activeStep.id)
+      })
     ) {
       assistantState.autoClearedLegacyTemplateByStepId.add(activeStep.id);
       updateInputTemplate("");
@@ -849,23 +845,13 @@
   });
 
   $effect(() => {
-    if (
-      activeStep &&
-      activeIndex >= 0 &&
-      activeStep.output_mode === "transcribe_only" &&
-      activeStep.output_type !== "text"
-    ) {
+    if (activeStep && activeIndex >= 0 && needsTranscribeOnlyOutputTypeCoercion(activeStep)) {
       updateStep("output_type", "text");
     }
   });
 
   $effect(() => {
-    if (
-      activeStep &&
-      activeIndex >= 0 &&
-      activeStep.input_type !== "audio" &&
-      activeStep.output_mode === "transcribe_only"
-    ) {
+    if (activeStep && activeIndex >= 0 && needsTranscribeOnlyOutputModeReset(activeStep)) {
       updateStep("output_mode", "pass_through");
     }
   });
@@ -1242,37 +1228,7 @@
         </FlowStepChapter>
 
         <!-- Typed I/O info banners -->
-        {#if activeStep.output_type === "json" && activeStep.output_contract}
-          <div
-            class="border-accent-default/30 bg-accent-dimmer text-accent-stronger mb-3 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs"
-          >
-            {m.flow_typed_io_json_contract_info()}
-          </div>
-        {/if}
-
-        {#if (activeStep.output_type === "pdf" || activeStep.output_type === "docx") && activeStep.output_contract}
-          <div
-            class="border-accent-default/30 bg-accent-dimmer text-accent-stronger mb-3 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs"
-          >
-            {m.flow_typed_io_doc_contract_info()}
-          </div>
-        {/if}
-
-        {#if activeStep.input_type === "document" && activeStep.step_order === 1}
-          <div
-            class="border-accent-default/30 bg-accent-dimmer text-accent-stronger mb-3 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs"
-          >
-            {m.flow_typed_io_document_input_info()}
-          </div>
-        {/if}
-
-        {#if activeStep.input_type === "image"}
-          <div
-            class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs"
-          >
-            {m.flow_typed_io_image_not_supported()}
-          </div>
-        {/if}
+        <FlowStepTypedIoBanners step={activeStep} />
 
         {#if isAdvancedMode && !isTemplateFill}
           <FlowStepChapter
