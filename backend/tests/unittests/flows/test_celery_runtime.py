@@ -785,6 +785,78 @@ def test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalizati
 
 
 @pytest.mark.parametrize(
+    "wrapper_name",
+    [
+        "reconcile_stale_running_runs",
+        "reconcile_expired_review_checkpoints",
+        "redispatch_stale_queued_runs",
+        "deliver_flow_audit_outbox",
+        "deliver_flow_webhook_outbox",
+    ],
+)
+def test_flow_maintenance_task_wrappers_cancel_future_on_timeout(
+    monkeypatch,
+    wrapper_name,
+):
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    expected_timeout_seconds = {
+        "reconcile_stale_running_runs": 30,
+        "reconcile_expired_review_checkpoints": 30,
+        "redispatch_stale_queued_runs": 60,
+        "deliver_flow_audit_outbox": 30,
+        "deliver_flow_webhook_outbox": (
+            tasks_module.FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30
+        ),
+    }[wrapper_name]
+    captured_coroutines: list[Coroutine[object, object, dict[str, int | str]]] = []
+
+    class _TimeoutThenCancelledFuture(concurrent.futures.Future[dict[str, int | str]]):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancel_calls = 0
+            self.result_timeouts: list[float | None] = []
+
+        def cancel(self) -> bool:
+            self.cancel_calls += 1
+            return True
+
+        def result(self, timeout: float | None = None) -> dict[str, int | str]:
+            self.result_timeouts.append(timeout)
+            if len(self.result_timeouts) == 1:
+                raise concurrent.futures.TimeoutError()
+            raise concurrent.futures.CancelledError()
+
+    future = _TimeoutThenCancelledFuture()
+
+    def _run_coroutine_threadsafe(
+        coroutine: Coroutine[object, object, dict[str, int | str]],
+        _loop: object,
+    ) -> _TimeoutThenCancelledFuture:
+        captured_coroutines.append(coroutine)
+        return future
+
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(
+        tasks_module.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_threadsafe,
+    )
+
+    try:
+        with pytest.raises(concurrent.futures.TimeoutError):
+            getattr(tasks_module, wrapper_name)()
+    finally:
+        for coroutine in captured_coroutines:
+            coroutine.close()
+
+    assert future.cancel_calls == 1
+    assert future.result_timeouts == [
+        expected_timeout_seconds,
+        tasks_module._FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS,
+    ]
+
+
+@pytest.mark.parametrize(
     ("payload", "scheduled_exceptions", "expected_result", "expected_source"),
     [
         (

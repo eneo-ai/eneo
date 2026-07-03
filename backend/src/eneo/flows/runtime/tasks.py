@@ -6,7 +6,7 @@ import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, assert_never
+from typing import Any, TypeVar, assert_never
 from uuid import UUID
 
 from celery.exceptions import (  # pyright: ignore[reportMissingTypeStubs]
@@ -74,6 +74,7 @@ _FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS = 10
 _FLOW_TASK_LOOP: asyncio.AbstractEventLoop | None = None
 _FLOW_TASK_LOOP_THREAD: threading.Thread | None = None
 _FLOW_TASK_LOOP_LOCK = threading.Lock()
+_FlowTaskResult = TypeVar("_FlowTaskResult")
 
 
 def _start_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -417,6 +418,33 @@ def _cancel_flow_execution_task_from_worker(
                 "source": FlowRunLifecycleSource.TASK_TIMEOUT.value,
             },
         )
+
+
+def _flow_task_future_result_or_cancel(
+    *,
+    future: concurrent.futures.Future[_FlowTaskResult],
+    timeout_seconds: int,
+    task_name: str,
+) -> _FlowTaskResult:
+    try:
+        return future.result(timeout=timeout_seconds)
+    except (concurrent.futures.TimeoutError, SoftTimeLimitExceeded):
+        future.cancel()
+        try:
+            future.result(timeout=_FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS)
+        except concurrent.futures.CancelledError:
+            pass
+        except concurrent.futures.TimeoutError:
+            logger.exception(
+                "Flow runtime task cancellation timed out",
+                extra={"task_name": task_name},
+            )
+        except Exception:
+            logger.exception(
+                "Flow runtime task cancellation failed",
+                extra={"task_name": task_name},
+            )
+        raise
 
 
 def _terminalize_flow_run_failure_from_task(
@@ -820,7 +848,11 @@ def reconcile_stale_running_runs() -> dict[str, int | str]:
         _reconcile_stale_running_runs_all_tenants(),
         loop,
     )
-    return future.result(timeout=30)
+    return _flow_task_future_result_or_cancel(
+        future=future,
+        timeout_seconds=30,
+        task_name="flows.reconcile_running",
+    )
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -832,7 +864,11 @@ def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
         _reconcile_expired_review_checkpoints_all_tenants(),
         loop,
     )
-    return future.result(timeout=30)
+    return _flow_task_future_result_or_cancel(
+        future=future,
+        timeout_seconds=30,
+        task_name="flows.reconcile_review_expiry",
+    )
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -844,7 +880,11 @@ def redispatch_stale_queued_runs() -> dict[str, int | str]:
         _redispatch_stale_queued_runs_all_tenants(),
         loop,
     )
-    return future.result(timeout=60)
+    return _flow_task_future_result_or_cancel(
+        future=future,
+        timeout_seconds=60,
+        task_name="flows.redispatch_stale_queued",
+    )
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -856,7 +896,11 @@ def deliver_flow_audit_outbox() -> dict[str, int | str]:
         _deliver_flow_audit_outbox(),
         loop,
     )
-    return future.result(timeout=30)
+    return _flow_task_future_result_or_cancel(
+        future=future,
+        timeout_seconds=30,
+        task_name="flows.deliver_audit_outbox",
+    )
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -868,4 +912,8 @@ def deliver_flow_webhook_outbox() -> dict[str, int | str]:
         _deliver_flow_webhook_outbox(),
         loop,
     )
-    return future.result(timeout=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30)
+    return _flow_task_future_result_or_cancel(
+        future=future,
+        timeout_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30,
+        task_name="flows.deliver_webhook_outbox",
+    )
