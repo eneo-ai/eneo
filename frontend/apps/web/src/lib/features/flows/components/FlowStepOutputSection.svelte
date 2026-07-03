@@ -13,6 +13,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
@@ -209,8 +210,7 @@
     <!-- Legacy URL-only fallback for configs without authored format -->
     {#if step.output_config && !step.output_config.auth}
       <Settings.Row title={m.flow_step_webhook_url()} description="">
-        <input
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <Input
           value={step.output_config?.url ?? ""}
           disabled={isPublished}
           oninput={(e) => onWebhookUrlChange?.({ value: e.currentTarget.value })}

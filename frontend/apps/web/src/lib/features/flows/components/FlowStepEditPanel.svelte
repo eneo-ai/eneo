@@ -14,6 +14,7 @@
   import { MousePointerClick } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -944,9 +945,8 @@
           <FlowStepSection title={m.flow_step_section_details()}>
             <Settings.Row title={m.flow_step_name()} description="" let:aria>
               <div class="flex flex-col gap-2">
-                <input
+                <Input
                   {...aria}
-                  class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
                   value={activeStep.user_description ?? ""}
                   placeholder={m.flow_step_name_placeholder()}
                   disabled={isPublished}
