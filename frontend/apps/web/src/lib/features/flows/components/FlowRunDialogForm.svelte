@@ -69,30 +69,29 @@
       </Field.Label>
 
       {#if field.type === "multiselect"}
-        <select
-          id={inputId}
-          class="border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive min-h-[7.5rem] w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none focus-visible:ring-3 aria-invalid:ring-3"
-          multiple
-          required={field.required}
-          aria-required={field.required}
-          aria-invalid={invalid}
-          aria-describedby={describedBy}
-          onchange={(event) => {
-            const selected = Array.from(event.currentTarget.selectedOptions).map(
-              (option) => option.value
-            );
-            launchInputState.setFieldValue(field, selected);
-          }}
+        {@const selectedValues = readFlowRunFieldMultiValue(currentFormValues, field)}
+        <Select.Root
+          type="multiple"
+          value={selectedValues}
+          onValueChange={(value) => launchInputState.setFieldValue(field, value)}
         >
-          {#each field.options ?? [] as option (option)}
-            <option
-              value={option}
-              selected={readFlowRunFieldMultiValue(currentFormValues, field).includes(option)}
-            >
-              {option}
-            </option>
-          {/each}
-        </select>
+          <Select.Trigger
+            id={inputId}
+            aria-required={field.required}
+            aria-invalid={invalid}
+            aria-describedby={describedBy}
+            class="w-full"
+          >
+            <span class="min-w-0 truncate">
+              {selectedValues.length > 0 ? selectedValues.join(", ") : m.flow_select_placeholder()}
+            </span>
+          </Select.Trigger>
+          <Select.Content>
+            {#each field.options ?? [] as option (option)}
+              <Select.Item value={option}>{option}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
       {:else if field.type === "select"}
         <Select.Root
           type="single"

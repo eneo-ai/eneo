@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import type { FlowStep } from "@eneo/eneo-js";
   import { SvelteSet } from "svelte/reactivity";
   import { Settings } from "$lib/components/layout";
@@ -26,6 +27,7 @@
   } from "./flowStepEditHelpers";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
 
   let {
     isPublished,
@@ -97,10 +99,33 @@
   function readinessPillClass(): string {
     return getTemplateReadinessPillClass(templateReadiness);
   }
+
+  function templateFileLabel(file: FlowTemplateAssetOption): string {
+    return file.status ? `${file.name} (${getTemplateAssetStatusLabel(file.status)})` : file.name;
+  }
+
+  const templateAssetValue = $derived(resolvedTemplateAssetId ?? "");
+  const templateAssetTriggerLabel = $derived.by(() => {
+    if (!templateAssetValue) return m.flow_template_fill_select_placeholder();
+    const file =
+      selectedTemplateAsset ?? availableTemplateFiles.find((f) => f.id === templateAssetValue);
+    return file ? templateFileLabel(file) : m.flow_template_fill_select_placeholder();
+  });
+
+  function bindingTriggerLabel(binding: string | null | undefined): string {
+    const value = binding ?? "__unset__";
+    if (value === "__unset__") return m.flow_template_fill_select_source();
+    if (value === "") return m.flow_template_fill_leave_empty();
+    for (const group of templateBindingSuggestionGroups) {
+      const match = group.options.find((option) => option.value === value);
+      if (match) return match.label;
+    }
+    return value;
+  }
 </script>
 
 {#if isAdvancedMode}
-  <Settings.Group title={m.flow_template_fill_template_section()}>
+  <FlowStepSection title={m.flow_template_fill_template_section()}>
     <Alert.Root
       class="border-accent-default/15 bg-accent-default/5 rounded-[1rem] px-5 py-4"
       role="status"
@@ -172,20 +197,28 @@
             </Card.Content>
           </Card.Root>
         {/if}
-        <select
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
-          value={resolvedTemplateAssetId ?? ""}
+        <Select.Root
+          type="single"
+          value={templateAssetValue}
           disabled={isPublished || templateInspecting || selectedTemplateAsset?.can_edit === false}
-          onchange={(e) => onTemplateFileSelect?.({ assetId: e.currentTarget.value })}
+          onValueChange={(value) => onTemplateFileSelect?.({ assetId: value })}
         >
-          <option value="">{m.flow_template_fill_select_placeholder()}</option>
-          {#each availableTemplateFiles as file (file.id)}
-            <option value={file.id}>
-              {file.name}
-              {file.status ? ` (${getTemplateAssetStatusLabel(file.status)})` : ""}
-            </option>
-          {/each}
-        </select>
+          <Select.Trigger class="w-full" aria-label={m.flow_template_fill_template_label()}>
+            <span class="min-w-0 truncate">{templateAssetTriggerLabel}</span>
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Group>
+              <Select.Item value="" label={m.flow_template_fill_select_placeholder()}>
+                {m.flow_template_fill_select_placeholder()}
+              </Select.Item>
+              {#each availableTemplateFiles as file (file.id)}
+                <Select.Item value={file.id} label={templateFileLabel(file)}>
+                  {templateFileLabel(file)}
+                </Select.Item>
+              {/each}
+            </Select.Group>
+          </Select.Content>
+        </Select.Root>
         <input
           bind:this={templateUploadInput}
           type="file"
@@ -246,9 +279,9 @@
         {/if}
       </div>
     </div>
-  </Settings.Group>
+  </FlowStepSection>
 
-  <Settings.Group title={m.flow_template_fill_placeholders_title()}>
+  <FlowStepSection title={m.flow_template_fill_placeholders_title()}>
     <div class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5">
       <div class="space-y-2 pr-4">
         <p class="text-secondary whitespace-pre-wrap">
@@ -397,26 +430,46 @@
 
                   <div class="flex flex-col gap-2 md:flex-row md:items-start">
                     <div class="min-w-0 flex-1">
-                      <select
-                        class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm focus-within:ring-2 hover:ring-1 focus-visible:ring-2"
+                      <Select.Root
+                        type="single"
                         value={row.binding ?? "__unset__"}
                         disabled={isPublished}
-                        onchange={(e) =>
+                        onValueChange={(value) =>
                           onBindingChange?.({
                             placeholder: row.placeholderName,
-                            value: e.currentTarget.value
+                            value
                           })}
                       >
-                        <option value="__unset__">{m.flow_template_fill_select_source()}</option>
-                        <option value="">{m.flow_template_fill_leave_empty()}</option>
-                        {#each templateBindingSuggestionGroups as group (group.key)}
-                          <optgroup label={group.label}>
-                            {#each group.options as suggestion (suggestion.value)}
-                              <option value={suggestion.value}>{suggestion.label}</option>
-                            {/each}
-                          </optgroup>
-                        {/each}
-                      </select>
+                        <Select.Trigger
+                          class="w-full"
+                          aria-label={m.flow_template_fill_select_source()}
+                        >
+                          <span class="min-w-0 truncate">{bindingTriggerLabel(row.binding)}</span>
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Group>
+                            <Select.Item
+                              value="__unset__"
+                              label={m.flow_template_fill_select_source()}
+                            >
+                              {m.flow_template_fill_select_source()}
+                            </Select.Item>
+                            <Select.Item value="" label={m.flow_template_fill_leave_empty()}>
+                              {m.flow_template_fill_leave_empty()}
+                            </Select.Item>
+                          </Select.Group>
+                          {#each templateBindingSuggestionGroups as group (group.key)}
+                            <Select.Group>
+                              <Select.GroupHeading>{group.label}</Select.GroupHeading>
+                              {#each group.options as suggestion (suggestion.value)}
+                                <Select.Item value={suggestion.value} label={suggestion.label}>
+                                  {suggestion.label}
+                                </Select.Item>
+                              {/each}
+                            </Select.Group>
+                          {/each}
+                        </Select.Content>
+                      </Select.Root>
                       {#if row.sourceOutputType === "json"}
                         <p class="text-warning-stronger mt-1 text-xs leading-relaxed">
                           {m.flow_template_fill_json_warning()}
@@ -459,9 +512,9 @@
         {/if}
       </div>
     </div>
-  </Settings.Group>
+  </FlowStepSection>
 {:else}
-  <Settings.Group title={m.flow_template_fill_template_section()}>
+  <FlowStepSection title={m.flow_template_fill_template_section()}>
     <Alert.Root
       class="border-accent-default/15 bg-accent-default/5 rounded-[1rem] px-5 py-4"
       role="status"
@@ -511,10 +564,10 @@
         {/if}
       </div>
     </div>
-  </Settings.Group>
+  </FlowStepSection>
 {/if}
 
-<Settings.Group title={m.flow_step_output_section()}>
+<FlowStepSection title={m.flow_step_output_section()}>
   <Settings.Row
     title={m.flow_step_output_type()}
     description={m.flow_template_fill_locked_output_help()}
@@ -530,4 +583,4 @@
       <span class="text-primary">{m.flow_output_mode_template_fill()}</span>
     </div>
   </Settings.Row>
-</Settings.Group>
+</FlowStepSection>

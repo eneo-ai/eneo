@@ -2,7 +2,7 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import FlowStepCard from "./FlowStepCard.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
-  import { getFlowEditor } from "$lib/features/flows/FlowEditor";
+  import { getFlowEditor, type FlowStepCreationSeed } from "$lib/features/flows/FlowEditor";
   import { IconPlus } from "@eneo/icons/plus";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -15,6 +15,7 @@
     summarizeAssistantMcp,
     type FlowStepMcpSummary
   } from "$lib/features/flows/flowStepMcpConfig";
+  import FlowAddStepDialog from "./FlowAddStepDialog.svelte";
 
   let {
     steps,
@@ -42,6 +43,14 @@
   let mcpSummaryByAssistantId = new SvelteMap<string, FlowStepMcpSummary>();
   let lastLoadedRevisionByAssistant = new SvelteMap<string, number>();
   const loadingAssistantIds = new SvelteSet<string>();
+
+  let showAddStep = $state(false);
+  const previousOutputType = $derived(
+    steps.length > 0 ? steps[steps.length - 1].output_type : null
+  );
+  function handleAddFromTemplate(seed: FlowStepCreationSeed | null) {
+    void flowEditor.addStep(seed ?? undefined);
+  }
 
   let showRemoveConfirm = $state(false);
   let pendingRemoveIndex: number | null = $state(null);
@@ -194,9 +203,9 @@
       <button
         type="button"
         class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer/60 hover:text-accent-default focus-visible:ring-accent-default/30 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl border border-dashed py-2.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
-        onclick={() => flowEditor.addStep()}
+        onclick={() => (showAddStep = true)}
       >
-        <IconPlus class="size-4" />
+        <IconPlus class="size-4" aria-hidden="true" />
         {m.flow_step_add()}
       </button>
     </div>
@@ -223,3 +232,5 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<FlowAddStepDialog bind:open={showAddStep} {previousOutputType} onConfirm={handleAddFromTemplate} />

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
+  import * as Select from "$lib/components/ui/select/index.js";
   import type { HttpBody, HttpBodyMode, HttpMethod } from "./httpConfigTypes";
 
   let {
@@ -32,6 +33,10 @@
     onBodyChange?.({ body: { ...body, template } });
   }
 
+  const bodyModeLabel = $derived(
+    BODY_MODES_POST.find((mode) => mode.value === body.mode)?.label ?? body.mode
+  );
+
   const isJsonInvalid = $derived.by(() => {
     if (body.mode !== "json_template") return false;
     if (body.template == null || body.template.trim().length === 0) return false;
@@ -48,16 +53,23 @@
 {#if method === "POST"}
   <Settings.Row title={m.http_body_title()} description="">
     <div class="flex flex-col gap-3">
-      <select
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <Select.Root
+        type="single"
         value={body.mode}
         disabled={isPublished}
-        onchange={(e) => handleModeChange(e.currentTarget.value as HttpBodyMode)}
+        onValueChange={(value) => handleModeChange(value as HttpBodyMode)}
       >
-        {#each BODY_MODES_POST as mode (mode.value)}
-          <option value={mode.value}>{mode.label}</option>
-        {/each}
-      </select>
+        <Select.Trigger class="w-full" aria-label={m.http_body_title()}>
+          {bodyModeLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#each BODY_MODES_POST as mode (mode.value)}
+              <Select.Item value={mode.value} label={mode.label}>{mode.label}</Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
 
       {#if body.mode === "auto"}
         <p class="text-muted text-xs leading-relaxed">
@@ -75,8 +87,7 @@
           placeholder={body.mode === "json_template"
             ? '{\n  "result": "{{ föregående_steg }}"\n}'
             : m.http_body_text_placeholder()}
-          oninput={(e) => handleTemplateChange(e.currentTarget.value)}
-        ></textarea>
+          oninput={(e) => handleTemplateChange(e.currentTarget.value)}></textarea>
         {#if isJsonInvalid}
           <p class="text-danger-default text-xs">{m.http_body_invalid_json()}</p>
         {/if}

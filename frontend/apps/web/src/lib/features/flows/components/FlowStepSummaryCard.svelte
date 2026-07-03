@@ -2,14 +2,14 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
+  import { CircleAlert } from "lucide-svelte";
   import {
     getInputTypeLabel,
     getOutputTypeLabel,
     getSummarySourceText,
-    getSummaryNextChannelText,
     hasAdvancedSettingsActive
   } from "./flowStepEditHelpers";
+  import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
   import { getHttpSummaryText } from "./http/httpConfigHelpers";
   import { parseHttpAuthoredConfig, type HttpMethod } from "./http/httpConfigTypes";
@@ -19,19 +19,34 @@
     summaryModel,
     previousStep,
     isAdvancedMode,
-    hasInputTemplateOverride
+    hasInputTemplateOverride,
+    aiInstructionPresent,
+    onFixInstruction
   }: {
     step: FlowStep;
     summaryModel: {
       usesInputTemplate?: boolean;
-      hasKnowledge?: boolean;
-      hasAttachments?: boolean;
       downstreamKind?: string;
     } | null;
     previousStep: FlowStep | undefined | null;
     isAdvancedMode: boolean;
     hasInputTemplateOverride: boolean;
+    // Whether the step's AI instruction is filled. `null` means the assistant
+    // is still loading, so the capsule stays neutral instead of claiming the
+    // instruction is missing.
+    aiInstructionPresent: boolean | null;
+    onFixInstruction?: () => void;
   } = $props();
+
+  const source = $derived(getSummarySourceText(step, summaryModel, previousStep));
+  const aiWork = $derived(getStepAiWork(step, { instructionPresent: aiInstructionPresent }));
+  const nextChannel = $derived(
+    step.output_mode === "transcribe_only"
+      ? m.flow_step_summary_next_channel_transcript()
+      : summaryModel?.downstreamKind === "text_and_structured"
+        ? m.flow_step_summary_next_channel_text_and_structured_short()
+        : m.flow_step_summary_next_channel_text_short()
+  );
 
   const httpMethod = $derived((step.input_source === "http_get" ? "GET" : "POST") as HttpMethod);
   const httpOutputConfig = $derived(
@@ -51,126 +66,51 @@
         ? getHttpSummaryText(httpInputConfig, httpMethod)
         : ""
   );
-
-  const summaryKey = $derived(
-    `${getSummarySourceText(step, summaryModel, previousStep)}|${getInputTypeLabel(step.input_type)}|${getOutputTypeLabel(step.output_type)}|${getSummaryNextChannelText(step, summaryModel)}`
-  );
-
-  let prevSummaryKey = $state("");
-  let gridPulse = $state(false);
-  let pulseTimer: ReturnType<typeof setTimeout> | null = null;
-
-  $effect(() => {
-    if (summaryKey !== prevSummaryKey) {
-      if (prevSummaryKey) {
-        gridPulse = true;
-        if (pulseTimer) clearTimeout(pulseTimer);
-        pulseTimer = setTimeout(() => {
-          gridPulse = false;
-        }, 700);
-      }
-      prevSummaryKey = summaryKey;
-    }
-  });
 </script>
 
-<Card.Root
-  class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl px-4 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:px-5"
+<div
+  class="border-default/60 bg-secondary/12 mb-4 rounded-xl border px-4 py-3"
+  style="font-variant-numeric: tabular-nums"
 >
-  <div class="flex flex-wrap items-center gap-2">
-    <span class="text-[0.9375rem] font-semibold tracking-[-0.005em]"
-      >{m.flow_step_summary_title()}</span
-    >
-    {#if summaryModel?.usesInputTemplate}
-      <Badge class="bg-accent-dimmer text-accent-stronger text-[11px]">
-        {m.flow_step_summary_badge_input_template()}
-      </Badge>
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm leading-snug">
+    <span class="text-secondary min-w-0 truncate" title={source}>
+      <span class="text-primary font-medium">{source}</span> · {getInputTypeLabel(step.input_type)}
+    </span>
+
+    <span class="text-muted" aria-hidden="true">&rarr;</span>
+
+    {#if aiWork.missing}
+      <button
+        type="button"
+        class="text-warning-stronger hover:text-warning-stronger/80 focus-visible:ring-warning-default/40 inline-flex items-center gap-1 rounded font-medium underline decoration-dotted underline-offset-2 focus-visible:ring-2 focus-visible:outline-none"
+        onclick={() => onFixInstruction?.()}
+      >
+        <CircleAlert class="size-3.5 shrink-0" aria-hidden="true" />{aiWork.text}
+      </button>
+    {:else}
+      <span class="text-primary font-medium">{aiWork.text}</span>
     {/if}
-    {#if summaryModel?.hasKnowledge}
-      <Badge class="bg-hover-dimmer text-secondary text-[11px]">
-        {m.flow_step_summary_badge_knowledge()}
-      </Badge>
-    {/if}
-    {#if summaryModel?.hasAttachments}
-      <Badge class="bg-hover-dimmer text-secondary text-[11px]">
-        {m.flow_step_summary_badge_attachments()}
-      </Badge>
-    {/if}
+
+    <span class="text-muted" aria-hidden="true">&rarr;</span>
+
+    <span class="text-secondary">
+      <span class="text-primary font-medium">{getOutputTypeLabel(step.output_type)}</span>
+      · {m.flow_capsule_next()}: {nextChannel}
+    </span>
+
     {#if !isAdvancedMode && hasAdvancedSettingsActive(step, hasInputTemplateOverride)}
-      <Badge class="bg-warning-dimmer text-warning-stronger text-[11px]">
+      <Badge
+        variant="outline"
+        class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger ml-auto text-[11px]"
+      >
         {m.flow_step_summary_badge_advanced()}
       </Badge>
     {/if}
   </div>
 
-  <Card.Content
-    class="summary-grid border-default/70 bg-secondary/15 mt-4 grid overflow-hidden rounded-2xl border p-0 sm:grid-cols-2 xl:grid-cols-4 {gridPulse
-      ? 'summary-grid-pulse'
-      : ''}"
-  >
-    <div class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r xl:border-b-0">
-      <p class="text-muted text-[11px] leading-none font-semibold tracking-[0.06em] uppercase">
-        {m.flow_step_summary_source_label()}
-      </p>
-      <p
-        class="text-primary mt-1.5 truncate text-sm leading-snug"
-        title={getSummarySourceText(step, summaryModel, previousStep)}
-      >
-        {getSummarySourceText(step, summaryModel, previousStep)}
-      </p>
-    </div>
-    <div class="border-default/70 min-w-0 border-b px-4 py-3 xl:border-r xl:border-b-0">
-      <p class="text-muted text-[11px] leading-none font-semibold tracking-[0.06em] uppercase">
-        {m.flow_step_summary_input_format_label()}
-      </p>
-      <p class="text-primary mt-1.5 truncate text-sm leading-snug">
-        {getInputTypeLabel(step.input_type)}
-      </p>
-    </div>
-    <div class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r sm:border-b-0 xl:border-r">
-      <p class="text-muted text-[11px] leading-none font-semibold tracking-[0.06em] uppercase">
-        {m.flow_step_summary_output_format_label()}
-      </p>
-      <p class="text-primary mt-1.5 truncate text-sm leading-snug">
-        {getOutputTypeLabel(step.output_type)}
-      </p>
-    </div>
-    <div class="min-w-0 px-4 py-3">
-      <p class="text-muted text-[11px] leading-none font-semibold tracking-[0.06em] uppercase">
-        {m.flow_step_summary_next_channel_label()}
-      </p>
-      <p class="text-primary mt-1.5 truncate text-sm leading-snug">
-        {getSummaryNextChannelText(step, summaryModel)}
-      </p>
-    </div>
-  </Card.Content>
   {#if httpSummary}
-    <p class="text-muted mt-2 truncate px-1 font-mono text-xs tracking-[-0.01em]">
+    <p class="text-muted mt-1.5 truncate font-mono text-xs">
       {httpSummary}
     </p>
   {/if}
-</Card.Root>
-
-<style>
-  :global(.summary-grid) {
-    font-variant-numeric: tabular-nums;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    :global(.summary-grid-pulse) {
-      animation: summary-pulse 700ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-  }
-
-  @keyframes summary-pulse {
-    0%,
-    12% {
-      border-color: var(--accent-default);
-      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-default) 20%, transparent);
-    }
-    100% {
-      border-color: color-mix(in srgb, var(--border-default) 70%, transparent);
-      box-shadow: none;
-    }
-  }
-</style>
+</div>

@@ -1,10 +1,12 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
   import { slide } from "svelte/transition";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { IconMicrophone } from "@eneo/icons/microphone";
   import {
@@ -84,6 +86,22 @@
     isHttpSource ? parseHttpAuthoredConfig(step.input_config, defaultHttpConfig) : defaultHttpConfig
   );
 
+  const selectedInputSourceLabel = $derived.by(() => {
+    const match = selectableInputSourceOptions.find((s) => s.value === step.input_source);
+    return getInputSourceOptionLabel(step.input_source, match?.legacyInvalid ?? false);
+  });
+  const selectedInputTypeLabel = $derived.by(() => {
+    const match = displayedInputTypeOptions.find((o) => o.value === step.input_type);
+    return getInputTypeOptionLabel(step.input_type, match?.legacyInvalid ?? false);
+  });
+  const runtimeInputFormatLabel = $derived(
+    runtimeInputConfig.input_format === "audio"
+      ? m.flow_runtime_input_format_audio()
+      : runtimeInputConfig.input_format === "file"
+        ? m.flow_runtime_input_format_file()
+        : m.flow_runtime_input_format_document()
+  );
+
   let showRuntimeInputAdvanced = $state(false);
 
   function updateRuntimeInputSettings(patch: Partial<FlowRuntimeInputConfigValue>) {
@@ -97,24 +115,34 @@
   }
 </script>
 
-<Settings.Group title={m.flow_step_section_input()}>
+<FlowStepSection title={m.flow_step_section_input()}>
   <Settings.Row
     title={m.flow_step_input_source_label()}
     description={m.flow_step_standard_input_desc()}
   >
     <div class="flex flex-col gap-2">
-      <select
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <Select.Root
+        type="single"
         value={step.input_source}
         disabled={isPublished}
-        onchange={(e) => onInputSourceChange?.({ value: e.currentTarget.value })}
+        onValueChange={(value) => onInputSourceChange?.({ value })}
       >
-        {#each selectableInputSourceOptions as source (source.value)}
-          <option value={source.value}>
-            {getInputSourceOptionLabel(source.value, source.legacyInvalid)}
-          </option>
-        {/each}
-      </select>
+        <Select.Trigger class="w-full" aria-label={m.flow_step_input_source_label()}>
+          {selectedInputSourceLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#each selectableInputSourceOptions as source (source.value)}
+              <Select.Item
+                value={source.value}
+                label={getInputSourceOptionLabel(source.value, source.legacyInvalid)}
+              >
+                {getInputSourceOptionLabel(source.value, source.legacyInvalid)}
+              </Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
       <p class="text-muted text-xs leading-relaxed" aria-live="polite">
         {getSourceHintText(sourceHintKind)}
       </p>
@@ -128,18 +156,29 @@
 
   <Settings.Row title={m.flow_step_input_type()} description={m.flow_step_input_format_desc()}>
     <div class="flex flex-col gap-2">
-      <select
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <Select.Root
+        type="single"
         value={step.input_type}
         disabled={isPublished}
-        onchange={(e) => onInputTypeChange?.({ value: e.currentTarget.value })}
+        onValueChange={(value) => onInputTypeChange?.({ value })}
       >
-        {#each displayedInputTypeOptions as option (option.value)}
-          <option value={option.value} disabled={option.disabled}>
-            {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
-          </option>
-        {/each}
-      </select>
+        <Select.Trigger class="w-full" aria-label={m.flow_step_input_type()}>
+          {selectedInputTypeLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#each displayedInputTypeOptions as option (option.value)}
+              <Select.Item
+                value={option.value}
+                disabled={option.disabled}
+                label={getInputTypeOptionLabel(option.value, option.legacyInvalid)}
+              >
+                {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
+              </Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
       {#if getInputFormatHintText(sourceHintKind, step.input_type)}
         <p class="text-muted text-xs leading-relaxed" aria-live="polite">
           {getInputFormatHintText(sourceHintKind, step.input_type)}
@@ -206,23 +245,34 @@
             <label class="text-sm font-medium" for="runtime-input-format"
               >{m.flow_runtime_input_format_label()}</label
             >
-            <select
-              id="runtime-input-format"
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            <Select.Root
+              type="single"
               value={runtimeInputConfig.input_format}
               disabled={isPublished ||
                 step.output_mode === "transcribe_only" ||
                 FILE_BASED_INPUT_TYPES.has(step.input_type)}
-              onchange={(event) =>
+              onValueChange={(value) =>
                 updateRuntimeInputSettings({
-                  input_format: event.currentTarget
-                    .value as FlowRuntimeInputConfigValue["input_format"]
+                  input_format: value as FlowRuntimeInputConfigValue["input_format"]
                 })}
             >
-              <option value="document">{m.flow_runtime_input_format_document()}</option>
-              <option value="audio">{m.flow_runtime_input_format_audio()}</option>
-              <option value="file">{m.flow_runtime_input_format_file()}</option>
-            </select>
+              <Select.Trigger id="runtime-input-format" class="w-full">
+                {runtimeInputFormatLabel}
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Group>
+                  <Select.Item value="document" label={m.flow_runtime_input_format_document()}>
+                    {m.flow_runtime_input_format_document()}
+                  </Select.Item>
+                  <Select.Item value="audio" label={m.flow_runtime_input_format_audio()}>
+                    {m.flow_runtime_input_format_audio()}
+                  </Select.Item>
+                  <Select.Item value="file" label={m.flow_runtime_input_format_file()}>
+                    {m.flow_runtime_input_format_file()}
+                  </Select.Item>
+                </Select.Group>
+              </Select.Content>
+            </Select.Root>
           </div>
 
           <div class="flex flex-col gap-1">
@@ -369,7 +419,7 @@
       {/if}
     </div>
   </Settings.Row>
-</Settings.Group>
+</FlowStepSection>
 
 {#if isHttpSource}
   <HttpConfigPanel

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import type { CompletionModel, FlowStep, PromptSparse } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
@@ -6,6 +7,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { CircleAlert } from "lucide-svelte";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconLockClosed } from "@eneo/icons/lock-closed";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
@@ -34,13 +36,16 @@
     hasAudioInputSteps,
     stepUxCopy,
     instructionText,
+    instructionMissing = false,
+    focusInstruction = false,
     canRevealInputTemplate,
     showInputTemplate,
     loadPromptVersions,
     onAssistantFieldChange,
     onInstructionDraft,
     onInstructionCommit,
-    onRevealInputTemplate
+    onRevealInputTemplate,
+    onInstructionFocused
   }: {
     step: FlowStep;
     isPublished: boolean;
@@ -55,6 +60,8 @@
     hasAudioInputSteps: boolean;
     stepUxCopy: FlowStepUxCopy;
     instructionText: string;
+    instructionMissing?: boolean;
+    focusInstruction?: boolean;
     canRevealInputTemplate: boolean;
     showInputTemplate: boolean;
     loadPromptVersions: (assistantId: string) => Promise<PromptSparse[]>;
@@ -62,14 +69,19 @@
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
     onRevealInputTemplate?: () => void;
+    onInstructionFocused?: () => void;
   } = $props();
+
+  // Onboarding comparison cards clutter the section once a step is configured.
+  // Show them only while the instruction is empty, or on explicit "Visa tips".
+  let showTips = $state(false);
 
   function updateAssistantField(field: string, value: unknown) {
     onAssistantFieldChange?.({ field, value });
   }
 </script>
 
-<Settings.Group title={m.flow_step_section_behavior()}>
+<FlowStepSection title={m.flow_step_section_behavior()}>
   {#if step.output_mode === "transcribe_only"}
     <Alert.Root
       class="border-accent-default/15 bg-accent-default/5 mb-4 rounded-[1rem] px-5 py-4"
@@ -137,28 +149,38 @@
         </Tooltip.Provider>
       </svelte:fragment>
       <div class="flex flex-col gap-2">
-        <div class="grid gap-3 md:grid-cols-2">
-          <Card.Root class="bg-hover-dimmer">
-            <Card.Content class="px-3.5 py-3">
-              <p class="text-accent-stronger text-sm font-semibold">
-                {m.flow_step_instructions_compare_title()}
-              </p>
-              <p class="text-secondary mt-1 text-xs leading-relaxed">
-                {m.flow_step_instructions_compare_body()}
-              </p>
-            </Card.Content>
-          </Card.Root>
-          <Card.Root class="bg-hover-dimmer">
-            <Card.Content class="px-3.5 py-3">
-              <p class="text-accent-stronger text-sm font-semibold">
-                {m.flow_step_input_template_compare_title()}
-              </p>
-              <p class="text-secondary mt-1 text-xs leading-relaxed">
-                {m.flow_step_input_template_compare_body()}
-              </p>
-            </Card.Content>
-          </Card.Root>
-        </div>
+        {#if instructionMissing || showTips}
+          <div class="grid gap-3 md:grid-cols-2">
+            <Card.Root class="bg-hover-dimmer">
+              <Card.Content class="px-3.5 py-3">
+                <p class="text-accent-stronger text-sm font-semibold">
+                  {m.flow_step_instructions_compare_title()}
+                </p>
+                <p class="text-secondary mt-1 text-xs leading-relaxed">
+                  {m.flow_step_instructions_compare_body()}
+                </p>
+              </Card.Content>
+            </Card.Root>
+            <Card.Root class="bg-hover-dimmer">
+              <Card.Content class="px-3.5 py-3">
+                <p class="text-accent-stronger text-sm font-semibold">
+                  {m.flow_step_input_template_compare_title()}
+                </p>
+                <p class="text-secondary mt-1 text-xs leading-relaxed">
+                  {m.flow_step_input_template_compare_body()}
+                </p>
+              </Card.Content>
+            </Card.Root>
+          </div>
+        {:else}
+          <button
+            type="button"
+            class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/40 self-start rounded text-xs font-medium focus-visible:ring-2 focus-visible:outline-none"
+            onclick={() => (showTips = true)}
+          >
+            {m.flow_step_instructions_show_tips()}
+          </button>
+        {/if}
         {#if !isAdvancedMode}
           <div class="flex flex-col gap-3 px-0.5 pt-0.5 pb-1.5">
             <div class="max-w-2xl min-w-0">
@@ -192,6 +214,9 @@
           value={instructionText}
           disabled={isPublished || assistantLoading || !assistant}
           label={stepUxCopy.instructionsTitle}
+          focusOnMount={focusInstruction}
+          invalid={instructionMissing}
+          ariaDescribedby={instructionMissing ? "flow-step-instruction-missing" : undefined}
           placeholder={isAdvancedMode
             ? stepUxCopy.instructionsPlaceholder
             : stepUxCopy.instructionsPlaceholder}
@@ -203,6 +228,7 @@
           {isAdvancedMode}
           onChange={(value) => onInstructionDraft?.({ value })}
           onCommit={(value) => onInstructionCommit?.({ value })}
+          onFocused={onInstructionFocused}
         >
           {#snippet toolbar()}
             {#if assistant?.id && !isPublished}
@@ -222,7 +248,16 @@
             {/if}
           {/snippet}
         </FlowPromptEditor>
+        {#if instructionMissing}
+          <p
+            id="flow-step-instruction-missing"
+            class="text-warning-stronger flex items-center gap-1.5 text-xs leading-relaxed"
+          >
+            <CircleAlert class="size-3.5 shrink-0" aria-hidden="true" />
+            {m.flow_step_instruction_missing()}
+          </p>
+        {/if}
       </div>
     </Settings.Row>
   {/if}
-</Settings.Group>
+</FlowStepSection>

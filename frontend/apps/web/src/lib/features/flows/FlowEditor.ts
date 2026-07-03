@@ -83,6 +83,19 @@ function stripTemporaryStepId(step: FlowStep): FlowStep {
 
 const [getFlowEditor, setFlowEditor] = createContext<FlowEditor>("Edit a flow");
 
+/**
+ * The overrides a template can seed into a new step. Deliberately narrow: only
+ * the output side and instruction, so a seeded step can never request an output
+ * mode that needs extra config (http/template_fill) or an input override that
+ * breaks chaining. The input side stays derived from position.
+ */
+export interface FlowStepCreationSeed {
+  name?: string;
+  output_type?: FlowStep["output_type"];
+  output_mode?: "pass_through";
+  prompt?: string;
+}
+
 function createFlowEditor(data: FlowEditorInitData) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.eneo.flows.assistants.get>>;
   const assistantRevision = writable(0);
@@ -150,6 +163,10 @@ function createFlowEditor(data: FlowEditorInitData) {
   const activeStepId = writable<string | null>(null);
   const validationErrors = writable<Map<string, string[]>>(new Map());
   const saveStatus = writable<"saved" | "saving" | "unsaved">("saved");
+  // Which editor chapter a freshly-created step should open by default. Keyed by
+  // step_order so it survives the temp→real id reconciliation. Template steps
+  // land on the AI work section; blank steps land on "what".
+  const newStepOpenIntent = writable<{ order: number; chapter: "ai" | "what" } | null>(null);
 
   // Derived: is the flow published?
   const isPublished = derived(editor.state.resource, ($resource) => {
@@ -560,8 +577,13 @@ function createFlowEditor(data: FlowEditorInitData) {
     syncTypedIOValidation(($update.steps ?? []) as FlowStep[]);
   });
 
-  /** Instant step creation — no dialogs */
-  async function addStep(): Promise<void> {
+  /**
+   * Step creation. With no argument it appends a blank step (the instant path);
+   * with a `seed` it applies a template's output shape plus a starter
+   * instruction on the hidden assistant. The input side is always derived from
+   * position, so a seeded step stays valid wherever it is added.
+   */
+  async function addStep(seed?: FlowStepCreationSeed): Promise<void> {
     const $update = get(editor.state.update);
     const currentSteps = $update.steps ?? [];
     const stepCount = currentSteps.length;
@@ -569,16 +591,16 @@ function createFlowEditor(data: FlowEditorInitData) {
     const prevStep = stepCount > 0 ? currentSteps[stepCount - 1] : null;
 
     const tempId = `_temp_${uid(12)}`;
-    const defaultStepName = `Nytt steg ${stepCount + 1}`;
+    const stepName = seed?.name ?? `Nytt steg ${stepCount + 1}`;
     const newStep: Partial<FlowStep> & { id: string } = {
       id: tempId,
       assistant_id: "",
       step_order: stepCount + 1,
-      user_description: defaultStepName,
+      user_description: stepName,
       input_source: isFirst ? "flow_input" : "previous_step",
       input_type: isFirst ? "text" : mapOutputToInputType((prevStep as FlowStep)?.output_type),
-      output_mode: "pass_through",
-      output_type: "text",
+      output_mode: seed?.output_mode ?? "pass_through",
+      output_type: seed?.output_type ?? "text",
       mcp_policy: "inherit"
     };
 
@@ -587,13 +609,14 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...u,
       steps: [...(u.steps ?? []), newStep as FlowStep]
     }));
+    newStepOpenIntent.set({ order: stepCount + 1, chapter: seed ? "ai" : "what" });
     activeStepId.set(tempId);
 
     // Background: create hidden assistant
     try {
       const assistant = await data.eneo.flows.assistants.create({
         id: getFlowId(),
-        name: defaultStepName
+        name: stepName
       });
       // Wire the real assistant_id
       editor.state.update.update((u) => ({
@@ -603,6 +626,13 @@ function createFlowEditor(data: FlowEditorInitData) {
         )
       }));
       assistantSaveManager.primeCache(assistant.id, assistant);
+      // Seed the starter instruction via the debounced assistant save (not an
+      // immediate one) so it lands in the same ~500ms window as the step's
+      // auto-save, collapsing the usual two "saved" flashes into one. The save
+      // manager owns error handling, so a failed seed never discards the step.
+      if (seed?.prompt) {
+        void saveAssistant(assistant.id, { prompt: { text: seed.prompt } });
+      }
     } catch {
       // Remove the step if assistant creation fails
       editor.state.update.update((u) => ({
@@ -968,6 +998,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     state: {
       ...editor.state,
       activeStepId: readonly(activeStepId),
+      newStepOpenIntent: readonly(newStepOpenIntent),
       validationErrors,
       saveStatus: unifiedSaveStatus,
       isPublished

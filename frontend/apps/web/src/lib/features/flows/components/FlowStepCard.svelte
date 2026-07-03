@@ -134,6 +134,15 @@
         return inputLabel;
     }
   });
+  // Quieter rail: the repeated default "Föregående steg" source line is noise on
+  // every row. Show the source only when it carries real information — a
+  // non-default source, the active row, a row needing attention, or advanced mode.
+  const isDefaultSource = $derived(
+    step.input_source === "previous_step" && step.output_mode !== "template_fill"
+  );
+  const showSourceSummary = $derived(
+    isPowerUser || isActive || hasValidationError || !isDefaultSource
+  );
   const inputBadgeClass = $derived(
     INPUT_BADGE_CLASSES[step.input_type] ?? "bg-hover-dimmer text-secondary"
   );
@@ -187,9 +196,11 @@
         title={label}>{label}</span
       >
 
-      <div class="text-secondary truncate text-xs leading-snug">
-        {sourceSummary}
-      </div>
+      {#if showSourceSummary}
+        <div class="text-secondary truncate text-xs leading-snug">
+          {sourceSummary}
+        </div>
+      {/if}
 
       {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only"}
         <div class="mt-0.5 flex flex-wrap items-center gap-1.5">

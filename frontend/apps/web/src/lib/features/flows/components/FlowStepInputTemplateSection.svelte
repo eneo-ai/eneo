@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
@@ -32,8 +33,12 @@
     onRevealInputTemplate,
     onClearInputTemplate,
     onInputTemplateChange,
-    onInputSourceChange
+    onInputSourceChange,
+    collapsible = false,
+    resetKey
   }: {
+    collapsible?: boolean;
+    resetKey?: string | number;
     step: FlowStep;
     isPublished: boolean;
     isAdvancedMode: boolean;
@@ -55,6 +60,12 @@
     onInputTemplateChange?: (detail: { value: string }) => void;
     onInputSourceChange?: (detail: { value: string }) => void;
   } = $props();
+
+  const templateStatus = $derived(
+    hasInputTemplateOverride
+      ? m.flow_section_status_template_custom()
+      : m.flow_section_status_template_standard()
+  );
 </script>
 
 {#if !isPowerUser && hasInputTemplateOverride}
@@ -106,7 +117,12 @@
 
 {#if showInputTemplate}
   <div transition:slide={{ duration: 200 }}>
-    <Settings.Group title={inputTemplateSectionTitle}>
+    <FlowStepSection
+      title={inputTemplateSectionTitle}
+      {collapsible}
+      {resetKey}
+      status={templateStatus}
+    >
       <Settings.Row title={inputTemplateSectionTitle} description={inputTemplateSectionDescription}>
         <svelte:fragment slot="title">
           <Tooltip.Provider delayDuration={150}>
@@ -139,6 +155,6 @@
           />
         </div>
       </Settings.Row>
-    </Settings.Group>
+    </FlowStepSection>
   </div>
 {/if}

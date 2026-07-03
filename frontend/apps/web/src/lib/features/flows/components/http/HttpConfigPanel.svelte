@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type {
@@ -13,6 +14,7 @@
   import HttpHeadersEditor from "./HttpHeadersEditor.svelte";
   import HttpBodyEditor from "./HttpBodyEditor.svelte";
   import HttpTestConnection from "./HttpTestConnection.svelte";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { getAuthoredHttpUrlError } from "./httpConfigDefaults";
 
   let {
@@ -36,9 +38,13 @@
   }
 
   const urlInvalid = $derived(getAuthoredHttpUrlError(config.url) === "HTTP_INVALID_URL");
+  const responseFormatValue = $derived(config.response_format ?? "text");
+  const responseFormatLabel = $derived(
+    responseFormatValue === "json" ? m.http_response_format_json() : m.http_response_format_text()
+  );
 </script>
 
-<Settings.Group title={m.http_config_title()}>
+<FlowStepSection title={m.http_config_title()}>
   <Settings.Row title={m.http_url_title()} description="">
     <div class="flex flex-col gap-1">
       <input
@@ -72,18 +78,26 @@
 
   {#if direction === "input"}
     <Settings.Row title={m.http_response_format()} description="">
-      <select
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
-        value={config.response_format ?? "text"}
+      <Select.Root
+        type="single"
+        value={responseFormatValue}
         disabled={isPublished}
-        onchange={(e) =>
-          update({
-            response_format: e.currentTarget.value as "text" | "json"
-          })}
+        onValueChange={(value) => update({ response_format: value as "text" | "json" })}
       >
-        <option value="text">Text</option>
-        <option value="json">JSON</option>
-      </select>
+        <Select.Trigger class="w-full" aria-label={m.http_response_format()}>
+          {responseFormatLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            <Select.Item value="text" label={m.http_response_format_text()}>
+              {m.http_response_format_text()}
+            </Select.Item>
+            <Select.Item value="json" label={m.http_response_format_json()}>
+              {m.http_response_format_json()}
+            </Select.Item>
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
     </Settings.Row>
   {/if}
 
@@ -114,4 +128,4 @@
   <Settings.Row title={m.http_test_title()} description="" fullWidth={true}>
     <HttpTestConnection {config} {direction} {method} {flowId} {isPublished} />
   </Settings.Row>
-</Settings.Group>
+</FlowStepSection>

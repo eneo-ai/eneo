@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
@@ -18,6 +19,7 @@
     isPublished,
     advancedJsonDrafts,
     advancedJsonErrors,
+    embedded = false,
     onJsonFieldUpdate,
     onJsonFieldFormat
   }: {
@@ -25,13 +27,14 @@
     isPublished: boolean;
     advancedJsonDrafts: AdvancedJsonDrafts;
     advancedJsonErrors: AdvancedJsonErrors;
+    embedded?: boolean;
     onJsonFieldUpdate?: (detail: { field: AdvancedJsonField; value: string }) => void;
     onJsonFieldFormat?: (detail: { field: AdvancedJsonField }) => void;
   } = $props();
 </script>
 
 <div transition:slide={{ duration: 200 }}>
-  <Settings.Group title={m.flow_step_advanced()}>
+  <FlowStepSection title={embedded ? undefined : m.flow_step_advanced()}>
     <Settings.Row
       title={m.flow_step_input_contract()}
       description={m.flow_step_input_contract_desc()}
@@ -157,5 +160,5 @@
         />
       </Settings.Row>
     {/if}
-  </Settings.Group>
+  </FlowStepSection>
 </div>

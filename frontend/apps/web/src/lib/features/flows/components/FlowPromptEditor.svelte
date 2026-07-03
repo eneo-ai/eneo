@@ -31,14 +31,21 @@
     formSchema,
     transcriptionEnabled,
     isAdvancedMode = false,
+    invalid = false,
+    ariaDescribedby,
+    focusOnMount = false,
     toolbar,
     onChange,
-    onCommit
+    onCommit,
+    onFocused
   }: {
     value: string;
     disabled?: boolean;
     placeholder?: string;
     label?: string;
+    invalid?: boolean;
+    ariaDescribedby?: string;
+    focusOnMount?: boolean;
     minHeight?: number;
     steps: FlowStep[];
     currentStepOrder: number;
@@ -58,6 +65,7 @@
     toolbar?: Snippet;
     onChange?: (value: string) => void;
     onCommit?: (value: string) => void;
+    onFocused?: () => void;
   } = $props();
 
   const MAX_VISIBLE_TEMPLATE_VALIDATION_ISSUES = 5;
@@ -95,6 +103,20 @@
   let activeTrigger: "braces" | "at" | null = $state(null);
   let autocompleteAnchorIndex = $state(-1);
   let markerEl: HTMLSpanElement | null = $state(null);
+
+  // Focus the textarea when the parent requests it (e.g. the step capsule's
+  // "add instruction" action, which opens this section and moves focus here).
+  // `focusOnMount` is a consume-once flag, not a counter: the section unmounts
+  // while collapsed, so on open this editor mounts fresh, reads the flag once,
+  // focuses, then calls `onFocused` so the parent clears it. Reading
+  // `textareaEl` keeps it correct when the flag is already set before mount.
+  $effect(() => {
+    if (!focusOnMount) return;
+    const el = textareaEl;
+    if (!el) return;
+    el.focus();
+    onFocused?.();
+  });
 
   function resetAutocomplete() {
     autocompleteOpen = false;
@@ -514,7 +536,9 @@
 </script>
 
 <Card.Root
-  class="flow-prompt-editor focus-within:ring-accent-default/30 transition-shadow focus-within:ring-2"
+  class="flow-prompt-editor focus-within:ring-accent-default/30 transition-shadow focus-within:ring-2 {invalid
+    ? 'ring-warning-default/40 ring-1'
+    : ''}"
 >
   <!-- Toolbar -->
   <div
@@ -585,7 +609,10 @@
       onblur={() => commitIfDirty(currentEditorValue)}
       value={currentEditorValue}
       {disabled}
-      {placeholder}></textarea>
+      {placeholder}
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+      aria-describedby={ariaDescribedby}></textarea>
 
     <!-- Autocomplete dropdown -->
     {#if autocompleteOpen && filteredSuggestions.length > 0 && !disabled}
@@ -611,8 +638,9 @@
     {/if}
   </div>
 
-  <!-- Quick-insert chip bar -->
-  {#if chipBarVariables.length > 0 && !disabled}
+  <!-- Quick-insert chip bar — kept out of Enkel so the editor stays calm; the
+       toolbar's variable picker ({}) still inserts variables there. -->
+  {#if chipBarVariables.length > 0 && !disabled && isAdvancedMode}
     <div class="border-default bg-secondary/20 flex flex-wrap gap-1.5 border-t px-3 py-2">
       {#each chipBarVariables as v (v.token)}
         <button

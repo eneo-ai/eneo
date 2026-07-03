@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import type { FlowStep } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -38,7 +39,7 @@
   }
 </script>
 
-<Settings.Group title={m.flow_step_review_section()}>
+<FlowStepSection title={m.flow_step_review_section()}>
   <Settings.Row title={m.flow_step_review_policy()} description={m.flow_step_review_policy_desc()}>
     <div class="flex flex-col gap-2">
       <Select.Root
@@ -75,4 +76,4 @@
       </p>
     </div>
   </Settings.Row>
-</Settings.Group>
+</FlowStepSection>

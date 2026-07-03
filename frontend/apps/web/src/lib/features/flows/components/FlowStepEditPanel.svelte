@@ -1,4 +1,6 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
+  import FlowStepChapter from "$lib/features/flows/components/FlowStepChapter.svelte";
   import { EneoError, type FlowStep, type UploadedFile } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
@@ -67,11 +69,13 @@
   // Extracted helpers
   import {
     getInputTypeLabel,
+    getOutputTypeLabel,
     getInputSourceLabel,
     getIssueMessage,
     OUTPUT_TYPES,
     OUTPUT_MODES
   } from "./flowStepEditHelpers";
+  import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
   import {
     type AdvancedJsonField,
     getStepKeyForAdvancedJson,
@@ -513,6 +517,9 @@
   const showMcpSection = $derived(shouldShowStepMcpSection(activeStep?.output_mode));
   const knowledgeDisabledByMcp = $derived(hasActiveMcp && !hasKnowledgeSelections);
   const mcpDisabledByKnowledge = $derived(hasKnowledgeSelections && !hasActiveMcp);
+  const mcpStatus = $derived(
+    hasActiveMcp ? m.flow_section_status_mcp_active() : m.flow_section_status_mcp_none()
+  );
   const flowMcpCompatibilityById = $derived.by(() => {
     if (!activeStep || !showMcpSection) {
       return {};
@@ -698,6 +705,53 @@
       ? (assistantState.assistant.prompt.text ?? "")
       : ""
   );
+  // Chapter presentation: one source drives the collapsed status lines and
+  // which chapter opens by default (the one needing attention).
+  const aiInstructionPresent = $derived(
+    assistantState.assistant ? instructionText.trim().length > 0 : null
+  );
+  const stepAiWork = $derived(
+    activeStep ? getStepAiWork(activeStep, { instructionPresent: aiInstructionPresent }) : null
+  );
+  // A freshly-created step opens its work section (AI for templates, "what" for
+  // blank); an existing step opens nothing — a calm collapsed overview. Keyed by
+  // step_order so it survives the temp→real id reconciliation.
+  const newStepOpenIntent = flowEditor.state.newStepOpenIntent;
+  const defaultOpenChapter = $derived.by(() => {
+    if (!activeStep) return null;
+    const intent = $newStepOpenIntent;
+    return intent && intent.order === activeStep.step_order ? intent.chapter : null;
+  });
+  // Bumped when the user clicks the capsule's "instruction missing" warning, to
+  // force the AI chapter open (the explicit fix action).
+  let aiRequestOpen = $state(0);
+  // Set when the capsule's "add instruction" action fires so the instruction
+  // editor focuses once it mounts (the AI section is unmounted while collapsed).
+  let focusInstructionPending = $state(false);
+  const chapterWhatStatus = $derived(
+    activeStep
+      ? `${getInputTypeLabel(activeStep.input_type)} → ${getOutputTypeLabel(activeStep.output_type)}`
+      : ""
+  );
+  const chapterOutputStatus = $derived.by(() => {
+    if (!activeStep) return "";
+    const modeLabel =
+      OUTPUT_MODES.find((option) => option.value === activeStep.output_mode)?.label ?? "";
+    const outputLabel = getOutputTypeLabel(activeStep.output_type);
+    return modeLabel ? `${outputLabel} · ${modeLabel}` : outputLabel;
+  });
+  const chapterControlStatus = $derived(
+    activeStep
+      ? activeStep.output_classification_override == null
+        ? m.flow_step_security_inherit()
+        : `K${activeStep.output_classification_override}`
+      : ""
+  );
+  const chapterAdvancedStatus = $derived(
+    activeStep && (activeStep.input_contract != null || activeStep.output_contract != null)
+      ? m.flow_chapter_advanced_custom()
+      : m.flow_chapter_advanced_default()
+  );
   const inputTemplateText = $derived(
     activeStep && activeStep.input_bindings && typeof activeStep.input_bindings === "object"
       ? ((activeStep.input_bindings.question as string) ?? "")
@@ -849,9 +903,7 @@
     class:pointer-events-none={isPublished}
     class:opacity-60={isPublished}
   >
-    <div
-      class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6 [&_section>h2]:font-sans [&_section>h2]:text-[11px] [&_section>h2]:font-semibold [&_section>h2]:tracking-[0.06em] [&_section>h2]:uppercase"
-    >
+    <div class="flow-step-editor">
       <Settings.Page>
         {#if stepSummaryModel}
           <FlowStepSummaryCard
@@ -860,114 +912,141 @@
             {previousStep}
             {isAdvancedMode}
             {hasInputTemplateOverride}
+            {aiInstructionPresent}
+            onFixInstruction={() => {
+              aiRequestOpen++;
+              focusInstructionPending = true;
+            }}
           />
           <Separator class="my-2" />
         {/if}
 
-        <Settings.Group title={m.flow_step_section_details()}>
-          <Settings.Row title={m.flow_step_name()} description="" let:aria>
-            <div class="flex flex-col gap-2">
-              <input
-                {...aria}
-                class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
-                value={activeStep.user_description ?? ""}
-                placeholder={m.flow_step_name_placeholder()}
-                disabled={isPublished}
-                onfocus={() => {
-                  stepNameBeforeEdit = activeStep.user_description ?? "";
-                }}
-                oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
-                onchange={() => void handleCommittedStepRename()}
+        <FlowStepChapter
+          title={m.flow_chapter_what()}
+          status={chapterWhatStatus}
+          initialOpen={defaultOpenChapter === "what"}
+          resetKey={activeStep?.step_order}
+        >
+          <FlowStepSection title={m.flow_step_section_details()}>
+            <Settings.Row title={m.flow_step_name()} description="" let:aria>
+              <div class="flex flex-col gap-2">
+                <input
+                  {...aria}
+                  class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+                  value={activeStep.user_description ?? ""}
+                  placeholder={m.flow_step_name_placeholder()}
+                  disabled={isPublished}
+                  onfocus={() => {
+                    stepNameBeforeEdit = activeStep.user_description ?? "";
+                  }}
+                  oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
+                  onchange={() => void handleCommittedStepRename()}
+                />
+                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly } )}
+                  <p
+                    class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
+                  >
+                    {m.flow_template_fill_step_name_hint()}
+                  </p>
+                {/if}
+              </div>
+            </Settings.Row>
+          </FlowStepSection>
+
+          {#if !isTemplateFill}
+            <FlowStepInputSection
+              step={activeStep}
+              {isPublished}
+              {selectableInputSourceOptions}
+              {displayedInputTypeOptions}
+              {runtimeInputConfig}
+              {sourceHintKind}
+              {sourceValidationMessage}
+              {inputSourceFeedback}
+              {inputTypeValidationMessage}
+              {inputTypeFeedback}
+              {transcriptionEnabled}
+              {transcriptionModelConfigured}
+              {transcriptionModelLabel}
+              flowId={currentFlowId}
+              onInputSourceChange={(detail) =>
+                handleInputSourceChange(detail.value as FlowStep["input_source"])}
+              onInputTypeChange={(detail) =>
+                handleInputTypeChange(detail.value as FlowStep["input_type"])}
+              onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
+              onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
+              onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
+            />
+          {/if}
+        </FlowStepChapter>
+
+        {#if !isTemplateFill}
+          <FlowStepChapter
+            title={m.flow_chapter_ai()}
+            status={stepAiWork?.text}
+            initialOpen={defaultOpenChapter === "ai"}
+            resetKey={activeStep?.step_order}
+            requestOpen={aiRequestOpen}
+          >
+            {#if !isTemplateFill}
+              <FlowStepBehaviorSection
+                step={activeStep}
+                {isPublished}
+                {isAdvancedMode}
+                {isTranscribeOnly}
+                instructionMissing={stepAiWork?.missing ?? false}
+                focusInstruction={focusInstructionPending}
+                onInstructionFocused={() => (focusInstructionPending = false)}
+                assistant={assistantState.assistant}
+                assistantLoading={assistantState.loading}
+                availableModels={$currentSpace.completion_models}
+                {steps}
+                {formSchema}
+                {transcriptionEnabled}
+                {hasAudioInputSteps}
+                {stepUxCopy}
+                {instructionText}
+                {canRevealInputTemplate}
+                {showInputTemplate}
+                loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
+                onAssistantFieldChange={(detail) =>
+                  updateAssistantField(detail.field, detail.value)}
+                onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
+                onInstructionCommit={(detail) => void updateInstruction(detail.value)}
+                onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
               />
-              {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly } )}
+            {/if}
+
+            {#if showMcpSection}
+              {#if knowledgeDisabledByMcp}
                 <p
-                  class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
+                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
                 >
-                  {m.flow_template_fill_step_name_hint()}
+                  <span class="font-bold">{m.warning()}:&nbsp;</span
+                  >{m.knowledge_disabled_when_mcp_active()}
                 </p>
               {/if}
-            </div>
-          </Settings.Row>
-        </Settings.Group>
+              <div class={knowledgeDisabledByMcp ? "pointer-events-none opacity-50" : ""}>
+                <FlowStepContextSection
+                  collapsible
+                  resetKey={activeStep?.step_order}
+                  assistant={assistantState.assistant}
+                  assistantLoading={assistantState.loading}
+                  runningUploads={assistantState.runningUploads}
+                  onKnowledgeChange={(detail) => {
+                    updateAssistantField("websites", detail.websites);
+                    updateAssistantField("groups", detail.groups);
+                    updateAssistantField(
+                      "integration_knowledge_list",
+                      detail.integrationKnowledgeList
+                    );
+                  }}
+                  onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
+                />
+              </div>
+            {/if}
 
-        {#if !isTemplateFill}
-          <FlowStepInputSection
-            step={activeStep}
-            {isPublished}
-            {selectableInputSourceOptions}
-            {displayedInputTypeOptions}
-            {runtimeInputConfig}
-            {sourceHintKind}
-            {sourceValidationMessage}
-            {inputSourceFeedback}
-            {inputTypeValidationMessage}
-            {inputTypeFeedback}
-            {transcriptionEnabled}
-            {transcriptionModelConfigured}
-            {transcriptionModelLabel}
-            flowId={currentFlowId}
-            onInputSourceChange={(detail) =>
-              handleInputSourceChange(detail.value as FlowStep["input_source"])}
-            onInputTypeChange={(detail) =>
-              handleInputTypeChange(detail.value as FlowStep["input_type"])}
-            onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
-            onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
-            onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
-          />
-        {/if}
-
-        {#if !isTemplateFill}
-          <FlowStepBehaviorSection
-            step={activeStep}
-            {isPublished}
-            {isAdvancedMode}
-            {isTranscribeOnly}
-            assistant={assistantState.assistant}
-            assistantLoading={assistantState.loading}
-            availableModels={$currentSpace.completion_models}
-            {steps}
-            {formSchema}
-            {transcriptionEnabled}
-            {hasAudioInputSteps}
-            {stepUxCopy}
-            {instructionText}
-            {canRevealInputTemplate}
-            {showInputTemplate}
-            loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
-            onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
-            onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
-            onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-            onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
-          />
-        {/if}
-
-        {#if showMcpSection}
-          {#if knowledgeDisabledByMcp}
-            <p
-              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-            >
-              <span class="font-bold">{m.warning()}:&nbsp;</span
-              >{m.knowledge_disabled_when_mcp_active()}
-            </p>
-          {/if}
-          <div class={knowledgeDisabledByMcp ? "pointer-events-none opacity-50" : ""}>
-            <FlowStepContextSection
-              assistant={assistantState.assistant}
-              assistantLoading={assistantState.loading}
-              runningUploads={assistantState.runningUploads}
-              onKnowledgeChange={(detail) => {
-                updateAssistantField("websites", detail.websites);
-                updateAssistantField("groups", detail.groups);
-                updateAssistantField("integration_knowledge_list", detail.integrationKnowledgeList);
-              }}
-              onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
-            />
-          </div>
-        {/if}
-
-        {#if showMcpSection}
-          <Settings.Group title={m.mcp_servers()}>
-            <Settings.Row title={m.mcp_servers()} description={m.select_mcp_servers_description()}>
+            {#if showMcpSection}
               {#if mcpDisabledByKnowledge}
                 <p
                   class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
@@ -984,141 +1063,169 @@
                   >{m.flow_step_mcp_security_context_loading()}
                 </p>
               {/if}
-              <div
-                class={mcpDisabledByKnowledge || !mcpCompatibilityReady
-                  ? "pointer-events-none opacity-50"
-                  : ""}
+              <FlowStepSection
+                title={m.mcp_servers()}
+                collapsible
+                status={mcpStatus}
+                resetKey={activeStep?.step_order}
               >
-                {#if assistantState.assistant}
-                  <SelectMCPServers
-                    bind:selectedMCPServers={assistantState.assistant.mcp_servers}
-                    bind:selectedMCPTools={assistantState.assistant.mcp_tools}
-                    selectedModel={assistantState.assistant.completion_model}
-                    serverCompatibilityById={flowMcpCompatibilityById}
-                    on:change={(event) =>
-                      assistantState.updateFields(
-                        {
-                          mcp_servers: event.detail.selectedMCPServers,
-                          mcp_tools: event.detail.selectedMCPTools
-                        },
-                        { immediate: true }
-                      )}
-                  />
-                {/if}
-              </div>
-            </Settings.Row>
-          </Settings.Group>
+                <Settings.Row
+                  title={m.mcp_servers()}
+                  description={m.select_mcp_servers_description()}
+                >
+                  <div
+                    class={mcpDisabledByKnowledge || !mcpCompatibilityReady
+                      ? "pointer-events-none opacity-50"
+                      : ""}
+                  >
+                    {#if assistantState.assistant}
+                      <SelectMCPServers
+                        bind:selectedMCPServers={assistantState.assistant.mcp_servers}
+                        bind:selectedMCPTools={assistantState.assistant.mcp_tools}
+                        selectedModel={assistantState.assistant.completion_model}
+                        serverCompatibilityById={flowMcpCompatibilityById}
+                        on:change={(event) =>
+                          assistantState.updateFields(
+                            {
+                              mcp_servers: event.detail.selectedMCPServers,
+                              mcp_tools: event.detail.selectedMCPTools
+                            },
+                            { immediate: true }
+                          )}
+                      />
+                    {/if}
+                  </div>
+                </Settings.Row>
+              </FlowStepSection>
+            {/if}
+
+            {#if !isTranscribeOnly && !isTemplateFill}
+              <FlowStepInputTemplateSection
+                collapsible
+                resetKey={activeStep?.step_order}
+                step={activeStep}
+                {isPublished}
+                {isAdvancedMode}
+                isPowerUser={$mode === "power_user"}
+                {hasInputTemplateOverride}
+                {showInputTemplate}
+                {inputTemplateText}
+                {templateSourceConflict}
+                {templateStepRefs}
+                {steps}
+                {formSchema}
+                {transcriptionEnabled}
+                {hasAudioInputSteps}
+                {stepUxCopy}
+                {inputTemplateSectionTitle}
+                {inputTemplateSectionDescription}
+                onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
+                onClearInputTemplate={() => updateInputTemplate("")}
+                onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}
+                onInputSourceChange={(detail) =>
+                  handleInputSourceChange(detail.value as FlowStep["input_source"])}
+              />
+            {/if}
+          </FlowStepChapter>
         {/if}
 
-        {#if !isTranscribeOnly && !isTemplateFill}
-          <FlowStepInputTemplateSection
+        <FlowStepChapter
+          title={m.flow_chapter_control()}
+          status={chapterControlStatus}
+          badge={m.flow_chapter_always_visible()}
+          resetKey={activeStep?.step_order}
+        >
+          <FlowStepReviewSection
             step={activeStep}
             {isPublished}
-            {isAdvancedMode}
-            isPowerUser={$mode === "power_user"}
-            {hasInputTemplateOverride}
-            {showInputTemplate}
-            {inputTemplateText}
-            {templateSourceConflict}
-            {templateStepRefs}
-            {steps}
-            {formSchema}
-            {transcriptionEnabled}
-            {hasAudioInputSteps}
-            {stepUxCopy}
-            {inputTemplateSectionTitle}
-            {inputTemplateSectionDescription}
-            onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
-            onClearInputTemplate={() => updateInputTemplate("")}
-            onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}
-            onInputSourceChange={(detail) =>
-              handleInputSourceChange(detail.value as FlowStep["input_source"])}
+            onReviewModeChange={(detail) => handleReviewModeChange(detail.value)}
           />
-        {/if}
 
-        {#if isTemplateFill}
-          <FlowStepTemplateFillSection
-            {isPublished}
-            {isAdvancedMode}
-            {templateFillConfig}
-            templateInspection={templateState.inspection}
-            templateInspecting={templateState.inspecting}
-            templateConfigError={templateState.configError}
-            templateFilesLoading={templateState.filesLoading}
-            {templatePlaceholders}
-            {templateBindingRows}
-            {templateBindingSuggestionGroups}
-            {templateAutoBindings}
-            {templateReadiness}
-            {templateOrphanedRows}
-            {templateHasSelection}
-            {resolvedTemplateAssetId}
-            {selectedTemplateAsset}
-            {templateUnnamedStepWarning}
-            {templateAutoMatchableCount}
-            availableTemplateFiles={templateState.availableFiles}
-            onOutputModeChange={(detail) =>
-              handleOutputModeChange(detail.value as FlowStep["output_mode"])}
-            onTemplateFileSelect={(detail) =>
-              void templateState.handleFileSelection(detail.assetId, templateContext())}
-            onTemplateUpload={(detail) =>
-              void templateState.handleUpload(detail.event, templateContext())}
-            onTemplateDownload={() =>
-              resolvedTemplateAssetId && void templateState.download(resolvedTemplateAssetId)}
-            onTemplateRefresh={() =>
-              resolvedTemplateAssetId &&
-              void templateState.inspectFile(
-                resolvedTemplateAssetId,
-                { persist: false },
-                templateContext()
-              )}
-            onBindingChange={(detail) =>
-              handleTemplateBindingChange(detail.placeholder, detail.value)}
-            onApplyAllSuggestions={applyAllTemplateSuggestions}
-          />
-        {:else}
-          <FlowStepOutputSection
+          <FlowStepSecuritySection
             step={activeStep}
             {isPublished}
-            {isAdvancedMode}
-            {availableOutputTypes}
-            {availableOutputModes}
-            {outputHintKind}
-            flowId={currentFlowId}
-            onOutputTypeChange={(detail) =>
-              handleOutputTypeChange(detail.value as FlowStep["output_type"])}
-            onOutputModeChange={(detail) =>
-              handleOutputModeChange(detail.value as FlowStep["output_mode"])}
-            onWebhookUrlChange={(detail) =>
-              updateStep("output_config", {
-                ...(activeStep?.output_config ?? {}),
-                url: detail.value
-              })}
-            onHttpConfigChange={(detail) =>
-              updateStep(
-                "output_config",
-                preserveFlowCitationMode(
-                  detail.config as unknown as Record<string, unknown>,
-                  activeStep?.output_config ?? null
-                )
-              )}
-            onCitationModeChange={(detail) => handleCitationModeChange(detail.value)}
-            onSwitchToTemplateFill={() => handleOutputModeChange("template_fill")}
+            onClassificationChange={(detail) =>
+              updateStep("output_classification_override", detail.value)}
           />
-        {/if}
+        </FlowStepChapter>
 
-        <FlowStepReviewSection
-          step={activeStep}
-          {isPublished}
-          onReviewModeChange={(detail) => handleReviewModeChange(detail.value)}
-        />
-
-        <FlowStepSecuritySection
-          step={activeStep}
-          {isPublished}
-          onClassificationChange={(detail) =>
-            updateStep("output_classification_override", detail.value)}
-        />
+        <FlowStepChapter
+          title={m.flow_chapter_output()}
+          status={chapterOutputStatus}
+          resetKey={activeStep?.step_order}
+        >
+          {#if isTemplateFill}
+            <FlowStepTemplateFillSection
+              {isPublished}
+              {isAdvancedMode}
+              {templateFillConfig}
+              templateInspection={templateState.inspection}
+              templateInspecting={templateState.inspecting}
+              templateConfigError={templateState.configError}
+              templateFilesLoading={templateState.filesLoading}
+              {templatePlaceholders}
+              {templateBindingRows}
+              {templateBindingSuggestionGroups}
+              {templateAutoBindings}
+              {templateReadiness}
+              {templateOrphanedRows}
+              {templateHasSelection}
+              {resolvedTemplateAssetId}
+              {selectedTemplateAsset}
+              {templateUnnamedStepWarning}
+              {templateAutoMatchableCount}
+              availableTemplateFiles={templateState.availableFiles}
+              onOutputModeChange={(detail) =>
+                handleOutputModeChange(detail.value as FlowStep["output_mode"])}
+              onTemplateFileSelect={(detail) =>
+                void templateState.handleFileSelection(detail.assetId, templateContext())}
+              onTemplateUpload={(detail) =>
+                void templateState.handleUpload(detail.event, templateContext())}
+              onTemplateDownload={() =>
+                resolvedTemplateAssetId && void templateState.download(resolvedTemplateAssetId)}
+              onTemplateRefresh={() =>
+                resolvedTemplateAssetId &&
+                void templateState.inspectFile(
+                  resolvedTemplateAssetId,
+                  { persist: false },
+                  templateContext()
+                )}
+              onBindingChange={(detail) =>
+                handleTemplateBindingChange(detail.placeholder, detail.value)}
+              onApplyAllSuggestions={applyAllTemplateSuggestions}
+            />
+          {:else}
+            <FlowStepOutputSection
+              embedded
+              step={activeStep}
+              {isPublished}
+              {isAdvancedMode}
+              {availableOutputTypes}
+              {availableOutputModes}
+              {outputHintKind}
+              flowId={currentFlowId}
+              onOutputTypeChange={(detail) =>
+                handleOutputTypeChange(detail.value as FlowStep["output_type"])}
+              onOutputModeChange={(detail) =>
+                handleOutputModeChange(detail.value as FlowStep["output_mode"])}
+              onWebhookUrlChange={(detail) =>
+                updateStep("output_config", {
+                  ...(activeStep?.output_config ?? {}),
+                  url: detail.value
+                })}
+              onHttpConfigChange={(detail) =>
+                updateStep(
+                  "output_config",
+                  preserveFlowCitationMode(
+                    detail.config as unknown as Record<string, unknown>,
+                    activeStep?.output_config ?? null
+                  )
+                )}
+              onCitationModeChange={(detail) => handleCitationModeChange(detail.value)}
+              onSwitchToTemplateFill={() => handleOutputModeChange("template_fill")}
+            />
+          {/if}
+        </FlowStepChapter>
 
         <!-- Typed I/O info banners -->
         {#if activeStep.output_type === "json" && activeStep.output_contract}
@@ -1154,15 +1261,22 @@
         {/if}
 
         {#if isAdvancedMode && !isTemplateFill}
-          <FlowStepAdvancedSection
-            step={activeStep}
-            {isPublished}
-            {advancedJsonDrafts}
-            {advancedJsonErrors}
-            onJsonFieldUpdate={(detail) =>
-              handleAdvancedJsonFieldUpdate(detail.field, detail.value)}
-            onJsonFieldFormat={(detail) => handleAdvancedJsonFieldFormat(detail.field)}
-          />
+          <FlowStepChapter
+            title={m.flow_step_advanced()}
+            status={chapterAdvancedStatus}
+            resetKey={activeStep?.step_order}
+          >
+            <FlowStepAdvancedSection
+              embedded
+              step={activeStep}
+              {isPublished}
+              {advancedJsonDrafts}
+              {advancedJsonErrors}
+              onJsonFieldUpdate={(detail) =>
+                handleAdvancedJsonFieldUpdate(detail.field, detail.value)}
+              onJsonFieldFormat={(detail) => handleAdvancedJsonFieldFormat(detail.field)}
+            />
+          </FlowStepChapter>
         {/if}
 
         <FlowStepDeleteSection

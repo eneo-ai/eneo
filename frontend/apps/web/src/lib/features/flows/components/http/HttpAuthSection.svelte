@@ -2,6 +2,7 @@
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import type { HttpAuth, HttpAuthMode } from "./httpConfigTypes";
   import { isSecretSentinel } from "./httpConfigTypes";
 
@@ -47,20 +48,31 @@
   const storedToken = $derived(auth.mode === "bearer_token" && isSecretSentinel(auth.token));
   const storedKey = $derived(auth.mode === "api_key" && isSecretSentinel(auth.key));
   const storedPassword = $derived(auth.mode === "basic_auth" && isSecretSentinel(auth.password));
+
+  const authModeLabel = $derived(
+    AUTH_MODES.find((mode) => mode.value === auth.mode)?.label ?? auth.mode
+  );
 </script>
 
 <Settings.Row title={m.http_auth_title()} description="">
   <div class="flex flex-col gap-3">
-    <select
-      class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+    <Select.Root
+      type="single"
       value={auth.mode}
       disabled={isPublished}
-      onchange={(e) => handleModeChange(e.currentTarget.value as HttpAuthMode)}
+      onValueChange={(value) => handleModeChange(value as HttpAuthMode)}
     >
-      {#each AUTH_MODES as mode (mode.value)}
-        <option value={mode.value}>{mode.label}</option>
-      {/each}
-    </select>
+      <Select.Trigger class="w-full" aria-label={m.http_auth_title()}>
+        {authModeLabel}
+      </Select.Trigger>
+      <Select.Content>
+        <Select.Group>
+          {#each AUTH_MODES as mode (mode.value)}
+            <Select.Item value={mode.value} label={mode.label}>{mode.label}</Select.Item>
+          {/each}
+        </Select.Group>
+      </Select.Content>
+    </Select.Root>
 
     {#if auth.mode === "bearer_token"}
       <div class="flex flex-col gap-1">

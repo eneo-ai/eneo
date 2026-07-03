@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -11,6 +12,7 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
@@ -25,6 +27,7 @@
     availableOutputModes,
     flowId = "",
     outputHintKind,
+    embedded = false,
     onOutputTypeChange,
     onOutputModeChange,
     onWebhookUrlChange,
@@ -39,6 +42,7 @@
     availableOutputModes: Array<{ value: string; label: string }>;
     flowId?: string;
     outputHintKind: FlowOutputHintKind | null;
+    embedded?: boolean;
     onOutputTypeChange?: (detail: { value: string }) => void;
     onOutputModeChange?: (detail: { value: string }) => void;
     onWebhookUrlChange?: (detail: { value: string }) => void;
@@ -55,21 +59,40 @@
   );
   const citationMode = $derived(resolveFlowCitationMode(step.output_config));
   const supportsCitationMode = $derived(supportsFlowCitationMode(step));
+
+  const selectedOutputTypeLabel = $derived(
+    availableOutputTypes.find((t) => t.value === step.output_type)?.label ?? step.output_type
+  );
+  const selectedOutputModeLabel = $derived(
+    availableOutputModes.find((mode) => mode.value === step.output_mode)?.label ?? step.output_mode
+  );
+  const citationModeLabel = $derived(
+    citationMode === FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
+      ? m.flow_step_citation_mode_inline_inref_sidecar()
+      : m.flow_step_citation_mode_off()
+  );
 </script>
 
-<Settings.Group title={m.flow_step_output_section()}>
+<FlowStepSection title={embedded ? undefined : m.flow_step_output_section()}>
   <Settings.Row title={m.flow_step_output_type()} description={m.flow_step_output_format_desc()}>
     <div class="flex flex-col gap-2">
-      <select
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <Select.Root
+        type="single"
         value={step.output_type}
         disabled={isPublished}
-        onchange={(e) => onOutputTypeChange?.({ value: e.currentTarget.value })}
+        onValueChange={(value) => onOutputTypeChange?.({ value })}
       >
-        {#each availableOutputTypes as t (t.value)}
-          <option value={t.value}>{t.label}</option>
-        {/each}
-      </select>
+        <Select.Trigger class="w-full" aria-label={m.flow_step_output_type()}>
+          {selectedOutputTypeLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#each availableOutputTypes as t (t.value)}
+              <Select.Item value={t.value} label={t.label}>{t.label}</Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
       {#if getOutputHintText(step.output_mode, outputHintKind)}
         <p class="text-muted text-xs leading-relaxed" aria-live="polite">
           {getOutputHintText(step.output_mode, outputHintKind)}
@@ -105,16 +128,23 @@
   {/if}
 
   <Settings.Row title={m.flow_step_output_mode()} description="">
-    <select
-      class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+    <Select.Root
+      type="single"
       value={step.output_mode}
       disabled={isPublished}
-      onchange={(e) => onOutputModeChange?.({ value: e.currentTarget.value })}
+      onValueChange={(value) => onOutputModeChange?.({ value })}
     >
-      {#each availableOutputModes as mode (mode.value)}
-        <option value={mode.value}>{mode.label}</option>
-      {/each}
-    </select>
+      <Select.Trigger class="w-full" aria-label={m.flow_step_output_mode()}>
+        {selectedOutputModeLabel}
+      </Select.Trigger>
+      <Select.Content>
+        <Select.Group>
+          {#each availableOutputModes as mode (mode.value)}
+            <Select.Item value={mode.value} label={mode.label}>{mode.label}</Select.Item>
+          {/each}
+        </Select.Group>
+      </Select.Content>
+    </Select.Root>
   </Settings.Row>
 
   {#if supportsCitationMode}
@@ -123,23 +153,35 @@
       description={m.flow_step_citation_mode_desc()}
     >
       <div class="flex flex-col gap-2">
-        <select
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <Select.Root
+          type="single"
           value={citationMode}
           disabled={isPublished}
-          onchange={(e) =>
+          onValueChange={(value) =>
             onCitationModeChange?.({
               value:
-                e.currentTarget.value === FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
+                value === FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
                   ? FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
                   : FLOW_CITATION_MODE_OFF
             })}
         >
-          <option value={FLOW_CITATION_MODE_OFF}>{m.flow_step_citation_mode_off()}</option>
-          <option value={FLOW_CITATION_MODE_INLINE_INREF_SIDECAR}>
-            {m.flow_step_citation_mode_inline_inref_sidecar()}
-          </option>
-        </select>
+          <Select.Trigger class="w-full" aria-label={m.flow_step_citation_mode()}>
+            {citationModeLabel}
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Group>
+              <Select.Item value={FLOW_CITATION_MODE_OFF} label={m.flow_step_citation_mode_off()}>
+                {m.flow_step_citation_mode_off()}
+              </Select.Item>
+              <Select.Item
+                value={FLOW_CITATION_MODE_INLINE_INREF_SIDECAR}
+                label={m.flow_step_citation_mode_inline_inref_sidecar()}
+              >
+                {m.flow_step_citation_mode_inline_inref_sidecar()}
+              </Select.Item>
+            </Select.Group>
+          </Select.Content>
+        </Select.Root>
         <p class="text-muted text-xs leading-relaxed">
           {m.flow_step_citation_mode_help()}
         </p>
@@ -161,7 +203,7 @@
       </Settings.Row>
     {/if}
   {/if}
-</Settings.Group>
+</FlowStepSection>
 
 {#if step.output_mode === "http_post" && (step.output_config?.auth || !step.output_config?.url)}
   <HttpConfigPanel

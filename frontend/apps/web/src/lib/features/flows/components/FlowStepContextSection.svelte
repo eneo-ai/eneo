@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type {
@@ -24,8 +25,12 @@
     assistantLoading,
     runningUploads,
     onKnowledgeChange,
-    onRemoveAttachment
+    onRemoveAttachment,
+    collapsible = false,
+    resetKey
   }: {
+    collapsible?: boolean;
+    resetKey?: string | number;
     assistant: {
       id?: string;
       websites?: WebsiteSparse[];
@@ -55,6 +60,16 @@
   let lastAssistantId = $state<string | null>(null);
   let lastSourceSignature = $state("");
   let lastEmittedSignature = $state("");
+
+  const hasKnowledge = $derived(
+    selectedWebsites.length > 0 ||
+      selectedGroups.length > 0 ||
+      selectedIntegrationKnowledge.length > 0 ||
+      (assistant?.attachments?.length ?? 0) > 0
+  );
+  const knowledgeStatus = $derived(
+    hasKnowledge ? m.flow_section_status_knowledge_active() : m.flow_section_status_knowledge_none()
+  );
 
   function knowledgeSignature(
     websites: WebsiteSparse[] = [],
@@ -110,7 +125,12 @@
   });
 </script>
 
-<Settings.Group title={m.flow_step_section_context()}>
+<FlowStepSection
+  title={m.flow_step_section_context()}
+  {collapsible}
+  {resetKey}
+  status={knowledgeStatus}
+>
   {#if assistantLoading}
     <div class="text-secondary flex items-center gap-2 px-4 py-3 text-sm">
       <IconLoadingSpinner class="size-4 animate-spin" />
@@ -205,4 +225,4 @@
       </div>
     </Settings.Row>
   {/if}
-</Settings.Group>
+</FlowStepSection>
