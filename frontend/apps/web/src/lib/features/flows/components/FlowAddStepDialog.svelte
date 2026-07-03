@@ -126,7 +126,7 @@
       <Input
         bind:value={query}
         placeholder={m.flow_add_step_search()}
-        class="pl-9"
+        class="focus-visible:ring-accent-default/40 pl-9 focus-visible:ring-2"
         aria-label={m.flow_add_step_search()}
         name="flow-template-search"
         autocomplete="off"
@@ -162,7 +162,7 @@
       {/if}
     </div>
 
-    <Dialog.Footer>
+    <Dialog.Footer class="border-default">
       {#if selectedTemplate?.id === "document"}
         <div class="mr-auto flex items-center gap-2">
           <span class="text-secondary text-xs font-medium">{m.flow_add_step_format()}</span>
