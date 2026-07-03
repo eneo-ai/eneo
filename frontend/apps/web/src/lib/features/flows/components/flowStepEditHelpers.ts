@@ -1,6 +1,6 @@
 import { m } from "$lib/paraglide/messages";
 import type { FlowStep } from "@eneo/eneo-js";
-import type { FlowStepValidationIssue } from "$lib/features/flows/flowStepTypes";
+import { OUTPUT_TYPES, type FlowStepValidationIssue } from "$lib/features/flows/flowStepTypes";
 import type {
   FlowSourceHintKind,
   FlowOutputHintKind
@@ -60,60 +60,6 @@ export const INPUT_TYPES = [
     value: "any",
     get label() {
       return m.flow_type_any();
-    }
-  }
-];
-
-export const OUTPUT_TYPES = [
-  {
-    value: "text",
-    get label() {
-      return m.flow_output_type_text();
-    }
-  },
-  {
-    value: "json",
-    get label() {
-      return m.flow_output_type_json();
-    }
-  },
-  {
-    value: "pdf",
-    get label() {
-      return m.flow_output_type_pdf();
-    }
-  },
-  {
-    value: "docx",
-    get label() {
-      return m.flow_output_type_docx();
-    }
-  }
-];
-
-export const OUTPUT_MODES = [
-  {
-    value: "pass_through",
-    get label() {
-      return m.flow_output_mode_pass_through();
-    }
-  },
-  {
-    value: "transcribe_only",
-    get label() {
-      return m.flow_output_mode_transcribe_only();
-    }
-  },
-  {
-    value: "http_post",
-    get label() {
-      return m.flow_output_mode_http_post();
-    }
-  },
-  {
-    value: "template_fill",
-    get label() {
-      return m.flow_output_mode_template_fill();
     }
   }
 ];

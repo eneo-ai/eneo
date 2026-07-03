@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { FLOW_API_ERROR_CODE } from "@eneo/eneo-js";
 import type { FlowRunContractTemplateReadiness } from "@eneo/eneo-js";
 import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
+import { getFlowRuntimeErrorMessageByCode } from "$lib/features/flows/flowRuntimeErrorMapping";
 import {
   getTemplateReadinessMessage,
   getTemplateStatusClasses,
@@ -61,5 +63,23 @@ describe("getTemplateReadinessMessage", () => {
     expect(getTemplateReadinessMessage(readinessItem({ status: "read_only" }), labels)).toBe(
       "You can run the flow but you cannot change the template."
     );
+  });
+
+  it("prefers a resolved message_code over the status fallback", () => {
+    const code = FLOW_API_ERROR_CODE.REVIEW_POLICY_INVALID;
+    const mapped = getFlowRuntimeErrorMessageByCode(code);
+    expect(mapped).not.toBeNull();
+    const item = readinessItem({ status: "needs_action", message_code: code });
+    expect(getTemplateReadinessMessage(item, labels)).toBe(mapped);
+    expect(getTemplateReadinessMessage(item, labels)).not.toBe(labels.templateNeedsActionMessage);
+  });
+
+  it("falls back to the needs-action message when no code resolves", () => {
+    expect(
+      getTemplateReadinessMessage(
+        readinessItem({ status: "needs_action", message_code: null }),
+        labels
+      )
+    ).toBe("The template needs attention before the flow can run.");
   });
 });
