@@ -1,23 +1,21 @@
 <script lang="ts">
   import { tick, untrack, type Snippet } from "svelte";
-  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { FlowStep } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
-  import {
-    getFlowFormFieldVariableExpression,
-    isFlowFormFieldNameUsableAsVariable
-  } from "$lib/features/flows/flowFormSchema";
   import {
     getChipClasses,
     parsePromptSegments,
     collectTemplateValidationIssues,
-    type VariableCategory,
-    type VariableClassificationContext,
     type TemplateValidationIssue
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
   import { findOpenTokenStart, findAtTriggerStart } from "./flowPromptAutocomplete";
   import { buildMirrorSegments } from "./flowPromptMirror";
+  import {
+    buildContext,
+    buildAvailableVariables,
+    type VariableSuggestion
+  } from "./flowPromptVariables";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { CircleAlert } from "lucide-svelte";
@@ -132,43 +130,6 @@
     buildContext(steps, formSchema, transcriptionEnabled, currentStepOrder)
   );
 
-  function buildContext(
-    steps: FlowStep[],
-    formSchema:
-      | {
-          fields: {
-            name: string;
-            type: string;
-            required?: boolean;
-            options?: string[];
-            order?: number;
-          }[];
-        }
-      | undefined,
-    transcriptionEnabled: boolean,
-    currentStepOrder: number
-  ): VariableClassificationContext {
-    const knownFieldNames = new SvelteSet<string>();
-    for (const field of formSchema?.fields ?? []) {
-      const name = (field.name ?? "").trim();
-      if (isFlowFormFieldNameUsableAsVariable(name)) knownFieldNames.add(name);
-    }
-    const knownStepNames = new SvelteMap<number, string>();
-    const stepOutputTypes = new SvelteMap<number, string>();
-    for (const step of steps) {
-      const name = (step.user_description ?? "").trim();
-      if (name) knownStepNames.set(step.step_order, name);
-      stepOutputTypes.set(step.step_order, step.output_type);
-    }
-    return {
-      knownFieldNames,
-      knownStepNames,
-      stepOutputTypes,
-      transcriptionEnabled,
-      currentStepOrder
-    };
-  }
-
   // Parse segments for mirror rendering
   const segments = $derived(parsePromptSegments(currentEditorValue, classificationContext));
 
@@ -181,80 +142,6 @@
   const availableVariables = $derived.by(() =>
     buildAvailableVariables(classificationContext, steps, isAdvancedMode)
   );
-
-  type VariableSuggestion = {
-    token: string;
-    label: string;
-    description: string;
-    category: VariableCategory;
-    displayToken?: boolean;
-  };
-
-  function buildAvailableVariables(
-    ctx: VariableClassificationContext,
-    steps: FlowStep[],
-    showTechnical: boolean
-  ): VariableSuggestion[] {
-    const suggestions: VariableSuggestion[] = [];
-
-    // Form fields
-    for (const name of ctx.knownFieldNames) {
-      const token = getFlowFormFieldVariableExpression(name);
-      if (!token) continue;
-      suggestions.push({
-        token,
-        label: name,
-        description: m.flow_variable_form_field(),
-        category: "field",
-        displayToken: true
-      });
-    }
-
-    // System
-    if (ctx.transcriptionEnabled) {
-      suggestions.push({
-        token: "transkribering",
-        label: "transkribering",
-        description: m.flow_variable_transcription(),
-        category: "system"
-      });
-    }
-    if (showTechnical && ctx.currentStepOrder > 1) {
-      suggestions.push({
-        token: "föregående_steg",
-        label: "föregående_steg",
-        description: m.flow_variable_previous_step(),
-        category: "system"
-      });
-    }
-
-    // Previous step name aliases
-    for (const [order, name] of ctx.knownStepNames) {
-      if (order < ctx.currentStepOrder && name) {
-        suggestions.push({
-          token: name,
-          label: name,
-          description: m.flow_variable_step_alias({ order: String(order) }),
-          category: "step"
-        });
-      }
-    }
-
-    // Technical (only in advanced mode)
-    if (showTechnical) {
-      const previousSteps = steps.filter((s) => s.step_order < ctx.currentStepOrder);
-      for (const step of previousSteps) {
-        suggestions.push({
-          token: `step_${step.step_order}.output.text`,
-          label: `step_${step.step_order}.output.text`,
-          description: m.flow_variable_text_output(),
-          category: "step"
-        });
-      }
-    }
-
-    return suggestions;
-  }
 
   // Chip bar variables (filtered in user mode)
   const chipBarVariables = $derived(
