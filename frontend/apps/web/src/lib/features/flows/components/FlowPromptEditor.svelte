@@ -16,6 +16,7 @@
     type TemplateValidationIssue
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
+  import { findOpenTokenStart, findAtTriggerStart } from "./flowPromptAutocomplete";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { CircleAlert } from "lucide-svelte";
@@ -364,25 +365,6 @@
   function setEditorValue(nextValue: string) {
     currentEditorValue = nextValue;
     onChange?.(nextValue);
-  }
-
-  function findOpenTokenStart(text: string, cursorIndex: number): number | null {
-    const beforeCursor = text.slice(0, cursorIndex);
-    const openIndex = beforeCursor.lastIndexOf("{{");
-    if (openIndex < 0) return null;
-    const closingIndex = beforeCursor.lastIndexOf("}}");
-    if (closingIndex > openIndex) return null;
-    return openIndex;
-  }
-
-  function findAtTriggerStart(text: string, cursor: number): number | null {
-    if (findOpenTokenStart(text, cursor) !== null) return null;
-    const beforeCursor = text.slice(0, cursor);
-    const atIndex = beforeCursor.lastIndexOf("@");
-    if (atIndex < 0) return null;
-    if (atIndex > 0 && !/[\s([{]/.test(beforeCursor[atIndex - 1])) return null;
-    if (beforeCursor.slice(atIndex + 1).includes(" ")) return null;
-    return atIndex;
   }
 
   function updateAutocompleteState() {
