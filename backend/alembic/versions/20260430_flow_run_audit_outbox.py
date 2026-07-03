@@ -64,8 +64,7 @@ def upgrade() -> None:
             "'task_failure',"
             "'missing_principal',"
             "'stale_running_reconciler',"
-            "'user_cancel',"
-            "'dispatch_failure'"
+            "'user_cancel'"
             ")",
             name="ck_flow_run_audit_outbox_source",
         ),

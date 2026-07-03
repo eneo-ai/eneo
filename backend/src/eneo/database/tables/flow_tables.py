@@ -1147,7 +1147,7 @@ class FlowStepAttempts(BasePublic):
             name="ck_flow_step_attempts_attempt_no_positive",
         ),
         CheckConstraint(
-            "status IN ('started','retried','failed','completed','cancelled')",
+            "status IN ('started','failed','completed','cancelled')",
             name="ck_flow_step_attempts_status",
         ),
         ForeignKeyConstraint(

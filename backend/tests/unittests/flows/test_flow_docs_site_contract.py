@@ -1640,7 +1640,6 @@ def test_flow_developer_docs_run_lifecycle_is_generated_from_lifecycle_sources()
     assert "active `pending` or `running` step results and open attempts as failed" in (
         page
     )
-    assert "No current runtime writer sets `retried`" in page
     assert "mark_running_if_claimable" in page
     assert "FlowReviewExpiryReconciler" in page
     assert "flows.reconcile_review_expiry" in page

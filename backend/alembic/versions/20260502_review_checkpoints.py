@@ -48,7 +48,6 @@ FLOW_RUN_LIFECYCLE_SOURCES = (
     "missing_principal",
     "stale_running_reconciler",
     "user_cancel",
-    "dispatch_failure",
     "review_rejected",
     "review_checkpoint_opened",
     "review_checkpoint_edited",
@@ -70,7 +69,6 @@ OLD_FLOW_RUN_LIFECYCLE_SOURCES = (
     "missing_principal",
     "stale_running_reconciler",
     "user_cancel",
-    "dispatch_failure",
 )
 
 

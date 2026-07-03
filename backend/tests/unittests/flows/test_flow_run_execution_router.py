@@ -1025,7 +1025,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
 
 
 @pytest.mark.asyncio
-async def test_redispatch_flow_run_propagates_dispatch_failure(monkeypatch):
+async def test_redispatch_flow_run_propagates_dispatch_error(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())

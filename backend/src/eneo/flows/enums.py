@@ -271,7 +271,6 @@ class FlowRunLifecycleSource(str, Enum):
     MISSING_PRINCIPAL = "missing_principal"
     STALE_RUNNING_RECONCILER = "stale_running_reconciler"
     USER_CANCEL = "user_cancel"
-    DISPATCH_FAILURE = "dispatch_failure"
     REVIEW_REJECTED = "review_rejected"
     REVIEW_CHECKPOINT_OPENED = "review_checkpoint_opened"
     REVIEW_CHECKPOINT_EDITED = "review_checkpoint_edited"
@@ -318,7 +317,6 @@ class FlowStepResultStatus(str, Enum):
 
 class FlowStepAttemptStatus(str, Enum):
     STARTED = "started"
-    RETRIED = "retried"
     FAILED = "failed"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -338,7 +336,6 @@ ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES = tuple(
 OPEN_FLOW_STEP_ATTEMPT_STATUSES = frozenset(
     {
         FlowStepAttemptStatus.STARTED,
-        FlowStepAttemptStatus.RETRIED,
     }
 )
 OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(

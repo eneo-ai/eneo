@@ -1393,7 +1393,7 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
     assert backend.dispatch.await_count == 0
 
 
-def test_redispatch_stale_queued_continues_after_dispatch_failure(monkeypatch):
+def test_redispatch_stale_queued_continues_after_dispatch_error(monkeypatch):
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     failed_run = SimpleNamespace(

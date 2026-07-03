@@ -121,21 +121,8 @@ def test_flow_step_open_work_status_constants_are_explicit() -> None:
     assert ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES == ("pending", "running")
     assert OPEN_FLOW_STEP_ATTEMPT_STATUSES == {
         FlowStepAttemptStatus.STARTED,
-        FlowStepAttemptStatus.RETRIED,
     }
-    assert OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES == ("started", "retried")
-
-
-def test_retried_step_attempt_status_has_no_runtime_writer() -> None:
-    source_root = BACKEND_ROOT / "src" / "eneo" / "flows"
-    references = [
-        path.relative_to(source_root).as_posix()
-        for path in source_root.rglob("*.py")
-        if path.name != "enums.py"
-        and "FlowStepAttemptStatus.RETRIED" in path.read_text(encoding="utf-8")
-    ]
-
-    assert references == []
+    assert OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES == ("started",)
 
 
 @pytest.mark.parametrize(

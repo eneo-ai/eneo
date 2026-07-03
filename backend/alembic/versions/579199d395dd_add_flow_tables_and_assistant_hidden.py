@@ -614,7 +614,7 @@ def upgrade() -> None:
         sa.Column("started_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.Column("finished_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.CheckConstraint(
-            "status IN ('started','retried','failed','completed','cancelled')",
+            "status IN ('started','failed','completed','cancelled')",
             name="ck_flow_step_attempts_status",
         ),
         sa.ForeignKeyConstraint(

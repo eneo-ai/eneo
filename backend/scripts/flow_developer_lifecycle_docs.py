@@ -160,7 +160,6 @@ STEP_RESULT_STATUS_NOTES: dict[FlowStepResultStatus, str] = {
 
 STEP_ATTEMPT_STATUS_NOTES: dict[FlowStepAttemptStatus, str] = {
     FlowStepAttemptStatus.STARTED: "attempt row was opened before handler dispatch",
-    FlowStepAttemptStatus.RETRIED: "open retry-recovery state in the unfinished-attempt vocabulary",
     FlowStepAttemptStatus.FAILED: "attempt finished with a typed or generic error",
     FlowStepAttemptStatus.COMPLETED: "attempt finished with persisted output",
     FlowStepAttemptStatus.CANCELLED: "attempt was closed because the run was cancelled",
@@ -468,10 +467,6 @@ def _render_step_failure_and_upload_binding() -> str:
                 "    started --> completed: output persisted",
                 "    started --> failed: typed or generic failure",
                 "    started --> cancelled: run cancellation",
-                "    started --> retried: retry recovery marker",
-                "    retried --> completed: retried output persisted",
-                "    retried --> failed: retried failure persisted",
-                "    retried --> cancelled: run cancellation",
                 "  }",
             ),
             "",
@@ -481,7 +476,6 @@ def _render_step_failure_and_upload_binding() -> str:
             "- Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.",
             "- When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.",
             "- Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.",
-            "- No current runtime writer sets `retried`; it is owned by the step-attempt vocabulary and open-attempt readers, which treat it as unfinished if encountered.",
             "",
             "### Runtime upload binding",
             "",

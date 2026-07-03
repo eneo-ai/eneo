@@ -82,7 +82,7 @@ async def test_redispatch_stale_queued_run_classifies_invalid_request():
 
 
 @pytest.mark.asyncio
-async def test_redispatch_stale_queued_run_classifies_dispatch_failure():
+async def test_redispatch_stale_queued_run_classifies_dispatch_error():
     error = RuntimeError("broker down")
     backend = MagicMock()
     backend.dispatch = AsyncMock(side_effect=error)

@@ -90,13 +90,12 @@ stateDiagram-v2
 
 ## Step attempt states
 
-| Status      | Open | Meaning                                                        |
-| ----------- | ---- | -------------------------------------------------------------- |
-| `started`   | yes  | attempt row was opened before handler dispatch                 |
-| `retried`   | yes  | open retry-recovery state in the unfinished-attempt vocabulary |
-| `failed`    | no   | attempt finished with a typed or generic error                 |
-| `completed` | no   | attempt finished with persisted output                         |
-| `cancelled` | no   | attempt was closed because the run was cancelled               |
+| Status      | Open | Meaning                                          |
+| ----------- | ---- | ------------------------------------------------ |
+| `started`   | yes  | attempt row was opened before handler dispatch   |
+| `failed`    | no   | attempt finished with a typed or generic error   |
+| `completed` | no   | attempt finished with persisted output           |
+| `cancelled` | no   | attempt was closed because the run was cancelled |
 
 ## Step failure and runtime file binding
 
@@ -121,10 +120,6 @@ stateDiagram-v2
     started --> completed: output persisted
     started --> failed: typed or generic failure
     started --> cancelled: run cancellation
-    started --> retried: retry recovery marker
-    retried --> completed: retried output persisted
-    retried --> failed: retried failure persisted
-    retried --> cancelled: run cancellation
   }
 ```
 
@@ -136,7 +131,6 @@ stateDiagram-v2
 - Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.
 - When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.
 - Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.
-- No current runtime writer sets `retried`; it is owned by the step-attempt vocabulary and open-attempt readers, which treat it as unfinished if encountered.
 
 ### Runtime upload binding
 

@@ -16368,7 +16368,6 @@ export interface components {
       | "missing_principal"
       | "stale_running_reconciler"
       | "user_cancel"
-      | "dispatch_failure"
       | "review_rejected"
       | "review_checkpoint_opened"
       | "review_checkpoint_edited"
@@ -18288,7 +18287,7 @@ export interface components {
      * FlowStepAttemptStatus
      * @enum {string}
      */
-    FlowStepAttemptStatus: "started" | "retried" | "failed" | "completed" | "cancelled";
+    FlowStepAttemptStatus: "started" | "failed" | "completed" | "cancelled";
     /**
      * FlowStepCreateRequest
      * @example {

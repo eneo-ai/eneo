@@ -3264,7 +3264,7 @@ async def test_redispatch_run_reloads_when_dispatch_request_is_invalid(
 
 
 @pytest.mark.asyncio
-async def test_redispatch_run_propagates_dispatch_failure(user, monkeypatch):
+async def test_redispatch_run_propagates_dispatch_error(user, monkeypatch):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
