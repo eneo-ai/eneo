@@ -32,10 +32,6 @@
         class="px-3 py-1 text-xs"
       >
         {m.flow_power_user_mode()}
-        {#if $mode === "power_user"}<span
-            class="bg-warning-default ml-1 inline-block size-1.5 rounded-full"
-            aria-hidden="true"
-          ></span>{/if}
       </Tabs.Trigger>
     </Tabs.List>
   </Tabs.Root>

@@ -353,7 +353,7 @@
           beforeExport={async () => flowEditor.flushSaves()}
         />
         <Button
-          variant="default"
+          variant={builderStage === 5 ? "default" : "outline"}
           disabled={!canPublish || publishLoading}
           aria-describedby={!canPublish ? "flow-publish-disabled-reason" : undefined}
           title={!canPublish ? m.flow_publish_not_ready_tooltip() : undefined}
@@ -550,15 +550,6 @@
                 onclick={goToNextStage}
               >
                 <span class="hidden lg:inline">{m.flow_stage_next()}</span> &rarr;
-              </Button>
-            {:else}
-              <Button
-                variant="default"
-                size="sm"
-                disabled={!canPublish}
-                title={canPublish ? "" : m.flow_publish_not_ready_tooltip()}
-              >
-                {m.flow_stage_done()}
               </Button>
             {/if}
           </div>
