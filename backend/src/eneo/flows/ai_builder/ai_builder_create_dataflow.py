@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
@@ -48,6 +51,15 @@ TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP = 3
 TARGETED_UNDERLAG_TOTAL_FIELD_CAP = 8
 TARGETED_UNDERLAG_BROAD_FIELD_CAP = 16
 _TargetedUnderlagBindingMode = Literal["skip", "with_text_priors", "fields_only"]
+_PreviousRefKind = Literal["uses_previous_fields", "uses_previous_outputs"]
+_PreviousRefFailureReason = Literal[
+    "previous_field_step_not_prior",
+    "previous_field_source_not_json",
+    "previous_field_source_missing_output_fields",
+    "unknown_previous_field_path",
+    "previous_output_step_not_prior",
+    "previous_output_source_not_text",
+]
 _UNDERLAG_ALWAYS_BROAD_COMPOSER_MARKERS = (
     "bygg docx",
     "docx innehall",
@@ -167,13 +179,13 @@ def normalize_create_step_mechanics(
     flow_description: str | None,
     aggregation_intent: "AggregationIntent" = "linear",
 ) -> list[NewStepDraft]:
-    """Remove low-level references the backend cannot compile safely.
+    """Normalize server-owned create mechanics before compiling a flow.
 
     The model may describe semantic flow intent, but exact structured field
     paths, form-variable joins, runtime-upload flags, and step-source invariants
-    are canonical mechanics owned by the backend. Invalid mechanical details are
-    normalized before proposal validation so the compiler can preserve semantic
-    intent instead of rejecting an otherwise useful plan.
+    are canonical mechanics owned by the backend. Previous-step underlag refs
+    are backend-generated in create mode; invalid refs indicate an architecture
+    bug and must fail before runtime.
     """
 
     normalized_steps = _normalize_create_step_refs(
@@ -208,7 +220,9 @@ def _normalize_create_step_refs(
     updated_steps: list[NewStepDraft] = []
     known_form_fields = {field.name for field in form_fields}
     for step_index, step in enumerate(mechanically_normalized_steps):
-        normalized_refs = _compile_safe_previous_field_refs(
+        # Previous-step refs are backend-generated after create-intent stripping.
+        # Form fields stay tolerant because runtime hints can complete their names.
+        normalized_refs = _require_valid_previous_field_refs(
             steps=mechanically_normalized_steps,
             step_index=step_index,
             refs=step.uses_previous_fields,
@@ -218,7 +232,7 @@ def _normalize_create_step_refs(
             for field_name in step.uses_form_fields
             if field_name in known_form_fields
         ]
-        normalized_output_refs = _compile_safe_previous_output_refs(
+        normalized_output_refs = _require_valid_previous_output_refs(
             steps=mechanically_normalized_steps,
             step_index=step_index,
             refs=step.uses_previous_outputs,
@@ -289,55 +303,118 @@ def _normalize_step_mechanics(
     return step.model_copy(update=updates) if updates else step
 
 
-def _compile_safe_previous_field_refs(
+def _require_valid_previous_field_refs(
     *,
     steps: list[NewStepDraft],
     step_index: int,
     refs: list[PreviousFieldRef],
 ) -> list[PreviousFieldRef]:
-    safe_refs: list[PreviousFieldRef] = []
+    valid_refs: list[PreviousFieldRef] = []
     seen: set[tuple[int, str]] = set()
     for field_ref in refs:
         target_index = field_ref.from_step - 1
         if target_index < 0 or target_index >= step_index:
-            continue
+            raise _invalid_previous_ref_error(
+                reason="previous_field_step_not_prior",
+                ref_kind="uses_previous_fields",
+                step_index=step_index,
+                from_step=field_ref.from_step,
+                field_path=field_ref.field_path,
+            )
 
         target_step = steps[target_index]
         if target_step.output_type != OutputType.JSON:
-            continue
+            raise _invalid_previous_ref_error(
+                reason="previous_field_source_not_json",
+                ref_kind="uses_previous_fields",
+                step_index=step_index,
+                from_step=field_ref.from_step,
+                field_path=field_ref.field_path,
+                source_output_type=target_step.output_type,
+            )
         if target_step.output_fields is None:
-            continue
+            raise _invalid_previous_ref_error(
+                reason="previous_field_source_missing_output_fields",
+                ref_kind="uses_previous_fields",
+                step_index=step_index,
+                from_step=field_ref.from_step,
+                field_path=field_ref.field_path,
+                source_output_type=target_step.output_type,
+            )
         if missing_draft_field_path(target_step.output_fields, field_ref.field_path):
-            continue
+            raise _invalid_previous_ref_error(
+                reason="unknown_previous_field_path",
+                ref_kind="uses_previous_fields",
+                step_index=step_index,
+                from_step=field_ref.from_step,
+                field_path=field_ref.field_path,
+                source_output_type=target_step.output_type,
+            )
 
         key = (field_ref.from_step, field_ref.field_path)
         if key in seen:
             continue
         seen.add(key)
-        safe_refs.append(field_ref)
-    return safe_refs
+        valid_refs.append(field_ref)
+    return valid_refs
 
 
-def _compile_safe_previous_output_refs(
+def _require_valid_previous_output_refs(
     *,
     steps: list[NewStepDraft],
     step_index: int,
     refs: list[PreviousOutputRef],
 ) -> list[PreviousOutputRef]:
-    safe_refs: list[PreviousOutputRef] = []
+    valid_refs: list[PreviousOutputRef] = []
     seen: set[int] = set()
     for output_ref in refs:
         target_index = output_ref.from_step - 1
         if target_index < 0 or target_index >= step_index:
-            continue
+            raise _invalid_previous_ref_error(
+                reason="previous_output_step_not_prior",
+                ref_kind="uses_previous_outputs",
+                step_index=step_index,
+                from_step=output_ref.from_step,
+            )
         target_step = steps[target_index]
         if target_step.output_type != OutputType.TEXT:
-            continue
+            raise _invalid_previous_ref_error(
+                reason="previous_output_source_not_text",
+                ref_kind="uses_previous_outputs",
+                step_index=step_index,
+                from_step=output_ref.from_step,
+                source_output_type=target_step.output_type,
+            )
         if output_ref.from_step in seen:
             continue
         seen.add(output_ref.from_step)
-        safe_refs.append(output_ref)
-    return safe_refs
+        valid_refs.append(output_ref)
+    return valid_refs
+
+
+def _invalid_previous_ref_error(
+    *,
+    reason: _PreviousRefFailureReason,
+    ref_kind: _PreviousRefKind,
+    step_index: int,
+    from_step: int,
+    field_path: str | None = None,
+    source_output_type: OutputType | None = None,
+) -> AIBuilderArchitectureError:
+    return AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail=f"AI Builder create dataflow emitted invalid {ref_kind}: {reason}.",
+        log_context={
+            "reason": reason,
+            "ref_kind": ref_kind,
+            "current_step": step_index + 1,
+            "from_step": from_step,
+            "field_path": field_path,
+            "source_output_type": (
+                source_output_type.value if source_output_type is not None else None
+            ),
+        },
+    )
 
 
 def auto_bind_targeted_underlag_for_text_composer(

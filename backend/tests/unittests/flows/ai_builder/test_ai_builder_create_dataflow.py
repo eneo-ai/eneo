@@ -1,3 +1,8 @@
+import pytest
+
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_steps_to_spec,
 )
@@ -76,41 +81,172 @@ def _normalize_steps(
     )
 
 
-def test_normalize_create_step_mechanics_prunes_unknown_previous_field_refs() -> None:
-    normalized = _normalize_steps(
-        flow_name="Robust rapport",
-        steps=[
-            {
-                "name": "Extrahera data",
-                "instructions": "Extrahera strukturerade data.",
-                "input_source": "flow_input",
-                "input_type": "document",
-                "output_type": "json",
-                "runtime_required": True,
-                "output_fields": [_field("known_field")],
-            },
-            {
-                "name": "Skriv rapport",
-                "instructions": "Skriv rapport.",
-                "input_source": "previous_step",
-                "input_type": "json",
-                "output_type": "text",
-                "uses_previous_fields": [
-                    {"from_step": 1, "field_path": "known_field"},
-                    {"from_step": 1, "field_path": "invented_field"},
-                    {"from_step": 2, "field_path": "future_field"},
-                ],
-            },
-        ],
+def test_normalize_create_step_mechanics_rejects_unknown_previous_field_refs() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _normalize_steps(
+            flow_name="Robust rapport",
+            steps=[
+                {
+                    "name": "Extrahera data",
+                    "instructions": "Extrahera strukturerade data.",
+                    "input_source": "flow_input",
+                    "input_type": "document",
+                    "output_type": "json",
+                    "runtime_required": True,
+                    "output_fields": [_field("known_field")],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapport.",
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {"from_step": 1, "field_path": "invented_field"},
+                    ],
+                },
+            ],
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "unknown_previous_field_path"
+
+
+def test_normalize_create_step_mechanics_rejects_future_previous_field_refs() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _normalize_steps(
+            flow_name="Robust rapport",
+            steps=[
+                {
+                    "name": "Extrahera data",
+                    "instructions": "Extrahera strukturerade data.",
+                    "input_source": "flow_input",
+                    "input_type": "document",
+                    "output_type": "json",
+                    "runtime_required": True,
+                    "output_fields": [_field("known_field")],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapport.",
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {"from_step": 2, "field_path": "future_field"},
+                    ],
+                },
+            ],
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "previous_field_step_not_prior"
+
+
+def test_normalize_create_step_mechanics_rejects_missing_previous_field_schema() -> (
+    None
+):
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _normalize_steps(
+            flow_name="Robust rapport",
+            steps=[
+                {
+                    "name": "Extrahera data",
+                    "instructions": "Extrahera strukturerade data.",
+                    "input_source": "flow_input",
+                    "input_type": "document",
+                    "output_type": "json",
+                    "runtime_required": True,
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapport.",
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {"from_step": 1, "field_path": "known_field"},
+                    ],
+                },
+            ],
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert (
+        exc_info.value.log_context["reason"]
+        == "previous_field_source_missing_output_fields"
     )
 
-    _assert_compiles_to_valid_spec(normalized)
-    assert [ref.field_path for ref in normalized[1].uses_previous_fields] == [
-        "known_field"
-    ]
+
+def test_normalize_create_step_mechanics_rejects_invalid_previous_output_refs() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _normalize_steps(
+            flow_name="Robust rapport",
+            steps=[
+                {
+                    "name": "Transkribera",
+                    "instructions": "Transkribera.",
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "output_type": "text",
+                    "runtime_required": True,
+                },
+                {
+                    "name": "Extrahera metadata",
+                    "instructions": "Extrahera metadata.",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "json",
+                    "output_fields": [_field("titel")],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapport.",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                    "uses_previous_outputs": [
+                        {"from_step": 2, "label": "Strukturerad metadata"},
+                    ],
+                },
+            ],
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "previous_output_source_not_text"
 
 
-def test_normalize_create_step_mechanics_prunes_invalid_previous_output_refs() -> None:
+def test_normalize_create_step_mechanics_rejects_future_previous_output_refs() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _normalize_steps(
+            flow_name="Robust rapport",
+            steps=[
+                {
+                    "name": "Transkribera",
+                    "instructions": "Transkribera.",
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "output_type": "text",
+                    "runtime_required": True,
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapport.",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                    "uses_previous_outputs": [
+                        {"from_step": 2, "label": "Eget steg"},
+                    ],
+                },
+            ],
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "previous_output_step_not_prior"
+
+
+def test_normalize_create_step_mechanics_dedupes_duplicate_previous_refs() -> None:
     normalized = _normalize_steps(
         flow_name="Robust rapport",
         steps=[
@@ -136,11 +272,12 @@ def test_normalize_create_step_mechanics_prunes_invalid_previous_output_refs() -
                 "input_source": "previous_step",
                 "input_type": "text",
                 "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 2, "field_path": "titel"},
+                    {"from_step": 2, "field_path": "titel", "label": "Dublett"},
+                ],
                 "uses_previous_outputs": [
                     {"from_step": 1, "label": "Transkription"},
-                    {"from_step": 2, "label": "Strukturerad metadata"},
-                    {"from_step": 3, "label": "Eget steg"},
-                    {"from_step": 9, "label": "Okänt"},
                     {"from_step": 1, "label": "Dublett"},
                 ],
             },
@@ -148,6 +285,9 @@ def test_normalize_create_step_mechanics_prunes_invalid_previous_output_refs() -
     )
 
     _assert_compiles_to_valid_spec(normalized)
+    assert [
+        (ref.from_step, ref.field_path) for ref in normalized[2].uses_previous_fields
+    ] == [(2, "titel")]
     assert [
         (ref.from_step, ref.label) for ref in normalized[2].uses_previous_outputs
     ] == [(1, "Transkription")]
@@ -229,6 +369,79 @@ def test_normalize_create_step_mechanics_restores_audio_source_material_underlag
         (4, "protocol_sections"),
     }
     assert normalized[5].uses_previous_outputs == []
+
+
+def test_normalize_create_step_mechanics_round_trips_backend_bound_underlag_refs() -> (
+    None
+):
+    flow_name = "Mötesprotokoll från ljud till Word"
+    once = _normalize_steps(
+        flow_name=flow_name,
+        steps=[
+            {
+                "name": "Transkribera ljud",
+                "instructions": "Transkribera uppladdat ljud.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "text",
+                "runtime_required": True,
+            },
+            {
+                "name": "Strukturera transkription",
+                "instructions": "Strukturera transkriptionen.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("transcription_text")],
+            },
+            {
+                "name": "Identifiera mötesmetadata",
+                "instructions": "Identifiera titel och organisation.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("meeting_title")],
+            },
+            {
+                "name": "Skapa mötesprotokoll med fasta rubriker",
+                "instructions": "Skapa protokollsektioner.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("protocol_sections")],
+            },
+            {
+                "name": "Förbered DOCX-innehåll",
+                "instructions": "Förbered dokumentets text.",
+                "input_source": "all_previous_steps",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Skapa DOCX",
+                "instructions": "Skapa slutdokumentet.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "docx",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+    composer = once[4]
+
+    assert {
+        (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+    } >= {
+        (2, "transcription_text"),
+        (3, "meeting_title"),
+        (4, "protocol_sections"),
+    }
+    assert [(ref.from_step, ref.label) for ref in composer.uses_previous_outputs] == [
+        (1, "Källmaterial")
+    ]
+
+    _assert_compiles_to_valid_spec(once, flow_name=flow_name)
+    assert _normalize_steps(flow_name=flow_name, steps=once) == once
 
 
 def test_normalize_create_step_mechanics_detects_source_after_input_source_normalization() -> (

@@ -803,12 +803,6 @@ def normalize_ai_builder_step(
     step: StepSpec,
 ) -> tuple[StepSpec, list[StepNormalizationChange]]:
     changes: list[StepNormalizationChange] = []
-    if not all(
-        hasattr(step, attribute)
-        for attribute in ("output_mode", "output_type", "output_config", "model_copy")
-    ):
-        return step, changes
-
     output_mode = step.output_mode
     output_type = step.output_type
     output_config = _as_output_config_dict(step.output_config)

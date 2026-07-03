@@ -1882,7 +1882,7 @@ def test_compile_create_steps_to_spec_empty_steps_surfaces_canonical_empty_steps
     assert [error.code for error in validation.errors] == ["empty_steps"]
 
 
-def test_normalize_create_step_mechanics_prunes_non_json_previous_field_source() -> (
+def test_normalize_create_step_mechanics_rejects_non_json_previous_field_source() -> (
     None
 ):
     steps = [
@@ -1902,15 +1902,15 @@ def test_normalize_create_step_mechanics_prunes_non_json_previous_field_source()
             uses_previous_fields=[{"from_step": 1, "field_path": "titel"}],
         ),
     ]
-    normalized = _normalize_create_steps(
-        flow_name="Ogiltig fältkälla",
-        steps=steps,
-    )
-    compiled = _compile_create_steps(flow_name="Ogiltig fältkälla", steps=normalized)
-    validation = validate_spec(compiled)
 
-    assert normalized[1].uses_previous_fields == []
-    assert validation.valid
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _normalize_create_steps(
+            flow_name="Ogiltig fältkälla",
+            steps=steps,
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "previous_field_source_not_json"
 
 
 def test_compile_create_steps_to_spec_derives_file_flow_input_runtime_config() -> None:
