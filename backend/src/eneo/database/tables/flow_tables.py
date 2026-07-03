@@ -733,7 +733,7 @@ class FlowRuns(BasePublic):
         server_default="1",
         comment=(
             "Monotonic lifecycle token for rerun/resume compare-and-swap; "
-            "updated_at is display metadata."
+            "updated_at remains the staleness and recovery fencing clock."
         ),
     )
     status: Mapped[str] = mapped_column(
