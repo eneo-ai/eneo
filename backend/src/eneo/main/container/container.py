@@ -1444,7 +1444,6 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         runtime_upload_repo=flow_runtime_upload_repo,
         settings_service=settings_service,
-        execution_backend=flow_execution_backend,
         access_policy=flow_run_access_policy,
     )
     flow_run_evidence_service = providers.Factory(

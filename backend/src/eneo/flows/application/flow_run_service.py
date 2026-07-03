@@ -184,7 +184,6 @@ class FlowRunService:
         flow_run_terminalizer: FlowRunTerminalizer,
         access_policy: FlowRunAccessPolicy,
         settings_service: SettingService | None = None,
-        execution_backend: FlowExecutionBackend | None = None,
         max_concurrent_runs: int | None = None,
         queued_redispatch_after_seconds: int | None = None,
     ):
@@ -196,7 +195,6 @@ class FlowRunService:
         self.file_repo = file_repo
         self.runtime_upload_repo = runtime_upload_repo
         self.settings_service = settings_service
-        self.execution_backend = execution_backend
         self.access_policy = access_policy
         self.max_concurrent_runs = (
             max_concurrent_runs

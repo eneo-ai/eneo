@@ -124,7 +124,6 @@ def _flow_run_service(
     file_repo=_FILE_REPO_UNSET,
     flow_run_terminalizer=None,
     settings_service=None,
-    execution_backend=None,
     access_policy=None,
     max_concurrent_runs=None,
     queued_redispatch_after_seconds=None,
@@ -150,7 +149,6 @@ def _flow_run_service(
         file_repo=resolved_file_repo,
         flow_run_terminalizer=resolved_terminalizer,
         settings_service=settings_service,
-        execution_backend=execution_backend,
         access_policy=resolved_access_policy,
         max_concurrent_runs=max_concurrent_runs,
         queued_redispatch_after_seconds=queued_redispatch_after_seconds,
@@ -666,11 +664,10 @@ async def test_create_run_maps_runtime_upload_binding_race_to_public_error(user)
 
 
 @pytest.mark.asyncio
-async def test_create_run_returns_created_run_without_dispatching(user):
+async def test_create_run_returns_created_run(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    execution_backend = AsyncMock()
     flow = _flow(user=user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id)
     service = _flow_run_service(
@@ -680,7 +677,6 @@ async def test_create_run_returns_created_run_without_dispatching(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         runtime_upload_repo=_runtime_upload_repo(),
-        execution_backend=execution_backend,
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -693,7 +689,6 @@ async def test_create_run_returns_created_run_without_dispatching(user):
 
     assert result.created is True
     assert result.run.id == created_run.id
-    execution_backend.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1035,36 +1030,6 @@ async def test_create_run_rejects_idempotency_key_replay_with_different_payload(
 
     assert exc_info.value.code == "flow_run_idempotency_conflict"
     flow_run_repo.create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_create_run_persists_even_when_execution_backend_is_configured(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    execution_backend = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    created_run = _run(user=user, flow_id=flow.id)
-    service = _flow_run_service(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_review_checkpoint_repo=AsyncMock(),
-        flow_version_repo=flow_version_repo,
-        runtime_upload_repo=_runtime_upload_repo(),
-        execution_backend=execution_backend,
-        max_concurrent_runs=5,
-    )
-    flow_repo.get.return_value = flow
-    flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    flow_run_repo.create.return_value = created_run
-
-    result = await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
-
-    assert result.created is True
-    assert result.run.id == created_run.id
-    execution_backend.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
