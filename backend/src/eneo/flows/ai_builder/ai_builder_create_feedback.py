@@ -103,21 +103,7 @@ def format_create_intent_quality_feedback(feedback: str | None) -> str | None:
         return None
 
     intent_feedback = feedback.replace("output_contract", "output_fields")
-    normalized_feedback = intent_feedback.casefold()
-    repair_rules: list[str] = []
-    if "output_type 'json'" in normalized_feedback and "output_fields" in (
-        normalized_feedback
-    ):
-        repair_rules.append(
-            "For every JSON semantic step that feeds later steps, set output_fields with named fields that match the step's extracted data."
-        )
-
-    formatted = format_create_quality_feedback(intent_feedback)
-    if not repair_rules:
-        return formatted
-    return f"{formatted}\n\nCreate-intent schema repair rules:\n- " + "\n- ".join(
-        repair_rules
-    )
+    return format_create_quality_feedback(intent_feedback)
 
 
 def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None:

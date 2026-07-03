@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     format_quality_feedback,
     format_validation_feedback,
     resolve_ui_language,
+    warnings_for_quality_retry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
@@ -296,6 +297,13 @@ class CompiledProposalFinalizer:
             compiled.validation,
             quality_retry_warning_codes=self._quality_retry_warning_codes,
         )
+        quality_failure_codes = frozenset(
+            warning.code
+            for warning in warnings_for_quality_retry(
+                compiled.validation,
+                retry_warning_codes=self._quality_retry_warning_codes,
+            )
+        )
         contextual_quality_feedback = format_create_contextual_quality_feedback(
             conversation=request.conversation,
             spec=compiled.content.spec,
@@ -330,6 +338,7 @@ class CompiledProposalFinalizer:
         return ToolProcessingResult(
             feedback=combined_quality_feedback,
             failure_kind="quality",
+            failure_codes=quality_failure_codes,
         )
 
     def _edit_quality_result(
@@ -342,6 +351,13 @@ class CompiledProposalFinalizer:
         quality_feedback = format_quality_feedback(
             compiled.validation,
             quality_retry_warning_codes=self._quality_retry_warning_codes,
+        )
+        quality_failure_codes = frozenset(
+            warning.code
+            for warning in warnings_for_quality_retry(
+                compiled.validation,
+                retry_warning_codes=self._quality_retry_warning_codes,
+            )
         )
         contextual_quality_feedback = format_contextual_quality_feedback(
             conversation=request.conversation,
@@ -370,4 +386,5 @@ class CompiledProposalFinalizer:
         return ToolProcessingResult(
             feedback=combined_quality_feedback,
             failure_kind="quality",
+            failure_codes=quality_failure_codes,
         )

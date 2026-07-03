@@ -463,12 +463,14 @@ class ProposalSubmissionOwner:
         error_message: str,
         tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
+        failure_codes: frozenset[str] = frozenset(),
     ) -> ProposalSelfCorrectionRequest:
         return build_proposal_self_correction_request(
             ctx=ctx,
             error_message=error_message,
             tool_call=tool_call,
             retry_config=retry_config,
+            failure_codes=failure_codes,
             self_correction_temperature=self.self_correction_temperature,
             self_correction_bumped_temperature=self.self_correction_bumped_temperature,
             forced_proposal_temperature=self.forced_proposal_temperature,
@@ -507,6 +509,7 @@ class ProposalSubmissionOwner:
         tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
         reason: ProposalRepairReason,
+        failure_codes: frozenset[str] = frozenset(),
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         self._record_failed_proposal_attempt_repair(
             usage_tracker=ctx.usage_tracker,
@@ -519,6 +522,7 @@ class ProposalSubmissionOwner:
                 error_message=error_message,
                 tool_call=tool_call,
                 retry_config=retry_config,
+                failure_codes=failure_codes,
             )
         ):
             yield event
@@ -553,6 +557,7 @@ class ProposalSubmissionOwner:
                 tool_call=tool_call,
                 retry_config=retry_config,
                 reason="parse",
+                failure_codes=frozenset(),
             ):
                 yield event
             return
@@ -595,6 +600,7 @@ class ProposalSubmissionOwner:
                     tool_call=tool_call,
                     retry_config=retry_config,
                     reason=proposal_repair_reason,
+                    failure_codes=result.failure_codes,
                 ):
                     yield event
                 return

@@ -233,12 +233,15 @@ async def test_finalize_compiled_proposal_records_success_once_when_persisted() 
 async def test_finalize_compiled_proposal_does_not_record_success_on_quality_reject() -> (
     None
 ):
-    finalizer = _make_finalizer(quality_retry_warning_codes={"quality_issue"})
+    finalizer = _make_finalizer(quality_retry_warning_codes={"json_output_no_contract"})
     validation = SpecValidationResult()
     validation.add_warning(
         step_ref="step_a",
-        code="quality_issue",
-        message="The plan should be improved before persistence.",
+        code="json_output_no_contract",
+        message=(
+            "Step has output_type 'json' but no output_contract. "
+            "Adding one enables structured variable access for downstream steps."
+        ),
     )
     tracker = ProposalTurnTelemetry(
         request_id="req-quality",
@@ -261,6 +264,7 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
 
     assert result.events == ()
     assert result.failure_kind == "quality"
+    assert result.failure_codes == frozenset({"json_output_no_contract"})
     assert tracker.proposal_first_attempt_success is None
     store_plan.assert_not_awaited()
 

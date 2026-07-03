@@ -182,6 +182,7 @@ def _make_self_correction_request(
     conversation: list[ConversationMessage] | None = None,
     new_messages_start: int = 0,
     error_message: str = "Invalid propose_flow draft.",
+    failure_codes: frozenset[str] = frozenset(),
     llm_messages: list[dict[str, Any]] | None = None,
     tool_call: Any | None = None,
     tool_schemas: list[dict[str, Any]] | None = None,
@@ -219,6 +220,7 @@ def _make_self_correction_request(
             assistant_metadata=assistant_metadata,
         ),
         error_message=error_message,
+        failure_codes=failure_codes,
         tool_call=_original_tool_call() if tool_call is None else tool_call,
         self_correction_temperature=self_correction_temperature,
         self_correction_bumped_temperature=self_correction_bumped_temperature,
@@ -741,8 +743,10 @@ async def _run_repair_capturing(
     max_retries: int,
     failure_kind: str = "validation",
     failure_codes: frozenset[str] = frozenset(),
+    initial_failure_codes: frozenset[str] = frozenset(),
     base_temperature: float = 0.35,
     bumped_temperature: float = 0.6,
+    target_kind: TargetKind = TargetKind.CREATE,
 ) -> tuple[list[float], list[str], list[dict[str, str]]]:
     observed_temperatures: list[float] = []
     observed_retry_feedback: list[str] = []
@@ -770,6 +774,7 @@ async def _run_repair_capturing(
     async for event in run_tool_self_correction(
         _make_self_correction_request(
             error_message="original invalid",
+            failure_codes=initial_failure_codes,
             llm_messages=[{"role": "user", "content": "go"}],
             self_correction_temperature=base_temperature,
             self_correction_bumped_temperature=bumped_temperature,
@@ -777,7 +782,7 @@ async def _run_repair_capturing(
             forced_proposal_temperature=0.1,
             repair_completion=call_proposal_completion,
             process_tool_invocation=process_invocation,
-            target_kind=TargetKind.CREATE,
+            target_kind=target_kind,
         )
     ):
         events.append(encode_ai_builder_stream_event(event))
@@ -845,6 +850,79 @@ async def test_run_tool_self_correction_adds_duplicate_name_outline_guidance() -
 
     assert len(retry_feedback) == 2
     assert "Every steps[] name must be unique case-insensitively" in retry_feedback[1]
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_initial_create_parse_prompt_uses_unified_feedback() -> (
+    None
+):
+    _, retry_feedback, _ = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="parse",
+        initial_failure_codes=frozenset(),
+    )
+
+    assert len(retry_feedback) == 1
+    prompt = retry_feedback[0]
+    assert prompt.startswith("VALIDATION FAILED:")
+    assert "Every steps[] item must be one complete semantic intent step" in prompt
+    assert "Runtime form inputs belong in top-level input_fields[]" in prompt
+    assert "Please fix and try again" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_initial_create_validation_prompt_uses_unified_feedback() -> (
+    None
+):
+    _, retry_feedback, _ = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="validation",
+        initial_failure_codes=frozenset(),
+    )
+
+    assert len(retry_feedback) == 1
+    prompt = retry_feedback[0]
+    assert prompt.startswith("VALIDATION FAILED:")
+    assert "Every steps[] item must be one complete semantic intent step" in prompt
+    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call." in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_initial_edit_validation_prompt_uses_unified_feedback() -> (
+    None
+):
+    _, retry_feedback, _ = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="validation",
+        initial_failure_codes=frozenset(),
+        target_kind=TargetKind.EDIT,
+    )
+
+    assert len(retry_feedback) == 1
+    prompt = retry_feedback[0]
+    assert prompt.startswith("VALIDATION FAILED:")
+    assert "Every steps[] item must be one complete semantic intent step" not in prompt
+    assert "Runtime form inputs belong in top-level input_fields[]" not in prompt
+    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call." in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_initial_quality_prompt_uses_warning_code_guidance() -> (
+    None
+):
+    _, retry_feedback, _ = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="quality",
+        initial_failure_codes=frozenset({"json_output_no_contract"}),
+    )
+
+    assert len(retry_feedback) == 1
+    prompt = retry_feedback[0]
+    assert prompt.startswith("VALIDATION FAILED:")
+    assert (
+        "For every JSON semantic step that feeds later steps, set output_fields "
+        "with named fields that match the step's extracted data."
+    ) in prompt
 
 
 @pytest.mark.asyncio
@@ -1606,7 +1684,7 @@ async def test_run_tool_self_correction_applies_stronger_prompt_on_second_retry(
         max_retries=3, base_temperature=0.35, bumped_temperature=0.6
     )
     # Feedback strings observed by each repair call (the tool-role retry feedback):
-    # [0]: initial correction (from build_tool_retry_messages, VALIDATION FAILED...)
+    # [0]: initial correction (VALIDATION FAILED from _build_retry_feedback)
     # [1]: first retry (CORRECTION STILL INVALID — standard preamble)
     # [2]: second retry (FINAL CORRECTION ATTEMPT — stronger)
     # [3]: third retry (FINAL CORRECTION ATTEMPT — stronger)

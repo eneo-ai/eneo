@@ -50,9 +50,7 @@ def test_format_create_quality_feedback_does_not_redirect_input_source_authoring
     assert "do not author input_source" not in feedback.casefold()
 
 
-def test_format_create_intent_quality_feedback_maps_contracts_to_output_fields() -> (
-    None
-):
+def test_format_create_intent_quality_feedback_translates_contract_terms_only() -> None:
     feedback = format_create_intent_quality_feedback(
         "Quality issues:\n"
         "1. Step has output_type 'json' but no output_contract. Adding one enables structured variable access for downstream steps."
@@ -61,8 +59,8 @@ def test_format_create_intent_quality_feedback_maps_contracts_to_output_fields()
     assert feedback is not None
     assert "output_fields" in feedback
     assert "output_contract" not in feedback
-    assert "Create-intent schema repair rules" in feedback
-    assert "named fields" in feedback
+    assert "Create-intent schema repair rules" not in feedback
+    assert "For every JSON semantic step" not in feedback
 
 
 @pytest.mark.parametrize(

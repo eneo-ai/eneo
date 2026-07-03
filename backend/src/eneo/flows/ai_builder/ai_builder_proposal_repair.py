@@ -80,6 +80,7 @@ class ProposalSelfCorrectionRequest:
     repair_completion: ProposalCompletionFn
     retry_config: ToolRetryConfig
     forced_proposal_temperature: float
+    failure_codes: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +382,10 @@ def _build_retry_feedback(
             "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
             "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_form_fields.",
         ]
+        if "json_output_no_contract" in failure_codes:
+            intent_rules.append(
+                "For every JSON semantic step that feeds later steps, set output_fields with named fields that match the step's extracted data."
+            )
         if "duplicate_step_name" in failure_codes:
             intent_rules.append(
                 "Every steps[] name must be unique case-insensitively; rename duplicate semantic steps with specific labels."
@@ -390,7 +395,10 @@ def _build_retry_feedback(
             + " Keep valid semantic parts and fix only the listed issues. "
             f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call."
         )
-    if retry_count >= 2:
+    if retry_count <= 0:
+        # retry_count=0 is the initial correction before any repair result exists.
+        preamble = "VALIDATION FAILED"
+    elif retry_count >= 2:
         preamble = (
             "FINAL CORRECTION ATTEMPT — earlier repairs have failed. "
             "Before responding, identify the exact field or rule named in the failure below "
@@ -411,6 +419,7 @@ def build_proposal_self_correction_request(
     self_correction_bumped_temperature: float,
     forced_proposal_temperature: float,
     repair_completion: ProposalCompletionFn,
+    failure_codes: frozenset[str] = frozenset(),
 ) -> ProposalSelfCorrectionRequest:
     return ProposalSelfCorrectionRequest(
         ctx=ctx,
@@ -422,6 +431,7 @@ def build_proposal_self_correction_request(
         repair_completion=repair_completion,
         retry_config=retry_config,
         forced_proposal_temperature=forced_proposal_temperature,
+        failure_codes=failure_codes,
     )
 
 
@@ -471,8 +481,11 @@ async def _request_self_correction_events(
     correction_messages = build_tool_retry_messages(
         llm_messages=ctx.llm_messages,
         tool_call=request.tool_call,
-        tool_feedback=(
-            f"VALIDATION FAILED: {request.error_message}. Please fix and try again."
+        tool_feedback=_build_retry_feedback(
+            target_kind=retry_config.target_kind,
+            feedback=request.error_message,
+            failure_codes=request.failure_codes,
+            retry_count=0,
         ),
     )
 
