@@ -1017,7 +1017,7 @@
               />
             {/if}
 
-            {#if showMcpSection}
+            {#if showMcpSection && isAdvancedMode}
               {#if knowledgeDisabledByMcp}
                 <p
                   class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
@@ -1046,7 +1046,7 @@
               </div>
             {/if}
 
-            {#if showMcpSection}
+            {#if showMcpSection && isAdvancedMode}
               {#if mcpDisabledByKnowledge}
                 <p
                   class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
