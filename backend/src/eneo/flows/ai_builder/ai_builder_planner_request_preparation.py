@@ -154,6 +154,9 @@ async def prepare_planner_request(
 ) -> PreparedTurnOutcome:
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
+    attachment_context_result = build_ai_builder_attachment_context(
+        request.attachment_files
+    )
     discovery_runtime = await build_discovery_runtime_result(
         request.conversation,
         flow=request.flow,
@@ -165,6 +168,7 @@ async def prepare_planner_request(
         tenant_id=request.tenant_id,
         requirements_confirmed=requirements_state.confirmed,
         is_requirements_confirmation=request.is_requirements_confirmation,
+        attachment_context=attachment_context_result,
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state
@@ -216,9 +220,6 @@ async def prepare_planner_request(
         )
         if part
     )
-    attachment_context_result = build_ai_builder_attachment_context(
-        request.attachment_files
-    )
     assert isinstance(turn_control.decision, GenerateProposal)
     proposal_system_prompt = build_plan_proposal_system_prompt(
         planning_state=rebuilt_planning_state,
@@ -255,6 +256,7 @@ async def prepare_planner_request(
             "attachment_context_chars": len(
                 attachment_context_result.context
                 if attachment_context_result is not None
+                and attachment_context_result.context is not None
                 else ""
             ),
             "conversation_budget_tokens": prepared_prompt.conversation_budget_tokens,

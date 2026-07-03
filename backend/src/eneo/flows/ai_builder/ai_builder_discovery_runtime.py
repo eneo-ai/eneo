@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     metadata_has_question_answer,
@@ -99,6 +102,7 @@ async def analyze_discovery_runtime(
     ui_language: str | None = None,
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
+    attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> DiscoveryAnalysis:
     context = await build_runtime_discovery_context(
         conversation=conversation,
@@ -109,6 +113,7 @@ async def analyze_discovery_runtime(
         ui_language=ui_language,
         tenant_id=tenant_id,
         allow_classification=allow_semantic_adjudication,
+        attachment_context=attachment_context,
     )
     return analyze_discovery(
         conversation,
@@ -152,13 +157,17 @@ async def build_runtime_discovery_context(
     ui_language: str | None = None,
     tenant_id: UUID,
     allow_classification: bool = True,
+    attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> RuntimeDiscoveryContext:
     state = build_planning_state_from_conversation(conversation, flow=flow)
     if not allow_classification or litellm_client is None or litellm_model is None:
         return RuntimeDiscoveryContext(planning_state=state)
 
     text = aggregate_freeform_user_text(conversation)
-    if not text.strip():
+    uploaded_file_evidence = (
+        attachment_context.discovery_context if attachment_context is not None else None
+    )
+    if not text.strip() and uploaded_file_evidence is None:
         return RuntimeDiscoveryContext(planning_state=state)
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
@@ -194,6 +203,7 @@ async def build_runtime_discovery_context(
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,
+        uploaded_file_evidence=uploaded_file_evidence,
     )
     if result is None:
         return RuntimeDiscoveryContext(planning_state=state)
@@ -203,6 +213,7 @@ async def build_runtime_discovery_context(
         ui_language=ui_language,
         allowed_slot_values=allowed_values,
         bias=bias,
+        uploaded_file_evidence=uploaded_file_evidence,
     )
     merge_llm_resolved_slots(
         state,
@@ -232,6 +243,7 @@ async def build_runtime_planning_state(
     ui_language: str | None = None,
     tenant_id: UUID,
     allow_classification: bool = True,
+    attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> PlanningState:
     context = await build_runtime_discovery_context(
         conversation,
@@ -242,6 +254,7 @@ async def build_runtime_planning_state(
         ui_language=ui_language,
         tenant_id=tenant_id,
         allow_classification=allow_classification,
+        attachment_context=attachment_context,
     )
     return context.planning_state
 
@@ -256,6 +269,7 @@ async def build_discovery_block_message_runtime(
     ui_language: str | None = None,
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
+    attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> tuple[str | None, DiscoveryAnalysis, PlanningState]:
     result = await build_discovery_runtime_result(
         conversation,
@@ -266,6 +280,7 @@ async def build_discovery_block_message_runtime(
         ui_language=ui_language,
         allow_semantic_adjudication=allow_semantic_adjudication,
         tenant_id=tenant_id,
+        attachment_context=attachment_context,
     )
     return (
         result.discovery_block_message,
@@ -286,6 +301,7 @@ async def build_discovery_runtime_result(
     tenant_id: UUID,
     requirements_confirmed: bool = False,
     is_requirements_confirmation: bool = False,
+    attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -296,6 +312,7 @@ async def build_discovery_runtime_result(
         ui_language=ui_language,
         tenant_id=tenant_id,
         allow_classification=allow_semantic_adjudication,
+        attachment_context=attachment_context,
     )
     analysis = analyze_discovery(
         conversation,

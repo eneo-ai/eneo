@@ -920,6 +920,100 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
 
 
 @pytest.mark.asyncio
+async def test_prepare_planner_request_passes_attachment_context_into_discovery_before_proposal() -> (
+    None
+):
+    planner = _make_planner()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Jag vill bygga ett transkriberingsflöde.",
+            metadata={"ui_language": "sv"},
+        )
+    ]
+    requirements_state = _requirements_state_unconfirmed()
+    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="heuristic",
+            evidence=["heuristic:role-aware freeform analysis"],
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="model",
+            evidence=["model:terminal_output:" + "a" * 64],
+            confidence="medium",
+        ),
+    }
+    attachment_context = SimpleNamespace(
+        context=None,
+        discovery_context=(
+            "Unconfirmed uploaded-file evidence:\n"
+            "filename: beslutsmall.docx\n"
+            "file_type: document"
+        ),
+        evidence=(),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=False,
+    )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
+            return_value=attachment_context,
+        ) as build_attachment_context,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            new_callable=AsyncMock,
+            return_value=_runtime_result(
+                None,
+                discovery_analysis,
+                planning_state,
+            ),
+        ) as build_discovery_runtime_result,
+    ):
+        prepared = await _prepare_planner_request_for_test(
+            planner,
+            conversation=conversation,
+            message=conversation[0].content,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=[_make_file()],
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            base_planning_state_version=4,
+        )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
+    build_attachment_context.assert_called_once()
+    assert (
+        build_discovery_runtime_result.call_args.kwargs["attachment_context"]
+        is attachment_context
+    )
+
+
+@pytest.mark.asyncio
 async def test_prepare_planner_request_passes_attachment_context_into_proposal_prompt() -> (
     None
 ):
@@ -959,7 +1053,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(None, discovery_analysis, state),
-        ),
+        ) as build_discovery_runtime_result,
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
             return_value=requirements,
@@ -968,6 +1062,8 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
             return_value=SimpleNamespace(
                 context="attachment context",
+                discovery_context="uploaded file evidence",
+                evidence=(),
                 included_file_ids=[],
                 total_chars=18,
                 truncated=False,
@@ -1009,6 +1105,10 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
         )
 
     build_attachment_context.assert_called_once()
+    assert (
+        build_discovery_runtime_result.call_args.kwargs["attachment_context"]
+        is build_attachment_context.return_value
+    )
     assert (
         build_plan_proposal_system_prompt.call_args.kwargs["attachment_context"]
         == "attachment context"

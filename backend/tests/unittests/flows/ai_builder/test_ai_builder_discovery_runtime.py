@@ -6,7 +6,12 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.files.file_models import FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
+    AIBuilderAttachmentEvidence,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
     DiscoveryAnalysis,
@@ -88,6 +93,34 @@ def _slot(
         source=source,
         evidence=[f"question_answer:{name}"],
         confidence=confidence,
+    )
+
+
+def _attachment_context() -> AIBuilderAttachmentContext:
+    return AIBuilderAttachmentContext(
+        context=None,
+        discovery_context=(
+            "Unconfirmed uploaded-file evidence:\n"
+            "filename: beslutsmall.docx\n"
+            "file_type: document\n"
+            "mimetype: application/vnd.openxmlformats-officedocument.wordprocessingml.document\n"
+            "has_readable_text: false"
+        ),
+        evidence=(
+            AIBuilderAttachmentEvidence(
+                file_id=uuid4(),
+                filename="beslutsmall.docx",
+                file_type=FileType.DOCUMENT,
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+                has_readable_text=False,
+                excerpt=None,
+            ),
+        ),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=False,
     )
 
 
@@ -249,6 +282,66 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
     prompt = "\n".join(message["content"] for message in messages)
     assert "\n- primary_runtime_input:" not in prompt
     assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifier() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
+    )
+
+    await build_runtime_planning_state(
+        [
+            ConversationMessage(
+                role="user",
+                content="Jag vill bygga ett transkriberingsflöde.",
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+        attachment_context=_attachment_context(),
+    )
+
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "Unconfirmed uploaded-file evidence" in prompt
+    assert "filename: beslutsmall.docx" in prompt
+    assert "has_readable_text: false" in prompt
+
+
+@pytest.mark.asyncio
+async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_terminal_output() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
+    )
+
+    state = await build_runtime_planning_state(
+        [
+            ConversationMessage(
+                role="user",
+                content="Jag vill bygga ett transkriberingsflöde.",
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+        attachment_context=_attachment_context(),
+    )
+
+    assert "terminal_output" not in state.resolved_slots
 
 
 @pytest.mark.asyncio

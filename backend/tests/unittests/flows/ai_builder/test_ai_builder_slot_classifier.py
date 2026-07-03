@@ -227,6 +227,25 @@ def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
     assert biased_hash != base_hash
 
 
+def test_prompt_hash_changes_when_uploaded_file_evidence_changes() -> None:
+    allowed = {"terminal_output": {"docx_document", "structured_text"}}
+    base_hash = slot_classification_prompt_hash(
+        text="Jag vill bygga ett transkriberingsflöde.",
+        ui_language="sv",
+        allowed_slot_values=allowed,
+        uploaded_file_evidence="filename: mall.docx\nfile_type: document",
+    )
+
+    changed_hash = slot_classification_prompt_hash(
+        text="Jag vill bygga ett transkriberingsflöde.",
+        ui_language="sv",
+        allowed_slot_values=allowed,
+        uploaded_file_evidence="filename: lagtext.pdf\nfile_type: document",
+    )
+
+    assert changed_hash != base_hash
+
+
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     messages = classifier._build_slot_classification_prompt(
         text="en fil jag kan ladda ner",
@@ -242,6 +261,26 @@ def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     user_prompt = messages[-1]["content"]
     assert "terminal_output" in user_prompt
     assert "en fil jag kan ladda ner" in user_prompt
+
+
+def test_classification_prompt_includes_unconfirmed_uploaded_file_evidence() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        text="Jag vill bygga ett transkriberingsflöde.",
+        allowed_slot_values={
+            "primary_runtime_input": frozenset({"audio", "documents"}),
+            "terminal_output": frozenset({"docx_document", "structured_text"}),
+        },
+        ui_language="sv",
+        uploaded_file_evidence=(
+            "filename: beslutsmall.docx\nfile_type: document\nhas_readable_text: false"
+        ),
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "Unconfirmed uploaded-file evidence" in prompt
+    assert "not confirmed user requirements" in prompt
+    assert "filename: beslutsmall.docx" in prompt
+    assert "has_readable_text: false" in prompt
 
 
 def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
