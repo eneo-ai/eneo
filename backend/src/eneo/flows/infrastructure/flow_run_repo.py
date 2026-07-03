@@ -58,6 +58,7 @@ from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
     FlowRunStepResultFileAvailability,
     FlowRunStepResultFileSource,
+    FlowStepResultFileReference,
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -836,6 +837,126 @@ class FlowRunRepository:
         if row is None:
             return None
         return self.factory.from_flow_step_result_db(row)
+
+    async def save_step_result(
+        self,
+        flow_run_id: UUID,
+        result: FlowStepResult,
+        tenant_id: UUID,
+        *,
+        session: AsyncSession | None = None,
+        attempt_no: int | None,
+        result_file_references: Sequence[FlowStepResultFileReference] | None = None,
+    ) -> FlowStepResult | None:
+        """Persist a step result and optionally replace this attempt's file rows.
+
+        Returns the persisted result, or None when the parent run is already terminal.
+        A `result_file_references` value of None leaves file rows untouched for
+        non-success updates; an empty sequence intentionally clears them.
+        """
+        db_session = session or self.session
+
+        if result.status == FlowStepResultStatus.COMPLETED and attempt_no is None:
+            raise ValueError("attempt_no is required for completed Flow step results.")
+        result_file_attempt_no: int | None = None
+        if result_file_references is not None and attempt_no is None:
+            raise ValueError("attempt_no is required for Flow step result files.")
+        if result_file_references is not None:
+            result_file_attempt_no = attempt_no
+
+        payload: dict[str, Any] = {
+            "flow_run_id": flow_run_id,
+            "flow_id": result.flow_id,
+            "tenant_id": tenant_id,
+            "step_id": result.step_id,
+            "step_order": result.step_order,
+            "assistant_id": result.assistant_id,
+            "input_payload_json": result.input_payload_json,
+            "effective_prompt": result.effective_prompt,
+            "output_payload_json": result.output_payload_json,
+            "model_parameters_json": result.model_parameters_json,
+            "num_tokens_input": result.num_tokens_input,
+            "num_tokens_output": result.num_tokens_output,
+            "status": result.status.value,
+            "error_code": result.error_code,
+            "error_message": result.error_message,
+            "flow_step_execution_hash": result.flow_step_execution_hash,
+        }
+
+        if result.status in (
+            FlowStepResultStatus.COMPLETED,
+            FlowStepResultStatus.FAILED,
+            FlowStepResultStatus.CANCELLED,
+        ):
+            payload["finished_at"] = datetime.now(timezone.utc)
+        if result.status == FlowStepResultStatus.COMPLETED:
+            payload["current_attempt_no"] = attempt_no
+
+        active_run_exists = (
+            sa.select(sa.literal(1))
+            .select_from(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
+            .exists()
+        )
+
+        stmt = (
+            pg_insert(FlowStepResults)
+            .values(payload)
+            .on_conflict_do_update(
+                constraint="uq_flow_step_results_run_step",
+                set_=payload,
+                where=active_run_exists,
+            )
+            .returning(FlowStepResults)
+        )
+        saved = await db_session.scalar(stmt)
+        if saved is None:
+            return None
+        if result_file_references is not None:
+            assert result_file_attempt_no is not None
+            await self._replace_step_result_file_rows(
+                db_session=db_session,
+                result_row=saved,
+                result_file_references=result_file_references,
+                attempt_no=result_file_attempt_no,
+            )
+        return self.factory.from_flow_step_result_db(saved)
+
+    async def _replace_step_result_file_rows(
+        self,
+        *,
+        db_session: AsyncSession,
+        result_row: FlowStepResults,
+        result_file_references: Sequence[FlowStepResultFileReference],
+        attempt_no: int,
+    ) -> None:
+        await db_session.execute(
+            sa.delete(FlowRunStepResultFiles)
+            .where(FlowRunStepResultFiles.step_result_id == result_row.id)
+            .where(FlowRunStepResultFiles.tenant_id == result_row.tenant_id)
+            .where(FlowRunStepResultFiles.attempt_no == attempt_no)
+        )
+        if not result_file_references:
+            return
+
+        rows = [
+            {
+                "flow_run_id": result_row.flow_run_id,
+                "flow_id": result_row.flow_id,
+                "tenant_id": result_row.tenant_id,
+                "step_result_id": result_row.id,
+                "step_id": result_row.step_id,
+                "step_order": result_row.step_order,
+                "attempt_no": attempt_no,
+                "file_id": reference.file_id,
+                "ordinal": ordinal,
+                "source": reference.source,
+            }
+            for ordinal, reference in enumerate(result_file_references)
+        ]
+        await db_session.execute(sa.insert(FlowRunStepResultFiles).values(rows))
 
     async def claim_step_result(
         self,

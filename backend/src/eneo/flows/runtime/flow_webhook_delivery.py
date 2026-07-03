@@ -319,8 +319,8 @@ class FlowRunWebhookDeliveryService:
         now: datetime,
         payload: WebhookDeliveryPayload,
     ) -> bool:
-        # Retain save_step_result as the active-run guard before marking delivery succeeded.
-        saved_result = await self.flow_repo.save_step_result(
+        # Preserve the active-run write guard before marking delivery succeeded.
+        saved_result = await self.flow_run_repo.save_step_result(
             row.flow_run_id,
             payload.step_result,
             tenant_id=row.tenant_id,

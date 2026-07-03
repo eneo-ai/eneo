@@ -1488,7 +1488,7 @@ class FlowRunExecutor:
         )
         run_error_message = error_message or failure_plan.run_error_message
         await self._rollback()
-        await self.flow_repo.save_step_result(
+        await self.flow_run_repo.save_step_result(
             run_id,
             failure_plan.failed_result,
             tenant_id=tenant_id,
@@ -1606,7 +1606,7 @@ class FlowRunExecutor:
                 step=step,
             ),
         )
-        await self.flow_repo.save_step_result(
+        await self.flow_run_repo.save_step_result(
             run_id,
             failure_plan.failed_result,
             tenant_id=tenant_id,
@@ -1666,7 +1666,7 @@ class FlowRunExecutor:
                 step=step,
             ),
         )
-        await self.flow_repo.save_step_result(
+        await self.flow_run_repo.save_step_result(
             run_id,
             failure_plan.failed_result,
             tenant_id=tenant_id,
@@ -1699,7 +1699,7 @@ class FlowRunExecutor:
         attempt_start: AttemptStartProvenance | None,
         commit: bool = True,
     ) -> FlowStepResult | None:
-        saved_result = await self.flow_repo.save_step_result(
+        saved_result = await self.flow_run_repo.save_step_result(
             run_id,
             step_result,
             tenant_id=tenant_id,

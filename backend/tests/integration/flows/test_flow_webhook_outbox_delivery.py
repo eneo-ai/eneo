@@ -219,7 +219,7 @@ async def _create_running_webhook_run(
         },
         deep=True,
     )
-    await flow_repo.save_step_result(
+    await run_repo.save_step_result(
         run.id,
         completed_result,
         tenant_id=admin_user.tenant_id,

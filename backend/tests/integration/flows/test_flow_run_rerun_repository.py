@@ -1416,7 +1416,9 @@ async def test_rerun_attempt_start_and_success_records_lineage(
         assert operation_after_first_start.started_at == first_started_at
         assert operation_after_first_start.root_attempt_id == started_attempt.id
 
-        await FlowRepository(session=session, factory=FlowFactory()).save_step_result(
+        await FlowRunRepository(
+            session=session, factory=FlowFactory()
+        ).save_step_result(
             scenario.flow_run_id,
             claimed.model_copy(
                 update={

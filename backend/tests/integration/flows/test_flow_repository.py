@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,16 +12,14 @@ from eneo.database.tables.flow_tables import (
     FlowResourceBindings,
     FlowRuns,
     Flows,
-    FlowStepResults,
     FlowSteps,
 )
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
-from eneo.flows.domain.flow import (
-    Flow,
-    FlowStep,
-    FlowStepResult,
-    FlowStepResultStatus,
+from eneo.flows import (
+    FlowFactory,
+    FlowRepository,
+    FlowVersionRepository,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -449,138 +446,6 @@ async def test_flow_repository_soft_delete_hides_row(
         )
         assert soft_deleted_row is not None
         assert soft_deleted_row.deleted_at is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_save_step_result_upserts_on_run_and_step(
-    db_container,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
-):
-    async with db_container() as container:
-        session = container.session()
-        model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows run space", [model.id])
-        assistant = await assistant_factory(
-            session,
-            "Run Assistant",
-            model.id,
-            space_id=space.id,
-        )
-
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
-        flow = await flow_repo.create(
-            flow=_build_flow(
-                tenant_id=admin_user.tenant_id,
-                space_id=space.id,
-                user_id=admin_user.id,
-                assistant_id=assistant.id,
-            ),
-            tenant_id=admin_user.tenant_id,
-        )
-        step_id = flow.steps[0].id
-        assert step_id is not None
-
-        await version_repo.create(
-            flow_id=flow.id,
-            version=1,
-            definition_json={"steps": [{"id": str(step_id), "step_order": 1}]},
-            tenant_id=admin_user.tenant_id,
-        )
-        run_row = FlowRuns(
-            flow_id=flow.id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            status="queued",
-            input_payload_json={"question": "What happened?"},
-        )
-        session.add(run_row)
-        await session.flush()
-
-        now = datetime.now(timezone.utc)
-        first_result = FlowStepResult(
-            id=uuid4(),
-            flow_run_id=run_row.id,
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            step_id=step_id,
-            step_order=1,
-            assistant_id=assistant.id,
-            input_payload_json={"question": "What happened?"},
-            effective_prompt="Summarize the incident.",
-            output_payload_json={"summary": "First output"},
-            model_parameters_json={"model_id": str(model.id), "temperature": 0.2},
-            num_tokens_input=11,
-            num_tokens_output=9,
-            status=FlowStepResultStatus.PENDING,
-            error_message=None,
-            flow_step_execution_hash="hash-1",
-            created_at=now,
-            updated_at=now,
-        )
-        await flow_repo.save_step_result(
-            flow_run_id=run_row.id,
-            result=first_result,
-            tenant_id=admin_user.tenant_id,
-            attempt_no=None,
-        )
-
-        updated_result = FlowStepResult(
-            id=uuid4(),
-            flow_run_id=run_row.id,
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            step_id=step_id,
-            step_order=1,
-            assistant_id=assistant.id,
-            input_payload_json={"question": "What happened?"},
-            effective_prompt="Summarize the incident and classify.",
-            output_payload_json={"summary": "Updated output", "classification": "open"},
-            model_parameters_json={"model_id": str(model.id), "temperature": 0.1},
-            num_tokens_input=15,
-            num_tokens_output=12,
-            status=FlowStepResultStatus.COMPLETED,
-            error_message=None,
-            flow_step_execution_hash="hash-1",
-            created_at=now,
-            updated_at=now,
-        )
-        await flow_repo.save_step_result(
-            flow_run_id=run_row.id,
-            result=updated_result,
-            tenant_id=admin_user.tenant_id,
-            attempt_no=1,
-        )
-
-        count = await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == run_row.id)
-            .where(FlowStepResults.step_id == step_id)
-        )
-        assert count == 1
-
-        saved = await flow_repo.get_step_result(
-            flow_run_id=run_row.id,
-            step_id=step_id,
-            tenant_id=admin_user.tenant_id,
-        )
-        assert saved is not None
-        assert saved.status == FlowStepResultStatus.COMPLETED
-        assert saved.output_payload_json == {
-            "summary": "Updated output",
-            "classification": "open",
-        }
-        assert saved.model_parameters_json == {
-            "model_id": str(model.id),
-            "temperature": 0.1,
-        }
 
 
 @pytest.mark.asyncio

@@ -579,7 +579,7 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
         )
         now = datetime.now(timezone.utc)
         for step in runtime_steps[:2]:
-            await flow_repo.save_step_result(
+            await run_repo.save_step_result(
                 run.id,
                 FlowStepResult(
                     id=uuid4(),
@@ -820,7 +820,7 @@ async def test_step_result_file_requires_matching_step_attempt(
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        saved_result = await FlowRepository(
+        saved_result = await FlowRunRepository(
             session=session,
             factory=FlowFactory(),
         ).save_step_result(
@@ -959,7 +959,7 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             attempt_no=3,
             celery_task_id="result-files-attempt-3",
         )
-        await flow_repo.save_step_result(
+        await run_repo.save_step_result(
             run.id,
             result,
             tenant_id=admin_user.tenant_id,
@@ -991,7 +991,7 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             attempt_no=4,
             celery_task_id="result-files-attempt-4",
         )
-        await flow_repo.save_step_result(
+        await run_repo.save_step_result(
             run.id,
             retry_result,
             tenant_id=admin_user.tenant_id,
@@ -1175,7 +1175,7 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        late_save = await FlowRepository(
+        late_save = await FlowRunRepository(
             session=late_session, factory=FlowFactory()
         ).save_step_result(
             run.id,

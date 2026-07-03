@@ -38,6 +38,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
 from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
@@ -536,8 +537,11 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
                     "error_message": None,
                 }
             )
-            flow_repo = FlowRepository(session=write_session, factory=flow_factory)
-            saved = await flow_repo.save_step_result(
+            flow_run_repo = FlowRunRepository(
+                session=write_session,
+                factory=flow_factory,
+            )
+            saved = await flow_run_repo.save_step_result(
                 flow_run_id=context.run_id,
                 result=late_result,
                 tenant_id=context.tenant_id,

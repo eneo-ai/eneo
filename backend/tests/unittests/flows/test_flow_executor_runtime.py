@@ -869,8 +869,8 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
     )
 
     assert result == {"status": "running"}
-    assert flow_repo.save_step_result.await_count == 1
-    saved = flow_repo.save_step_result.await_args_list[0].args[1]
+    assert flow_run_repo.save_step_result.await_count == 1
+    saved = flow_run_repo.save_step_result.await_args_list[0].args[1]
     assert saved.status == FlowStepResultStatus.COMPLETED
     assert saved.input_payload_json == {
         "text": "hello",
@@ -933,7 +933,7 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
         side_effect=_create_attempt_in_order
     )
-    flow_repo.save_step_result = AsyncMock(side_effect=_save_step_result_in_order)
+    flow_run_repo.save_step_result = AsyncMock(side_effect=_save_step_result_in_order)
     flow_run_repo.finish_attempt = AsyncMock(side_effect=_finish_attempt_in_order)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
@@ -990,8 +990,8 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
     )
 
     assert result == {"status": "running"}
-    assert flow_repo.save_step_result.await_count == 1
-    saved = flow_repo.save_step_result.await_args_list[0].args[1]
+    assert flow_run_repo.save_step_result.await_count == 1
+    saved = flow_run_repo.save_step_result.await_args_list[0].args[1]
     assert saved.status == FlowStepResultStatus.COMPLETED
     assert saved.output_payload_json == {"text": "result"}
     call_kwargs = (
@@ -1115,7 +1115,7 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
     )
 
     async def _list_step_results(*args, **kwargs):
-        return [call.args[1] for call in flow_repo.save_step_result.await_args_list]
+        return [call.args[1] for call in flow_run_repo.save_step_result.await_args_list]
 
     flow_run_repo.list_step_results = AsyncMock(side_effect=_list_step_results)
 
@@ -1128,9 +1128,9 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
     )
 
     assert result == {"status": "completed"}
-    assert flow_repo.save_step_result.await_count == 2
-    first_saved = flow_repo.save_step_result.await_args_list[0].args[1]
-    second_saved = flow_repo.save_step_result.await_args_list[1].args[1]
+    assert flow_run_repo.save_step_result.await_count == 2
+    first_saved = flow_run_repo.save_step_result.await_args_list[0].args[1]
+    second_saved = flow_run_repo.save_step_result.await_args_list[1].args[1]
     assert first_saved.model_parameters_json == {
         "model_id": first_saved.model_parameters_json["model_id"],
         "model_name": "claude-haiku-4-5",
@@ -1327,7 +1327,7 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert update_kwargs["error"].message == "Flow step 1 execution failed."
-    saved_result = flow_repo.save_step_result.await_args.args[1]
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
 
@@ -1390,7 +1390,7 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
     }
     flow_run_repo.finish_attempt.assert_not_awaited()
-    saved_result = flow_repo.save_step_result.await_args.args[1]
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
     assert (
@@ -1464,7 +1464,7 @@ async def test_execute_terminalizes_multiple_active_rerun_operations(
         "status": "failed",
         "error": "Rerun failed because multiple active rerun operations exist.",
     }
-    flow_repo.save_step_result.assert_not_awaited()
+    flow_run_repo.save_step_result.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.session.rollback.assert_awaited_once()
     terminalize_kwargs = (
@@ -1558,7 +1558,7 @@ async def test_rerun_lineage_conflict_uses_specific_run_error_after_claim(user):
     }
     flow_run_repo.finish_attempt.assert_not_awaited()
     flow_run_rerun_repo.mark_rerun_operation_running.assert_not_awaited()
-    saved_result = flow_repo.save_step_result.await_args.args[1]
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
     terminalize_kwargs = (
@@ -1644,7 +1644,7 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
     assert finish_kwargs["error_code"] == "typed_io_contract_violation"
-    saved_result = flow_repo.save_step_result.await_args.args[1]
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.input_payload_json == typed_exc.input_payload_json
     assert saved_result.effective_prompt == "Categorize this"
@@ -1735,7 +1735,7 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
     """
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_repo.save_step_result = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
     executor._terminalize_run = AsyncMock()
     executor._rollback = AsyncMock()
 
@@ -1802,7 +1802,7 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
 async def test_typed_validation_failure_terminalizes_with_bounded_public_error(user):
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_repo.save_step_result = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
     executor._terminalize_run = AsyncMock()
     executor._rollback = AsyncMock()
 
@@ -1850,7 +1850,7 @@ async def test_typed_validation_failure_terminalizes_with_bounded_public_error(u
 async def test_typed_validation_failure_unknown_code_uses_cataloged_fallback(user):
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_repo.save_step_result = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
     executor._terminalize_run = AsyncMock()
     executor._rollback = AsyncMock()
 
@@ -1883,7 +1883,7 @@ async def test_typed_validation_failure_unknown_code_uses_cataloged_fallback(use
     fallback_code = FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["error_code"] == fallback_code
-    saved_result = flow_repo.save_step_result.await_args.args[1]
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.error_code == fallback_code
     terminal_error = executor._terminalize_run.await_args.kwargs["error"]
     assert terminal_error.code == fallback_code
@@ -1924,7 +1924,7 @@ async def test_cancelled_step_retains_attempt_start_provenance(user):
 async def test_llm_timeout_failure_retains_attempt_start_provenance(user):
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_repo.save_step_result = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
     executor._terminalize_run = AsyncMock()
     executor._rollback = AsyncMock()
     step = _step_for_execute_step()
@@ -2028,7 +2028,7 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
     assert finish_kwargs["error_code"] == "typed_io_contract_violation"
-    saved_result = flow_repo.save_step_result.await_args.args[1]
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.input_payload_json == {
         "text": "",
@@ -2469,7 +2469,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_repo.save_step_result = AsyncMock(return_value=None)
+    flow_run_repo.save_step_result = AsyncMock(return_value=None)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -2520,7 +2520,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     )
 
     assert result == {"status": "skipped", "reason": "run_cancelled"}
-    flow_repo.save_step_result.assert_awaited_once()
+    flow_run_repo.save_step_result.assert_awaited_once()
     flow_run_repo.finish_attempt.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
@@ -2571,7 +2571,7 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
             status=FlowRunStatus.FAILED.value
         )
     )
-    flow_repo.save_step_result = AsyncMock(return_value=completed)
+    flow_run_repo.save_step_result = AsyncMock(return_value=completed)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -2700,7 +2700,7 @@ async def test_execute_terminalizes_review_open_invariant_errors(
     executor.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step = AsyncMock(
         side_effect=review_open_error
     )
-    flow_repo.save_step_result = AsyncMock(return_value=completed)
+    flow_run_repo.save_step_result = AsyncMock(return_value=completed)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -2965,8 +2965,8 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     )
 
     assert result == {"status": "cancelled", "reason": "flow_deleted"}
-    assert flow_repo.save_step_result.await_count >= 1
-    first_saved = flow_repo.save_step_result.await_args_list[0].args[1]
+    assert flow_run_repo.save_step_result.await_count >= 1
+    first_saved = flow_run_repo.save_step_result.await_args_list[0].args[1]
     assert first_saved.status == FlowStepResultStatus.COMPLETED
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert update_kwargs["target_status"] == FlowRunStatus.CANCELLED
