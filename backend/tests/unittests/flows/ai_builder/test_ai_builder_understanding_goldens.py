@@ -90,7 +90,7 @@ def test_docx_output_characterization_cases(
                 (
                     "structured_analysis_need",
                     "use_structured_analysis",
-                    "policy_default",
+                    "heuristic",
                 ),
                 ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
@@ -110,7 +110,7 @@ def test_docx_output_characterization_cases(
                 (
                     "structured_analysis_need",
                     "use_structured_analysis",
-                    "policy_default",
+                    "heuristic",
                 ),
                 ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
@@ -130,7 +130,7 @@ def test_docx_output_characterization_cases(
                 (
                     "structured_analysis_need",
                     "use_structured_analysis",
-                    "policy_default",
+                    "heuristic",
                 ),
                 ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],

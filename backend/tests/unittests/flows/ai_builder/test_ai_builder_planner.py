@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    ResolvedSlot,
     StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -839,6 +840,82 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
 
     assert isinstance(prepared, ServerOutputPrepared)
     assert isinstance(prepared.server_decision, CommitArchitecture)
+    assert not hasattr(prepared, "llm_messages")
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_asks_for_model_medium_output_before_commit() -> (
+    None
+):
+    planner = _make_planner()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Jag vill bygga ett transkriberingsflöde",
+            metadata={"ui_language": "sv"},
+        )
+    ]
+    requirements_state = _requirements_state_unconfirmed()
+    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="heuristic",
+            evidence=["heuristic:role-aware freeform analysis"],
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="model",
+            evidence=["model:terminal_output:" + "a" * 64],
+            confidence="medium",
+        ),
+    }
+    assert planning_state.resolved_slots["terminal_output"].source == "model"
+    assert planning_state.resolved_slots["terminal_output"].confidence == "medium"
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            new_callable=AsyncMock,
+            return_value=_runtime_result(
+                None,
+                discovery_analysis,
+                planning_state,
+            ),
+        ),
+    ):
+        prepared = await _prepare_planner_request_for_test(
+            planner,
+            conversation=conversation,
+            message=conversation[0].content,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            base_planning_state_version=4,
+        )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
+    assert prepared.server_decision.slot_name == "terminal_output"
     assert not hasattr(prepared, "llm_messages")
 
 

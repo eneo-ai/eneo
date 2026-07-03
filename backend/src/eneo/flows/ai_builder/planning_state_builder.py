@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    infer_answer_signals_from_text,
     infer_post_processing_goal,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -417,22 +418,12 @@ def _apply_structured_analysis_default_from_post_processing_goal(
 ) -> None:
     if "structured_analysis_need" in state.resolved_slots:
         return
-    post_processing_goal = state.resolved_slots.get("post_processing_goal")
-    value = _structured_analysis_default_for_post_processing_goal(
-        post_processing_goal.value if post_processing_goal is not None else None
+    default_slot = _structured_analysis_default_slot_from_post_processing_goal(
+        state.resolved_slots.get("post_processing_goal")
     )
-    if value is None:
+    if default_slot is None:
         return
-    state.resolved_slots["structured_analysis_need"] = ResolvedSlot(
-        name="structured_analysis_need",
-        value=value,
-        source="policy_default",
-        evidence=[
-            "policy_default:structured_analysis_need=post_processing_goal:"
-            f"{post_processing_goal.value if post_processing_goal is not None else ''}",
-        ],
-        confidence="medium",
-    )
+    state.resolved_slots["structured_analysis_need"] = default_slot
 
 
 def llm_resolvable_slot_values_for_state(
@@ -488,13 +479,17 @@ def _model_slot_can_replace(
     if existing_slot.source == "requirements_summary":
         return model_confidence == "high"
     if existing_slot.source == "policy_default":
-        # The post-processing-goal default is a policy contract, not a guess.
         if existing_slot.name == "structured_analysis_need":
             return False
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
         if (
             existing_slot.name == "primary_runtime_input"
+            and existing_slot.confidence == "high"
+        ):
+            return False
+        if (
+            existing_slot.name == "structured_analysis_need"
             and existing_slot.confidence == "high"
         ):
             return False
@@ -679,20 +674,13 @@ def _resolve_slots(
             slot_value=structured_analysis_need,
         )
     else:
-        structured_analysis_default = (
-            _structured_analysis_default_for_post_processing_goal(post_processing_goal)
-        )
-        if structured_analysis_default is not None:
-            slots["structured_analysis_need"] = ResolvedSlot(
-                name="structured_analysis_need",
-                value=structured_analysis_default,
-                source="policy_default",
-                evidence=[
-                    "policy_default:structured_analysis_need=post_processing_goal:"
-                    f"{post_processing_goal}",
-                ],
-                confidence="medium",
+        structured_analysis_default_slot = (
+            _structured_analysis_default_slot_from_post_processing_goal(
+                slots.get("post_processing_goal")
             )
+        )
+        if structured_analysis_default_slot is not None:
+            slots["structured_analysis_need"] = structured_analysis_default_slot
 
     runtime_metadata_fields = _single_slot_value(
         answer_signals=answer_signals,
@@ -866,12 +854,47 @@ def _structured_analysis_default_for_post_processing_goal(
     return None
 
 
+def _structured_analysis_default_slot_from_post_processing_goal(
+    post_processing_goal: ResolvedSlot | None,
+) -> ResolvedSlot | None:
+    if post_processing_goal is None:
+        return None
+    value = _structured_analysis_default_for_post_processing_goal(
+        post_processing_goal.value
+    )
+    if value is None:
+        return None
+    return ResolvedSlot(
+        name="structured_analysis_need",
+        value=value,
+        source="heuristic",
+        evidence=[
+            "heuristic:structured_analysis_need=post_processing_goal:"
+            f"{post_processing_goal.value}",
+            *post_processing_goal.evidence,
+        ],
+        confidence=post_processing_goal.confidence,
+    )
+
+
 def _heuristic_slot_confidence(
     *,
     question_id: str,
     slot_value: str,
     freeform_text: str,
 ) -> SlotConfidence:
+    if question_id == "final_output_mode":
+        return _heuristic_terminal_output_confidence(slot_value, freeform_text)
+    if question_id == "docx_output_mode":
+        return _heuristic_docx_output_mode_confidence(slot_value, freeform_text)
+    if question_id == "pdf_generation_mode":
+        return _heuristic_pdf_generation_mode_confidence(slot_value, freeform_text)
+    if question_id in {"document_material_scope", "comparison_scope"}:
+        return _heuristic_text_signal_confidence(
+            question_id=question_id,
+            slot_value=slot_value,
+            freeform_text=freeform_text,
+        )
     if (
         question_id == "runtime_metadata_fields"
         and slot_value == NO_EXTRA_RUNTIME_METADATA
@@ -913,6 +936,46 @@ def _heuristic_slot_confidence(
     if slot_value == "text":
         return "high"
     return "medium"
+
+
+def _heuristic_terminal_output_confidence(
+    slot_value: str,
+    freeform_text: str,
+) -> SlotConfidence:
+    if not freeform_text:
+        return "medium"
+    output_intent = resolve_output_intent(freeform_text, {})
+    return "high" if output_intent.terminal_output == slot_value else "medium"
+
+
+def _heuristic_docx_output_mode_confidence(
+    slot_value: str,
+    freeform_text: str,
+) -> SlotConfidence:
+    if not has_explicit_docx_mode_text(freeform_text):
+        return "medium"
+    output_intent = resolve_output_intent(freeform_text, {})
+    return "high" if output_intent.docx_output_mode == slot_value else "medium"
+
+
+def _heuristic_pdf_generation_mode_confidence(
+    slot_value: str,
+    freeform_text: str,
+) -> SlotConfidence:
+    if not has_explicit_pdf_mode_text(freeform_text):
+        return "medium"
+    output_intent = resolve_output_intent(freeform_text, {})
+    return "high" if output_intent.pdf_generation_mode == slot_value else "medium"
+
+
+def _heuristic_text_signal_confidence(
+    *,
+    question_id: str,
+    slot_value: str,
+    freeform_text: str,
+) -> SlotConfidence:
+    signals = infer_answer_signals_from_text(freeform_text)
+    return "high" if signals.get(question_id) == {slot_value} else "medium"
 
 
 def _is_policy_default_slot(

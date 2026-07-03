@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
+    SlotConfidence,
     SlotSource,
     StepTriple,
 )
@@ -59,13 +60,14 @@ def _slot(
     value: str,
     *,
     source: SlotSource = "structured_answer",
+    confidence: SlotConfidence = "high",
 ) -> ResolvedSlot:
     return ResolvedSlot(
         name=name,
         value=value,
         source=source,
         evidence=[f"{source}:{name}"],
-        confidence="high",
+        confidence=confidence,
     )
 
 
@@ -118,6 +120,17 @@ def _output_uncertain_state() -> PlanningState:
     return state
 
 
+def _model_medium_output_state() -> PlanningState:
+    state = _state(primary_runtime_input="audio")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+        source="model",
+        confidence="medium",
+    )
+    return state
+
+
 def _cases() -> tuple[TurnDecisionCase, ...]:
     ready_for_commit = _state(
         primary_runtime_input="documents",
@@ -145,6 +158,12 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
         TurnDecisionCase(
             id="explicit uncertainty clears weak output and asks again",
             state=_output_uncertain_state(),
+            expected_type=AskCanonicalQuestion,
+            expected_slot_name="terminal_output",
+        ),
+        TurnDecisionCase(
+            id="medium model output is known but still asks before commit",
+            state=_model_medium_output_state(),
             expected_type=AskCanonicalQuestion,
             expected_slot_name="terminal_output",
         ),

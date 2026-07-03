@@ -39,9 +39,9 @@ Then inspect source yourself.
 Review only Flow and Flow AI Builder surfaces plus directly coupled generated-client/API/migration/test code:
 
 - `backend/src/eneo/flows`
-- `backend/src/intric/flows`
+- `backend/src/eneo/flows`
 - `backend/src/eneo/database/tables/flow_tables.py`
-- `backend/src/intric/database/tables/flow_tables.py`
+- `backend/src/eneo/database/tables/flow_tables.py`
 - Flow-related migrations under `backend/alembic/versions`
 - Flow and AI Builder tests under `backend/tests`
 - frontend Flow and AI Builder code under `frontend/apps/web/src/lib/features/flows`
@@ -81,13 +81,13 @@ Use `rg` and source reading. Suggested searches:
 - `v1`
 - `v2`
 - `flow_legacy`
-- `intric/flows` vs `eneo/flows`
+- stale Flow package namespace references
 
 ## Specific Audit Targets
 
 1. Dead or duplicate Python modules.
 
-2. Duplicate Eneo/Intric Flow package paths that are compatibility mirrors or stale copies.
+2. Duplicate Flow package paths that are compatibility mirrors or stale copies.
 
 3. Legacy migrations or backfills that exist only because Flow/Builder changed shape before production.
 

@@ -8,6 +8,8 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
+    compute_unresolved_core_slots,
+    is_commit_grade_slot,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
@@ -18,6 +20,8 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
+    SlotConfidence,
+    SlotSource,
     StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
@@ -31,16 +35,26 @@ def _slot_value(slot_name: str) -> str:
     }.get(slot_name, f"{slot_name}_value")
 
 
+def _slot(
+    slot_name: str,
+    value: str | None = None,
+    *,
+    source: SlotSource = "structured_answer",
+    confidence: SlotConfidence = "high",
+) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=slot_name,
+        value=value or _slot_value(slot_name),
+        source=source,
+        evidence=[f"{source}:{slot_name}"],
+        confidence=confidence,
+    )
+
+
 def _state_with_resolved_slots(*slot_names: str) -> PlanningState:
     state = PlanningState.empty()
     for slot_name in slot_names:
-        state.resolved_slots[slot_name] = ResolvedSlot(
-            name=slot_name,
-            value=_slot_value(slot_name),
-            source="structured_answer",
-            evidence=[],
-            confidence="high",
-        )
+        state.resolved_slots[slot_name] = _slot(slot_name)
     return state
 
 
@@ -81,6 +95,139 @@ def test_policy_blocks_commit_and_plan_until_core_architecture_is_resolved() -> 
     assert policy.blocked_action_reasons["propose_plan"].startswith(
         "architecture has not been committed"
     )
+
+
+def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "audio",
+        source="heuristic",
+        confidence="high",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+        source="model",
+        confidence="medium",
+    )
+    unresolved = compute_unresolved_core_slots(state)
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=unresolved,
+        selected_discovery_question_ids=(),
+    )
+
+    assert unresolved == frozenset({"terminal_output"})
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("terminal_output",)
+    assert "terminal_output" in policy.blocked_action_reasons["commit_architecture"]
+
+
+def test_policy_blocks_model_medium_pattern_required_slot() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "flexible_document_case",
+        source="model",
+        confidence="medium",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=compute_unresolved_core_slots(state),
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("document_material_scope",)
+    assert (
+        "document_material_scope"
+        in policy.blocked_action_reasons["commit_architecture"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("slot", "expected"),
+    [
+        (_slot("terminal_output", "structured_text", source="model"), True),
+        (
+            _slot(
+                "terminal_output",
+                "structured_text",
+                source="model",
+                confidence="medium",
+            ),
+            False,
+        ),
+        (
+            _slot(
+                "terminal_output",
+                "structured_text",
+                source="model",
+                confidence="low",
+            ),
+            False,
+        ),
+        (
+            _slot(
+                "terminal_output",
+                "structured_text",
+                source="heuristic",
+                confidence="medium",
+            ),
+            False,
+        ),
+        (
+            _slot(
+                "terminal_output",
+                "structured_text",
+                source="heuristic",
+                confidence="low",
+            ),
+            False,
+        ),
+        (
+            _slot(
+                "terminal_output",
+                "structured_text",
+                source="requirements_summary",
+                confidence="medium",
+            ),
+            True,
+        ),
+        (
+            _slot(
+                "primary_runtime_input",
+                "audio",
+                source="heuristic",
+                confidence="high",
+            ),
+            True,
+        ),
+        (
+            _slot(
+                "runtime_metadata_fields",
+                "no_extra_metadata",
+                source="policy_default",
+                confidence="medium",
+            ),
+            True,
+        ),
+        (_slot("terminal_output", "docx_document", source="flow_default"), True),
+    ],
+)
+def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
+    assert is_commit_grade_slot(slot) is expected
 
 
 def test_policy_preserves_selected_discovery_question_priority() -> None:

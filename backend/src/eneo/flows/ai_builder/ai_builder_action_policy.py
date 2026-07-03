@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, assert_never
 
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
@@ -19,7 +19,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.question_catalog import slot_name_for_legacy_question_id
 
 CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
@@ -66,12 +66,12 @@ def build_planner_action_policy(
     in `PlanningState.resolved_slots`.
     """
 
-    resolved_slot_names = frozenset(session_state.resolved_slots.keys())
+    commit_grade_slot_names = _commit_grade_slot_names(session_state)
     unresolved_core_slots = compute_unresolved_core_slots(session_state)
     derived_commit = derive_architecture_commit_draft(session_state)
     unresolved_commit_slots = _unresolved_slots_for_derived_commit(
         session_state=session_state,
-        resolved_slot_names=resolved_slot_names,
+        commit_grade_slot_names=commit_grade_slot_names,
     )
     ask_targets: tuple[str, ...]
     if session_state.architecture_commit is not None:
@@ -83,7 +83,7 @@ def build_planner_action_policy(
                 unresolved_architectural_choices | unresolved_core_slots
             ),
             derived_commit_required_slots=unresolved_commit_slots,
-            resolved_slot_names=resolved_slot_names,
+            commit_grade_slot_names=commit_grade_slot_names,
         )
 
     blocked: dict[PlannerActionKind, str] = {}
@@ -96,10 +96,12 @@ def build_planner_action_policy(
 
     if session_state.architecture_commit is not None:
         blocked["commit_architecture"] = "architecture is already committed"
-    elif unresolved_architectural_choices - resolved_slot_names:
+    elif unresolved_architectural_choices - commit_grade_slot_names:
         blocked["commit_architecture"] = (
             "unresolved architecture choices: "
-            + ", ".join(sorted(unresolved_architectural_choices - resolved_slot_names))
+            + ", ".join(
+                sorted(unresolved_architectural_choices - commit_grade_slot_names)
+            )
         )
     elif derived_commit is None:
         blocked["commit_architecture"] = (
@@ -135,10 +137,30 @@ def build_planner_action_policy(
 def compute_unresolved_core_slots(
     planning_state: PlanningState,
 ) -> frozenset[str]:
-    """One predicate for prompt policy and commit eligibility checks."""
+    """Core slots that lack evidence strong enough to close discovery."""
 
-    resolved = frozenset(planning_state.resolved_slots.keys())
-    return CORE_ARCHITECTURAL_SLOTS - resolved
+    return CORE_ARCHITECTURAL_SLOTS - _commit_grade_slot_names(planning_state)
+
+
+def is_commit_grade_slot(slot: ResolvedSlot) -> bool:
+    """Model/heuristic slots below high confidence need user confirmation."""
+
+    match slot.source:
+        case "structured_answer" | "requirements_summary" | "flow_default":
+            return True
+        case "policy_default":
+            return True
+        case "heuristic" | "model":
+            return slot.confidence == "high"
+    return assert_never(slot.source)
+
+
+def _commit_grade_slot_names(planning_state: PlanningState) -> frozenset[str]:
+    return frozenset(
+        name
+        for name, slot in planning_state.resolved_slots.items()
+        if is_commit_grade_slot(slot)
+    )
 
 
 def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKind]:
@@ -160,7 +182,7 @@ def _ordered_ask_targets(
     selected_discovery_question_ids: Sequence[str],
     architecture_required_slots: frozenset[str],
     derived_commit_required_slots: frozenset[str],
-    resolved_slot_names: frozenset[str],
+    commit_grade_slot_names: frozenset[str],
 ) -> tuple[str, ...]:
     """Priority: discovery order, then core fallback, then derived requirements."""
 
@@ -171,7 +193,7 @@ def _ordered_ask_targets(
         target = slot_name_for_legacy_question_id(raw_target)
         if (
             target not in KNOWN_REQUIREMENT_SLOT_NAMES
-            or target in resolved_slot_names
+            or target in commit_grade_slot_names
             or target in seen
         ):
             return
@@ -201,7 +223,7 @@ def _order_slot_names(slot_names: frozenset[str]) -> tuple[str, ...]:
 def _unresolved_slots_for_derived_commit(
     *,
     session_state: PlanningState,
-    resolved_slot_names: frozenset[str],
+    commit_grade_slot_names: frozenset[str],
 ) -> frozenset[str]:
     commit = derive_architecture_commit_draft(session_state)
     if commit is None:
@@ -212,7 +234,7 @@ def _unresolved_slots_for_derived_commit(
         if pattern_id in PATTERN_REGISTRY
         for slot_name in PATTERN_REGISTRY[pattern_id].required_architectural_slots
     )
-    return required_slots - resolved_slot_names
+    return required_slots - commit_grade_slot_names
 
 
 __all__ = [
@@ -221,4 +243,5 @@ __all__ = [
     "PlannerActionPolicy",
     "build_planner_action_policy",
     "compute_unresolved_core_slots",
+    "is_commit_grade_slot",
 ]

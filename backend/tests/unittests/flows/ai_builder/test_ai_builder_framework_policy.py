@@ -1630,6 +1630,66 @@ def test_resolve_output_intent_prefers_docx_output_role_over_pdf_input_reference
     assert intent.terminal_output == "docx_document"
 
 
+def test_planning_state_marks_explicit_freeform_terminal_output_high_confidence() -> (
+    None
+):
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag vill ladda upp ett eller flera PDF-dokument, jämföra "
+                    "dem och skapa en DOCX-rapport."
+                ),
+            )
+        ],
+    )
+
+    terminal_output = state.resolved_slots["terminal_output"]
+    docx_output_mode = state.resolved_slots["docx_output_mode"]
+    document_material_scope = state.resolved_slots["document_material_scope"]
+    assert terminal_output.value == "docx_document"
+    assert terminal_output.source == "heuristic"
+    assert terminal_output.confidence == "high"
+    assert docx_output_mode.value == "generated_docx"
+    assert docx_output_mode.source == "policy_default"
+    assert document_material_scope.value == "multiple_documents_case"
+    assert document_material_scope.source == "heuristic"
+    assert document_material_scope.confidence == "high"
+
+
+def test_planning_state_marks_explicit_docx_template_mode_high_confidence() -> None:
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som fyller en DOCX-mall med data från "
+                    "uppladdade PDF-dokument."
+                ),
+            )
+        ],
+    )
+
+    docx_output_mode = state.resolved_slots["docx_output_mode"]
+    assert docx_output_mode.value == "template_fill_docx"
+    assert docx_output_mode.source == "heuristic"
+    assert docx_output_mode.confidence == "high"
+
+
+def test_planning_state_keeps_vague_freeform_terminal_output_unresolved() -> None:
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="Jag vill bygga ett transkriberingsflöde.",
+            )
+        ],
+    )
+
+    assert "terminal_output" not in state.resolved_slots
+
+
 def test_resolve_output_intent_uses_role_scoped_pdf_input_vs_docx_output() -> None:
     prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
 

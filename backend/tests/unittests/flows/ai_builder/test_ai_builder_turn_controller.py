@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import get_args
 
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
@@ -12,17 +13,25 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
+    SlotConfidence,
+    SlotSource,
     StepTriple,
 )
 
 
-def _slot(name: str, value: str) -> ResolvedSlot:
+def _slot(
+    name: str,
+    value: str,
+    *,
+    source: SlotSource = "structured_answer",
+    confidence: SlotConfidence = "high",
+) -> ResolvedSlot:
     return ResolvedSlot(
         name=name,
         value=value,
-        source="structured_answer",
-        evidence=[],
-        confidence="high",
+        source=source,
+        evidence=[f"{source}:{name}"],
+        confidence=confidence,
     )
 
 
@@ -192,3 +201,116 @@ def test_server_confirmation_names_json_to_json_architecture() -> None:
         decision.topic: decision.decision for decision in decision.payload.key_decisions
     }
     assert decisions["Planerad bearbetning"] == "JSON till JSON"
+
+
+def test_server_confirmation_separates_decisions_from_assumptions() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
+        "terminal_output": _slot(
+            "terminal_output",
+            "structured_text",
+            source="model",
+            confidence="medium",
+        ),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields",
+            "no_extra_metadata",
+            source="policy_default",
+            confidence="medium",
+        ),
+        "post_processing_goal": _slot(
+            "post_processing_goal",
+            "summarize_or_overview",
+            source="heuristic",
+        ),
+        "docx_output_mode": _slot(
+            "docx_output_mode",
+            "generated_docx",
+            source="flow_default",
+        ),
+    }
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+        ],
+        chosen_patterns=["audio_transcription"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="d" * 64,
+    )
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert isinstance(decision, ConfirmRequirements)
+    decisions = {
+        decision.topic: decision.decision for decision in decision.payload.key_decisions
+    }
+    assert "Indata vid körning" in decisions
+    assert "DOCX-resultat" in decisions
+    assert "Planerad bearbetning" in decisions
+    assert "Slutresultat" not in decisions
+    assert "Metadata vid körning" not in decisions
+    assert "Syfte med bearbetningen" not in decisions
+    assert "Slutresultat: Strukturerat textresultat" in decision.payload.assumptions
+    assert "Metadata vid körning: Inga extra fält" in decision.payload.assumptions
+    assert "Syfte med bearbetningen: Sammanfatta eller ge överblick" in (
+        decision.payload.assumptions
+    )
+
+
+def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
+    source_to_slot = {
+        "structured_answer": ("primary_runtime_input", "audio"),
+        "requirements_summary": ("terminal_output", "structured_text"),
+        "flow_default": ("docx_output_mode", "generated_docx"),
+        "policy_default": ("runtime_metadata_fields", "no_extra_metadata"),
+        "heuristic": ("post_processing_goal", "summarize_or_overview"),
+        "model": ("structured_analysis_need", "use_structured_analysis"),
+    }
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        slot_name: _slot(slot_name, value, source=source)
+        for source, (slot_name, value) in source_to_slot.items()
+    }
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+        ],
+        chosen_patterns=["audio_transcription"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="e" * 64,
+    )
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert set(source_to_slot) == set(get_args(SlotSource))
+    decision_topics = {
+        key_decision.topic for key_decision in decision.payload.key_decisions
+    } - {"Planerad bearbetning"}
+    assumption_topics = {
+        assumption.split(":", 1)[0]
+        for assumption in decision.payload.assumptions
+        if ":" in assumption
+    }
+    assert decision_topics == {
+        "Indata vid körning",
+        "Slutresultat",
+        "DOCX-resultat",
+    }
+    assert assumption_topics == {
+        "Metadata vid körning",
+        "Syfte med bearbetningen",
+        "Strukturerad analys",
+    }
+    assert decision_topics.isdisjoint(assumption_topics)

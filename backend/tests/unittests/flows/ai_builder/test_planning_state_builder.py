@@ -13,6 +13,10 @@ from datetime import datetime, timezone
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    build_planner_action_policy,
+    compute_unresolved_core_slots,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -81,14 +85,17 @@ def _slot(
     name: str,
     value: str,
     source: SlotSource,
+    confidence: SlotConfidence | None = None,
 ) -> ResolvedSlot:
-    confidence: SlotConfidence = "medium" if source == "policy_default" else "high"
+    resolved_confidence: SlotConfidence = confidence or (
+        "medium" if source == "policy_default" else "high"
+    )
     return ResolvedSlot(
         name=name,
         value=value,
         source=source,
         evidence=[f"{source}:{name}"],
-        confidence=confidence,
+        confidence=resolved_confidence,
     )
 
 
@@ -548,7 +555,57 @@ class TestPolicyDefaults:
         assert goal.confidence == "high"
         structured = state.resolved_slots["structured_analysis_need"]
         assert structured.value == "use_structured_analysis"
-        assert structured.source == "policy_default"
+        assert structured.source == "heuristic"
+        assert structured.confidence == "high"
+
+    def test_medium_model_goal_derives_non_commit_grade_structured_analysis(
+        self,
+    ) -> None:
+        state = PlanningState.empty()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_text",
+                source="structured_answer",
+            ),
+            "document_material_scope": _slot(
+                name="document_material_scope",
+                value="flexible_document_case",
+                source="policy_default",
+            ),
+            "post_processing_goal": _slot(
+                name="post_processing_goal",
+                value="decision_support",
+                source="model",
+                confidence="medium",
+            ),
+        }
+
+        apply_policy_defaults_from_resolved_slots(state, freeform_text="")
+
+        structured = state.resolved_slots["structured_analysis_need"]
+        assert structured.value == "use_structured_analysis"
+        assert structured.source == "heuristic"
+        assert structured.confidence == "medium"
+        assert "model:post_processing_goal" in structured.evidence
+
+        policy = build_planner_action_policy(
+            session_state=state,
+            unresolved_architectural_choices=compute_unresolved_core_slots(state),
+            selected_discovery_question_ids=(),
+        )
+
+        assert policy.allowed_action_kinds == ("ask_question",)
+        assert policy.allowed_ask_question_targets == ("structured_analysis_need",)
+        assert (
+            "structured_analysis_need"
+            in policy.blocked_action_reasons["commit_architecture"]
+        )
 
     def test_transcript_only_goal_does_not_derive_structured_analysis(self) -> None:
         state = build_planning_state_from_conversation(

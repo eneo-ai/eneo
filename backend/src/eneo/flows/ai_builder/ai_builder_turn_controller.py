@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import TypeAlias, assert_never
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
+    ResolvedSlot,
 )
 from eneo.flows.ai_builder.question_catalog import Locale, render_question
 
@@ -171,6 +172,7 @@ def _confirm_requirements_payload(
             ),
         )
         for slot_name in sorted(resolved)
+        if _slot_is_key_decision(resolved[slot_name])
     ]
     architecture_decision = _architecture_decision(session_state, locale)
     if architecture_decision is not None:
@@ -182,8 +184,35 @@ def _confirm_requirements_payload(
         key_decisions=key_decisions,
         input_description=input_description,
         output_description=output_description,
-        assumptions=_assumptions(locale),
+        assumptions=[
+            *[
+                _slot_assumption(slot_name, resolved[slot_name], locale)
+                for slot_name in sorted(resolved)
+                if not _slot_is_key_decision(resolved[slot_name])
+            ],
+            *_assumptions(locale),
+        ],
         manual_setup_notes=[],
+    )
+
+
+def _slot_is_key_decision(slot: ResolvedSlot) -> bool:
+    match slot.source:
+        case "structured_answer" | "requirements_summary" | "flow_default":
+            return True
+        case "policy_default" | "heuristic" | "model":
+            return False
+    return assert_never(slot.source)
+
+
+def _slot_assumption(
+    slot_name: str,
+    slot: ResolvedSlot,
+    locale: Locale,
+) -> str:
+    return (
+        f"{_slot_label(slot_name, locale)}: "
+        f"{_slot_value_for_slot(slot_name, slot.value, locale)}"
     )
 
 
