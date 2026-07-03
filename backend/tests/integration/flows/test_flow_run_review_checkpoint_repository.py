@@ -1984,6 +1984,84 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_failed_running_run_cancels_active_checkpoint_by_terminalizer(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        checkpoint = await _create_checkpoint(
+            checkpoint_repo=checkpoint_repo,
+            run_repo=repo,
+            scenario=scenario,
+            requester_user_id=admin_user.id,
+        )
+
+        result = await FlowRunTerminalizer(
+            repo,
+            FlowRunRerunRepository(session=session, factory=repo.factory),
+            repo.audit_outbox_repo,
+            checkpoint_repo,
+        ).terminalize_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=FlowApiErrorCode.RUN_TASK_FAILURE,
+                message="failed in test",
+            ),
+        )
+        checkpoint_row = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == checkpoint.id
+            )
+        )
+        checkpoint_outbox_actions = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox.action)
+                    .where(FlowRunAuditOutbox.review_checkpoint_id == checkpoint.id)
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        terminal_outbox_action = await session.scalar(
+            sa.select(FlowRunAuditOutbox.action).where(
+                FlowRunAuditOutbox.flow_run_id == scenario.flow_run_id,
+                FlowRunAuditOutbox.review_checkpoint_id.is_(None),
+            )
+        )
+        checkpoint_state = checkpoint_row.state if checkpoint_row is not None else None
+
+    assert result.did_transition is True
+    assert result.run.status == FlowRunStatus.FAILED
+    assert checkpoint_state == FlowRunReviewCheckpointState.CANCELLED.value
+    assert checkpoint_outbox_actions == ["flow_run_review_checkpoint_cancelled"]
+    assert terminal_outbox_action == "flow_run_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_reconcile_expired_review_checkpoint_cancels_run_with_audit_trail(
     db_container,
     completion_model_factory,

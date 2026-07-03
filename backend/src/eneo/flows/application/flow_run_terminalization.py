@@ -229,15 +229,14 @@ class FlowRunTerminalizer:
             run=terminal_run,
             principal=principal,
         )
-        if target_status == FlowRunStatus.CANCELLED:
-            await self.flow_run_review_checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run(
-                tenant_id=tenant_id,
-                flow_run_id=run_id,
-                run_revision=terminal_run.revision,
-                principal=checkpoint_principal,
-                error_code=effective_error_code,
-                error_message=effective_error_message,
-            )
+        await self.flow_run_review_checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run(
+            tenant_id=tenant_id,
+            flow_run_id=run_id,
+            run_revision=terminal_run.revision,
+            principal=checkpoint_principal,
+            error_code=effective_error_code,
+            error_message=effective_error_message,
+        )
 
         actor_fields = self._audit_actor_fields(
             run=terminal_run,
