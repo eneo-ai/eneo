@@ -2029,14 +2029,10 @@ def test_planner_request_preparation_has_canonical_owner() -> None:
         for node in planner_class.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    for method_name in {
-        "_prepare_planner_request",
-        "_should_emit_forced_followup",
-    }:
+    for method_name in {"_prepare_planner_request"}:
         if method_name in planner_methods:
             violations.append(f"{planner_path}: AIBuilderPlanner defines {method_name}")
     for helper_name in {
-        "_count_free_discovery_turns",
         "_emit_planner_failure_event",
         "_extract_first_validation_loc",
         "_get_mvs_forced_followup",

@@ -206,10 +206,6 @@ class AIBuilderPlanner:
                     **(metadata or {}),
                     **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
                 }
-            is_requirements_confirmation = (
-                metadata_resolution.is_requirements_confirmation
-            )
-
             user_message = ConversationMessage(
                 role="user",
                 content=message,
@@ -240,7 +236,6 @@ class AIBuilderPlanner:
                     max_input_tokens=max_input_tokens,
                     max_output_tokens=max_output_tokens,
                     budget_policy=budget_policy,
-                    is_requirements_confirmation=is_requirements_confirmation,
                     plan_edit_context=plan_edit_context,
                     prior_plan_for_revision=prior_plan_for_revision,
                     allow_discovery_semantic_adjudication=(

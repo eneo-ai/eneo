@@ -10,16 +10,13 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
-    metadata_has_question_answer,
     slot_classification_metadata_from_result,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
-    build_discovery_followup,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
-    BackendQuestion,
     DiscoveryAnalysis,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -65,8 +62,6 @@ class DiscoveryRuntimeResult:
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
-    should_emit_forced_followup: bool = False
-    followup: BackendQuestion | None = None
 
 
 def _narrow_structured_analysis_need_from_classifier(
@@ -299,8 +294,6 @@ async def build_discovery_runtime_result(
     ui_language: str | None = None,
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
-    requirements_confirmed: bool = False,
-    is_requirements_confirmation: bool = False,
     attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
@@ -320,11 +313,6 @@ async def build_discovery_runtime_result(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
-    followup = build_discovery_followup(
-        conversation,
-        flow=flow,
-        analysis=analysis,
-    )
     discovery_block_message = build_discovery_block_message(
         conversation,
         flow=flow,
@@ -332,50 +320,7 @@ async def build_discovery_runtime_result(
     )
     return DiscoveryRuntimeResult(
         discovery_block_message=discovery_block_message,
-        should_emit_forced_followup=_should_emit_forced_followup(
-            conversation,
-            requirements_confirmed=requirements_confirmed,
-            is_requirements_confirmation=is_requirements_confirmation,
-            discovery_block_message=discovery_block_message,
-            discovery_analysis=analysis,
-            flow=flow,
-            followup=followup,
-        ),
         discovery_analysis=analysis,
         planning_state=context.planning_state,
         slot_classification_metadata=context.slot_classification_metadata,
-        followup=followup,
     )
-
-
-def _should_emit_forced_followup(
-    conversation: list[ConversationMessage],
-    *,
-    requirements_confirmed: bool,
-    is_requirements_confirmation: bool,
-    discovery_block_message: str | None,
-    discovery_analysis: DiscoveryAnalysis,
-    flow: Flow | None,
-    followup: BackendQuestion | None,
-) -> bool:
-    is_free_discovery = (
-        not requirements_confirmed
-        and not is_requirements_confirmation
-        and not discovery_analysis.mvs_met
-        and discovery_block_message is None
-    )
-    if not is_free_discovery:
-        return False
-    if _count_free_discovery_turns(conversation) < 2:
-        return False
-    return followup is not None
-
-
-def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:
-    count = 0
-    for msg in reversed(conversation):
-        if msg.role == "assistant" and msg.content and not msg.tool_calls:
-            count += 1
-        elif msg.role == "user" and metadata_has_question_answer(msg.metadata):
-            break
-    return count

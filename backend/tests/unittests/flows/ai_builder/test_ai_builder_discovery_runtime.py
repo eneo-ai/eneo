@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -12,25 +12,14 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_models import (
-    BackendQuestion,
-    DiscoveryAnalysis,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
-    DiscoveryRuntimeResult,
-    RuntimeDiscoveryContext,
     _targeted_classification_bias,
     analyze_discovery_runtime,
     build_discovery_block_message_runtime,
-    build_discovery_runtime_result,
     build_runtime_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-)
-from eneo.flows.ai_builder.ai_builder_event_models import (
-    StructuredQuestionOptionPayload,
-    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
 from eneo.flows.ai_builder.planning_state import (
@@ -756,19 +745,6 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
     litellm_client.acompletion.assert_awaited_once()
 
 
-def _clarification_question(question_id: str = "terminal_output") -> BackendQuestion:
-    return BackendQuestion(
-        question_data=StructuredQuestionPayload(
-            question_id=question_id,
-            question="Vilket format ska slutresultatet ha?",
-            options=[StructuredQuestionOptionPayload(label="PDF")],
-            selection_mode="single",
-            allow_custom=True,
-        ),
-        assistant_text="Jag behöver förstå slutresultatet.",
-    )
-
-
 def test_targeted_bias_maps_legacy_question_id_to_slot() -> None:
     bias = _targeted_classification_bias(
         [
@@ -802,69 +778,3 @@ def test_targeted_bias_is_none_when_target_already_resolved() -> None:
     )
 
     assert bias is None
-
-
-async def _run_with_followup(
-    conversation: list[ConversationMessage],
-) -> tuple[DiscoveryRuntimeResult, AsyncMock]:
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        "Omformulerad ledtext med PDF-exempel."
-    )
-    with (
-        patch.object(
-            runtime,
-            "build_runtime_discovery_context",
-            new_callable=AsyncMock,
-            return_value=RuntimeDiscoveryContext(planning_state=PlanningState.empty()),
-        ),
-        patch.object(
-            runtime, "analyze_discovery", return_value=DiscoveryAnalysis(issues=())
-        ),
-        patch.object(
-            runtime, "build_discovery_followup", return_value=_clarification_question()
-        ),
-        patch.object(runtime, "build_discovery_block_message", return_value=None),
-    ):
-        result = await build_discovery_runtime_result(
-            conversation,
-            litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            tenant_id=uuid4(),
-        )
-    return result, litellm_client
-
-
-@pytest.mark.asyncio
-async def test_reask_keeps_catalog_text_without_llm_call() -> None:
-    conversation = [
-        ConversationMessage(role="user", content="Bygg ett flöde."),
-        ConversationMessage(
-            role="assistant",
-            content="Vilket format?",
-            metadata={"question_id": "terminal_output"},
-        ),
-        ConversationMessage(role="user", content="vet inte"),
-    ]
-
-    result, litellm_client = await _run_with_followup(conversation)
-
-    litellm_client.acompletion.assert_not_awaited()
-    assert result.followup is not None
-    assert result.followup.assistant_text == "Jag behöver förstå slutresultatet."
-    assert result.followup.question_data.question_id == "terminal_output"
-    assert (
-        result.followup.question_data.question == "Vilket format ska slutresultatet ha?"
-    )
-    assert [o.label for o in result.followup.question_data.options] == ["PDF"]
-
-
-@pytest.mark.asyncio
-async def test_first_ask_keeps_catalog_text_without_llm_call() -> None:
-    conversation = [ConversationMessage(role="user", content="Bygg ett flöde.")]
-
-    result, litellm_client = await _run_with_followup(conversation)
-
-    litellm_client.acompletion.assert_not_awaited()
-    assert result.followup is not None
-    assert result.followup.assistant_text == "Jag behöver förstå slutresultatet."

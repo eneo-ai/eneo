@@ -12,14 +12,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.files.file_models import File, FileType
-from eneo.flows.ai_builder.ai_builder_discovery_models import (
-    BackendQuestion,
-    DiscoveryAnalysis,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
-    DiscoveryRuntimeResult,
-    _should_emit_forced_followup,
-)
+from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -33,7 +27,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
     KeyDecisionPayload,
     RequirementsSummaryPayload,
-    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
@@ -155,38 +148,11 @@ def _runtime_result(
     discovery_block_message: str | None,
     discovery_analysis: object,
     planning_state: PlanningState,
-    *,
-    followup: BackendQuestion | None = None,
-    should_emit_forced_followup: bool = False,
 ) -> DiscoveryRuntimeResult:
     return DiscoveryRuntimeResult(
         discovery_block_message=discovery_block_message,
         discovery_analysis=cast(DiscoveryAnalysis, discovery_analysis),
         planning_state=planning_state,
-        followup=followup,
-        should_emit_forced_followup=should_emit_forced_followup,
-    )
-
-
-def _backend_question() -> BackendQuestion:
-    return BackendQuestion(
-        question_data=StructuredQuestionPayload.model_validate(
-            {
-                "question_id": "terminal_output",
-                "question": "Vilket slutresultat vill du ha?",
-                "options": [
-                    {
-                        "id": "text",
-                        "label": "Text",
-                        "description": "Svara med text.",
-                        "value": "text",
-                    }
-                ],
-                "selection_mode": "single",
-                "allow_custom": True,
-            }
-        ),
-        assistant_text="Vilket slutresultat vill du ha?",
     )
 
 
@@ -206,7 +172,6 @@ async def _prepare_planner_request_for_test(
     max_input_tokens: int = 4096,
     max_output_tokens: int = 1024,
     budget_policy: AIBuilderBudgetPolicy | None = None,
-    is_requirements_confirmation: bool = False,
     base_planning_state_version: int = 0,
     plan_edit_context: object = None,
     prior_plan_for_revision: BuilderPlan | None = None,
@@ -234,7 +199,6 @@ async def _prepare_planner_request_for_test(
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=is_requirements_confirmation,
             base_planning_state_version=base_planning_state_version,
             tenant_id=planner.user.tenant_id,
             plan_edit_context=cast(Any, plan_edit_context),
@@ -707,31 +671,6 @@ async def test_resolve_user_question_metadata_infers_final_output_answer_from_st
     }
 
 
-def test_should_emit_forced_followup_arms_after_two_free_discovery_turns_with_catalog_hit() -> (
-    None
-):
-    conversation = [
-        ConversationMessage(
-            role="assistant", content="What kind of input should I expect?"
-        ),
-        ConversationMessage(
-            role="assistant", content="Can you clarify the desired output?"
-        ),
-    ]
-
-    armed = _should_emit_forced_followup(
-        conversation=conversation,
-        requirements_confirmed=False,
-        is_requirements_confirmation=False,
-        discovery_block_message=None,
-        discovery_analysis=SimpleNamespace(mvs_met=False),
-        flow=None,
-        followup=_backend_question(),
-    )
-
-    assert armed is True
-
-
 @pytest.mark.asyncio
 async def test_prepare_planner_request_skips_prompt_for_server_owned_action() -> None:
     planner = _make_planner()
@@ -773,7 +712,6 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=4,
         )
 
@@ -834,7 +772,6 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=4,
         )
 
@@ -909,7 +846,6 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=4,
         )
 
@@ -1000,7 +936,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=4,
         )
 
@@ -1100,7 +1035,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=0,
         )
 
@@ -1187,7 +1121,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=4,
         )
 
@@ -1236,7 +1169,6 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=0,
             allow_discovery_semantic_adjudication=False,
         )
@@ -1317,7 +1249,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
                 minimum_conversation_budget_tokens=256,
                 unknown_model_context_window_tokens=8192,
             ),
-            is_requirements_confirmation=False,
             base_planning_state_version=0,
         )
 

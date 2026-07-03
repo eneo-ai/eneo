@@ -104,7 +104,6 @@ class PlannerRequestPreparationInput:
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
-    is_requirements_confirmation: bool
     base_planning_state_version: int
     tenant_id: UUID
     plan_edit_context: AIBuilderPlanEditContext | None
@@ -166,8 +165,6 @@ async def prepare_planner_request(
         ui_language=ui_language,
         allow_semantic_adjudication=request.allow_discovery_semantic_adjudication,
         tenant_id=request.tenant_id,
-        requirements_confirmed=requirements_state.confirmed,
-        is_requirements_confirmation=request.is_requirements_confirmation,
         attachment_context=attachment_context_result,
     )
     discovery_analysis = discovery_runtime.discovery_analysis
