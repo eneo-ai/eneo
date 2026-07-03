@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Protocol, Sequence
 
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
+from eneo.flows.enums import FlowInputType, FlowOutputType
+from eneo.flows.flow_capability_manifest import is_chain_compatible
 
 
 class StepChainShape(Protocol):
@@ -26,20 +28,6 @@ class StepChainViolation:
     step_order: int
     message: str
     code: FlowGraphIssueCode
-
-
-COMPATIBLE_TYPE_COERCIONS = {
-    ("text", "text"),
-    ("text", "json"),
-    ("text", "any"),
-    ("json", "text"),
-    ("json", "json"),
-    ("json", "any"),
-    ("pdf", "text"),
-    ("pdf", "any"),
-    ("docx", "text"),
-    ("docx", "any"),
-}
 
 
 def find_first_step_chain_violation(
@@ -105,7 +93,10 @@ def iter_step_chain_violations(
                     )
                     first_global_yielded = True
                 continue
-            if (previous.output_type, step.input_type) not in COMPATIBLE_TYPE_COERCIONS:
+            if not _previous_step_types_are_compatible(
+                output_type=previous.output_type,
+                input_type=step.input_type,
+            ):
                 yield StepChainViolation(
                     step_order=step.step_order,
                     message=(
@@ -114,6 +105,16 @@ def iter_step_chain_violations(
                     ),
                     code=FlowGraphIssueCode.TYPED_IO_INCOMPATIBLE_TYPE_CHAIN,
                 )
+
+
+def _previous_step_types_are_compatible(*, output_type: str, input_type: str) -> bool:
+    try:
+        typed_output = FlowOutputType(output_type)
+        typed_input = FlowInputType(input_type)
+    except ValueError:
+        # Authored strings fail as validation issues instead of escaping the validator.
+        return False
+    return is_chain_compatible(output_type=typed_output, input_type=typed_input)
 
 
 def _first_global_step_chain_violation(

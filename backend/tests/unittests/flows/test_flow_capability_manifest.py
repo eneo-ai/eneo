@@ -40,6 +40,7 @@ from eneo.flows.flow_capability_manifest import (
     InvariantSpec,
     _classify_cell,
     coverage_report,
+    is_chain_compatible,
     is_citation_capable_step,
     render_critic_invariants,
     requires_completion_model,
@@ -47,7 +48,6 @@ from eneo.flows.flow_capability_manifest import (
     resolve_document_generation_mode,
     supports_step_io_tuple,
 )
-from eneo.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
 
 
@@ -196,16 +196,28 @@ def test_chain_compatibility_is_frozen_and_typed_with_enums() -> None:
         )
 
 
-def test_chain_compatibility_mirrors_legacy_compatible_type_coercions() -> None:
-    """Parity test. The FCM mirrors `COMPATIBLE_TYPE_COERCIONS` with typed
-    enum entries; the two sets must stay in lockstep. A drift here is a
-    bug."""
-    fcm_as_strings = {(out.value, inp.value) for out, inp in CHAIN_COMPATIBILITY}
-    assert fcm_as_strings == COMPATIBLE_TYPE_COERCIONS, (
-        "CHAIN_COMPATIBILITY has drifted from COMPATIBLE_TYPE_COERCIONS.\n"
-        f"Missing from FCM: {COMPATIBLE_TYPE_COERCIONS - fcm_as_strings}\n"
-        f"Extra in FCM:    {fcm_as_strings - COMPATIBLE_TYPE_COERCIONS}"
+def test_chain_compatibility_predicate_uses_typed_fcm_truth() -> None:
+    assert is_chain_compatible(
+        output_type=FlowOutputType.TEXT,
+        input_type=FlowInputType.JSON,
     )
+    assert not is_chain_compatible(
+        output_type=FlowOutputType.DOCX,
+        input_type=FlowInputType.JSON,
+    )
+
+
+def test_chain_compatibility_predicate_rejects_non_enum_values() -> None:
+    with pytest.raises(TypeError, match="output_type must be FlowOutputType"):
+        is_chain_compatible(
+            output_type="text",  # type: ignore[arg-type]
+            input_type=FlowInputType.JSON,
+        )
+    with pytest.raises(TypeError, match="input_type must be FlowInputType"):
+        is_chain_compatible(
+            output_type=FlowOutputType.TEXT,
+            input_type="json",  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))

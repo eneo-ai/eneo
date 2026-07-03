@@ -468,13 +468,9 @@ CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
 
 # Chain-composition truth: which `(previous_step_output_type, next_step_input_type)`
 # pairs are legal when a step is fed by `input_source='previous_step'`. Only
-# `previous_step` consults this table — `all_previous_steps` has its own rule
-# path in `step_chain_rules.py` (the JSON-over-concatenated-text prohibition)
-# and does not participate in type coercion. Mirrors
-# `COMPATIBLE_TYPE_COERCIONS` from `step_chain_rules.py` as a typed FCM
-# constant so consumers can read the rule without parsing the legacy
-# string-tuple table. A parity test in `test_flow_capability_manifest.py`
-# enforces lockstep.
+# `previous_step` consults this table; `all_previous_steps` has its own rule
+# path in `step_chain_rules.py` and does not participate in type coercion.
+# Runtime validators consume this typed FCM truth through `is_chain_compatible`.
 CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset(
     {
         (FlowOutputType.TEXT, FlowInputType.TEXT),
@@ -489,6 +485,24 @@ CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset
         (FlowOutputType.DOCX, FlowInputType.ANY),
     }
 )
+
+
+def is_chain_compatible(
+    *,
+    output_type: FlowOutputType,
+    input_type: FlowInputType,
+) -> bool:
+    """Engine-truth: can one step's output feed the next step's input?"""
+
+    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
+        )
+    if not isinstance(input_type, FlowInputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"input_type must be FlowInputType, got {type(input_type).__name__}"
+        )
+    return (output_type, input_type) in CHAIN_COMPATIBILITY
 
 
 # Engine-truth mapping from output type to the artifact the runtime produces.
@@ -667,8 +681,7 @@ _TEMPORARY_REASON_MARKER = "temporary"
 # `flow_validators_http.py`. Single-cell in scope — step-order-dependent
 # rules (e.g. step 1 cannot use `previous_step`) belong to
 # `step_chain_rules.find_first_step_chain_violation`. `previous_step`
-# chain-compat depends on the prior step's `output_type`; the single-cell
-# `CHAIN_COMPATIBILITY` constant is guarded by its own parity test.
+# chain compatibility is owned by `CHAIN_COMPATIBILITY`.
 _HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset(
     {FlowInputSource.HTTP_GET, FlowInputSource.HTTP_POST}
 )
