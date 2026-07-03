@@ -9,18 +9,29 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state import (
+    PlanningState,
+    ResolvedSlot,
+    SlotConfidence,
+    SlotSource,
+)
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 
 
-def _slot(name: str, value: str) -> ResolvedSlot:
+def _slot(
+    name: str,
+    value: str,
+    *,
+    source: SlotSource = "structured_answer",
+    confidence: SlotConfidence = "high",
+) -> ResolvedSlot:
     return ResolvedSlot(
         name=name,
         value=value,
-        source="structured_answer",
-        confidence="high",
+        source=source,
+        confidence=confidence,
     )
 
 
@@ -284,6 +295,73 @@ def test_derives_compare_intent_for_same_run_comparison_scope() -> None:
 
     assert draft is not None
     assert draft.aggregation_intent == "compare"
+
+
+def test_derives_linear_intent_for_medium_comparison_scope() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="single_document_case",
+    )
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope",
+        "same_run_compare",
+        source="model",
+        confidence="medium",
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.aggregation_intent == "linear"
+
+
+def test_derives_compare_intent_for_high_model_comparison_scope() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="single_document_case",
+    )
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope",
+        "same_run_compare",
+        source="model",
+        confidence="high",
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.aggregation_intent == "compare"
+
+
+@pytest.mark.parametrize(
+    ("confidence", "expected"),
+    [
+        ("medium", "linear"),
+        ("high", "compare"),
+    ],
+)
+def test_document_comparison_scope_respects_commit_grade(
+    confidence: SlotConfidence,
+    expected: str,
+) -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="single_document_case",
+    )
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope",
+        "same_run_multiple_documents",
+        source="model",
+        confidence=confidence,
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.aggregation_intent == expected
 
 
 def test_derives_compare_intent_from_high_confidence_multi_source_prompt() -> None:

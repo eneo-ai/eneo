@@ -9,7 +9,6 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
     compute_unresolved_core_slots,
-    is_commit_grade_slot,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
@@ -227,7 +226,7 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
     ],
 )
 def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
-    assert is_commit_grade_slot(slot) is expected
+    assert slot.is_commit_grade is expected
 
 
 def test_policy_preserves_selected_discovery_question_priority() -> None:

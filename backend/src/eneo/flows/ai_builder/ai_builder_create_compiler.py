@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
+    derive_aggregation_intent_from_slots,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -70,14 +73,6 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 logger = logging.getLogger(__name__)
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
-_DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
-_DOCUMENT_SCOPE_AGGREGATION_VALUES = frozenset(
-    {
-        "multiple_documents_case",
-        "multiple_pdfs_same_run",
-        "same_run_multiple_documents",
-    }
-)
 ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
 
 
@@ -532,28 +527,14 @@ def _aggregation_intent_for_compile_context(
         if _COMPARISON_FAN_IN_PATTERN_IDS & set(architecture.chosen_patterns):
             return "compare"
 
-    document_scope = _resolved_slot_value(state, "document_material_scope")
-    if (
-        runtime_input_type in _DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES
-        and document_scope in _DOCUMENT_SCOPE_AGGREGATION_VALUES
-    ):
-        return "aggregate"
-
-    comparison_scope = _resolved_slot_value(state, "comparison_scope")
-    if comparison_scope == "same_run_compare":
-        return "compare"
-    if (
-        runtime_input_type in _DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES
-        and comparison_scope
-        in {"same_run_multiple_documents", "multiple_documents_case"}
-    ):
-        return "compare"
-    return "linear"
-
-
-def _resolved_slot_value(state: PlanningState, slot_name: str) -> str | None:
-    slot = state.resolved_slots.get(slot_name)
-    return slot.value if slot is not None else None
+    return derive_aggregation_intent_from_slots(
+        state,
+        document_material_input=runtime_input_type
+        in (
+            InputType.DOCUMENT,
+            InputType.FILE,
+        ),
+    )
 
 
 def _compile_form_fields(

@@ -8,9 +8,11 @@ This module derives the semantic architecture draft from deterministic
 
 from __future__ import annotations
 
+from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
+    derive_aggregation_intent_from_slots,
+)
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
-    AggregationIntent,
     ArchitectureCommitDraft,
     PlanningState,
     StepTriple,
@@ -23,15 +25,6 @@ from eneo.flows.enums import (
     FlowOutputType,
 )
 from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
-
-_DOCUMENT_MATERIAL_INPUT_TYPES = frozenset({FlowInputType.DOCUMENT, FlowInputType.FILE})
-_DOCUMENT_SCOPE_AGGREGATION_VALUES = frozenset(
-    {
-        "multiple_documents_case",
-        "multiple_pdfs_same_run",
-        "same_run_multiple_documents",
-    }
-)
 
 
 def derive_architecture_commit_draft(
@@ -77,9 +70,10 @@ def derive_architecture_commit_draft(
         ],
         chosen_patterns=chosen_patterns,
         required_capabilities=[capability.id for capability in capabilities],
-        aggregation_intent=_aggregation_intent_from_state(
+        aggregation_intent=derive_aggregation_intent_from_slots(
             state,
-            input_type=input_type,
+            document_material_input=input_type
+            in {FlowInputType.DOCUMENT, FlowInputType.FILE},
         ),
     )
 
@@ -156,35 +150,6 @@ def _chosen_patterns_for_state(
         if pattern_id in PATTERN_REGISTRY
         and PATTERN_REGISTRY[pattern_id].polarity == "positive"
     ]
-
-
-def _aggregation_intent_from_state(
-    state: PlanningState,
-    *,
-    input_type: FlowInputType,
-) -> AggregationIntent:
-    comparison_scope = _resolved_slot_value(state, "comparison_scope")
-    if comparison_scope == "same_run_compare":
-        return "compare"
-    if input_type in _DOCUMENT_MATERIAL_INPUT_TYPES and comparison_scope in {
-        "same_run_multiple_documents",
-        "multiple_documents_case",
-    }:
-        return "compare"
-
-    document_scope = _resolved_slot_value(state, "document_material_scope")
-    if (
-        input_type in _DOCUMENT_MATERIAL_INPUT_TYPES
-        and document_scope in _DOCUMENT_SCOPE_AGGREGATION_VALUES
-    ):
-        return "aggregate"
-
-    return "linear"
-
-
-def _resolved_slot_value(state: PlanningState, slot_name: str) -> str | None:
-    slot = state.resolved_slots.get(slot_name)
-    return slot.value if slot is not None else None
 
 
 def _primary_pattern_id(

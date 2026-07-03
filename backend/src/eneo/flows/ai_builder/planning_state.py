@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -102,6 +102,19 @@ class ResolvedSlot(_PlanningModel):
     source: SlotSource
     evidence: list[str] = Field(default_factory=list[str])
     confidence: SlotConfidence
+
+    @property
+    def is_commit_grade(self) -> bool:
+        """Whether this slot can drive irreversible planner decisions."""
+
+        match self.source:
+            case "structured_answer" | "requirements_summary" | "flow_default":
+                return True
+            case "policy_default":
+                return True
+            case "heuristic" | "model":
+                return self.confidence == "high"
+        return assert_never(self.source)
 
 
 class StepTriple(_PlanningModel):

@@ -8685,6 +8685,79 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
     )
 
 
+def test_compile_context_ignores_medium_comparison_scope_after_linear_commit() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Weak comparison evidence",
+            "plan_rationale": "Analyze uploaded material.",
+            "steps": [
+                {"name": "Extract source facts", "instructions": "Extract facts."},
+                {"name": "Assess findings", "instructions": "Assess findings."},
+                {"name": "Write conclusion", "instructions": "Write conclusion."},
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["document_to_structured_report"],
+            required_capabilities=["input_document", "output_mode_pass_through"],
+            aggregation_intent="linear",
+        )
+    )
+    state.resolved_slots["comparison_scope"] = ResolvedSlot(
+        name="comparison_scope",
+        value="same_run_compare",
+        source="model",
+        confidence="medium",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+    draft = compile_create_intent_to_spec(outline, context=context)
+
+    assert context is not None
+    assert context.aggregation_intent == "linear"
+    assert "all_previous_steps" not in {step.input_source.value for step in draft.steps}
+
+
+def test_compile_context_trusts_high_model_comparison_scope_after_linear_commit() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["document_to_structured_report"],
+            required_capabilities=["input_document", "output_mode_pass_through"],
+            aggregation_intent="linear",
+        )
+    )
+    state.resolved_slots["comparison_scope"] = ResolvedSlot(
+        name="comparison_scope",
+        value="same_run_compare",
+        source="model",
+        confidence="high",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.aggregation_intent == "compare"
+
+
 def test_compile_outline_flow_audio_docx_ignores_document_scope_fan_in() -> None:
     outline = parse_create_flow_intent_arguments(
         {
