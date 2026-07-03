@@ -71,6 +71,17 @@
       ? m.flow_step_citation_mode_inline_inref_sidecar()
       : m.flow_step_citation_mode_off()
   );
+
+  // Plain-language reassurance for document outputs — the "vidarebefordra" mode
+  // label doesn't make clear that a file is produced.
+  const documentHelperText = $derived(
+    step.output_mode === "pass_through" &&
+      (step.output_type === "pdf" || step.output_type === "docx")
+      ? step.output_type === "pdf"
+        ? m.flow_output_document_helper_pdf()
+        : m.flow_output_document_helper_word()
+      : ""
+  );
 </script>
 
 <FlowStepSection title={embedded ? undefined : m.flow_step_output_section()}>
@@ -128,23 +139,28 @@
   {/if}
 
   <Settings.Row title={m.flow_step_output_mode()} description="">
-    <Select.Root
-      type="single"
-      value={step.output_mode}
-      disabled={isPublished}
-      onValueChange={(value) => onOutputModeChange?.({ value })}
-    >
-      <Select.Trigger class="w-full" aria-label={m.flow_step_output_mode()}>
-        {selectedOutputModeLabel}
-      </Select.Trigger>
-      <Select.Content>
-        <Select.Group>
-          {#each availableOutputModes as mode (mode.value)}
-            <Select.Item value={mode.value} label={mode.label}>{mode.label}</Select.Item>
-          {/each}
-        </Select.Group>
-      </Select.Content>
-    </Select.Root>
+    <div class="flex flex-col gap-2">
+      <Select.Root
+        type="single"
+        value={step.output_mode}
+        disabled={isPublished}
+        onValueChange={(value) => onOutputModeChange?.({ value })}
+      >
+        <Select.Trigger class="w-full" aria-label={m.flow_step_output_mode()}>
+          {selectedOutputModeLabel}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#each availableOutputModes as mode (mode.value)}
+              <Select.Item value={mode.value} label={mode.label}>{mode.label}</Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
+      {#if documentHelperText}
+        <p class="text-muted text-xs leading-relaxed">{documentHelperText}</p>
+      {/if}
+    </div>
   </Settings.Row>
 
   {#if supportsCitationMode}

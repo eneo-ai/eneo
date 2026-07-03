@@ -76,12 +76,17 @@
   // Show them only while the instruction is empty, or on explicit "Visa tips".
   let showTips = $state(false);
 
+  // Collapsed label for the advanced model group — the chosen model's name.
+  const modelStatus = $derived(
+    assistant?.completion_model?.nickname ?? assistant?.completion_model?.name ?? ""
+  );
+
   function updateAssistantField(field: string, value: unknown) {
     onAssistantFieldChange?.({ field, value });
   }
 </script>
 
-<FlowStepSection title={m.flow_step_section_behavior()}>
+<FlowStepSection>
   {#if step.output_mode === "transcribe_only"}
     <Alert.Root
       class="border-accent-default/15 bg-accent-default/5 mb-4 rounded-[1rem] px-5 py-4"
@@ -108,31 +113,8 @@
 
   {#if !isTranscribeOnly && assistant}
     {@const currentAssistant = assistant}
-    <div class="w-full [&>button]:w-full">
-      <SelectAIModelV2
-        bind:selectedModel={currentAssistant.completion_model}
-        {availableModels}
-        on:change={() =>
-          updateAssistantField("completion_model", currentAssistant.completion_model)}
-      />
-    </div>
-
-    <Settings.Row title={m.model_behaviour()} description="">
-      <SelectBehaviourV2
-        bind:kwArgs={currentAssistant.completion_model_kwargs}
-        selectedModel={currentAssistant.completion_model}
-        isDisabled={!supportsBehaviorPresets(currentAssistant.completion_model)}
-        on:change={() =>
-          updateAssistantField("completion_model_kwargs", currentAssistant.completion_model_kwargs)}
-      />
-      <SelectModelSpecificSettings
-        bind:kwArgs={currentAssistant.completion_model_kwargs}
-        selectedModel={currentAssistant.completion_model}
-        on:change={() =>
-          updateAssistantField("completion_model_kwargs", currentAssistant.completion_model_kwargs)}
-      />
-    </Settings.Row>
-
+    <!-- The user's core task comes first: what should the AI do? Model and
+         behaviour settings are secondary and live in a collapsed group below. -->
     <Settings.Row
       title={stepUxCopy.instructionsTitle}
       description={isAdvancedMode ? stepUxCopy.instructionsHelperTitle : ""}
@@ -259,5 +241,44 @@
         {/if}
       </div>
     </Settings.Row>
+
+    {#if isAdvancedMode}
+      <FlowStepSection
+        title={m.flow_model_settings()}
+        collapsible
+        resetKey={step.step_order}
+        status={modelStatus}
+      >
+        <div class="w-full [&>button]:w-full">
+          <SelectAIModelV2
+            bind:selectedModel={currentAssistant.completion_model}
+            {availableModels}
+            on:change={() =>
+              updateAssistantField("completion_model", currentAssistant.completion_model)}
+          />
+        </div>
+        <Settings.Row title={m.model_behaviour()} description="">
+          <SelectBehaviourV2
+            bind:kwArgs={currentAssistant.completion_model_kwargs}
+            selectedModel={currentAssistant.completion_model}
+            isDisabled={!supportsBehaviorPresets(currentAssistant.completion_model)}
+            on:change={() =>
+              updateAssistantField(
+                "completion_model_kwargs",
+                currentAssistant.completion_model_kwargs
+              )}
+          />
+          <SelectModelSpecificSettings
+            bind:kwArgs={currentAssistant.completion_model_kwargs}
+            selectedModel={currentAssistant.completion_model}
+            on:change={() =>
+              updateAssistantField(
+                "completion_model_kwargs",
+                currentAssistant.completion_model_kwargs
+              )}
+          />
+        </Settings.Row>
+      </FlowStepSection>
+    {/if}
   {/if}
 </FlowStepSection>

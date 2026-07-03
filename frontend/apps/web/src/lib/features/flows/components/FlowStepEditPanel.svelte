@@ -905,6 +905,20 @@
   >
     <div class="flow-step-editor">
       <Settings.Page>
+        <div class="mb-3 flex min-w-0 items-baseline gap-1.5">
+          <span class="text-secondary shrink-0 text-xs font-medium">
+            {m.flow_step_position({
+              index: String(activeStep.step_order),
+              total: String(steps.length)
+            })}
+          </span>
+          {#if activeStep.user_description}
+            <span class="text-muted shrink-0 text-xs" aria-hidden="true">·</span>
+            <span class="text-primary truncate text-sm font-semibold">
+              {activeStep.user_description}
+            </span>
+          {/if}
+        </div>
         {#if stepSummaryModel}
           <FlowStepSummaryCard
             step={activeStep}

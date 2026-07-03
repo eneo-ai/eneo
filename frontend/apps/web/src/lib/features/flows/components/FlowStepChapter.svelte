@@ -4,10 +4,12 @@
   import { ChevronDown } from "lucide-svelte";
   import { cn } from "$lib/utils.js";
 
-  // A collapsible chapter that groups related step sections. Multiple chapters
-  // can be open at once (each owns its state); the collapsed header keeps a
-  // one-line status so nothing feels hidden. Built on shadcn Collapsible, which
-  // provides the button semantics + aria-expanded for free.
+  // A collapsible chapter that groups related step sections. Renders as a flat
+  // disclosure row separated by a divider (not a card) so the editor reads as one
+  // calm settings surface rather than a stack of bordered cards. Multiple
+  // chapters can be open at once (each owns its state); the collapsed header
+  // keeps a one-line status so nothing feels hidden. Built on shadcn Collapsible
+  // for the button semantics + aria-expanded.
   let {
     title,
     status,
@@ -50,12 +52,9 @@
   });
 </script>
 
-<Collapsible.Root
-  bind:open
-  class={cn("border-default bg-primary mb-3 overflow-hidden rounded-xl border", className)}
->
+<Collapsible.Root bind:open class={cn("border-default border-b", className)}>
   <Collapsible.Trigger
-    class="group hover:bg-hover-dimmer/30 focus-visible:ring-accent-default/40 flex min-h-[52px] w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+    class="group hover:bg-hover-dimmer/20 focus-visible:ring-accent-default/40 flex min-h-[52px] w-full items-center gap-3 rounded-lg px-2 py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
   >
     <span class="min-w-0 flex-1">
       <span class="flex items-center gap-2">
@@ -76,7 +75,7 @@
       class="text-secondary size-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180"
     />
   </Collapsible.Trigger>
-  <Collapsible.Content class="border-default border-t px-4 pt-2 pb-5">
+  <Collapsible.Content class="px-2 pt-1 pb-5">
     {@render children?.()}
   </Collapsible.Content>
 </Collapsible.Root>
