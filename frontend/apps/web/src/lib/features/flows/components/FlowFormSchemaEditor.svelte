@@ -340,6 +340,26 @@
     lastReconciledFormSchemaSignature = storeFormSchemaSignature;
     formSchemaConflictVisible = false;
   }
+
+  let copiedVariableFieldId = $state<string | null>(null);
+  let copiedResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function copyVariableToken(field: LocalFormField) {
+    const token = getFlowFormFieldVariableToken(field.name);
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+    } catch (error) {
+      console.error("Could not copy flow input variable token", error);
+      return;
+    }
+    copiedVariableFieldId = field._localId;
+    if (copiedResetTimer) clearTimeout(copiedResetTimer);
+    copiedResetTimer = setTimeout(() => {
+      copiedVariableFieldId = null;
+      copiedResetTimer = null;
+    }, 1500);
+  }
 </script>
 
 <div class="flex flex-col gap-4">
@@ -544,11 +564,17 @@
               </label>
 
               {#if hasValidVariable}
+                {@const isCopied = copiedVariableFieldId === field._localId}
                 <span class="text-muted inline-flex items-center gap-1.5 text-xs">
-                  <span>{m.flow_form_field_variable_hint_label()}</span>
-                  <span class={getChipClasses("field")}>
-                    {getFlowFormFieldVariableToken(field.name)}
-                  </span>
+                  <span>{m.flow_form_field_variable_chip_label()}</span>
+                  <button
+                    type="button"
+                    class={`${getChipClasses("field")} hover:ring-label-stronger/30 cursor-pointer transition-shadow hover:ring-1 focus-visible:ring-1 focus-visible:outline-none`}
+                    onclick={() => void copyVariableToken(field)}
+                    aria-label={m.flow_form_field_variable_copy_label()}
+                  >
+                    {isCopied ? m.copied() : getFlowFormFieldVariableToken(field.name)}
+                  </button>
                 </span>
               {:else if fieldNameIssue}
                 <span class="text-warning-stronger text-xs">
@@ -616,12 +642,12 @@
                         />
                         <button
                           type="button"
-                          class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 inline-flex size-7 items-center justify-center rounded transition-colors"
+                          class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 inline-flex size-11 shrink-0 items-center justify-center rounded transition-colors"
                           onclick={() => removeOption(index, optionIndex)}
                           disabled={isPublished}
-                          aria-label={m.delete()}
+                          aria-label={m.flow_form_field_remove_option_label()}
                         >
-                          <IconTrash class="size-3" />
+                          <IconTrash class="size-3.5" />
                         </button>
                       </div>
                     {/each}

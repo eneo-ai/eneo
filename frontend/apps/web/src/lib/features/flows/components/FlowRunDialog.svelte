@@ -211,11 +211,23 @@
   const progressLabel = $derived(
     wizardPages.length > 0 ? labels.progress(currentPageIndex + 1, wizardPages.length) : ""
   );
+  // Runtime-step pages collect one required input each. Number them as
+  // "input N of M" over the input screens only (not the whole wizard), so the
+  // user reads it as collecting run material rather than builder-step progress.
+  const runtimeInputTotal = $derived(stepsRequiringInput.length);
+  const currentInputPosition = $derived(
+    currentPage?.kind === "runtime-step"
+      ? stepsRequiringInput.findIndex((step) => step.step_id === currentPage.stepId) + 1
+      : 0
+  );
   const canGoNext = $derived(
     currentPageIndex < wizardPages.length - 1 &&
       currentPageProgressBlockers.length === 0 &&
       !isSubmitting
   );
+  // Surfaced as visible helper text next to the Next button so a blocked step
+  // explains itself, not just as a hover title. Undefined while submitting.
+  const nextDisabledReason = $derived(getDisabledNextReason());
   const canSubmitRun = $derived(
     runContract !== null && !runContractError && !isSubmitting && runBlockers.length === 0
   );
@@ -1145,14 +1157,28 @@
         <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_17rem] md:items-center">
           <div class="min-w-0">
             <p class="text-muted mb-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
-              {progressLabel}
+              {#if currentPage.kind === "runtime-step"}
+                {m.flow_run_input_progress({
+                  n: String(currentInputPosition),
+                  total: String(runtimeInputTotal)
+                })}
+              {:else}
+                {progressLabel}
+              {/if}
             </p>
             <h3
               class="text-primary text-base font-semibold tracking-tight sm:text-lg"
               data-wizard-heading
               tabindex="-1"
             >
-              {currentPage.title}
+              {#if currentPage.kind === "runtime-step"}
+                {m.flow_run_input_for_step({
+                  order: String(currentPage.stepOrder),
+                  name: currentPage.stepLabel
+                })}
+              {:else}
+                {currentPage.title}
+              {/if}
             </h3>
             <p class="text-secondary mt-1 text-sm leading-relaxed">
               {currentPage.description}
@@ -1319,10 +1345,20 @@
             {/if}
           </div>
 
-          <div class="hidden flex-grow sm:order-2 sm:block"></div>
+          <div class="order-1 flex-grow sm:order-2">
+            {#if currentPage?.kind !== "review" && !canGoNext && nextDisabledReason}
+              <p
+                class="text-muted text-sm leading-relaxed sm:text-right"
+                role="status"
+                aria-live="polite"
+              >
+                {nextDisabledReason}
+              </p>
+            {/if}
+          </div>
 
           <div
-            class="order-1 flex w-full flex-col gap-2 sm:order-3 sm:w-auto sm:flex-row sm:items-center"
+            class="order-2 flex w-full flex-col gap-2 sm:order-3 sm:w-auto sm:flex-row sm:items-center"
           >
             {#if currentPage && currentPage.kind === "review"}
               <Button
@@ -1339,7 +1375,7 @@
               <Button
                 onclick={goToNextPage}
                 disabled={!canGoNext}
-                title={!canGoNext ? getDisabledNextReason() : undefined}
+                title={nextDisabledReason}
                 class="order-1 w-full min-w-[7rem] sm:order-3 sm:w-auto"
               >
                 {labels.next}
