@@ -729,6 +729,7 @@ def test_build_retry_feedback_keeps_create_outline_rules_out_of_edit_mode() -> N
         "Every steps[] item must be one complete semantic intent step"
         in create_feedback
     )
+    assert "backend compiles those mechanics" not in create_feedback
     assert "Every steps[] name must be unique case-insensitively" in create_feedback
     assert "semantic intent step" not in edit_feedback
     assert "unique case-insensitively" not in edit_feedback

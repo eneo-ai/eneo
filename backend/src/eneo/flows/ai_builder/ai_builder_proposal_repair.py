@@ -380,7 +380,6 @@ def _build_retry_feedback(
         intent_rules = [
             "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
             "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_form_fields.",
-            "Do not emit input_source, input_type, input_bindings, output_mode, refs, ids, hashes, or timestamps; backend compiles those mechanics.",
         ]
         if "duplicate_step_name" in failure_codes:
             intent_rules.append(
