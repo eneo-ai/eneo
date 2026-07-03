@@ -1,0 +1,8 @@
+started_at=2026-07-03T08:14:24Z
+model=gpt-5.5
+reasoning_effort=xhigh
+sandbox=read-only
+finished_at=2026-07-03T08:25:09Z
+exit_code=0
+output=fablereview/2026-07-03-eneo-flows-ai-builder/codex-verify-fable-06-runtime-report.md
+log=fablereview/2026-07-03-eneo-flows-ai-builder/codex-verify-fable-06-runtime-report.log
