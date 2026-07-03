@@ -22,6 +22,7 @@ def _policy() -> FlowRuntimeHealthPolicy:
         review_expiry_unhealthy_after_seconds=120,
         terminal_integrity_lookback=timedelta(hours=24),
         audit_outbox_backlog_grace_seconds=300,
+        webhook_outbox_backlog_grace_seconds=300,
     )
 
 
@@ -187,6 +188,49 @@ def test_audit_outbox_dead_letters_are_unhealthy() -> None:
     assert response.status_flags == [FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS]
     assert response.audit_outbox.dead_lettered_count == 1
     assert response.audit_outbox.oldest_dead_lettered_age_seconds == 180
+
+
+def test_webhook_outbox_backlog_and_expired_claims_degrade_health() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            webhook_outbox_pending_count=2,
+            webhook_outbox_delivery_backlog_count=1,
+            oldest_webhook_outbox_delivery_backlog_created_at=datetime(
+                2026, 5, 2, 11, 50, tzinfo=timezone.utc
+            ),
+            webhook_outbox_expired_claim_count=1,
+            oldest_webhook_outbox_expired_claim_expires_at=datetime(
+                2026, 5, 2, 11, 58, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.DEGRADED
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DELIVERY_BACKLOG,
+        FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_EXPIRED_CLAIMS,
+    ]
+    assert response.webhook_outbox.pending_count == 2
+    assert response.webhook_outbox.delivery_backlog_count == 1
+    assert response.webhook_outbox.expired_claim_count == 1
+    assert response.webhook_outbox.oldest_delivery_backlog_age_seconds == 600
+    assert response.webhook_outbox.oldest_expired_claim_age_seconds == 120
+
+
+def test_webhook_outbox_dead_letters_are_unhealthy() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            webhook_outbox_dead_lettered_count=1,
+            oldest_webhook_outbox_dead_lettered_at=datetime(
+                2026, 5, 2, 11, 57, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS]
+    assert response.webhook_outbox.dead_lettered_count == 1
+    assert response.webhook_outbox.oldest_dead_lettered_age_seconds == 180
 
 
 def test_db_probe_failure_makes_health_unknown() -> None:

@@ -13,6 +13,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
+    FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -23,6 +24,9 @@ from eneo.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     flow_stale_running_reconcile_after_seconds,
     flow_stale_running_unhealthy_after_seconds,
+)
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
 )
 from eneo.flows.enums import (
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
@@ -55,6 +59,9 @@ class FlowRuntimeHealthFlag(str, Enum):
     TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS = "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
     AUDIT_OUTBOX_DELIVERY_BACKLOG = "AUDIT_OUTBOX_DELIVERY_BACKLOG"
     AUDIT_OUTBOX_DEAD_LETTERS = "AUDIT_OUTBOX_DEAD_LETTERS"
+    WEBHOOK_OUTBOX_DELIVERY_BACKLOG = "WEBHOOK_OUTBOX_DELIVERY_BACKLOG"
+    WEBHOOK_OUTBOX_EXPIRED_CLAIMS = "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
+    WEBHOOK_OUTBOX_DEAD_LETTERS = "WEBHOOK_OUTBOX_DEAD_LETTERS"
 
 
 class FlowRuntimeProbeFailure(str, Enum):
@@ -70,6 +77,7 @@ class FlowRuntimeHealthPolicy:
     review_expiry_unhealthy_after_seconds: int
     terminal_integrity_lookback: timedelta
     audit_outbox_backlog_grace_seconds: int
+    webhook_outbox_backlog_grace_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +100,13 @@ class FlowRuntimeHealthSnapshot:
     oldest_audit_outbox_delivery_backlog_created_at: datetime | None = None
     audit_outbox_dead_lettered_count: int = 0
     oldest_audit_outbox_dead_lettered_at: datetime | None = None
+    webhook_outbox_pending_count: int = 0
+    webhook_outbox_delivery_backlog_count: int = 0
+    oldest_webhook_outbox_delivery_backlog_created_at: datetime | None = None
+    webhook_outbox_expired_claim_count: int = 0
+    oldest_webhook_outbox_expired_claim_expires_at: datetime | None = None
+    webhook_outbox_dead_lettered_count: int = 0
+    oldest_webhook_outbox_dead_lettered_at: datetime | None = None
 
 
 class FlowRuntimeProbe(BaseModel):
@@ -131,6 +146,16 @@ class FlowRuntimeAuditOutboxSummary(BaseModel):
     oldest_dead_lettered_age_seconds: int | None = None
 
 
+class FlowRuntimeWebhookOutboxSummary(BaseModel):
+    pending_count: int = 0
+    delivery_backlog_count: int = 0
+    expired_claim_count: int = 0
+    dead_lettered_count: int = 0
+    oldest_delivery_backlog_age_seconds: int | None = None
+    oldest_expired_claim_age_seconds: int | None = None
+    oldest_dead_lettered_age_seconds: int | None = None
+
+
 class FlowRuntimeHealthThresholds(BaseModel):
     stale_queued_after_seconds: int
     stale_running_after_seconds: int
@@ -138,6 +163,7 @@ class FlowRuntimeHealthThresholds(BaseModel):
     review_expiry_unhealthy_after_seconds: int
     terminal_integrity_lookback_hours: int
     audit_outbox_backlog_grace_seconds: int
+    webhook_outbox_backlog_grace_seconds: int
 
 
 class FlowRuntimeHealthResponse(BaseModel):
@@ -155,6 +181,9 @@ class FlowRuntimeHealthResponse(BaseModel):
     )
     audit_outbox: FlowRuntimeAuditOutboxSummary = Field(
         default_factory=FlowRuntimeAuditOutboxSummary
+    )
+    webhook_outbox: FlowRuntimeWebhookOutboxSummary = Field(
+        default_factory=FlowRuntimeWebhookOutboxSummary
     )
     thresholds: FlowRuntimeHealthThresholds
 
@@ -175,6 +204,7 @@ def build_flow_runtime_health_policy(
         ),
         terminal_integrity_lookback=timedelta(hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS),
         audit_outbox_backlog_grace_seconds=FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
+        webhook_outbox_backlog_grace_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
     )
 
 
@@ -189,6 +219,9 @@ async def load_flow_runtime_health_snapshot(
     terminal_integrity_after = now - policy.terminal_integrity_lookback
     audit_outbox_backlog_before = now - timedelta(
         seconds=policy.audit_outbox_backlog_grace_seconds
+    )
+    webhook_outbox_backlog_before = now - timedelta(
+        seconds=policy.webhook_outbox_backlog_grace_seconds
     )
 
     status_counts = await _load_run_status_counts(session)
@@ -220,6 +253,11 @@ async def load_flow_runtime_health_snapshot(
         session=session,
         backlog_before=audit_outbox_backlog_before,
     )
+    webhook_outbox = await _load_webhook_outbox_summary(
+        session=session,
+        backlog_before=webhook_outbox_backlog_before,
+        now=now,
+    )
 
     return FlowRuntimeHealthSnapshot(
         queued_count=status_counts.get(FlowRunStatus.QUEUED.value, 0),
@@ -250,6 +288,17 @@ async def load_flow_runtime_health_snapshot(
         ),
         audit_outbox_dead_lettered_count=audit_outbox.dead_lettered_count,
         oldest_audit_outbox_dead_lettered_at=(audit_outbox.oldest_dead_lettered_at),
+        webhook_outbox_pending_count=webhook_outbox.pending_count,
+        webhook_outbox_delivery_backlog_count=webhook_outbox.delivery_backlog_count,
+        oldest_webhook_outbox_delivery_backlog_created_at=(
+            webhook_outbox.oldest_backlog_created_at
+        ),
+        webhook_outbox_expired_claim_count=webhook_outbox.expired_claim_count,
+        oldest_webhook_outbox_expired_claim_expires_at=(
+            webhook_outbox.oldest_expired_claim_expires_at
+        ),
+        webhook_outbox_dead_lettered_count=webhook_outbox.dead_lettered_count,
+        oldest_webhook_outbox_dead_lettered_at=(webhook_outbox.oldest_dead_lettered_at),
     )
 
 
@@ -280,6 +329,18 @@ def classify_flow_runtime_health(
     audit_dead_letter_age = _age_seconds(
         now,
         snapshot.oldest_audit_outbox_dead_lettered_at,
+    )
+    webhook_backlog_age = _age_seconds(
+        now,
+        snapshot.oldest_webhook_outbox_delivery_backlog_created_at,
+    )
+    webhook_expired_claim_age = _age_seconds(
+        now,
+        snapshot.oldest_webhook_outbox_expired_claim_expires_at,
+    )
+    webhook_dead_letter_age = _age_seconds(
+        now,
+        snapshot.oldest_webhook_outbox_dead_lettered_at,
     )
     status_flags = _flow_runtime_health_flags(
         snapshot=snapshot,
@@ -330,6 +391,15 @@ def classify_flow_runtime_health(
             oldest_delivery_backlog_age_seconds=audit_backlog_age,
             oldest_dead_lettered_age_seconds=audit_dead_letter_age,
         ),
+        webhook_outbox=FlowRuntimeWebhookOutboxSummary(
+            pending_count=snapshot.webhook_outbox_pending_count,
+            delivery_backlog_count=snapshot.webhook_outbox_delivery_backlog_count,
+            expired_claim_count=snapshot.webhook_outbox_expired_claim_count,
+            dead_lettered_count=snapshot.webhook_outbox_dead_lettered_count,
+            oldest_delivery_backlog_age_seconds=webhook_backlog_age,
+            oldest_expired_claim_age_seconds=webhook_expired_claim_age,
+            oldest_dead_lettered_age_seconds=webhook_dead_letter_age,
+        ),
         thresholds=FlowRuntimeHealthThresholds(
             stale_queued_after_seconds=policy.stale_queued_after_seconds,
             stale_running_after_seconds=policy.stale_running_after_seconds,
@@ -342,6 +412,9 @@ def classify_flow_runtime_health(
             terminal_integrity_lookback_hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS,
             audit_outbox_backlog_grace_seconds=(
                 policy.audit_outbox_backlog_grace_seconds
+            ),
+            webhook_outbox_backlog_grace_seconds=(
+                policy.webhook_outbox_backlog_grace_seconds
             ),
         ),
     )
@@ -383,6 +456,17 @@ class _AuditOutboxSummary:
     pending_count: int
     delivery_backlog_count: int
     oldest_backlog_created_at: datetime | None
+    dead_lettered_count: int
+    oldest_dead_lettered_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class _WebhookOutboxSummary:
+    pending_count: int
+    delivery_backlog_count: int
+    oldest_backlog_created_at: datetime | None
+    expired_claim_count: int
+    oldest_expired_claim_expires_at: datetime | None
     dead_lettered_count: int
     oldest_dead_lettered_at: datetime | None
 
@@ -561,6 +645,86 @@ async def _load_audit_outbox_summary(
     )
 
 
+async def _load_webhook_outbox_summary(
+    *,
+    session: AsyncSession,
+    backlog_before: datetime,
+    now: datetime,
+) -> _WebhookOutboxSummary:
+    pending_count = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(FlowRunWebhookDeliveries)
+        .where(
+            FlowRunWebhookDeliveries.delivery_status
+            == FlowOutboxDeliveryStatus.PENDING.value
+        )
+    )
+    backlog_count, oldest_backlog_created_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.min(FlowRunWebhookDeliveries.created_at),
+            )
+            .select_from(FlowRunWebhookDeliveries)
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
+            .where(
+                sa.or_(
+                    FlowRunWebhookDeliveries.next_delivery_at.is_(None),
+                    FlowRunWebhookDeliveries.next_delivery_at <= backlog_before,
+                )
+            )
+            .where(
+                sa.or_(
+                    FlowRunWebhookDeliveries.claim_token.is_(None),
+                    FlowRunWebhookDeliveries.claim_expires_at <= backlog_before,
+                )
+            )
+        )
+    ).one()
+    expired_claim_count, oldest_expired_claim_expires_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.min(FlowRunWebhookDeliveries.claim_expires_at),
+            )
+            .select_from(FlowRunWebhookDeliveries)
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
+            .where(FlowRunWebhookDeliveries.claim_token.is_not(None))
+            .where(FlowRunWebhookDeliveries.claim_expires_at <= now)
+        )
+    ).one()
+    dead_lettered_count, oldest_dead_lettered_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.min(FlowRunWebhookDeliveries.dead_lettered_at),
+            )
+            .select_from(FlowRunWebhookDeliveries)
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+            )
+        )
+    ).one()
+    return _WebhookOutboxSummary(
+        pending_count=int(pending_count or 0),
+        delivery_backlog_count=int(backlog_count or 0),
+        oldest_backlog_created_at=_normalize_datetime(oldest_backlog_created_at),
+        expired_claim_count=int(expired_claim_count or 0),
+        oldest_expired_claim_expires_at=_normalize_datetime(
+            oldest_expired_claim_expires_at
+        ),
+        dead_lettered_count=int(dead_lettered_count or 0),
+        oldest_dead_lettered_at=_normalize_datetime(oldest_dead_lettered_at),
+    )
+
+
 def _flow_runtime_health_flags(
     *,
     snapshot: FlowRuntimeHealthSnapshot,
@@ -596,6 +760,12 @@ def _flow_runtime_health_flags(
         flags.append(FlowRuntimeHealthFlag.AUDIT_OUTBOX_DELIVERY_BACKLOG)
     if snapshot.audit_outbox_dead_lettered_count > 0:
         flags.append(FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS)
+    if snapshot.webhook_outbox_delivery_backlog_count > 0:
+        flags.append(FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DELIVERY_BACKLOG)
+    if snapshot.webhook_outbox_expired_claim_count > 0:
+        flags.append(FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_EXPIRED_CLAIMS)
+    if snapshot.webhook_outbox_dead_lettered_count > 0:
+        flags.append(FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS)
     return flags
 
 
@@ -612,6 +782,7 @@ def _flow_runtime_health_status(
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS,
         FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS,
+        FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS,
     }
     if any(flag in unhealthy_flags for flag in status_flags):
         return FlowRuntimeHealthStatus.UNHEALTHY
@@ -623,8 +794,8 @@ def _flow_runtime_health_status(
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
         FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB signals are healthy.",
-        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or audit outbox signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag, review expiry lag, terminal-run integrity issues, or audit dead letters.",
+        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or outbox signals.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag, review expiry lag, terminal-run integrity issues, or outbox dead letters.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

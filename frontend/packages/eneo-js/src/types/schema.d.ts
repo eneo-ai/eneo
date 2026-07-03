@@ -8509,7 +8509,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return Flow runtime readiness signals derived from persisted run, review, data-integrity, and audit-outbox state.
+     * @description Return Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, and webhook-outbox state.
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -17694,7 +17694,10 @@ export interface components {
       | "TERMINAL_RUNS_WITH_OPEN_ATTEMPTS"
       | "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
       | "AUDIT_OUTBOX_DELIVERY_BACKLOG"
-      | "AUDIT_OUTBOX_DEAD_LETTERS";
+      | "AUDIT_OUTBOX_DEAD_LETTERS"
+      | "WEBHOOK_OUTBOX_DELIVERY_BACKLOG"
+      | "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
+      | "WEBHOOK_OUTBOX_DEAD_LETTERS";
     /** FlowRuntimeHealthResponse */
     FlowRuntimeHealthResponse: {
       status: components["schemas"]["FlowRuntimeHealthStatus"];
@@ -17712,6 +17715,7 @@ export interface components {
       review?: components["schemas"]["FlowRuntimeReviewSummary"];
       data_integrity?: components["schemas"]["FlowRuntimeDataIntegrity"];
       audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
+      webhook_outbox?: components["schemas"]["FlowRuntimeWebhookOutboxSummary"];
       thresholds: components["schemas"]["FlowRuntimeHealthThresholds"];
     };
     /**
@@ -17733,6 +17737,8 @@ export interface components {
       terminal_integrity_lookback_hours: number;
       /** Audit Outbox Backlog Grace Seconds */
       audit_outbox_backlog_grace_seconds: number;
+      /** Webhook Outbox Backlog Grace Seconds */
+      webhook_outbox_backlog_grace_seconds: number;
     };
     /** FlowRuntimeInputContractPublic */
     FlowRuntimeInputContractPublic: {
@@ -18020,6 +18026,35 @@ export interface components {
        * @description Timeout clients should allow after the latest upload progress event.
        */
       idle_timeout_seconds: number;
+    };
+    /** FlowRuntimeWebhookOutboxSummary */
+    FlowRuntimeWebhookOutboxSummary: {
+      /**
+       * Pending Count
+       * @default 0
+       */
+      pending_count?: number;
+      /**
+       * Delivery Backlog Count
+       * @default 0
+       */
+      delivery_backlog_count?: number;
+      /**
+       * Expired Claim Count
+       * @default 0
+       */
+      expired_claim_count?: number;
+      /**
+       * Dead Lettered Count
+       * @default 0
+       */
+      dead_lettered_count?: number;
+      /** Oldest Delivery Backlog Age Seconds */
+      oldest_delivery_backlog_age_seconds?: number | null;
+      /** Oldest Expired Claim Age Seconds */
+      oldest_expired_claim_age_seconds?: number | null;
+      /** Oldest Dead Lettered Age Seconds */
+      oldest_dead_lettered_age_seconds?: number | null;
     };
     /** FlowServicePrincipalActorPublic */
     FlowServicePrincipalActorPublic: {

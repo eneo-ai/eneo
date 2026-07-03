@@ -702,7 +702,7 @@ def get_application():
         response_model=FlowRuntimeHealthResponse,
         description=(
             "Return Flow runtime readiness signals derived from persisted run, review, "
-            "data-integrity, and audit-outbox state."
+            "data-integrity, audit-outbox, and webhook-outbox state."
         ),
         responses={
             200: {

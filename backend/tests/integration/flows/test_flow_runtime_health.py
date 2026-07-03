@@ -11,6 +11,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
+    FlowRunWebhookDeliveries,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowRunStatus
@@ -36,6 +37,7 @@ def _policy() -> FlowRuntimeHealthPolicy:
         review_expiry_unhealthy_after_seconds=120,
         terminal_integrity_lookback=timedelta(hours=24),
         audit_outbox_backlog_grace_seconds=300,
+        webhook_outbox_backlog_grace_seconds=300,
     )
 
 
@@ -152,6 +154,31 @@ async def _create_run(
             }
         ],
     )
+
+
+async def _create_webhook_delivery_attempt(
+    *,
+    run_repo: FlowRunRepository,
+    flow: Flow,
+    admin_user,
+    case: str,
+):
+    run = await _create_run(
+        run_repo=run_repo,
+        flow=flow,
+        admin_user=admin_user,
+        case=case,
+    )
+    await run_repo.create_or_get_attempt_started(
+        run_id=run.id,
+        flow_id=flow.id,
+        tenant_id=admin_user.tenant_id,
+        step_id=flow.steps[0].id,
+        step_order=1,
+        attempt_no=1,
+        celery_task_id=f"runtime-health-webhook-{case}",
+    )
+    return run
 
 
 @pytest.mark.asyncio
@@ -458,3 +485,125 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
     assert response.audit_outbox.dead_lettered_count == 1
     assert response.audit_outbox.oldest_delivery_backlog_age_seconds == 600
     assert response.audit_outbox.oldest_dead_lettered_age_seconds == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_runtime_health_snapshot_reports_webhook_outbox_delivery_state(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        flow = await _create_published_flow(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        policy = _policy()
+        now = datetime.now(timezone.utc)
+        pending_run = await _create_webhook_delivery_attempt(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="pending-webhook-outbox",
+        )
+        expired_claim_run = await _create_webhook_delivery_attempt(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="expired-claim-webhook-outbox",
+        )
+        dead_lettered_run = await _create_webhook_delivery_attempt(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="dead-lettered-webhook-outbox",
+        )
+        await session.execute(
+            sa.insert(FlowRunWebhookDeliveries).values(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=pending_run.id,
+                step_id=flow.steps[0].id,
+                step_order=1,
+                attempt_no=1,
+                idempotency_key=f"webhook-pending-{uuid4()}",
+                payload_ref="runtime-health-webhook-pending",
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                delivery_attempts=0,
+                next_delivery_at=now
+                - timedelta(seconds=policy.webhook_outbox_backlog_grace_seconds + 5),
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+        await session.execute(
+            sa.insert(FlowRunWebhookDeliveries).values(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=expired_claim_run.id,
+                step_id=flow.steps[0].id,
+                step_order=1,
+                attempt_no=1,
+                idempotency_key=f"webhook-expired-claim-{uuid4()}",
+                payload_ref="runtime-health-webhook-expired-claim",
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                delivery_attempts=1,
+                next_delivery_at=now,
+                claim_token=uuid4(),
+                claimed_at=now - timedelta(minutes=10),
+                claim_expires_at=now - timedelta(minutes=2),
+                created_at=now - timedelta(minutes=9),
+            )
+        )
+        await session.execute(
+            sa.insert(FlowRunWebhookDeliveries).values(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=dead_lettered_run.id,
+                step_id=flow.steps[0].id,
+                step_order=1,
+                attempt_no=1,
+                idempotency_key=f"webhook-dead-lettered-{uuid4()}",
+                payload_ref="runtime-health-webhook-dead-lettered",
+                delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+                delivery_attempts=5,
+                next_delivery_at=None,
+                dead_lettered_at=now - timedelta(minutes=3),
+                delivery_last_error="RuntimeError: webhook failed",
+                created_at=now - timedelta(minutes=8),
+            )
+        )
+        await session.flush()
+
+        snapshot = await load_flow_runtime_health_snapshot(
+            session=session,
+            now=now,
+            policy=policy,
+        )
+        response = classify_flow_runtime_health(
+            snapshot=snapshot,
+            now=now,
+            policy=policy,
+            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+        )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DELIVERY_BACKLOG,
+        FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_EXPIRED_CLAIMS,
+        FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS,
+    ]
+    assert response.webhook_outbox.pending_count == 2
+    assert response.webhook_outbox.delivery_backlog_count == 1
+    assert response.webhook_outbox.expired_claim_count == 1
+    assert response.webhook_outbox.dead_lettered_count == 1
+    assert response.webhook_outbox.oldest_delivery_backlog_age_seconds == 600
+    assert response.webhook_outbox.oldest_expired_claim_age_seconds == 120
+    assert response.webhook_outbox.oldest_dead_lettered_age_seconds == 180
