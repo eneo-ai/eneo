@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.main.exceptions import BadRequestException
 
@@ -100,6 +101,42 @@ def test_parse_runtime_steps_rejects_non_object_webhook_headers():
                 )
             )
         )
+
+
+def test_parse_runtime_steps_rejects_http_post_output_before_last_step():
+    with pytest.raises(BadRequestException, match="last step") as exc_info:
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    step_order=1,
+                    output_mode="http_post",
+                    output_config={"url": "https://example.org/hook"},
+                ),
+                _step_snapshot(step_order=2),
+            )
+        )
+
+    assert (
+        exc_info.value.code
+        == FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL.value
+    )
+    assert exc_info.value.context == {"step_order": 1}
+
+
+def test_parse_runtime_steps_allows_http_post_output_on_last_step():
+    parsed = parse_runtime_steps(
+        _definition(
+            _step_snapshot(step_order=1),
+            _step_snapshot(
+                step_order=2,
+                input_source="previous_step",
+                output_mode="http_post",
+                output_config={"url": "https://example.org/hook"},
+            ),
+        )
+    )
+
+    assert parsed[1].output_mode == "http_post"
 
 
 def test_parse_runtime_steps_rejects_all_previous_steps_json_input():

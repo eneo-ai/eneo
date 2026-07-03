@@ -102,6 +102,12 @@ ALLOWED_OUTPUT_MODE_BRANCHES = frozenset(
         _OutputAxisBranch(
             axis="output_mode",
             relative_path="step_definition_parser.py",
+            function="_validate_http_post_output_is_terminal",
+            expression="step.output_mode == 'http_post'",
+        ),
+        _OutputAxisBranch(
+            axis="output_mode",
+            relative_path="step_definition_parser.py",
             function="parse_runtime_steps",
             expression="output_fields.output_mode == 'transcribe_only'",
         ),
@@ -141,7 +147,7 @@ ALLOWED_OUTPUT_TYPE_BRANCHES = frozenset(
         ),
     }
 )
-MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 6
+MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 7
 MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE = 3
 ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS = frozenset(
     {

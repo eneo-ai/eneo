@@ -10,6 +10,7 @@ from eneo.database.tables.flow_tables import (
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
@@ -538,7 +539,20 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
     expected_orders = list(range(1, len(parsed) + 1))
     if step_orders != expected_orders:
         raise BadRequestException("Step order must be contiguous and start at 1.")
+    _validate_http_post_output_is_terminal(parsed)
     chain_violation = find_first_step_chain_violation(parsed)
     if chain_violation is not None:
         raise BadRequestException(chain_violation.message)
     return parsed
+
+
+def _validate_http_post_output_is_terminal(steps: Sequence[RuntimeStep]) -> None:
+    terminal_step_order = len(steps)
+    for step in steps:
+        if step.output_mode == "http_post" and step.step_order != terminal_step_order:
+            raise BadRequestException(
+                f"Step {step.step_order}: output_mode 'http_post' is only supported "
+                "on the last step.",
+                code=FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL.value,
+                context={"step_order": step.step_order},
+            )
