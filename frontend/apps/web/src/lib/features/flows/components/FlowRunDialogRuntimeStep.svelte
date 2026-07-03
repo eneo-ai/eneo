@@ -299,8 +299,7 @@
         {/if}
       {:else}
         <IconUploadCloud class="text-muted size-7" />
-        <span class="text-secondary text-sm">{m.upload_file()}</span>
-        <span class="text-muted text-sm">{labels.runtimeUploadHint}</span>
+        <span class="text-secondary text-sm">{labels.runtimeUploadHint}</span>
       {/if}
     </div>
 
