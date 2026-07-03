@@ -23,6 +23,12 @@ import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTyp
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
+import {
+  getFlowWizardMetadata,
+  getUnifiedFlowSaveStatus,
+  type FlowWizardMetadata
+} from "./flowEditorMetadata";
+import { isFlowRetentionDays, parseFlowRetentionDaysInput } from "./flowEditorRetention";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -31,47 +37,6 @@ type FlowEditorInitData = {
 };
 
 type FlowMetadataJson = NonNullable<Flow["metadata_json"]>;
-type FlowWizardMetadata = {
-  transcription_enabled?: boolean;
-  transcription_model?: { id: string } | null;
-  transcription_language?: string;
-};
-type FlowSaveStatus = "saved" | "saving" | "unsaved";
-const FLOW_RETENTION_MIN_DAYS = 1;
-const FLOW_RETENTION_MAX_DAYS = 2555;
-
-function getFlowWizardMetadata(
-  metadata: Flow["metadata_json"] | null | undefined
-): FlowWizardMetadata {
-  const wizard = metadata?.wizard;
-  if (typeof wizard === "object" && wizard !== null && !Array.isArray(wizard)) {
-    return wizard as FlowWizardMetadata;
-  }
-  return {};
-}
-
-function getUnifiedFlowSaveStatus(
-  flowStatus: FlowSaveStatus,
-  assistantStatus: "idle" | "pending" | "saving" | "error"
-): FlowSaveStatus {
-  if (assistantStatus === "saving" || flowStatus === "saving") return "saving";
-  if (assistantStatus === "error" || assistantStatus === "pending") return "unsaved";
-  if (flowStatus === "unsaved") return "unsaved";
-  return "saved";
-}
-
-function isFlowRetentionDays(value: number): boolean {
-  return (
-    Number.isInteger(value) && value >= FLOW_RETENTION_MIN_DAYS && value <= FLOW_RETENTION_MAX_DAYS
-  );
-}
-
-function parseFlowRetentionDaysInput(value: string): number | null | undefined {
-  const rawValue = value.trim();
-  if (rawValue === "") return null;
-  if (!/^\d+$/.test(rawValue)) return undefined;
-  return Number(rawValue);
-}
 
 function stripTemporaryStepId(step: FlowStep): FlowStep {
   if (!step.id?.startsWith("_temp_")) return step;

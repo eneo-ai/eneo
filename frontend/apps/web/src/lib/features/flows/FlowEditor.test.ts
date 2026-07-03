@@ -924,6 +924,48 @@ describe("FlowEditor save flushing", () => {
       editor.destroy();
     }
   });
+
+  it("reconciles the active temporary step id to the real backend id after save", async () => {
+    // The backend assigns a real id to the temp step at the same step_order; the
+    // editor re-points activeStepId from the temp id to that real id after save.
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...(flow as Flow),
+      ...(update as Partial<Flow>),
+      steps: [
+        makeStep(1),
+        makeStep(2, {
+          id: "step-real-2",
+          assistant_id: "assistant-2",
+          input_source: "previous_step"
+        })
+      ]
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      const persistedStep = get(editor.state.update).steps[0];
+      const tempStep = makeStep(2, {
+        id: "_temp_new",
+        assistant_id: "assistant-2",
+        input_source: "previous_step"
+      });
+      editor.state.update.update((resource) => ({
+        ...resource,
+        steps: [persistedStep, tempStep]
+      }));
+      editor.selectStep("_temp_new");
+      expect(get(editor.state.activeStepId)).toBe("_temp_new");
+
+      await editor.flushFlowSaves();
+
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      expect(get(editor.state.activeStepId)).toBe("step-real-2");
+    } finally {
+      editor.destroy();
+    }
+  });
 });
 
 function renderEditorMetadata({
