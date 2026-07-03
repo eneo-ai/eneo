@@ -96,9 +96,9 @@
       <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
         {m.flow_transcribe_only_title()}
       </Alert.Title>
-      <Alert.Description class="text-accent-stronger/80 flex flex-col gap-1.5">
+      <Alert.Description class="text-accent-stronger flex flex-col gap-1.5">
         <span class="text-[0.8125rem] leading-relaxed">{m.flow_transcribe_only_description()}</span>
-        <span class="text-accent-stronger/75 text-[0.8125rem] leading-relaxed"
+        <span class="text-accent-stronger text-[0.8125rem] leading-relaxed"
           >{m.flow_transcribe_only_next_step_hint()}</span
         >
       </Alert.Description>
@@ -169,9 +169,6 @@
               <p class="text-primary text-sm font-medium">
                 {stepUxCopy.instructionsHelperTitle}
               </p>
-              <p class="text-muted mt-1 text-xs leading-relaxed">
-                {stepUxCopy.instructionsHelperBody}
-              </p>
             </div>
             {#if canRevealInputTemplate && !showInputTemplate}
               <div
@@ -199,9 +196,7 @@
           focusOnMount={focusInstruction}
           invalid={instructionMissing}
           ariaDescribedby={instructionMissing ? "flow-step-instruction-missing" : undefined}
-          placeholder={isAdvancedMode
-            ? stepUxCopy.instructionsPlaceholder
-            : stepUxCopy.instructionsPlaceholder}
+          placeholder={stepUxCopy.instructionsPlaceholder}
           minHeight={isAdvancedMode ? 160 : 132}
           {steps}
           currentStepOrder={step.step_order}

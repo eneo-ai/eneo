@@ -128,7 +128,7 @@
   <div
     class="border-default bg-secondary/30 flex items-center justify-between border-b px-3.5 py-2.5"
   >
-    <h3 class="text-secondary text-[11px] leading-none font-semibold tracking-[0.06em] uppercase">
+    <h3 class="text-secondary text-[0.8125rem] font-medium">
       {m.flow_steps()}
     </h3>
     <span

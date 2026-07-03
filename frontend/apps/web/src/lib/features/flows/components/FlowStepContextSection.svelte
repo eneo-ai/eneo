@@ -141,7 +141,7 @@
       <Alert.Title class="text-accent-stronger text-sm font-medium">
         {m.flow_step_context_runtime_files_title()}
       </Alert.Title>
-      <Alert.Description class="text-accent-stronger/90 mt-1 text-xs leading-relaxed">
+      <Alert.Description class="text-accent-stronger mt-1 text-xs leading-relaxed">
         {m.flow_step_context_runtime_files_body()}
       </Alert.Description>
     </Alert.Root>

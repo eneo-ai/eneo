@@ -135,7 +135,7 @@
           <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
             {m.flow_template_fill_title()}
           </Alert.Title>
-          <Alert.Description class="text-accent-stronger/90 text-[0.8125rem] leading-relaxed">
+          <Alert.Description class="text-accent-stronger text-[0.8125rem] leading-relaxed">
             {m.flow_template_fill_desc()}
           </Alert.Description>
         </div>
@@ -522,7 +522,7 @@
       <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
         {m.flow_template_fill_title()}
       </Alert.Title>
-      <Alert.Description class="text-accent-stronger/90 mt-1.5 text-[0.8125rem] leading-relaxed">
+      <Alert.Description class="text-accent-stronger mt-1.5 text-[0.8125rem] leading-relaxed">
         {m.flow_template_fill_desc()}
       </Alert.Description>
     </Alert.Root>

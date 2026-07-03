@@ -122,7 +122,7 @@
           <Alert.Title class="text-accent-stronger text-sm font-medium">
             {m.flow_template_fill_title()}
           </Alert.Title>
-          <Alert.Description class="text-accent-stronger/80 text-xs leading-relaxed">
+          <Alert.Description class="text-accent-stronger text-xs leading-relaxed">
             {m.flow_template_fill_summary()}
           </Alert.Description>
         </div>

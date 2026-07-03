@@ -51,5 +51,8 @@
         </Select.Group>
       </Select.Content>
     </Select.Root>
+    <p class="text-muted mt-2 text-xs leading-relaxed">
+      {m.flow_step_security_classification_help()}
+    </p>
   </div>
 </FlowStepSection>

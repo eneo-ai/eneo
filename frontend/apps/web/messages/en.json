@@ -4516,6 +4516,7 @@
   "flow_step_output_type": "Output type",
   "flow_step_prompt": "Prompt",
   "flow_step_review_policy": "Review after this step",
+  "flow_step_security_classification_help": "The level controls which models and tools this step may use. Inherit follows the flow's setting.",
   "flow_step_review_policy_desc": "Choose whether the run should wait for human review after this step.",
   "flow_step_review_policy_edit": "Review and edit output",
   "flow_step_review_policy_help": "After review, downstream steps use the approved or edited output.",
