@@ -19,6 +19,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
@@ -325,8 +326,8 @@
     </header>
 
     <div class="overflow-y-auto px-5 py-5 sm:px-6">
-      <input
-        bind:this={fileInputElement}
+      <Input
+        bind:ref={fileInputElement}
         id="flow-package-file-input"
         type="file"
         accept={FILE_ACCEPT}

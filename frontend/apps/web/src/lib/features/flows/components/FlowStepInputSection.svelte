@@ -7,6 +7,8 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { IconMicrophone } from "@eneo/icons/microphone";
   import {
@@ -279,14 +281,15 @@
             <label class="text-sm font-medium" for="runtime-input-description">
               {m.flow_runtime_input_instruction_label()}
             </label>
-            <textarea
+            <Textarea
               id="runtime-input-description"
-              class="border-default bg-primary ring-default min-h-[88px] w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+              class="min-h-[88px]"
               placeholder={m.flow_runtime_input_instruction_placeholder()}
               value={runtimeInputConfig.description}
               disabled={isPublished}
               oninput={(event) =>
-                updateRuntimeInputSettings({ description: event.currentTarget.value })}></textarea>
+                updateRuntimeInputSettings({ description: event.currentTarget.value })}
+            />
             <p class="text-muted text-xs leading-relaxed">
               {m.flow_runtime_input_instruction_hint()}
             </p>
@@ -313,9 +316,8 @@
                     <label class="text-sm font-medium" for="runtime-input-label"
                       >{m.flow_runtime_input_heading_label()}</label
                     >
-                    <input
+                    <Input
                       id="runtime-input-label"
-                      class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                       type="text"
                       placeholder={m.flow_runtime_input_heading_placeholder()}
                       value={runtimeInputConfig.label}
@@ -329,9 +331,8 @@
                     <label class="text-sm font-medium" for="runtime-input-max-files">
                       {m.flow_input_limits_max_files_title()}
                     </label>
-                    <input
+                    <Input
                       id="runtime-input-max-files"
-                      class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                       type="number"
                       min="1"
                       inputmode="numeric"
@@ -380,9 +381,9 @@
                           .join(", ")}
                       </p>
                     {/if}
-                    <input
+                    <Input
                       id="runtime-input-mimetypes"
-                      class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-xs shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                      class="text-xs"
                       type="text"
                       placeholder={m.flow_runtime_input_mimetypes_custom_placeholder()}
                       value={runtimeInputConfig.accepted_mimetypes_override

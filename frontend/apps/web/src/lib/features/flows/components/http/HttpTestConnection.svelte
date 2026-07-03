@@ -1,6 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import type {
     FlowHttpRequestPreview,
@@ -102,13 +103,14 @@
   {#if hasTemplateMarkers}
     <label class="flex flex-col gap-1.5">
       <span class="text-xs font-medium">{m.http_test_variables_label()}</span>
-      <textarea
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-xs shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <Textarea
+        class="min-h-[80px] font-mono text-xs"
         aria-label={m.http_test_variables_label()}
         value={testVariablesText}
         disabled={isPublished || testing}
         placeholder={m.http_test_variables_placeholder()}
-        oninput={(e) => (testVariablesText = e.currentTarget.value)}></textarea>
+        oninput={(e) => (testVariablesText = e.currentTarget.value)}
+      />
       <span class="text-muted text-xs leading-relaxed">{m.http_test_variables_help()}</span>
     </label>
   {/if}

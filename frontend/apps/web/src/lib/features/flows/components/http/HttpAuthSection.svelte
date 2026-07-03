@@ -3,6 +3,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import type { HttpAuth, HttpAuthMode } from "./httpConfigTypes";
   import { isSecretSentinel } from "./httpConfigTypes";
 
@@ -91,8 +92,7 @@
             </button>
           </div>
         {:else}
-          <input
-            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          <Input
             type="password"
             placeholder="Token"
             value={typeof auth.token === "string" ? auth.token : ""}
@@ -105,8 +105,7 @@
 
     {#if auth.mode === "api_key"}
       <div class="grid gap-2 sm:grid-cols-2">
-        <input
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <Input
           type="text"
           placeholder={m.http_auth_header_name()}
           value={auth.header_name}
@@ -128,8 +127,7 @@
             </button>
           </div>
         {:else}
-          <input
-            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          <Input
             type="password"
             placeholder={m.http_auth_api_key_value()}
             value={typeof auth.key === "string" ? auth.key : ""}
@@ -142,8 +140,7 @@
 
     {#if auth.mode === "basic_auth"}
       <div class="grid gap-2 sm:grid-cols-2">
-        <input
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <Input
           type="text"
           placeholder={m.http_auth_username()}
           value={auth.username}
@@ -165,8 +162,7 @@
             </button>
           </div>
         {:else}
-          <input
-            class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          <Input
             type="password"
             placeholder={m.http_auth_password()}
             value={typeof auth.password === "string" ? auth.password : ""}

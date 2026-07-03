@@ -28,6 +28,7 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
 
   let {
     isPublished,
@@ -493,8 +494,8 @@
                   </div>
 
                   {#if expandedTemplateExpressions.has(row.key)}
-                    <input
-                      class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 font-mono text-sm focus-within:ring-2 hover:ring-1 focus-visible:ring-2"
+                    <Input
+                      class="font-mono"
                       value={row.binding ?? ""}
                       disabled={isPublished}
                       placeholder={m.flow_template_fill_expression_placeholder()}

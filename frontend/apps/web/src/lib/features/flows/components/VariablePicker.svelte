@@ -3,6 +3,7 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowFormFieldVariableExpression,
@@ -102,10 +103,10 @@
   <DropdownMenu.Content align="end" class="max-h-[400px] min-w-[280px] overflow-y-auto p-0">
     <!-- Search -->
     <div class="border-default bg-primary sticky top-0 z-10 border-b px-3 py-2">
-      <input
-        bind:this={searchInputEl}
+      <Input
+        bind:ref={searchInputEl}
         type="text"
-        class="border-default bg-secondary/50 placeholder:text-muted focus:ring-accent-default/30 w-full rounded-md border px-2.5 py-1.5 text-xs focus:ring-1 focus:outline-none"
+        class="w-full text-xs"
         placeholder={m.flow_variable_search_placeholder()}
         bind:value={searchQuery}
         onkeydown={(e) => e.stopPropagation()}

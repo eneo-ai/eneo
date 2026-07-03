@@ -15,6 +15,7 @@
   import HttpBodyEditor from "./HttpBodyEditor.svelte";
   import HttpTestConnection from "./HttpTestConnection.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { getAuthoredHttpUrlError } from "./httpConfigDefaults";
 
   let {
@@ -47,14 +48,12 @@
 <FlowStepSection title={m.http_config_title()}>
   <Settings.Row title={m.http_url_title()} description="">
     <div class="flex flex-col gap-1">
-      <input
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50 {urlInvalid
-          ? 'border-danger-default/60'
-          : ''}"
+      <Input
         type="url"
         placeholder="https://api.example.com/webhook"
         value={config.url}
         disabled={isPublished}
+        aria-invalid={urlInvalid || undefined}
         oninput={(e) => update({ url: e.currentTarget.value })}
       />
       {#if urlInvalid}
@@ -109,8 +108,8 @@
 
   <Settings.Row title={m.http_timeout_title()} description="">
     <div class="flex items-center gap-2">
-      <input
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-24 rounded-xl border px-3.5 py-2.5 text-sm shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <Input
+        class="w-24"
         type="number"
         min="1"
         max="120"

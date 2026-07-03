@@ -2,6 +2,7 @@
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import type { HttpBody, HttpBodyMode, HttpMethod } from "./httpConfigTypes";
 
   let {
@@ -78,16 +79,16 @@
       {/if}
 
       {#if body.mode === "json_template" || body.mode === "text_template"}
-        <textarea
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger min-h-[120px] w-full rounded-lg border px-3 py-2 font-mono text-xs shadow-xs transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50 {isJsonInvalid
-            ? 'border-danger-default/60'
-            : ''}"
+        <Textarea
+          class="min-h-[120px] font-mono text-xs"
+          aria-invalid={isJsonInvalid || undefined}
           value={body.template ?? ""}
           disabled={isPublished}
           placeholder={body.mode === "json_template"
             ? '{\n  "result": "{{ föregående_steg }}"\n}'
             : m.http_body_text_placeholder()}
-          oninput={(e) => handleTemplateChange(e.currentTarget.value)}></textarea>
+          oninput={(e) => handleTemplateChange(e.currentTarget.value)}
+        />
         {#if isJsonInvalid}
           <p class="text-danger-default text-xs">{m.http_body_invalid_json()}</p>
         {/if}

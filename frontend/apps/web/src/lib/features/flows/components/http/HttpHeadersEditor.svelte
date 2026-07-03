@@ -4,6 +4,7 @@
   import { m } from "$lib/paraglide/messages";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import type { CustomHeader } from "./httpConfigTypes";
   import { isSecretSentinel } from "./httpConfigTypes";
@@ -56,8 +57,8 @@
         <div class="border-default/70 flex flex-col gap-2 border-t px-3 pt-3 pb-3">
           {#each headers as header, i (i)}
             <div class="flex items-start gap-2">
-              <input
-                class="border-default bg-primary ring-default w-1/3 rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+              <Input
+                class="w-1/3"
                 type="text"
                 placeholder={m.http_header_name_placeholder()}
                 value={header.name}
@@ -79,8 +80,8 @@
                   </button>
                 </div>
               {:else}
-                <input
-                  class="border-default bg-primary ring-default flex-1 rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                <Input
+                  class="flex-1"
                   type={header.secret ? "password" : "text"}
                   placeholder={m.http_header_value_placeholder()}
                   value={typeof header.value === "string" ? header.value : ""}
