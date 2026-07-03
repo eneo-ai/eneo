@@ -17,6 +17,7 @@
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
   import { findOpenTokenStart, findAtTriggerStart } from "./flowPromptAutocomplete";
+  import { buildMirrorSegments } from "./flowPromptMirror";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { CircleAlert } from "lucide-svelte";
@@ -172,55 +173,9 @@
   const segments = $derived(parsePromptSegments(currentEditorValue, classificationContext));
 
   // Build mirror segments with an optional marker at the autocomplete anchor position.
-  type MirrorSegment = {
-    type: "text" | "variable" | "marker";
-    value: string;
-    category?: VariableCategory;
-  };
   const mirrorSegments = $derived.by(() =>
     buildMirrorSegments(segments, autocompleteAnchorIndex, autocompleteOpen)
   );
-
-  function toMirror(seg: (typeof segments)[number]): MirrorSegment {
-    return seg.type === "variable"
-      ? { type: "variable", value: seg.value, category: seg.category }
-      : { type: "text", value: seg.value };
-  }
-
-  function buildMirrorSegments(
-    segs: typeof segments,
-    anchorIdx: number,
-    isOpen: boolean
-  ): MirrorSegment[] {
-    if (!isOpen || anchorIdx < 0) return segs.map(toMirror);
-    const result: MirrorSegment[] = [];
-    let charPos = 0;
-    let markerInserted = false;
-    for (const seg of segs) {
-      const segLen = seg.value.length;
-      if (!markerInserted && charPos + segLen > anchorIdx) {
-        const offset = anchorIdx - charPos;
-        if (seg.type === "text") {
-          if (offset > 0) result.push({ type: "text", value: seg.value.slice(0, offset) });
-          result.push({ type: "marker", value: "" });
-          if (offset < segLen) result.push({ type: "text", value: seg.value.slice(offset) });
-        } else {
-          result.push({ type: "marker", value: "" });
-          result.push(toMirror(seg));
-        }
-        markerInserted = true;
-      } else if (!markerInserted && charPos + segLen === anchorIdx) {
-        result.push(toMirror(seg));
-        result.push({ type: "marker", value: "" });
-        markerInserted = true;
-      } else {
-        result.push(toMirror(seg));
-      }
-      charPos += segLen;
-    }
-    if (!markerInserted) result.push({ type: "marker", value: "" });
-    return result;
-  }
 
   // Available variables for chip bar and autocomplete
   const availableVariables = $derived.by(() =>
