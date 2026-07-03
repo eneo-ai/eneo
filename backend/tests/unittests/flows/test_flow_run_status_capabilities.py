@@ -24,7 +24,9 @@ from eneo.flows.enums import (
     OPEN_FLOW_STEP_ATTEMPT_STATUSES,
     RERUN_ELIGIBLE_FLOW_RUN_STATUS_VALUES,
     RERUN_ELIGIBLE_FLOW_RUN_STATUSES,
+    RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS,
     TERMINAL_FLOW_RUN_STATUSES,
+    FlowRunRerunOperationStatus,
     FlowRunStatus,
     FlowRunStatusCapability,
     FlowStepAttemptStatus,
@@ -98,6 +100,17 @@ def test_flow_run_status_helpers_are_derived_from_capabilities() -> None:
     assert ACTIVE_FLOW_RUN_STATUSES | TERMINAL_FLOW_RUN_STATUSES | {
         FlowRunStatus.AWAITING_REVIEW
     } == set(FlowRunStatus)
+
+
+def test_rerun_operation_terminal_status_mapping_is_explicit() -> None:
+    assert set(RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS) == (
+        TERMINAL_FLOW_RUN_STATUSES
+    )
+    assert RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS == {
+        FlowRunStatus.COMPLETED: FlowRunRerunOperationStatus.COMPLETED,
+        FlowRunStatus.FAILED: FlowRunRerunOperationStatus.FAILED,
+        FlowRunStatus.CANCELLED: FlowRunRerunOperationStatus.CANCELLED,
+    }
 
 
 def test_flow_step_open_work_status_constants_are_explicit() -> None:

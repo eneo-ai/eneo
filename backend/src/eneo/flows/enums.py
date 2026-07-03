@@ -214,6 +214,15 @@ TERMINAL_FLOW_RUN_STATUSES = frozenset(
 TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
     status.value for status in FlowRunStatus if status in TERMINAL_FLOW_RUN_STATUSES
 )
+RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS: Mapping[
+    FlowRunStatus, FlowRunRerunOperationStatus
+] = MappingProxyType(
+    {
+        FlowRunStatus.COMPLETED: FlowRunRerunOperationStatus.COMPLETED,
+        FlowRunStatus.FAILED: FlowRunRerunOperationStatus.FAILED,
+        FlowRunStatus.CANCELLED: FlowRunRerunOperationStatus.CANCELLED,
+    }
+)
 CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
     status
     for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()

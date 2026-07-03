@@ -48,6 +48,7 @@ from eneo.flows.domain.rerun_exceptions import (
 )
 from eneo.flows.enums import (
     RERUN_ELIGIBLE_FLOW_RUN_STATUS_VALUES,
+    RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS,
     TERMINAL_FLOW_RUN_STATUSES,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
@@ -423,7 +424,9 @@ class FlowRunRerunRepository:
             raise ValueError("target_status must be terminal")
 
         values: dict[str, Any] = {
-            "status": FlowRunRerunOperationStatus(target_status.value).value,
+            "status": RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS[
+                target_status
+            ].value,
             "finished_at": datetime.now(timezone.utc),
         }
         if target_status == FlowRunStatus.COMPLETED:
