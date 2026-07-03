@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -75,7 +77,7 @@ async def process_edit_arguments(
 
     try:
         proposal = OrderedEditProposal.model_validate(arguments)
-    except Exception as exc:
+    except ValidationError as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
         return ToolProcessingResult(
             feedback=f"Invalid propose_flow arguments: {exc}",
@@ -113,12 +115,6 @@ async def process_edit_arguments(
                 "Re-select the affected model, knowledge base, or MCP resource "
                 "and try again."
             ),
-            failure_kind="validation",
-        )
-    except Exception as exc:
-        logger.error("Edit compilation failed: %s", exc, exc_info=True)
-        return ToolProcessingResult(
-            feedback=f"Failed to compile edit: {exc}",
             failure_kind="validation",
         )
 

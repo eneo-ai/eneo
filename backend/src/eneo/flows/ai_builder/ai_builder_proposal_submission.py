@@ -577,6 +577,30 @@ class ProposalSubmissionOwner:
                 usage_tracker=ctx.usage_tracker,
                 metadata_tool_call=tool_call,
             )
+            if is_create and result.user_message is not None:
+                yield build_text_event(result.user_message)
+                return
+            if not result.events:
+                proposal_repair_reason = proposal_repair_reason_from_tool_failure(
+                    result.failure_kind
+                )
+                fallback_feedback = (
+                    "Invalid propose_flow draft."
+                    if is_create
+                    else "Invalid propose_flow arguments."
+                )
+                async for event in self._run_proposal_self_correction(
+                    ctx=ctx,
+                    error_message=result.feedback or fallback_feedback,
+                    tool_call=tool_call,
+                    retry_config=retry_config,
+                    reason=proposal_repair_reason,
+                ):
+                    yield event
+                return
+
+            for event in result.events:
+                yield event
         except AIBuilderArchitectureError as error:
             if not is_create:
                 raise
@@ -593,30 +617,34 @@ class ProposalSubmissionOwner:
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
             )
             return
-        if is_create and result.user_message is not None:
-            yield build_text_event(result.user_message)
-            return
-        if not result.events:
-            proposal_repair_reason = proposal_repair_reason_from_tool_failure(
-                result.failure_kind
-            )
-            fallback_feedback = (
-                "Invalid propose_flow draft."
-                if is_create
-                else "Invalid propose_flow arguments."
-            )
-            async for event in self._run_proposal_self_correction(
-                ctx=ctx,
-                error_message=result.feedback or fallback_feedback,
-                tool_call=tool_call,
-                retry_config=retry_config,
-                reason=proposal_repair_reason,
-            ):
-                yield event
-            return
+        except Exception as error:
+            yield self._build_internal_submission_error_event(ctx=ctx, error=error)
 
-        for event in result.events:
-            yield event
+    def _build_internal_submission_error_event(
+        self,
+        *,
+        ctx: ProposalTurnContext,
+        error: Exception,
+    ) -> AIBuilderStreamEvent:
+        logger.error(
+            "AI Builder proposal submission failed",
+            exc_info=error,
+            extra={"request_id": ctx.request_id},
+        )
+        if ctx.usage_tracker is not None:
+            log_proposal_failed_turn(
+                usage_tracker=ctx.usage_tracker,
+                session_id=ctx.session_id,
+                branch="internal_submission_error",
+                final_failure_kind="internal_error",
+                final_error_code=AIBuilderErrorCode.PLANNER_STREAM_FAILED.value,
+            )
+        return build_ai_builder_error_event(
+            message="The AI Builder proposal failed. Please try again.",
+            code=AIBuilderErrorCode.PLANNER_STREAM_FAILED,
+            phase=AIBuilderErrorPhase.PROPOSAL,
+            request_id=ctx.request_id,
+        )
 
     async def _retry_forced_proposal_after_text(
         self,

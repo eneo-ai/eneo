@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ValidationError
-
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -39,7 +37,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
     attach_selected_mcp_refs_to_explicit_intent_steps,
-    safe_validation_issues,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     resolve_ui_language,
@@ -117,24 +114,6 @@ async def process_create_intent_arguments(
         )
     except AIBuilderArchitectureError:
         raise
-    except Exception as error:
-        issues = (
-            list(safe_validation_issues(error))
-            if isinstance(error, ValidationError)
-            else None
-        )
-        logger.info(
-            "ai_builder_create_intent_compile_failed session_id=%s tool_call_id=%s error_type=%s issues=%s",
-            turn.session_id,
-            tool_call_id,
-            type(error).__name__,
-            issues,
-        )
-        detail = "; ".join(issues) if issues else str(error)
-        return ToolProcessingResult(
-            feedback=f"Invalid propose_flow arguments: {detail}",
-            failure_kind="parse",
-        )
 
     return await _process_create_spec(
         turn=turn,

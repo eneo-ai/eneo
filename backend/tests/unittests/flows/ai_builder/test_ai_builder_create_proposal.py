@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -217,6 +218,31 @@ async def test_outline_processing_returns_compiled_proposal_for_processor_finali
     assert result.compiled_proposal is not None
     assert result.feedback is None
     assert result.events == ()
+
+
+@pytest.mark.asyncio
+async def test_outline_processing_propagates_internal_compile_error() -> None:
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_create_proposal.compile_create_intent_to_spec",
+        side_effect=RuntimeError("compiler exploded"),
+    ):
+        with pytest.raises(RuntimeError, match="compiler exploded"):
+            await process_create_intent_arguments(
+                turn=_make_turn(),
+                conversation=[
+                    ConversationMessage(role="user", content="Bygg ett textflöde.")
+                ],
+                arguments={
+                    "flow_name": "Internal bug",
+                    "plan_rationale": "Trigger compiler bug.",
+                    "steps": [
+                        {"name": "Analysera", "instructions": "Analysera texten."}
+                    ],
+                },
+                tool_call_id="call-internal-bug",
+                available_model_refs=None,
+                available_kb_refs=None,
+            )
 
 
 @pytest.mark.asyncio

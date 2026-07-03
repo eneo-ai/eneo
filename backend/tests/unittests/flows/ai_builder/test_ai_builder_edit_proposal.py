@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -164,6 +165,30 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
     assert result.failure_kind == "validation"
     assert result.feedback is not None
     assert "model.missing" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_ordered_submission_propagates_internal_compile_error() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+        side_effect=RuntimeError("compiler exploded"),
+    ):
+        with pytest.raises(RuntimeError, match="compiler exploded"):
+            await _process(
+                flow=flow,
+                arguments={
+                    "plan_rationale": "Rename the analysis step.",
+                    "steps": [
+                        {
+                            "kind": "modify",
+                            "existing_step_ref": "existing_step_1",
+                            "name": "Analyze case text",
+                        }
+                    ],
+                },
+            )
 
 
 @pytest.mark.asyncio

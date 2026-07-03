@@ -291,6 +291,167 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_propose_plan_create_compile_bug_yields_internal_error_without_repair() -> (
+    None
+):
+    processor = _make_processor()
+    session_id = uuid4()
+    outline_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Document analysis",
+            "plan_rationale": "Analyze the document and produce a summary.",
+            "steps": [{"name": "Analyze", "instructions": "Analyze the document."}],
+        },
+    )
+
+    with (
+        _captured_proposal_telemetry() as telemetry_records,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_create_proposal.compile_create_intent_to_spec",
+            side_effect=RuntimeError("compiler exploded"),
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
+        ) as repair,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
+        ),
+    ):
+        events = [
+            encode_ai_builder_stream_event(event)
+            async for event in processor.propose_plan(
+                turn=_make_turn(session_id=session_id),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=_empty_catalog(),
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-create-compile-bug",
+                flow=None,
+            )
+        ]
+
+    repair.assert_not_called()
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "planner_stream_failed"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-create-compile-bug"
+    assert "compiler exploded" not in events[0]["data"]
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-create-compile-bug"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "create"
+    assert failed_payload["branch"] == "internal_submission_error"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["final_failure_kind"] == "internal_error"
+    assert failed_payload["final_error_code"] == "planner_stream_failed"
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_edit_compile_bug_yields_internal_error_without_repair() -> (
+    None
+):
+    processor = _make_processor()
+    session_id = uuid4()
+    flow = MagicMock()
+    flow.id = uuid4()
+    flow.steps = [
+        FlowStep(
+            id=uuid4(),
+            flow_id=flow.id,
+            tenant_id=uuid4(),
+            assistant_id=uuid4(),
+            step_order=1,
+            user_description="Analyze text",
+            input_source="flow_input",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+            mcp_policy="inherit",
+        )
+    ]
+    flow.draft_revision = 7
+    flow.name = "Existing flow"
+    flow.description = "Existing description."
+    flow.metadata_json = {}
+    edit_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "plan_rationale": "Rename the existing step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Analyze text deeply",
+                }
+            ],
+        },
+    )
+
+    with (
+        _captured_proposal_telemetry() as telemetry_records,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+            side_effect=RuntimeError("compiler exploded"),
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
+        ) as repair,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            new=AsyncMock(return_value=_make_response_with_tool_calls(edit_call)),
+        ),
+    ):
+        events = [
+            encode_ai_builder_stream_event(event)
+            async for event in processor.propose_plan(
+                turn=_make_turn(
+                    session_id=session_id,
+                    base_planning_state_version=flow.draft_revision,
+                ),
+                conversation=[
+                    ConversationMessage(role="user", content="Rename the first step")
+                ],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=_empty_catalog(),
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-edit-compile-bug",
+                flow=flow,
+            )
+        ]
+
+    repair.assert_not_called()
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "planner_stream_failed"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-edit-compile-bug"
+    assert "compiler exploded" not in events[0]["data"]
+    failed_payload = _single_failed_turn_payload(telemetry_records)
+    assert failed_payload["request_id"] == "req-edit-compile-bug"
+    assert failed_payload["session_id"] == str(session_id)
+    assert failed_payload["target_kind"] == "edit"
+    assert failed_payload["branch"] == "internal_submission_error"
+    assert failed_payload["repair_attempts"] == 0
+    assert failed_payload["final_failure_kind"] == "internal_error"
+    assert failed_payload["final_error_code"] == "planner_stream_failed"
+
+
+@pytest.mark.asyncio
 async def test_propose_plan_provider_error_still_yields_planner_upstream_error() -> (
     None
 ):
