@@ -35,7 +35,6 @@ from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_structured_field_schema,
 )
 from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
-    looks_like_structured_field_spec,
     normalize_structured_field_list,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -75,8 +74,6 @@ _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS = frozenset(
 )
 logger = logging.getLogger(__name__)
 _CREATE_INTENT_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
-_CREATE_INTENT_ASSUMPTIONS_FIELD = "assumptions"
-_CREATE_INTENT_STEP_ROOT_RECOVERED_KEYS = frozenset({_CREATE_INTENT_ASSUMPTIONS_FIELD})
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -373,16 +370,10 @@ def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, A
     }
     raw_steps = normalized.get("steps")
     if isinstance(raw_steps, list):
-        typed_steps = cast(list[Any], raw_steps)
-        normalized_steps, misplaced_assumptions = _normalize_semantic_steps(typed_steps)
-        normalized["steps"] = normalized_steps
-        if misplaced_assumptions:
-            normalized[_CREATE_INTENT_ASSUMPTIONS_FIELD] = (
-                _merge_create_intent_assumptions(
-                    normalized.get(_CREATE_INTENT_ASSUMPTIONS_FIELD),
-                    misplaced_assumptions,
-                )
-            )
+        normalized["steps"] = [
+            _strip_backend_owned_semantic_step_keys(raw_step)
+            for raw_step in cast(list[Any], raw_steps)
+        ]
     return normalized
 
 
@@ -396,128 +387,31 @@ def _create_intent_root_ignored_keys() -> frozenset[str]:
 
 
 @cache
-def _semantic_step_ignored_keys() -> frozenset[str]:
-    return (
-        _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS | _CREATE_INTENT_STEP_ROOT_RECOVERED_KEYS
-    )
-
-
-@cache
 def _semantic_step_only_keys() -> frozenset[str]:
     return frozenset(SemanticStepIntent.model_fields.keys()) - frozenset(
         CreateFlowIntent.model_fields.keys()
     )
 
 
-def _normalize_semantic_steps(raw_steps: list[Any]) -> tuple[list[Any], list[str]]:
-    """Recover common small-model shape errors without weakening Flow models.
-
-    Semantic steps are intent units with instructions. When a model accidentally
-    places assumptions on a step, keep the root source of truth by folding those
-    notes into root assumptions. Orphan output field objects are attached to the
-    previous step instead of being treated as broken steps.
-    """
-
-    steps: list[Any] = []
-    misplaced_assumptions: list[str] = []
-    recovered_step_keys: set[str] = set()
-    for raw_step in raw_steps:
-        step, step_assumptions, recovered_keys = _strip_ignored_semantic_step_keys(
-            raw_step
-        )
-        misplaced_assumptions.extend(step_assumptions)
-        recovered_step_keys.update(recovered_keys)
-        if _looks_like_orphan_output_field(step):
-            _attach_orphan_output_field(steps, cast(dict[str, Any], step))
-            continue
-        steps.append(step)
-    if recovered_step_keys:
-        logger.info(
-            "ai_builder_semantic_step_assumptions_recovered",
-            extra={"keys": sorted(recovered_step_keys)},
-        )
-    return steps, misplaced_assumptions
-
-
-def _strip_ignored_semantic_step_keys(
+def _strip_backend_owned_semantic_step_keys(
     value: Any,
-) -> tuple[Any, list[str], frozenset[str]]:
-    if not isinstance(value, dict):
-        return value, [], frozenset()
-    raw = cast(dict[str, Any], value)
-    recovered_keys = frozenset(
-        key for key in raw if key in _CREATE_INTENT_STEP_ROOT_RECOVERED_KEYS
-    )
-    misplaced_assumptions = _assumption_strings(
-        raw.get(_CREATE_INTENT_ASSUMPTIONS_FIELD)
-    )
-    return (
-        {
-            key: step_value
-            for key, step_value in raw.items()
-            if key not in _semantic_step_ignored_keys()
-        },
-        misplaced_assumptions,
-        recovered_keys,
-    )
-
-
-def _merge_create_intent_assumptions(
-    raw_assumptions: Any,
-    misplaced_assumptions: list[str],
 ) -> Any:
-    if raw_assumptions is None:
-        return misplaced_assumptions
-    if isinstance(raw_assumptions, list):
-        return [*cast(list[Any], raw_assumptions), *misplaced_assumptions]
-    return raw_assumptions
-
-
-def _assumption_strings(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if not isinstance(value, list):
-        return []
-    return [item for item in cast(list[Any], value) if isinstance(item, str)]
-
-
-def _looks_like_orphan_output_field(value: Any) -> bool:
     if not isinstance(value, dict):
-        return False
+        return value
     raw = cast(dict[str, Any], value)
-    if "instructions" in raw:
-        return False
-    return looks_like_structured_field_spec(raw) and any(
-        key in raw
-        for key in (
-            "description",
-            "field_type",
-            "fields",
-            "item_fields",
-            "items",
-            "properties",
-            "required",
-            "type",
-        )
+    stripped_keys = sorted(
+        key for key in raw if key in _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
     )
-
-
-def _attach_orphan_output_field(
-    steps: list[Any],
-    field: dict[str, Any],
-) -> None:
-    if not steps or not isinstance(steps[-1], dict):
-        return
-    previous_step = cast(dict[str, Any], steps[-1])
-    output_fields = previous_step.get("output_fields")
-    if isinstance(output_fields, list):
-        normalized_output_fields = [*cast(list[Any], output_fields), field]
-    elif output_fields is None:
-        normalized_output_fields = [field]
-    else:
-        normalized_output_fields = [output_fields, field]
-    previous_step["output_fields"] = normalized_output_fields
-    previous_step.setdefault("output_type", OutputType.JSON.value)
+    if stripped_keys:
+        logger.info(
+            "ai_builder_create_intent_backend_step_keys_stripped",
+            extra={"keys": stripped_keys},
+        )
+    return {
+        key: step_value
+        for key, step_value in raw.items()
+        if key not in _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
+    }
 
 
 def attach_selected_mcp_refs_to_explicit_intent_steps(

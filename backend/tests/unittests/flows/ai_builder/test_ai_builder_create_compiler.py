@@ -86,8 +86,6 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
-    expected_root_assumption_strings,
-    expected_step_assumption_strings,
     self_correction_intent_with_step_assumptions_payload,
 )
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
@@ -2538,18 +2536,18 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
     assert draft.steps[0].input_type.value == "text"
 
 
-def test_parse_outline_flow_merges_step_local_assumptions_from_diagnostic_payload() -> (
+def test_parse_outline_flow_rejects_step_local_assumptions_from_diagnostic_payload() -> (
     None
 ):
-    outline = parse_create_flow_intent_arguments(
-        self_correction_intent_with_step_assumptions_payload()
-    )
+    with pytest.raises(ProposalIntentArgumentError) as exc_info:
+        parse_create_flow_intent_arguments(
+            self_correction_intent_with_step_assumptions_payload()
+        )
 
-    assert outline.assumptions == [
-        *expected_root_assumption_strings(),
-        *expected_step_assumption_strings(),
-    ]
-    assert all("assumptions" not in step.model_dump() for step in outline.steps)
+    message = str(exc_info.value)
+    assert "steps.1.assumptions" in message
+    assert "extra_forbidden" in message
+    assert "Det går att avgöra" not in message
 
 
 def test_parse_outline_flow_rejects_step_local_input_fields() -> None:
@@ -2606,58 +2604,52 @@ def test_parse_outline_flow_ignores_step_only_fields_at_root() -> None:
     assert len(outline.steps) == 1
 
 
-def test_parse_outline_flow_attaches_orphan_field_specs_to_previous_step() -> None:
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Orphan field outline",
-            "plan_rationale": "Weak models may put output field specs in steps[].",
-            "steps": [
-                {
-                    "name": "Extract facts",
-                    "instructions": "Extract structured facts.",
-                    "output_type": "json",
-                    "output_fields": [
-                        {
-                            "name": "facts",
-                            "field_type": "array",
-                            "description": "Extracted facts.",
-                            "item_fields": [
-                                {
-                                    "name": "fact",
-                                    "field_type": "string",
-                                    "description": "Fact text.",
-                                }
-                            ],
-                        }
-                    ],
-                },
-                {
-                    "name": "extraction_notes",
-                    "field_type": "array",
-                    "description": "Notes about extraction quality.",
-                    "item_fields": [
-                        {
-                            "name": "note",
-                            "field_type": "string",
-                            "description": "A quality note.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Write report",
-                    "instructions": "Write the final report.",
-                    "output_type": "text",
-                },
-            ],
-        }
-    )
+def test_parse_outline_flow_rejects_orphan_field_specs_in_steps() -> None:
+    with pytest.raises(ProposalIntentArgumentError) as exc_info:
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Orphan field outline",
+                "plan_rationale": "Field specs in steps[] are malformed steps.",
+                "steps": [
+                    {
+                        "name": "Extract facts",
+                        "instructions": "Extract structured facts.",
+                        "output_type": "json",
+                        "output_fields": [
+                            {
+                                "name": "facts",
+                                "field_type": "array",
+                                "description": "Extracted facts.",
+                                "item_fields": [
+                                    {
+                                        "name": "fact",
+                                        "field_type": "string",
+                                        "description": "Fact text.",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "extraction_notes",
+                        "field_type": "array",
+                        "description": "Notes about extraction quality.",
+                        "item_fields": [
+                            {
+                                "name": "note",
+                                "field_type": "string",
+                                "description": "A quality note.",
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
 
-    assert len(outline.steps) == 2
-    assert outline.steps[0].output_fields is not None
-    assert [field.name for field in outline.steps[0].output_fields] == [
-        "facts",
-        "extraction_notes",
-    ]
+    message = str(exc_info.value)
+    assert "steps.1.instructions" in message
+    assert "missing" in message
+    assert "Notes about extraction quality" not in message
 
 
 def test_outline_flow_truncates_over_deep_structured_fields_before_draft_validation() -> (

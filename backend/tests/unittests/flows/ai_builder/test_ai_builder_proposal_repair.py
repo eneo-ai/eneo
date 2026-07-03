@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_repair import (
@@ -56,8 +57,6 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
-    expected_root_assumption_strings,
-    expected_step_assumption_strings,
     self_correction_intent_with_step_assumptions_payload,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
@@ -430,10 +429,9 @@ async def test_run_forced_tool_retry_after_text_surfaces_tool_user_message() -> 
 
 
 @pytest.mark.asyncio
-async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_with_step_assumptions() -> (
+async def test_run_forced_tool_retry_after_text_returns_feedback_for_malformed_json_text() -> (
     None
 ):
-    observed_assumptions: list[str] = []
     call_proposal_completion = AsyncMock()
     payload = self_correction_intent_with_step_assumptions_payload()
     assistant_text = f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```"
@@ -441,8 +439,13 @@ async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_wit
     async def process_invocation(
         invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
-        outline = parse_create_flow_intent_arguments(invocation.arguments)
-        observed_assumptions.extend(outline.assumptions)
+        try:
+            parse_create_flow_intent_arguments(invocation.arguments)
+        except ProposalIntentArgumentError as error:
+            return ToolProcessingResult(
+                feedback=f"Invalid propose_flow arguments: {error}",
+                failure_kind="parse",
+            )
         return ToolProcessingResult(events=(_plan_stream_event(),))
 
     result = await run_forced_tool_retry_after_text(
@@ -455,13 +458,11 @@ async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_wit
         )
     )
 
-    assert result.events is not None
-    assert [event.event for event in result.events] == ["plan"]
-    assert result.feedback is None
-    assert observed_assumptions == [
-        *expected_root_assumption_strings(),
-        *expected_step_assumption_strings(),
-    ]
+    assert result.events is None
+    assert result.feedback is not None
+    assert "steps.1.assumptions" in result.feedback
+    assert "extra_forbidden" in result.feedback
+    assert result.failure_kind == "parse"
     call_proposal_completion.assert_not_awaited()
 
 

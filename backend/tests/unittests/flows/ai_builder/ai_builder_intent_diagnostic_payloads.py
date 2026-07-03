@@ -236,27 +236,3 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
 
 def self_correction_intent_with_step_assumptions_payload() -> dict[str, Any]:
     return cast(dict[str, Any], deepcopy(_STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT))
-
-
-def expected_step_assumption_strings() -> list[str]:
-    return [
-        (
-            "Det går att avgöra om informationen är explicit i transkriptionen "
-            "eller saknas/är otydlig."
-        ),
-        (
-            "Om en uppgift inte kan styrkas av transkriptionen ska den markeras "
-            "som saknad/oklar."
-        ),
-        "Extraherade värden ska vara förenliga med transkriptionens ordalydelse.",
-    ]
-
-
-def expected_root_assumption_strings() -> list[str]:
-    return [
-        (
-            "Flödet levererar en genererad PDF med nyckeluppgifter extraherade "
-            "från ljudets transkription."
-        ),
-        "Inga extra metadatafält krävs vid körning.",
-    ]
