@@ -663,30 +663,34 @@ async def _reconcile_stale_running_runs_all_tenants(
     )
     reconciled = 0
     async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
         run_repo = container.flow_run_repo()
         terminalizer = container.flow_run_terminalizer()
         tenant_repo = container.tenant_repo()
-        tenants = await tenant_repo.get_all_tenants()
+        async with session.begin():
+            tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
-            stale_runs = await run_repo.list_stale_running_runs(
-                tenant_id=tenant.id,
-                stale_before=stale_before,
-                limit=limit,
-            )
-            for run in stale_runs:
-                result = await terminalizer.terminalize_stale_running_run(
-                    run_id=run.id,
-                    tenant_id=run.tenant_id,
+            async with session.begin():
+                stale_runs = await run_repo.list_stale_running_runs(
+                    tenant_id=tenant.id,
                     stale_before=stale_before,
-                    error=FlowRunError.from_source(
-                        FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                        code=FlowApiErrorCode.RUN_WORKER_STALLED,
-                        message=(
-                            "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
-                        ),
-                    ),
+                    limit=limit,
                 )
+            for run in stale_runs:
+                async with session.begin():
+                    result = await terminalizer.terminalize_stale_running_run(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        stale_before=stale_before,
+                        error=FlowRunError.from_source(
+                            FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                            code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                            message=(
+                                "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+                            ),
+                        ),
+                    )
                 if result.did_transition:
                     reconciled += 1
     return {"status": "ok", "reconciled": reconciled}

@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRuns,
@@ -41,6 +42,7 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.runtime import tasks as flow_runtime_tasks
 
 LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 
@@ -412,6 +414,100 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
         assert getattr(noop_record, "target_status") == FlowRunStatus.FAILED.value
         assert getattr(noop_record, "previous_status") == FlowRunStatus.FAILED.value
         assert getattr(noop_record, "audit_outbox_id") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_stale_running_reconcile_task_commits_failure_for_fresh_sessions(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        run, _flow, _run_repo = await _create_running_run(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_id = run.id
+        tenant_id = admin_user.tenant_id
+        await setup_session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .values(updated_at=datetime.now(timezone.utc) - timedelta(hours=3))
+        )
+
+    result = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
+        limit=10
+    )
+
+    assert result["status"] == "ok"
+    assert result["reconciled"] >= 1
+    async with sessionmanager.session() as verify_session, verify_session.begin():
+        run_row = await verify_session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        assert run_row is not None
+        assert run_row.status == FlowRunStatus.FAILED.value
+        run_error = FlowRunError.model_validate(run_row.error_json)
+        assert run_error.code == FlowApiErrorCode.RUN_WORKER_STALLED.value
+        assert run_error.source == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+        assert run_error.message == (
+            "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+        )
+
+        step_statuses = (
+            (
+                await verify_session.execute(
+                    sa.select(FlowStepResults.status)
+                    .where(FlowStepResults.flow_run_id == run_id)
+                    .order_by(FlowStepResults.step_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert step_statuses == [
+            FlowStepResultStatus.FAILED.value,
+            FlowStepResultStatus.FAILED.value,
+        ]
+        attempt_statuses = (
+            (
+                await verify_session.execute(
+                    sa.select(FlowStepAttempts.status).where(
+                        FlowStepAttempts.flow_run_id == run_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert attempt_statuses == [FlowStepAttemptStatus.FAILED.value]
+        outbox_rows = (
+            (
+                await verify_session.execute(
+                    sa.select(FlowRunAuditOutbox).where(
+                        FlowRunAuditOutbox.flow_run_id == run_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(outbox_rows) == 1
+        assert (
+            outbox_rows[0].source
+            == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER.value
+        )
+        assert outbox_rows[0].target_status == FlowRunStatus.FAILED.value
+        assert outbox_rows[0].error_code == FlowApiErrorCode.RUN_WORKER_STALLED.value
 
 
 @pytest.mark.asyncio

@@ -37,16 +37,20 @@ EXPECTED_FLOW_CELERY_TASKS = {
 }
 
 
-def _fake_flow_task_session():
+def _fake_flow_task_session(events: list[str] | None = None):
     """Mock session that supports `enable_autobegin_for_flow_task_session`
     and `async with session.begin():` as no-ops, for unit tests that do
     not exercise real SQLAlchemy semantics."""
 
     class _BeginContext:
         async def __aenter__(self):
+            if events is not None:
+                events.append("begin")
             return None
 
         async def __aexit__(self, _exc_type, _exc, _tb):
+            if events is not None:
+                events.append("commit" if _exc_type is None else "rollback")
             return False
 
     return SimpleNamespace(
@@ -935,18 +939,32 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant_one = SimpleNamespace(id=uuid4())
     tenant_two = SimpleNamespace(id=uuid4())
+    run_one = SimpleNamespace(id=uuid4(), tenant_id=tenant_one.id)
+    run_two = SimpleNamespace(id=uuid4(), tenant_id=tenant_two.id)
+    events: list[str] = []
     repo = MagicMock()
     tenant_repo = MagicMock()
-    tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant_one, tenant_two])
-    repo.list_stale_running_runs = AsyncMock(
-        side_effect=[
-            [SimpleNamespace(id=uuid4(), tenant_id=tenant_one.id)],
-            [SimpleNamespace(id=uuid4(), tenant_id=tenant_two.id)],
-        ]
-    )
+
+    async def get_all_tenants():
+        events.append("get_tenants")
+        return [tenant_one, tenant_two]
+
+    async def list_stale_running_runs(*, tenant_id, **_kwargs):
+        events.append(f"list:{tenant_id}")
+        if tenant_id == tenant_one.id:
+            return [run_one]
+        return [run_two]
+
+    tenant_repo.get_all_tenants = AsyncMock(side_effect=get_all_tenants)
+    repo.list_stale_running_runs = AsyncMock(side_effect=list_stale_running_runs)
     terminalizer = MagicMock()
+
+    async def terminalize_stale_running_run(*, run_id, **_kwargs):
+        events.append(f"terminalize:{run_id}")
+        return SimpleNamespace(did_transition=True)
+
     terminalizer.terminalize_stale_running_run = AsyncMock(
-        return_value=SimpleNamespace(did_transition=True)
+        side_effect=terminalize_stale_running_run
     )
 
     class _Container:
@@ -963,9 +981,11 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
         def tenant_repo(self):
             return self._tenant_repo
 
+    fake_session = _fake_flow_task_session(events)
+
     class _SessionContext:
         async def __aenter__(self):
-            return AsyncMock()
+            return fake_session
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
@@ -984,6 +1004,24 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
 
     assert result["status"] == "ok"
     assert result["reconciled"] == 2
+    assert fake_session.sync_session.autobegin is True
+    assert events == [
+        "begin",
+        "get_tenants",
+        "commit",
+        "begin",
+        f"list:{tenant_one.id}",
+        "commit",
+        "begin",
+        f"terminalize:{run_one.id}",
+        "commit",
+        "begin",
+        f"list:{tenant_two.id}",
+        "commit",
+        "begin",
+        f"terminalize:{run_two.id}",
+        "commit",
+    ]
     assert terminalizer.terminalize_stale_running_run.await_count == 2
     assert {
         call.kwargs["error"].code
@@ -1024,9 +1062,11 @@ def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch)
         def tenant_repo(self):
             return self._tenant_repo
 
+    fake_session = _fake_flow_task_session()
+
     class _SessionContext:
         async def __aenter__(self):
-            return AsyncMock()
+            return fake_session
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
@@ -1045,6 +1085,7 @@ def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch)
 
     assert result["status"] == "ok"
     assert result["reconciled"] == 0
+    assert fake_session.sync_session.autobegin is True
     terminalizer.terminalize_stale_running_run.assert_awaited_once()
     terminal_kwargs = terminalizer.terminalize_stale_running_run.await_args.kwargs
     assert terminal_kwargs["error"].code == "flow_worker_stalled"
