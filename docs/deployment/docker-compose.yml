@@ -148,6 +148,24 @@ services:
     depends_on:
       - backend
 
+  celery-worker-flows-maintenance:
+    # Flow maintenance worker for reconciliation and outbox delivery.
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    container_name: eneo_celery_worker_flows_maintenance
+    restart: unless-stopped
+    environment:
+      - RUN_AS_CELERY_WORKER=true
+      - FLOW_CELERY_WORKER_QUEUES=flows.maintenance
+    env_file:
+      - env_backend.env
+    volumes:
+      - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
+    networks:
+      - proxy_tier
+    depends_on:
+      - backend
+
   celery-beat-flows:
     # Flow reconciliation scheduler (Celery beat). Required for stale-run reconciliation.
     image: ghcr.io/eneo-ai/eneo-backend:latest

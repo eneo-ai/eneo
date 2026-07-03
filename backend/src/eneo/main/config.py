@@ -298,6 +298,8 @@ class Settings(BaseSettings):
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
     flow_max_concurrent_runs_per_tenant: int = 4
     flow_celery_queue: str = "flows.execute"
+    flow_celery_maintenance_queue: str = "flows.maintenance"
+    flow_celery_worker_queues: str | None = None
     flow_task_timeout_seconds: int = 3600
     celery_visibility_timeout_seconds: int = 7200
     flow_max_inline_text_bytes: int = 1_048_576

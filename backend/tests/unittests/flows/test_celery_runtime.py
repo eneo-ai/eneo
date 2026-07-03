@@ -345,6 +345,7 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
         redis_db_celery_broker=2,
         redis_db_celery_result=3,
         flow_celery_queue="flows.execute",
+        flow_celery_maintenance_queue="flows.maintenance",
         celery_visibility_timeout_seconds=7200,
         flow_task_timeout_seconds=540,
     )
@@ -357,12 +358,24 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     assert app.conf.result_backend == "redis://redis:6379/3"
     assert app.conf.task_default_queue == "flows.execute"
     assert app.conf.task_routes["flows.execute"]["queue"] == "flows.execute"
-    assert app.conf.task_routes["flows.reconcile_running"]["queue"] == "flows.execute"
     assert (
-        app.conf.task_routes["flows.deliver_audit_outbox"]["queue"] == "flows.execute"
+        app.conf.task_routes["flows.reconcile_running"]["queue"] == "flows.maintenance"
     )
     assert (
-        app.conf.task_routes["flows.deliver_webhook_outbox"]["queue"] == "flows.execute"
+        app.conf.task_routes["flows.reconcile_review_expiry"]["queue"]
+        == "flows.maintenance"
+    )
+    assert (
+        app.conf.task_routes["flows.redispatch_stale_queued"]["queue"]
+        == "flows.maintenance"
+    )
+    assert (
+        app.conf.task_routes["flows.deliver_audit_outbox"]["queue"]
+        == "flows.maintenance"
+    )
+    assert (
+        app.conf.task_routes["flows.deliver_webhook_outbox"]["queue"]
+        == "flows.maintenance"
     )
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.task_acks_late is True
@@ -403,7 +416,10 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
     monkeypatch.setattr(
         cli_module,
         "get_settings",
-        lambda: SimpleNamespace(flow_celery_queue="flows.custom"),
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.custom",
+            flow_celery_worker_queues=None,
+        ),
     )
     monkeypatch.setattr(cli_module, "get_loglevel", lambda: 10)
     monkeypatch.setattr(
@@ -436,6 +452,24 @@ def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
             "flows.custom",
         ],
     )
+
+
+def test_flow_worker_cli_uses_worker_queue_override(monkeypatch: pytest.MonkeyPatch):
+    cli_module = importlib.import_module("eneo.flows.runtime.cli")
+    monkeypatch.setattr(
+        cli_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            flow_celery_queue="flows.execute",
+            flow_celery_worker_queues="flows.maintenance",
+        ),
+    )
+    monkeypatch.setattr(cli_module, "get_loglevel", lambda: 20)
+
+    assert cli_module._flow_worker_argv()[-2:] == [
+        "--queues",
+        "flows.maintenance",
+    ]
 
 
 def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(

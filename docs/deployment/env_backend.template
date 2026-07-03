@@ -262,6 +262,10 @@ FLOW_MAX_CONCURRENT_RUNS_PER_TENANT=4
 
 # Celery Flow worker queue/runtime settings
 FLOW_CELERY_QUEUE=flows.execute
+FLOW_CELERY_MAINTENANCE_QUEUE=flows.maintenance
+# Optional worker subscription override. Leave unset for the execute worker;
+# set to flows.maintenance on the dedicated maintenance worker.
+# FLOW_CELERY_WORKER_QUEUES=flows.execute
 FLOW_TASK_TIMEOUT_SECONDS=3600
 CELERY_VISIBILITY_TIMEOUT_SECONDS=7200
 

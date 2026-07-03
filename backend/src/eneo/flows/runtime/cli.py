@@ -19,6 +19,7 @@ def _celery_loglevel() -> str:
 
 def _flow_worker_argv() -> list[str]:
     settings = get_settings()
+    worker_queues = settings.flow_celery_worker_queues or settings.flow_celery_queue
     return [
         "celery",
         "-A",
@@ -27,7 +28,7 @@ def _flow_worker_argv() -> list[str]:
         "--loglevel",
         _celery_loglevel(),
         "--queues",
-        settings.flow_celery_queue,
+        worker_queues,
     ]
 
 

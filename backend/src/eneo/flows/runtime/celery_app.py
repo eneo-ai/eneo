@@ -41,11 +41,21 @@ def create_flow_celery_app() -> Celery:
         default_queue=settings.flow_celery_queue,
         task_routes={
             "flows.execute": {"queue": settings.flow_celery_queue},
-            "flows.reconcile_running": {"queue": settings.flow_celery_queue},
-            "flows.reconcile_review_expiry": {"queue": settings.flow_celery_queue},
-            "flows.redispatch_stale_queued": {"queue": settings.flow_celery_queue},
-            "flows.deliver_audit_outbox": {"queue": settings.flow_celery_queue},
-            "flows.deliver_webhook_outbox": {"queue": settings.flow_celery_queue},
+            "flows.reconcile_running": {
+                "queue": settings.flow_celery_maintenance_queue
+            },
+            "flows.reconcile_review_expiry": {
+                "queue": settings.flow_celery_maintenance_queue
+            },
+            "flows.redispatch_stale_queued": {
+                "queue": settings.flow_celery_maintenance_queue
+            },
+            "flows.deliver_audit_outbox": {
+                "queue": settings.flow_celery_maintenance_queue
+            },
+            "flows.deliver_webhook_outbox": {
+                "queue": settings.flow_celery_maintenance_queue
+            },
         },
     )
     app.conf.update(  # pyright: ignore[reportUnknownMemberType]
