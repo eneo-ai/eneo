@@ -17,6 +17,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
+    ServerDecisionTelemetry,
     dispatch_server_decision,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
@@ -32,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
+    FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -55,6 +57,7 @@ def _request(
     decision: BuilderTurnDecision,
     conversation: list[ConversationMessage],
     new_messages_start: int = 0,
+    planning_state: PlanningState | None = None,
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -66,9 +69,12 @@ def _request(
         discovery_analysis=None,
         requirements_confirmed=False,
         ui_language="en",
-        request_id="req-test",
-        litellm_model="server",
-        used_auxiliary_llm=False,
+        telemetry=ServerDecisionTelemetry(
+            request_id="req-test",
+            litellm_model="server",
+            used_auxiliary_llm=False,
+        ),
+        planning_state=planning_state or PlanningState.empty(),
     )
 
 
@@ -144,6 +150,41 @@ async def test_fallback_text_question_persists_user_and_assistant_turn() -> None
     assert [message.role for message in new_messages] == ["user", "assistant"]
     assert new_messages[-1].content == decision.prompt
     assert result.new_planning_state_version == 5
+
+
+@pytest.mark.asyncio
+async def test_server_question_preserves_prepared_file_roles_on_commit() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+        )
+    ]
+    conversation = [ConversationMessage(role="user", content="Build a flow")]
+    decision = AskCanonicalQuestion(
+        slot_name="structured_analysis_need",
+        prompt="Should the flow use structured analysis?",
+    )
+
+    await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=conversation,
+            planning_state=state,
+        )
+    )
+
+    repo.commit_turn.assert_awaited_once()
+    assert repo.commit_turn.await_args.kwargs["planning_state_overlay"] is state
 
 
 @pytest.mark.asyncio

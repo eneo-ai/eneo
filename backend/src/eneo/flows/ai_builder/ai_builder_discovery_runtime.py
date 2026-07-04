@@ -7,6 +7,7 @@ from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
+    apply_attachment_file_roles_to_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
@@ -155,6 +156,7 @@ async def build_runtime_discovery_context(
     attachment_context: AIBuilderAttachmentContext | None = None,
 ) -> RuntimeDiscoveryContext:
     state = build_planning_state_from_conversation(conversation, flow=flow)
+    apply_attachment_file_roles_to_planning_state(state, attachment_context)
     if not allow_classification or litellm_client is None or litellm_model is None:
         return RuntimeDiscoveryContext(planning_state=state)
 

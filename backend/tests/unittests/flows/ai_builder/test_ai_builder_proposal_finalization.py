@@ -183,6 +183,7 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
             model="openai/gpt-5.4",
             target_kind=TargetKind.CREATE,
         ),
+        "planning_state": None,
     }
     defaults.update(overrides)
     return CompiledProposalFinalizationRequest(**defaults)

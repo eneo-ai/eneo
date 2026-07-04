@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
+    FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -169,6 +170,61 @@ class TestArchitectureCommitPreservation:
         carry_forward_persisted_planner_state(rebuilt, persisted)
 
         assert rebuilt.architecture_commit is None
+
+
+class TestFileRoleEvidencePreservation:
+    def test_carries_forward_persisted_file_roles(self) -> None:
+        persisted_role = FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+        )
+        rebuilt = _state()
+        persisted = _state()
+        persisted.file_roles = [persisted_role]
+
+        carry_forward_persisted_planner_state(rebuilt, persisted)
+
+        assert rebuilt.file_roles == [persisted_role]
+
+    def test_current_turn_file_role_wins_over_persisted_same_file(self) -> None:
+        file_id = "00000000-0000-0000-0000-000000000701"
+        current_role = FileRoleEvidence(
+            file_id=file_id,
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="template",
+            source="heuristic",
+            confidence="medium",
+        )
+        stale_role = FileRoleEvidence(
+            file_id=file_id,
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+        rebuilt = _state()
+        rebuilt.file_roles = [current_role]
+        persisted = _state()
+        persisted.file_roles = [stale_role]
+
+        carry_forward_persisted_planner_state(rebuilt, persisted)
+
+        assert rebuilt.file_roles == [current_role]
 
 
 class TestReturnValue:

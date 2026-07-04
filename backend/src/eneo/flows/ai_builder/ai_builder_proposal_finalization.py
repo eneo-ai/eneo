@@ -56,6 +56,7 @@ from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.planning_state import PlanningState
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -78,6 +79,7 @@ class CompiledProposalFinalizationRequest:
     flow: "Flow | None"
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
+    planning_state: PlanningState | None
 
     @property
     def session_id(self) -> UUID:
@@ -168,6 +170,7 @@ class CompiledProposalFinalizer:
             arguments=request.arguments,
             compiled=compiled,
             flow=request.flow,
+            planning_state_overlay=request.planning_state,
         )
         return ToolProcessingResult(
             events=(
@@ -224,6 +227,7 @@ class CompiledProposalFinalizer:
                 "user selection from enabled space resources."
             ),
             flow=request.flow,
+            planning_state_overlay=request.planning_state,
         )
 
     def _mcp_policy_feedback(

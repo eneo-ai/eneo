@@ -17,6 +17,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -160,6 +161,46 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     assert "must not execute MCP tools" in prompt
     assert "input_schema" not in prompt
     assert "assistant_ref" not in prompt
+
+
+def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="template",
+            source="heuristic",
+            confidence="medium",
+        ),
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000702",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+        ),
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Use the uploaded files."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Uploaded file roles:" in prompt
+    assert "- avtalsmall.docx: template (heuristic, medium confidence)" in prompt
+    assert "- lagstod.pdf: reference_material (heuristic, medium confidence)" in prompt
 
 
 def test_plan_proposal_prompt_honors_continue_without_mcp_decision():

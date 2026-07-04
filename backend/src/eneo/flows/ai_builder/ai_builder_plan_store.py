@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
@@ -99,6 +100,7 @@ async def store_plan_and_update_conversation(
     arguments: dict[str, Any],
     compiled: CompiledProposal,
     flow: "Flow | None" = None,
+    planning_state_overlay: PlanningState | None = None,
 ) -> StoredPlanResult:
     proposal = build_flow_builder_proposal(compiled)
     append_plan_messages(
@@ -127,6 +129,12 @@ async def store_plan_and_update_conversation(
             start_index=new_messages_start,
         )
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
+        # Current-turn overlay must run before prior state: carry-forward only
+        # fills missing planner-owned fields, so the current upload role wins.
+        carry_forward_persisted_planner_state(
+            planning_state,
+            planning_state_overlay,
+        )
         carry_forward_persisted_planner_state(planning_state, prior_state)
         prior_commit = prior_state.architecture_commit if prior_state else None
         assert_architecture_commit_draft_matches_pinned(

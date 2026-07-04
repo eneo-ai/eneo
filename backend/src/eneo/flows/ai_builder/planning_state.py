@@ -12,10 +12,11 @@ JSONB column never drifts out of Pydantic's typed world.
 Three first-class version stamps travel on every persisted state:
 `fcm_version` (the Flow Capability Manifest in force), a
 `planner_contract_version` (the planner I/O schema in force), and
-`builder_schema_version` (this Pydantic shape itself). The stale-session
-policy compares stamps at load time. `pattern_registry_version` and
-`question_catalog_version` are module-internal hygiene counters owned
-by their respective modules and are NOT stamped here.
+`builder_schema_version` (this Pydantic shape itself). The Pydantic model
+preserves those stamps verbatim; load/rebuild policy lives at the repository
+or planner boundary, not inside the model. `pattern_registry_version` and
+`question_catalog_version` are module-internal hygiene counters owned by
+their respective modules and are NOT stamped here.
 
 Mutability vs revalidation: models are mutable because full-snapshot
 discipline mutates in Python before re-serializing. Direct attribute
@@ -30,14 +31,16 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from typing import Literal, assert_never
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from eneo.files.file_models import FileType
 from eneo.flows.enums import AIBuilderInputType
 
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 1
+BUILDER_SCHEMA_VERSION: int = 2
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
@@ -64,6 +67,16 @@ SlotSource = Literal[
 ]
 
 SlotConfidence = Literal["high", "medium", "low"]
+
+FileRole = Literal[
+    "runtime_input_sample",
+    "template",
+    "reference_material",
+    "example_output",
+    "context_only",
+]
+
+FileRoleSource = Literal["structured_answer", "heuristic", "model"]
 
 StepOutputType = Literal["text", "json", "pdf", "docx"]
 StepOutputMode = Literal[
@@ -173,6 +186,17 @@ class ArchitectureCommit(ArchitectureCommitDraft):
         return value
 
 
+class FileRoleEvidence(_PlanningModel):
+    file_id: UUID
+    filename: str
+    file_type: FileType
+    mimetype: str | None = None
+    role: FileRole
+    source: FileRoleSource
+    confidence: SignalConfidence
+    evidence: list[str] = Field(default_factory=list[str])
+
+
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
@@ -181,7 +205,17 @@ class PlanningState(_PlanningModel):
     resolved_slots: dict[str, ResolvedSlot] = Field(
         default_factory=dict[str, ResolvedSlot]
     )
+    file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
     architecture_commit: ArchitectureCommit | None = None
+
+    @model_validator(mode="after")
+    def _file_role_ids_are_unique(self) -> PlanningState:
+        seen: set[UUID] = set()
+        for item in self.file_roles:
+            if item.file_id in seen:
+                raise ValueError("file_roles must contain unique file_id values")
+            seen.add(item.file_id)
+        return self
 
     @classmethod
     def empty(cls) -> PlanningState:

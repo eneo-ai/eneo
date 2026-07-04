@@ -423,6 +423,7 @@ class ProposalSubmissionOwner:
             request_id=request_id,
             usage_tracker=usage_tracker,
             metadata_tool_call=metadata_tool_call,
+            planning_state=planning_state,
         )
 
     async def _finalize_invocation_proposal(
@@ -435,6 +436,7 @@ class ProposalSubmissionOwner:
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
         metadata_tool_call: RuntimeToolCall | None,
+        planning_state: PlanningState | None,
     ) -> ToolProcessingResult:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
             CompiledProposalFinalizationRequest(
@@ -453,6 +455,7 @@ class ProposalSubmissionOwner:
                 flow=invocation.flow,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
+                planning_state=planning_state,
             )
         )
 

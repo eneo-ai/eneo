@@ -127,6 +127,7 @@ async def run_scoped_plan_revision_attempt(
             flow=request.flow,
             request_id=request.request_id,
             usage_tracker=request.usage_tracker,
+            planning_state=None,
         )
     )
     return _outcome_from_processing_result(finalized, request_id=request.request_id)

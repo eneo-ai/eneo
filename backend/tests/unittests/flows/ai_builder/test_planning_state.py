@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
+    FileRoleEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -34,8 +35,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_one(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 1
+    def test_builder_schema_version_is_two(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 2
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -63,6 +64,7 @@ class TestEmptyConstruction:
         state = PlanningState.empty()
         assert state.signals == []
         assert state.resolved_slots == {}
+        assert state.file_roles == []
         assert state.architecture_commit is None
 
 
@@ -98,6 +100,21 @@ class TestRoundTrip:
                     confidence="high",
                 ),
             },
+            file_roles=[
+                FileRoleEvidence(
+                    file_id="00000000-0000-0000-0000-000000000701",
+                    filename="beslutsmall.docx",
+                    file_type="document",
+                    mimetype=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    ),
+                    role="template",
+                    source="heuristic",
+                    confidence="medium",
+                    evidence=["filename:mall"],
+                )
+            ],
             architecture_commit=ArchitectureCommit(
                 tuples_chain=[
                     StepTriple(
@@ -164,6 +181,53 @@ class TestSignalValidation:
                 value="case_documents",
                 confidence="high",
                 source="invented_source",  # type: ignore[arg-type]
+            )
+
+
+class TestFileRoleEvidenceValidation:
+    def test_file_role_evidence_accepts_declared_roles(self) -> None:
+        evidence = FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+            evidence=["filename:lag"],
+        )
+
+        assert evidence.role == "reference_material"
+
+    def test_file_role_evidence_rejects_unknown_role(self) -> None:
+        with pytest.raises(ValidationError):
+            FileRoleEvidence(
+                file_id="00000000-0000-0000-0000-000000000701",
+                filename="lagstod.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                role="sourceish",  # type: ignore[arg-type]
+                source="heuristic",
+                confidence="medium",
+            )
+
+    def test_planning_state_rejects_duplicate_file_role_ids(self) -> None:
+        file_role = FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+        )
+
+        with pytest.raises(ValidationError):
+            PlanningState(
+                fcm_version=FCM_VERSION,
+                planner_contract_version=PLANNER_CONTRACT_VERSION,
+                builder_schema_version=BUILDER_SCHEMA_VERSION,
+                file_roles=[file_role, file_role],
             )
 
 
@@ -305,9 +369,8 @@ class TestStrictExtraRejection:
 
 class TestVersionStampContract:
     """All three first-class stamps are required and preserved verbatim.
-    The stale-session policy compares them against current module
-    constants at load time, but the Pydantic model does not auto-upgrade
-    them.
+    The Pydantic model does not auto-upgrade them; repository/planner
+    policy owns any reset or stale-session behavior.
     """
 
     def test_older_fcm_version_round_trips_unchanged(self) -> None:

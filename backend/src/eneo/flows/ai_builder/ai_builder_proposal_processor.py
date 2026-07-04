@@ -138,6 +138,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             flow=flow,
             assistant_metadata=assistant_metadata,
+            planning_state=planning_state,
         )
         if mcp_preflight_result is not None:
             for event in mcp_preflight_result.events:
@@ -202,6 +203,7 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
         assistant_metadata: dict[str, Any] | None,
+        planning_state: PlanningState | None,
     ) -> BackendQuestionPersistenceResult | None:
         if resource_catalog is None or mcp_selection_answer_allows_planning(
             conversation
@@ -241,4 +243,5 @@ class AIBuilderProposalProcessor:
                 "requested an MCP by name and must choose from enabled space MCP resources."
             ),
             flow=flow,
+            planning_state_overlay=planning_state,
         )

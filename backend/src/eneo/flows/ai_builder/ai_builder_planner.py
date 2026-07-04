@@ -45,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_send_lease import claim_ai_builder_send_turn
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
+    ServerDecisionTelemetry,
     dispatch_server_decision,
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
@@ -303,11 +304,14 @@ class AIBuilderPlanner:
                                 ),
                                 requirements_confirmed=requirements_state.confirmed,
                                 ui_language=ui_language,
-                                request_id=request_id,
-                                litellm_model=litellm_model,
-                                used_auxiliary_llm=(
-                                    metadata_resolution.used_auxiliary_llm
+                                telemetry=ServerDecisionTelemetry(
+                                    request_id=request_id,
+                                    litellm_model=litellm_model,
+                                    used_auxiliary_llm=(
+                                        metadata_resolution.used_auxiliary_llm
+                                    ),
                                 ),
+                                planning_state=planner_turn_request.planning_state,
                             )
                         )
                     except AIBuilderBadRequestException as error:

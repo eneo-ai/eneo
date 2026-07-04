@@ -69,6 +69,13 @@ ServerDecisionKind = Literal[
 
 
 @dataclass(frozen=True, slots=True)
+class ServerDecisionTelemetry:
+    request_id: str
+    litellm_model: str
+    used_auxiliary_llm: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ServerDecisionDispatchRequest:
     repo: "AIBuilderRepository"
     turn: SessionSendTurn
@@ -79,9 +86,8 @@ class ServerDecisionDispatchRequest:
     discovery_analysis: DiscoveryAnalysis | None
     requirements_confirmed: bool
     ui_language: str | None
-    request_id: str
-    litellm_model: str
-    used_auxiliary_llm: bool
+    telemetry: ServerDecisionTelemetry
+    planning_state: PlanningState
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +181,7 @@ async def _dispatch_question(
                 planner_telemetry=telemetry,
                 tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
+            planning_state_overlay=request.planning_state,
         )
         return ServerDecisionDispatchResult(
             action_kind="ask_question",
@@ -197,6 +204,7 @@ async def _dispatch_question(
         turn=request.turn,
         new_messages=request.conversation[request.new_messages_start :],
         flow=request.flow,
+        planning_state_overlay=request.planning_state,
     )
     return ServerDecisionDispatchResult(
         action_kind="ask_question",
@@ -217,6 +225,7 @@ async def _dispatch_architecture_commit(
         new_messages=request.conversation[request.new_messages_start :],
         flow=request.flow,
         architecture_commit=finalize_architecture_commit(decision.architecture_commit),
+        planning_state_overlay=request.planning_state,
     )
     events: list[AIBuilderStreamEvent] = [build_status_event(status)]
 
@@ -248,9 +257,8 @@ async def _dispatch_architecture_commit(
                 discovery_analysis=None,
                 requirements_confirmed=request.requirements_confirmed,
                 ui_language=request.ui_language,
-                request_id=request.request_id,
-                litellm_model=request.litellm_model,
-                used_auxiliary_llm=request.used_auxiliary_llm,
+                telemetry=request.telemetry,
+                planning_state=session_state,
             )
         )
         events.extend(chained.events)
@@ -293,6 +301,7 @@ async def _dispatch_requirements_confirmation(
         turn=request.turn,
         new_messages=request.conversation[request.new_messages_start :],
         flow=request.flow,
+        planning_state_overlay=request.planning_state,
     )
     return ServerDecisionDispatchResult(
         action_kind="confirm_requirements",
@@ -331,14 +340,14 @@ def _server_turn_telemetry(
     tool_call_count: int,
 ) -> dict[str, object]:
     return build_planner_telemetry(
-        request_id=request.request_id,
-        model=request.litellm_model,
+        request_id=request.telemetry.request_id,
+        model=request.telemetry.litellm_model,
         finish_reason=None,
         prompt_tokens=None,
         completion_tokens=None,
         total_tokens=None,
         tool_call_count=tool_call_count,
-        used_auxiliary_llm=request.used_auxiliary_llm,
+        used_auxiliary_llm=request.telemetry.used_auxiliary_llm,
         outcome_kind=f"server_{action_kind}",
         wall_clock_ms=0,
         llm_calls_made=0,
@@ -351,6 +360,7 @@ def _server_turn_telemetry(
 __all__ = [
     "ServerDecisionDispatchRequest",
     "ServerDecisionDispatchResult",
+    "ServerDecisionTelemetry",
     "build_requirements_summary_payload",
     "dispatch_server_decision",
 ]

@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject
 
 
@@ -46,6 +47,7 @@ async def persist_backend_question(
     assistant_metadata: dict[str, Any] | None = None,
     tool_content: str = "Question presented to user. Awaiting their selection.",
     flow: Flow | None = None,
+    planning_state_overlay: PlanningState | None = None,
 ) -> BackendQuestionPersistenceResult:
     """Append a backend-owned discovery question turn and refresh `PlanningState` atomically.
 
@@ -87,6 +89,7 @@ async def persist_backend_question(
         turn=turn,
         new_messages=conversation[new_messages_start:],
         flow=flow,
+        planning_state_overlay=planning_state_overlay,
     )
 
     return BackendQuestionPersistenceResult(

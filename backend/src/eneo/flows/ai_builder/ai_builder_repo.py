@@ -1104,6 +1104,7 @@ class AIBuilderRepository:
         new_messages: list[ConversationMessage],
         flow: "Flow | None" = None,
         architecture_commit: ArchitectureCommit | None = None,
+        planning_state_overlay: PlanningState | None = None,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
 
@@ -1148,6 +1149,9 @@ class AIBuilderRepository:
             state = build_planning_state_from_conversation(persisted, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
+            # Current-turn overlay must run before prior state: carry-forward only
+            # fills missing planner-owned fields, so the current upload role wins.
+            carry_forward_persisted_planner_state(state, planning_state_overlay)
             carry_forward_persisted_planner_state(state, prior_state)
             return await self.save_planning_state(
                 session_id=turn.session_id,

@@ -5,7 +5,6 @@ from uuid import uuid4
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
-    AIBuilderAttachmentEvidence,
     build_ai_builder_attachment_context,
 )
 
@@ -81,31 +80,87 @@ def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> N
     result = build_ai_builder_attachment_context(files)
 
     assert result is not None
-    assert result.evidence == (
-        AIBuilderAttachmentEvidence(
-            file_id=files[0].id,
-            filename="beslutsmall.docx",
-            file_type=FileType.DOCUMENT,
-            mimetype=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ),
-            has_readable_text=True,
-            excerpt="Beslutspunkt: ...",
-        ),
-        AIBuilderAttachmentEvidence(
-            file_id=files[1].id,
-            filename="meeting.m4a",
-            file_type=FileType.AUDIO,
-            mimetype="audio/mp4",
-            has_readable_text=True,
-            excerpt="Vi beslutade att följa upp avtalet.",
-        ),
-    )
+    assert result.evidence[0].file_id == files[0].id
+    assert result.evidence[0].filename == "beslutsmall.docx"
+    assert result.evidence[0].file_type == FileType.DOCUMENT
+    assert result.evidence[0].inferred_role == "template"
+    assert result.evidence[0].role_confidence == "medium"
+    assert result.evidence[1].file_id == files[1].id
+    assert result.evidence[1].filename == "meeting.m4a"
+    assert result.evidence[1].file_type == FileType.AUDIO
+    assert result.evidence[1].inferred_role == "runtime_input_sample"
+    assert result.evidence[1].role_confidence == "high"
     assert result.discovery_context is not None
     assert "filename: beslutsmall.docx" in result.discovery_context
     assert "file_type: document" in result.discovery_context
+    assert "inferred_role: template" in result.discovery_context
     assert "filename: meeting.m4a" in result.discovery_context
     assert "file_type: audio" in result.discovery_context
+    assert "inferred_role: runtime_input_sample" in result.discovery_context
+
+
+def test_build_ai_builder_attachment_context_distinguishes_template_and_reference() -> (
+    None
+):
+    files = [
+        _make_file(
+            name="avtalsmall.docx",
+            text="Fyll i {{ kundnamn }} och {{ datum }}.",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_type=FileType.DOCUMENT,
+        ),
+        _make_file(
+            name="lagstod.pdf",
+            text="Lagstöd och föreskrifter som ska användas vid bedömning.",
+            mimetype="application/pdf",
+            file_type=FileType.DOCUMENT,
+        ),
+    ]
+
+    result = build_ai_builder_attachment_context(files)
+
+    assert result is not None
+    assert [item.inferred_role for item in result.evidence] == [
+        "template",
+        "reference_material",
+    ]
+    assert result.context is not None
+    assert "File role: template" in result.context
+    assert "File role: reference_material" in result.context
+
+
+def test_build_ai_builder_attachment_context_avoids_substring_role_false_positives() -> (
+    None
+):
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="underlag.pdf",
+                text="Allmänt underlag utan rättskälla.",
+                mimetype="application/pdf",
+                file_type=FileType.DOCUMENT,
+            ),
+            _make_file(
+                name="bilaga.pdf",
+                text="Bilaga till ärendet.",
+                mimetype="application/pdf",
+                file_type=FileType.DOCUMENT,
+            ),
+            _make_file(
+                name="small.pdf",
+                text="Short document.",
+                mimetype="application/pdf",
+                file_type=FileType.DOCUMENT,
+            ),
+        ]
+    )
+
+    assert result is not None
+    assert [item.inferred_role for item in result.evidence] == [
+        "context_only",
+        "context_only",
+        "context_only",
+    ]
 
 
 def test_build_ai_builder_attachment_context_surfaces_unreadable_files_for_discovery() -> (

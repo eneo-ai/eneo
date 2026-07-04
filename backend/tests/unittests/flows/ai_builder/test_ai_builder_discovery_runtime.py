@@ -105,6 +105,9 @@ def _attachment_context() -> AIBuilderAttachmentContext:
                 ),
                 has_readable_text=False,
                 excerpt=None,
+                inferred_role="template",
+                role_confidence="medium",
+                role_evidence=("filename:template_keyword",),
             ),
         ),
         included_file_ids=[],
@@ -201,6 +204,46 @@ async def test_runtime_planning_state_skips_model_when_freeform_text_is_empty() 
     )
 
     litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifier() -> (
+    None
+):
+    file_id = uuid4()
+    attachment_context = AIBuilderAttachmentContext(
+        context=None,
+        discovery_context=None,
+        evidence=(
+            AIBuilderAttachmentEvidence(
+                file_id=file_id,
+                filename="lagstod.pdf",
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                has_readable_text=True,
+                excerpt="Lagstöd som ska användas vid bedömning.",
+                inferred_role="reference_material",
+                role_confidence="medium",
+                role_evidence=("filename:reference_keyword",),
+            ),
+        ),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=False,
+    )
+
+    state = await build_runtime_planning_state(
+        [ConversationMessage(role="user", content="   ")],
+        litellm_client=AsyncMock(),
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        attachment_context=attachment_context,
+    )
+
+    assert len(state.file_roles) == 1
+    assert state.file_roles[0].file_id == file_id
+    assert state.file_roles[0].role == "reference_material"
 
 
 @pytest.mark.asyncio

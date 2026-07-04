@@ -223,6 +223,11 @@ def carry_forward_persisted_planner_state(
         and persisted.architecture_commit is not None
     ):
         rebuilt.architecture_commit = persisted.architecture_commit
+    current_file_ids = {item.file_id for item in rebuilt.file_roles}
+    for file_role in persisted.file_roles:
+        if file_role.file_id not in current_file_ids:
+            rebuilt.file_roles.append(file_role)
+            current_file_ids.add(file_role.file_id)
 
 
 def merge_llm_resolved_slots(

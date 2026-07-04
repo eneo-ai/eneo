@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.planning_state import (
+    FileRole,
+    FileRoleEvidence,
+    PlanningState,
+    SignalConfidence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +29,9 @@ class AIBuilderAttachmentEvidence:
     mimetype: str | None
     has_readable_text: bool
     excerpt: str | None
+    inferred_role: FileRole = "context_only"
+    role_confidence: SignalConfidence = "low"
+    role_evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,10 +52,80 @@ def readable_attachment_text(file: File) -> str | None:
     return None
 
 
+def apply_attachment_file_roles_to_planning_state(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> None:
+    if attachment_context is None:
+        return
+    roles_by_id = {item.file_id: item for item in state.file_roles}
+    for item in attachment_context.evidence:
+        roles_by_id[item.file_id] = FileRoleEvidence(
+            file_id=item.file_id,
+            filename=item.filename,
+            file_type=item.file_type,
+            mimetype=item.mimetype,
+            role=item.inferred_role,
+            source="heuristic",
+            confidence=item.role_confidence,
+            evidence=list(item.role_evidence),
+        )
+    state.file_roles = list(roles_by_id.values())
+
+
 def _bounded_text(value: str, max_chars: int) -> tuple[str, bool]:
     if len(value) <= max_chars:
         return value, False
     return value[:max_chars], True
+
+
+def _contains_token(value: str, tokens: tuple[str, ...]) -> bool:
+    words = set(re.findall(r"[\wåäöÅÄÖ]+", value.casefold()))
+    return bool(words.intersection(tokens))
+
+
+def _filename_has_template_keyword(filename: str) -> bool:
+    words = re.findall(r"[\wåäöÅÄÖ]+", filename.casefold())
+    return "template" in words or any(
+        "mall" in word and word != "small" for word in words
+    )
+
+
+def _infer_file_role(
+    file: File,
+    readable_text: str | None,
+) -> tuple[FileRole, SignalConfidence, tuple[str, ...]]:
+    filename = file.name.casefold()
+    text = (readable_text or "").casefold()
+
+    if file.file_type == FileType.AUDIO:
+        return "runtime_input_sample", "high", ("file_type:audio",)
+    if _filename_has_template_keyword(filename):
+        return "template", "medium", ("filename:template_keyword",)
+    if "{{" in text or any(
+        marker in text
+        for marker in ("fyll i", "placeholder", "template variable", "mallfält")
+    ):
+        return "template", "medium", ("content:template_marker",)
+    reference_tokens = (
+        "lag",
+        "lagstod",
+        "lagstöd",
+        "föreskrift",
+        "riktlinje",
+        "policy",
+        "regel",
+        "regler",
+        "referens",
+        "reference",
+    )
+    if _contains_token(filename, reference_tokens):
+        return "reference_material", "medium", ("filename:reference_keyword",)
+    if _contains_token(text, reference_tokens):
+        return "reference_material", "medium", ("content:reference_keyword",)
+    if _contains_token(filename, ("exempel", "example", "sample", "output")):
+        return "example_output", "medium", ("filename:example_keyword",)
+    return "context_only", "low", ("fallback:unclassified_file",)
 
 
 def build_ai_builder_attachment_context(
@@ -74,16 +154,20 @@ def build_ai_builder_attachment_context(
             )
             truncated = truncated or excerpt_truncated
 
-        evidence.append(
-            AIBuilderAttachmentEvidence(
-                file_id=file.id,
-                filename=file.name,
-                file_type=file.file_type,
-                mimetype=file.mimetype,
-                has_readable_text=text is not None,
-                excerpt=excerpt,
-            )
+        role, role_confidence, role_evidence = _infer_file_role(file, text)
+
+        attachment_evidence = AIBuilderAttachmentEvidence(
+            file_id=file.id,
+            filename=file.name,
+            file_type=file.file_type,
+            mimetype=file.mimetype,
+            has_readable_text=text is not None,
+            excerpt=excerpt,
+            inferred_role=role,
+            role_confidence=role_confidence,
+            role_evidence=role_evidence,
         )
+        evidence.append(attachment_evidence)
 
         if text is None or remaining <= 0:
             continue
@@ -93,7 +177,11 @@ def build_ai_builder_attachment_context(
             resolved_policy.max_chars_per_file,
         )
         truncated = truncated or file_truncated
-        filename_header = f"Filename: {file.name}\n"
+        filename_header = (
+            f"Filename: {file.name}\n"
+            f"File role: {attachment_evidence.inferred_role} "
+            f"({attachment_evidence.role_confidence}, unconfirmed)\n"
+        )
         block_body = text[:remaining]
         if len(text) > len(block_body):
             truncated = True
@@ -155,7 +243,11 @@ def _render_discovery_context(
             f"file_type: {item.file_type.value}",
             f"mimetype: {item.mimetype or 'unknown'}",
             f"has_readable_text: {str(item.has_readable_text).lower()}",
+            f"inferred_role: {item.inferred_role}",
+            f"role_confidence: {item.role_confidence}",
         ]
+        for marker in item.role_evidence:
+            lines.append(f"role_evidence: {marker}")
         if item.excerpt is not None:
             lines.append(f"excerpt: {item.excerpt}")
         blocks.append("\n".join(lines))

@@ -46,7 +46,11 @@ from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
-from eneo.flows.ai_builder.planning_state import ArchitectureCommit, PlanningState
+from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    FileRoleEvidence,
+    PlanningState,
+)
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -416,6 +420,95 @@ async def test_store_plan_preserves_proposal_when_current_slots_match_commit() -
     )
 
     repo.save_planning_state.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_store_plan_persists_prepared_file_roles() -> None:
+    repo = _make_repo_mock()
+    prepared_state = PlanningState.empty()
+    prepared_state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="template",
+            source="heuristic",
+            confidence="medium",
+        )
+    ]
+
+    await store_plan_and_update_conversation(
+        repo=repo,
+        turn=_make_turn(base_version=7),
+        conversation=[],
+        new_messages_start=0,
+        assistant_content="plan ready",
+        tool_call_id="call-unit-1",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={},
+        compiled=_compiled_proposal(),
+        planning_state_overlay=prepared_state,
+    )
+
+    saved_state = repo.save_planning_state.await_args.kwargs["state"]
+    assert saved_state.file_roles == prepared_state.file_roles
+
+
+@pytest.mark.asyncio
+async def test_store_plan_prefers_current_file_role_over_prior_same_file() -> None:
+    repo = _make_repo_mock()
+    file_id = "00000000-0000-0000-0000-000000000701"
+    prior_state = PlanningState.empty()
+    prior_state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+    ]
+    prepared_state = PlanningState.empty()
+    prepared_state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="template",
+            source="heuristic",
+            confidence="medium",
+        )
+    ]
+    repo.load_planning_state.return_value = prior_state
+
+    await store_plan_and_update_conversation(
+        repo=repo,
+        turn=_make_turn(base_version=7),
+        conversation=[],
+        new_messages_start=0,
+        assistant_content="plan ready",
+        tool_call_id="call-unit-1",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={},
+        compiled=_compiled_proposal(),
+        planning_state_overlay=prepared_state,
+    )
+
+    saved_state = repo.save_planning_state.await_args.kwargs["state"]
+    assert saved_state.file_roles == prepared_state.file_roles
 
 
 @pytest.mark.asyncio

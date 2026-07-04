@@ -319,6 +319,7 @@ SERVER_DECISION_DISPATCH_PUBLIC_NAMES = frozenset(
     {
         "ServerDecisionDispatchRequest",
         "ServerDecisionDispatchResult",
+        "ServerDecisionTelemetry",
         "build_requirements_summary_payload",
         "dispatch_server_decision",
     }

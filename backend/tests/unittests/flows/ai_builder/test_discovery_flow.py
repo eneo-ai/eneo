@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
+    ServerDecisionTelemetry,
     dispatch_server_decision,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
@@ -51,6 +52,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -2841,9 +2843,12 @@ class TestPlannerDiscoveryQuestionDispatch:
                 discovery_analysis=None,
                 requirements_confirmed=False,
                 ui_language="en",
-                request_id="req-test",
-                litellm_model="server",
-                used_auxiliary_llm=False,
+                telemetry=ServerDecisionTelemetry(
+                    request_id="req-test",
+                    litellm_model="server",
+                    used_auxiliary_llm=False,
+                ),
+                planning_state=PlanningState.empty(),
             )
         )
 

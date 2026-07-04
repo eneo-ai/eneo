@@ -133,6 +133,7 @@ class _PreparedBase:
 class ServerOutputPrepared(_PreparedBase):
     server_decision: BuilderTurnDecision
     discovery_analysis: DiscoveryAnalysis
+    planning_state: PlanningState
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +207,7 @@ async def prepare_planner_request(
             ),
             discovery_analysis=discovery_analysis,
             server_decision=turn_control.decision,
+            planning_state=rebuilt_planning_state,
         )
 
     confirmed_requirements = latest_confirmed_requirements(request.conversation)

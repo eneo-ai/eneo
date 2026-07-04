@@ -253,6 +253,7 @@ def _server_output_prepared() -> ServerOutputPrepared:
             prompt="What should the flow produce?",
         ),
         discovery_analysis=DiscoveryAnalysis(issues=()),
+        planning_state=PlanningState.empty(),
     )
 
 

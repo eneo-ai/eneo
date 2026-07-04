@@ -103,6 +103,9 @@ def build_plan_proposal_system_prompt(
         "Confirmed requirements:",
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
+    file_roles_block = _file_roles_block(planning_state)
+    if file_roles_block is not None:
+        lines.extend(["", "Uploaded file roles:", file_roles_block])
     if result_contract_block is not None:
         lines.extend(["", "Result contract:", result_contract_block])
     section_block = _requested_output_sections_block(requested_output_sections)
@@ -207,6 +210,15 @@ def _resolved_slot_prompt_status(slot: ResolvedSlot) -> str:
         case "model":
             return f"model inference, {slot.confidence} confidence"
     return assert_never(slot.source)
+
+
+def _file_roles_block(planning_state: PlanningState) -> str | None:
+    if not planning_state.file_roles:
+        return None
+    return "\n".join(
+        f"- {item.filename}: {item.role} ({item.source}, {item.confidence} confidence)"
+        for item in planning_state.file_roles
+    )
 
 
 def _resource_context_block(
