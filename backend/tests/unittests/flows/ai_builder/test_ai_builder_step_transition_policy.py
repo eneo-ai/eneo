@@ -21,7 +21,10 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import question_binding
+from eneo.flows.input_binding_contract_rules import (
+    effective_question_binding,
+    question_binding,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -102,6 +105,26 @@ def _text_report_source_material_spec(
     )
 
 
+def _completed_source_refs(
+    *,
+    structured_step_ref: str,
+    source_step_ref: str,
+    label: str = "Source material",
+) -> dict[str, object]:
+    return {
+        "source_refs": [
+            {"step_ref": structured_step_ref, "output": "structured"},
+            {"step_ref": source_step_ref, "output": "text", "label": label},
+        ]
+    }
+
+
+def _effective_question(input_bindings: dict[str, object] | None) -> str:
+    question = effective_question_binding(input_bindings)
+    assert question is not None
+    return question
+
+
 def _question_metrics(
     question: str,
     *,
@@ -132,7 +155,9 @@ def _question_metrics(
         )
     }
     question_step = next(
-        step for step in spec.steps if question_binding(step.input_bindings) == question
+        step
+        for step in spec.steps
+        if effective_question_binding(step.input_bindings) == question
     )
     return {
         "binding_byte_size": len(question.encode("utf-8")),
@@ -1214,18 +1239,24 @@ def test_normalize_ai_builder_spec_completes_source_material_underlag() -> None:
     )
 
     assert normalized.steps[2].input_type == InputType.TEXT
-    assert normalized.steps[2].input_bindings == {
-        "question": (
-            "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-        )
-    }
+    assert normalized.steps[2].input_bindings == _completed_source_refs(
+        structured_step_ref="step_b",
+        source_step_ref="step_a",
+        label="Källmaterial",
+    )
+    assert _effective_question(normalized.steps[2].input_bindings) == (
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
     assert normalized.steps[2].input_contract is None
     assert normalized.steps[3].input_type == InputType.TEXT
-    assert normalized.steps[3].input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-        )
-    }
+    assert normalized.steps[3].input_bindings == _completed_source_refs(
+        structured_step_ref="step_c",
+        source_step_ref="step_a",
+        label="Källmaterial",
+    )
+    assert _effective_question(normalized.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
     assert normalized.steps[3].input_contract is None
     assert [
         change.code
@@ -1247,12 +1278,13 @@ def test_normalize_ai_builder_spec_completes_source_material_for_text_report() -
     final_step = normalized.steps[3]
     assert final_step.input_source == InputSource.PREVIOUS_STEP
     assert final_step.input_type == InputType.TEXT
-    assert final_step.input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\n"
-            "Source material: {{ step_a.output.text }}"
-        )
-    }
+    assert final_step.input_bindings == _completed_source_refs(
+        structured_step_ref="step_c",
+        source_step_ref="step_a",
+    )
+    assert _effective_question(final_step.input_bindings) == (
+        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+    )
     assert [
         change.code
         for _step_spec, change in changes
@@ -1263,7 +1295,7 @@ def test_normalize_ai_builder_spec_completes_source_material_for_text_report() -
     ]
 
     metrics = _question_metrics(
-        question=question_binding(final_step.input_bindings) or "",
+        question=_effective_question(final_step.input_bindings),
         spec=normalized,
     )
     assert metrics["fan_in_width"] == 2
@@ -1319,7 +1351,7 @@ def test_normalize_ai_builder_spec_bounds_material_metrics_for_section_chain() -
     normalized, _changes = normalize_ai_builder_spec(spec)
 
     for step in normalized.steps[2:]:
-        question = question_binding(step.input_bindings) or ""
+        question = _effective_question(step.input_bindings)
         metrics = _question_metrics(question=question, spec=normalized)
         assert metrics["binding_byte_size"] <= 96
         assert metrics["fan_in_width"] == 2
@@ -1340,11 +1372,18 @@ def test_normalize_ai_builder_spec_treats_immediate_structured_only_as_incomplet
 
     assert normalized.steps[3].input_type == InputType.TEXT
     assert normalized.steps[3].input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\n"
-            "Source material: {{ step_a.output.text }}"
-        )
+        "question": "{{ step_c.output.structured }}",
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "text",
+                "label": "Source material",
+            }
+        ],
     }
+    assert _effective_question(normalized.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+    )
 
 
 def test_normalize_ai_builder_spec_preserves_text_report_complete_underlag() -> None:
@@ -1440,12 +1479,13 @@ def test_normalize_ai_builder_spec_completes_empty_source_material_question() ->
 
     normalized, _changes = normalize_ai_builder_spec(spec)
 
-    assert normalized.steps[3].input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\n"
-            "Source material: {{ step_a.output.text }}"
-        )
-    }
+    assert normalized.steps[3].input_bindings == _completed_source_refs(
+        structured_step_ref="step_c",
+        source_step_ref="step_a",
+    )
+    assert _effective_question(normalized.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+    )
 
 
 def test_normalize_ai_builder_spec_does_not_add_source_material_without_json_predecessor() -> (
@@ -1535,15 +1575,18 @@ def test_normalize_ai_builder_spec_uses_text_flow_input_as_primary_source() -> N
 
     normalized, _changes = normalize_ai_builder_spec(spec)
 
-    assert normalized.steps[3].input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\n"
-            "Source material: {{ step_a.output.text }}"
-        )
-    }
+    assert normalized.steps[3].input_bindings == _completed_source_refs(
+        structured_step_ref="step_c",
+        source_step_ref="step_a",
+    )
+    assert _effective_question(normalized.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+    )
 
 
-def test_source_material_question_for_boundary_is_idempotent() -> None:
+def test_normalize_ai_builder_spec_typed_source_refs_are_completion_fixed_point() -> (
+    None
+):
     spec = _text_report_source_material_spec()
     normalized, _changes = normalize_ai_builder_spec(spec)
     normalized_again, second_changes = normalize_ai_builder_spec(normalized)
@@ -1643,12 +1686,17 @@ def test_normalize_ai_builder_spec_preserves_existing_source_material_question_t
     )
 
     assert normalized.steps[2].input_bindings == {
-        "question": (
-            "audience: {{ audience }}\n\n"
-            "{{ step_b.output.structured }}\n\n"
-            "Källmaterial: {{ step_a.output.text }}"
-        )
+        "question": "audience: {{ audience }}",
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
+        ],
     }
+    assert _effective_question(normalized.steps[2].input_bindings) == (
+        "audience: {{ audience }}\n\n"
+        "{{ step_b.output.structured }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
+    )
 
 
 def test_normalize_ai_builder_spec_completes_structured_field_only_source_material() -> (
@@ -1703,10 +1751,17 @@ def test_normalize_ai_builder_spec_completes_structured_field_only_source_materi
     assert normalized.steps[2].input_bindings == {
         "question": (
             "Audience: {{ review_audience }}\n"
-            "Risk: {{ step_b.output.structured.contract.delivery_risk }}\n\n"
-            "Source material: {{ step_a.output.text }}"
-        )
+            "Risk: {{ step_b.output.structured.contract.delivery_risk }}"
+        ),
+        "source_refs": [
+            {"step_ref": "step_a", "output": "text", "label": "Source material"}
+        ],
     }
+    assert _effective_question(normalized.steps[2].input_bindings) == (
+        "Audience: {{ review_audience }}\n"
+        "Risk: {{ step_b.output.structured.contract.delivery_risk }}\n\n"
+        "Source material: {{ step_a.output.text }}"
+    )
     assert any(
         change.code == "source_material_underlag_completed"
         for _step_spec, change in changes
@@ -1757,11 +1812,14 @@ def test_normalize_ai_builder_spec_prefers_primary_audio_source_over_prior_text_
     )
 
     assert normalized.steps[3].input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\n"
-            "Source material: {{ step_b.output.text }}"
-        )
+        "source_refs": [
+            {"step_ref": "step_c", "output": "structured"},
+            {"step_ref": "step_b", "output": "text", "label": "Source material"},
+        ]
     }
+    assert _effective_question(normalized.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nSource material: {{ step_b.output.text }}"
+    )
 
 
 def test_normalize_ai_builder_spec_uses_english_source_material_label() -> None:
@@ -1802,8 +1860,11 @@ def test_normalize_ai_builder_spec_uses_english_source_material_label() -> None:
     )
 
     assert normalized.steps[2].input_bindings == {
-        "question": (
-            "{{ step_b.output.structured }}\n\n"
-            "Source material: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Source material"},
+        ]
     }
+    assert _effective_question(normalized.steps[2].input_bindings) == (
+        "{{ step_b.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+    )

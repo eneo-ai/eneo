@@ -13,7 +13,7 @@ from eneo.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
     source_material_binding_status,
-    source_material_question_for_boundary,
+    source_material_bindings_for_boundary,
 )
 from eneo.flows.citation_sidecar import resolve_citation_mode
 from eneo.flows.enums import FlowOutputMode
@@ -28,7 +28,6 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
 from eneo.flows.input_binding_contract_rules import (
-    SOURCE_REFS_BINDING_KEY,
     effective_question_binding,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -262,13 +261,7 @@ def _normalize_source_material_underlag(
             for index, candidate in enumerate(spec.steps)
             if candidate is boundary.step
         )
-        existing_question = effective_question_binding(boundary.step.input_bindings)
-        normalized_bindings = dict(boundary.step.input_bindings or {})
-        normalized_bindings.pop(SOURCE_REFS_BINDING_KEY, None)
-        normalized_bindings["question"] = source_material_question_for_boundary(
-            boundary,
-            existing_question=existing_question,
-        )
+        normalized_bindings = source_material_bindings_for_boundary(boundary)
         normalized_step = boundary.step.model_copy(
             update={
                 "input_type": InputType.TEXT,
@@ -281,7 +274,7 @@ def _normalize_source_material_underlag(
                 normalized_step,
                 StepNormalizationChange(
                     code="source_material_underlag_completed",
-                    field_suffix="input_bindings.question",
+                    field_suffix="input_bindings.source_refs",
                     message=(
                         "Completed source-material underlag so the step receives "
                         "the immediate structured result and the earlier source text."

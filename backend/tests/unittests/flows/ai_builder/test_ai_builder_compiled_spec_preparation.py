@@ -28,6 +28,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 
 _DEFAULT_HELPER_INPUT_BINDINGS = object()
 
@@ -562,15 +563,23 @@ def test_prepared_source_material_docx_spec_is_apply_normalization_fixed_point()
     )
 
     assert spec.steps[2].input_bindings == {
-        "question": (
-            "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
+        ]
     }
+    assert effective_question_binding(spec.steps[2].input_bindings) == (
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
     assert spec.steps[3].input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {"step_ref": "step_c", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
+        ]
     }
+    assert effective_question_binding(spec.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
     _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
 
 

@@ -7,8 +7,8 @@ from eneo.flows.ai_builder.ai_builder_source_material import (
     iter_compiled_source_material_boundaries,
     primary_source_material_ref_for_steps,
     source_material_binding_status,
+    source_material_bindings_for_boundary,
     source_material_label_for_text,
-    source_material_question_for_boundary,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -242,21 +242,29 @@ def test_source_material_status_keeps_source_only_binding_intentional_partial() 
     )
 
 
-def test_source_material_question_completion_preserves_prompt_and_appends_source() -> (
-    None
-):
+def test_source_material_bindings_for_boundary_completes_typed_refs() -> None:
+    boundary = _only_boundary(_report_spec())
+
+    assert source_material_bindings_for_boundary(boundary) == {
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Source material"},
+        ]
+    }
+
+
+def test_source_material_bindings_for_boundary_preserves_prompt_copy() -> None:
     boundary = _only_boundary(
         _report_spec(final_question="Audience: {{ flow_input.audience }}")
     )
 
-    assert source_material_question_for_boundary(
-        boundary,
-        existing_question="Audience: {{ flow_input.audience }}",
-    ) == (
-        "Audience: {{ flow_input.audience }}\n\n"
-        "{{ step_b.output.structured }}\n\n"
-        "Source material: {{ step_a.output.text }}"
-    )
+    assert source_material_bindings_for_boundary(boundary) == {
+        "question": "Audience: {{ flow_input.audience }}",
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Source material"},
+        ],
+    }
 
 
 def test_source_material_label_uses_swedish_when_context_is_swedish() -> None:
