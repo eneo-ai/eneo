@@ -300,7 +300,12 @@ def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "docx_output_mode"):
         return False
     intent = profile.output_intent
-    if intent.terminal_output != "docx_document" or intent.docx_output_mode is not None:
+    if intent.terminal_output != "docx_document":
+        return False
+    if profile.planning_state.has_template_file_role():
+        docx_mode_slot = profile.resolved_slot("docx_output_mode")
+        return docx_mode_slot is None or docx_mode_slot.source == "policy_default"
+    if intent.docx_output_mode is not None:
         return False
     return mentions_any(
         profile.text,

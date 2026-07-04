@@ -52,7 +52,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import FileRoleEvidence, PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -832,6 +832,102 @@ class TestExtendedClarificationHints:
         assert "input_material_mode" not in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "final_output_mode" not in question_ids
+        assert "docx_output_mode" not in question_ids
+
+    def test_template_file_role_requires_docx_mode_when_generated_docx_is_defaulted(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag vill bygga ett flöde där jag ska skicka in en ljudfil "
+                    "som ska transkriberas. Jag vill ha en Word-fil i slutet."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+        planning_state = build_planning_state_from_conversation(conversation)
+        docx_mode_slot = planning_state.resolved_slots["docx_output_mode"]
+        assert docx_mode_slot.value == "generated_docx"
+        assert docx_mode_slot.source == "policy_default"
+        planning_state.file_roles = [
+            FileRoleEvidence(
+                file_id="00000000-0000-0000-0000-000000000701",
+                filename="beslutsmall.docx",
+                file_type="document",
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                    "document"
+                ),
+                role="template",
+                source="heuristic",
+                confidence="medium",
+            )
+        ]
+
+        analysis = analyze_discovery(conversation, planning_state=planning_state)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "docx_output_mode" in question_ids
+        assert analysis.ready_for_confirmation is False
+
+    def test_template_file_role_does_not_reask_after_explicit_generated_docx_choice(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="DOCX document",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_ids": ["docx_document"],
+                        "selected_values": ["docx_document"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Generated DOCX without template",
+                metadata={
+                    "question_answer": {
+                        "question_id": "docx_output_mode",
+                        "selected_option_ids": ["generated_docx"],
+                        "selected_values": ["generated_docx"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+        planning_state = build_planning_state_from_conversation(conversation)
+        planning_state.file_roles = [
+            FileRoleEvidence(
+                file_id="00000000-0000-0000-0000-000000000702",
+                filename="beslutsmall.docx",
+                file_type="document",
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                    "document"
+                ),
+                role="template",
+                source="heuristic",
+                confidence="medium",
+            )
+        ]
+
+        analysis = analyze_discovery(conversation, planning_state=planning_state)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
         assert "docx_output_mode" not in question_ids
 
     def test_audio_prompt_with_derived_underlag_does_not_trigger_mixed_input_question(

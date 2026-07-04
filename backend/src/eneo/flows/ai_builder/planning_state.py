@@ -226,6 +226,9 @@ class PlanningState(_PlanningModel):
             seen.add(item.file_id)
         return self
 
+    def has_template_file_role(self) -> bool:
+        return any(item.role == "template" for item in self.file_roles)
+
     @classmethod
     def empty(cls) -> PlanningState:
         """Fresh state for a new session — stamped at the current versions."""
