@@ -19,7 +19,7 @@ import {
   type FlowFormField
 } from "./flowFormSchema";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
-import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
+import { getFlowStepValidationIssues } from "./flowStepTypes";
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
@@ -29,6 +29,12 @@ import {
   type FlowWizardMetadata
 } from "./flowEditorMetadata";
 import { isFlowRetentionDays, parseFlowRetentionDaysInput } from "./flowEditorRetention";
+import {
+  stripTemporaryStepId,
+  isValidStepIndex,
+  getStableStepKey,
+  buildBlankStep
+} from "./flowStepPayloadShaping";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -37,14 +43,6 @@ type FlowEditorInitData = {
 };
 
 type FlowMetadataJson = NonNullable<Flow["metadata_json"]>;
-
-function stripTemporaryStepId(step: FlowStep): FlowStep {
-  if (!step.id?.startsWith("_temp_")) return step;
-
-  const stepWithoutTemporaryId: FlowStep = { ...step };
-  delete stepWithoutTemporaryId.id;
-  return stepWithoutTemporaryId;
-}
 
 const [getFlowEditor, setFlowEditor] = createContext<FlowEditor>("Edit a flow");
 
@@ -397,10 +395,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     setDataRetentionDays(days);
   }
 
-  function isValidStepIndex(index: number, steps: FlowStep[]): boolean {
-    return Number.isInteger(index) && index >= 0 && index < steps.length;
-  }
-
   function selectStep(stepId: string): void {
     const currentSteps = get(editor.state.update).steps ?? [];
     if (currentSteps.some((step) => step.id === stepId)) {
@@ -557,17 +551,15 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     const tempId = `_temp_${uid(12)}`;
     const stepName = seed?.name ?? `Nytt steg ${stepCount + 1}`;
-    const newStep: Partial<FlowStep> & { id: string } = {
-      id: tempId,
-      assistant_id: "",
-      step_order: stepCount + 1,
-      user_description: stepName,
-      input_source: isFirst ? "flow_input" : "previous_step",
-      input_type: isFirst ? "text" : mapOutputToInputType((prevStep as FlowStep)?.output_type),
-      output_mode: seed?.output_mode ?? "pass_through",
-      output_type: seed?.output_type ?? "text",
-      mcp_policy: "inherit"
-    };
+    const newStep = buildBlankStep({
+      tempId,
+      stepOrder: stepCount + 1,
+      name: stepName,
+      isFirst,
+      prevStepOutputType: (prevStep as FlowStep)?.output_type,
+      outputMode: seed?.output_mode,
+      outputType: seed?.output_type
+    });
 
     // Instant UI update
     editor.state.update.update((u) => ({
@@ -618,19 +610,13 @@ function createFlowEditor(data: FlowEditorInitData) {
     const isFirstInsert = afterOrder === 0;
 
     const defaultStepName = `Nytt steg ${afterOrder + 1}`;
-    const newStep: Partial<FlowStep> & { id: string } = {
-      id: tempId,
-      assistant_id: "",
-      step_order: afterOrder + 1,
-      user_description: defaultStepName,
-      input_source: isFirstInsert ? "flow_input" : "previous_step",
-      input_type: isFirstInsert
-        ? "text"
-        : mapOutputToInputType((prevStep as FlowStep)?.output_type),
-      output_mode: "pass_through",
-      output_type: "text",
-      mcp_policy: "inherit"
-    };
+    const newStep = buildBlankStep({
+      tempId,
+      stepOrder: afterOrder + 1,
+      name: defaultStepName,
+      isFirst: isFirstInsert,
+      prevStepOutputType: (prevStep as FlowStep)?.output_type
+    });
 
     // Renumber subsequent steps
     const updatedSteps = currentSteps.map((s: FlowStep) => {
@@ -740,12 +726,6 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   async function listAssistantPrompts(assistantId: string): Promise<PromptSparse[]> {
     return data.eneo.assistants.listPrompts({ id: assistantId });
-  }
-
-  function getStableStepKey(step: FlowStep, index: number): string {
-    if (step.id) return `id:${step.id}`;
-    if (step.assistant_id) return `assistant:${step.assistant_id}`;
-    return `index:${index}`;
   }
 
   async function applyStepsWithSafeOrderRemap(nextSteps: FlowStep[]): Promise<void> {
