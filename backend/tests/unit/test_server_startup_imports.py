@@ -361,6 +361,7 @@ def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -
     assert list_flow_runs_params["id"]["description"]
     assert list_flow_runs_params["limit"]["description"]
     assert list_flow_runs_params["offset"]["description"]
+    assert list_flow_runs_params["status"]["description"]
 
     get_flow_graph_operation = schema["paths"]["/api/v1/flows/{id}/graph/"]["get"]
     get_flow_graph_params = {

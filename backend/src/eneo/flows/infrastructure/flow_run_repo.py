@@ -266,6 +266,7 @@ class FlowRunRepository:
         *,
         tenant_id: UUID,
         flow_id: UUID | None = None,
+        statuses: Sequence[FlowRunStatus] | None = None,
         principal_user_id: UUID | None = None,
         principal_service_id: UUID | None = None,
         limit: int | None = None,
@@ -278,6 +279,10 @@ class FlowRunRepository:
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
+        if statuses:
+            stmt = stmt.where(
+                FlowRuns.status.in_(tuple(status.value for status in statuses))
+            )
         if principal_user_id is not None:
             stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
         if principal_service_id is not None:

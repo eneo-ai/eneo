@@ -582,6 +582,7 @@ class FlowRunService:
         self,
         *,
         flow_id: UUID | None = None,
+        statuses: Sequence[FlowRunStatus] | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowRun]:
@@ -594,12 +595,14 @@ class FlowRunService:
                     flow_id=flow_id,
                     principal_user_id=None,
                     principal_service_id=None,
+                    statuses=statuses,
                     limit=limit,
                     offset=offset,
                 )
         return await self.flow_run_repo.list_runs(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
+            statuses=statuses,
             principal_user_id=(
                 None
                 if is_tenant_admin or principal.is_service_key
@@ -669,11 +672,13 @@ class FlowRunService:
         self,
         *,
         flow_id: UUID,
+        statuses: Sequence[FlowRunStatus] | None = None,
         limit: int,
         offset: int,
     ) -> FlowRunPageWithResultFilesAndTokenUsage:
         runs = await self.list_runs(
             flow_id=flow_id,
+            statuses=statuses,
             limit=limit + 1,
             offset=offset,
         )

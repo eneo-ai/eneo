@@ -1728,6 +1728,44 @@ async def test_list_runs_delegates_to_repo(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=user.tenant_id,
         flow_id=flow_id,
+        statuses=None,
+        principal_user_id=user.id,
+        principal_service_id=None,
+        limit=None,
+        offset=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_runs_delegates_status_filter_to_repo(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow_id = uuid4()
+    statuses = [FlowRunStatus.COMPLETED]
+    expected = [
+        _run(user=user, flow_id=flow_id).model_copy(
+            update={"status": FlowRunStatus.COMPLETED}
+        )
+    ]
+    flow_run_repo.list_runs.return_value = expected
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    result = await service.list_runs(flow_id=flow_id, statuses=statuses)
+
+    assert result == expected
+    flow_run_repo.list_runs.assert_awaited_once_with(
+        tenant_id=user.tenant_id,
+        flow_id=flow_id,
+        statuses=statuses,
         principal_user_id=user.id,
         principal_service_id=None,
         limit=None,
@@ -1762,6 +1800,7 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=admin_user.tenant_id,
         flow_id=flow_id,
+        statuses=None,
         principal_user_id=None,
         principal_service_id=None,
         limit=None,
@@ -1804,6 +1843,7 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow_id,
+        statuses=None,
         principal_user_id=None,
         principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
@@ -1846,6 +1886,7 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow.id,
+        statuses=None,
         principal_user_id=None,
         principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
@@ -1893,6 +1934,7 @@ async def test_list_runs_with_result_files_and_token_usage_enriches_page(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=user.tenant_id,
         flow_id=flow_id,
+        statuses=None,
         principal_user_id=user.id,
         principal_service_id=None,
         limit=3,

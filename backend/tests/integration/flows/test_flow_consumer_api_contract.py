@@ -777,6 +777,36 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert steps[0]["status"] == "completed"
     assert steps[0]["output_payload_json"] == {"answer": "consumer-visible"}
 
+    await _mark_run_completed(db_container=db_container, run_id=first_run["id"])
+
+    completed_runs_response = await client.get(
+        f"/api/v1/flows/{flow_id}/runs/?status=completed",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert completed_runs_response.status_code == 200, completed_runs_response.text
+    completed_runs = completed_runs_response.json()["items"]
+    assert [run["id"] for run in completed_runs] == [first_run["id"]]
+
+    queued_runs_response = await client.get(
+        f"/api/v1/flows/{flow_id}/runs/?status=queued",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert queued_runs_response.status_code == 200, queued_runs_response.text
+    queued_runs = queued_runs_response.json()["items"]
+    assert [run["id"] for run in queued_runs] == [second_run["id"]]
+
+    active_or_done_runs_response = await client.get(
+        f"/api/v1/flows/{flow_id}/runs/?status=completed&status=queued",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert active_or_done_runs_response.status_code == 200, (
+        active_or_done_runs_response.text
+    )
+    active_or_done_run_ids = {
+        run["id"] for run in active_or_done_runs_response.json()["items"]
+    }
+    assert active_or_done_run_ids == {first_run["id"], second_run["id"]}
+
     evidence_response = await client.get(
         published_payload["runtime_paths"]["evidence_template"].replace(
             "{run_id}",

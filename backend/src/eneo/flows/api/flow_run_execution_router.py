@@ -69,7 +69,7 @@ from eneo.flows.application.flow_dispatch import (
 from eneo.flows.application.stale_queued_redispatch import (
     StaleQueuedRedispatchDispatchError,
 )
-from eneo.flows.domain.flow import FlowRunReviewCheckpoint
+from eneo.flows.domain.flow import FlowRunReviewCheckpoint, FlowRunStatus
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_dispatch_request import FlowRunDispatchRequest
@@ -816,6 +816,16 @@ async def list_flow_runs(
     offset: int = Query(
         default=0, ge=0, description="Number of runs to skip before returning results."
     ),
+    statuses: Annotated[
+        list[FlowRunStatus] | None,
+        Query(
+            alias="status",
+            description=(
+                "Filter runs by one or more status values. Repeat `status=` "
+                "to request multiple statuses."
+            ),
+        ),
+    ] = None,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await flow_access_context.enforce_flow_scope(
@@ -828,6 +838,7 @@ async def list_flow_runs(
     run_service = container.flow_run_service()
     page = await run_service.list_runs_with_result_files_and_token_usage(
         flow_id=id,
+        statuses=statuses,
         limit=limit,
         offset=offset,
     )
