@@ -420,6 +420,52 @@ def _audio_to_docx_template_advanced() -> BuildableGoldenCase:
     )
 
 
+def _audio_to_structured_text_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Transkriberade beslut till text",
+        steps=[
+            _step(
+                "step_a",
+                "Transkribera ljud",
+                "Transkribera den uppladdade ljudfilen till text.",
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                "step_b",
+                "Extrahera uppföljning",
+                "Extrahera beslut, nästa steg och öppna frågor ur "
+                "{{step_a.output.text}} som JSON.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_c",
+                "Skriv uppföljningstext",
+                "Skriv en strukturerad text som väger originaltranskriptionen "
+                "{{step_a.output.text}} mot besluten "
+                "{{step_b.output.structured.decisions}}, nästa steg "
+                "{{step_b.output.structured.next_steps}} och öppna frågor "
+                "{{step_b.output.structured.open_questions}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="audio_to_structured_text__advanced",
+        capability_row=CapabilityRow.AUDIO_TRANSCRIPTION,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+                CompositionColumn.EDIT_PATH,
+            }
+        ),
+        via_edit=True,
+    )
+
+
 def _comparison_basic() -> BuildableGoldenCase:
     spec = FlowDraftSpecCore(
         flow_name="Jämför offerter",
@@ -738,6 +784,7 @@ GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _pdf_report_basic(),
     _audio_transcription_basic(),
     _audio_to_docx_template_advanced(),
+    _audio_to_structured_text_advanced(),
     _comparison_basic(),
     _comparison_advanced(),
     _docx_template_advanced(),
