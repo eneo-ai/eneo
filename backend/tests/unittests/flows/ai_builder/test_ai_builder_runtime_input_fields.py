@@ -11,7 +11,9 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     normalize_runtime_metadata_state,
     runtime_input_fields_declared_absent,
     runtime_metadata_allows_input_fields,
+    runtime_metadata_disables_declared_input_fields,
 )
+from eneo.flows.ai_builder.planning_state import SlotConfidence, SlotSource
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 
 
@@ -28,6 +30,54 @@ def test_runtime_metadata_policy_allows_fields_only_for_metadata_states() -> Non
     assert runtime_metadata_allows_input_fields(BASIC_CASE_METADATA)
     assert runtime_metadata_allows_input_fields(DETAILED_CASE_METADATA)
     assert normalize_runtime_metadata_state("unknown") is None
+
+
+@pytest.mark.parametrize(
+    ("source", "confidence", "expected"),
+    [
+        ("structured_answer", "high", True),
+        ("structured_answer", "low", True),
+        ("requirements_summary", "high", True),
+        ("requirements_summary", "low", True),
+        ("flow_default", "high", False),
+        ("flow_default", "low", False),
+        ("policy_default", "high", False),
+        ("policy_default", "low", False),
+        ("heuristic", "high", True),
+        ("heuristic", "low", False),
+        ("model", "high", True),
+        ("model", "low", False),
+    ],
+)
+def test_runtime_metadata_declared_field_suppression_is_source_aware(
+    source: SlotSource,
+    confidence: SlotConfidence,
+    *,
+    expected: bool,
+) -> None:
+    assert (
+        runtime_metadata_disables_declared_input_fields(
+            state=NO_EXTRA_RUNTIME_METADATA,
+            source=source,
+            confidence=confidence,
+        )
+        is expected
+    )
+    assert not runtime_metadata_disables_declared_input_fields(
+        state=BASIC_CASE_METADATA,
+        source=source,
+        confidence=confidence,
+    )
+    assert not runtime_metadata_disables_declared_input_fields(
+        state=DETAILED_CASE_METADATA,
+        source=source,
+        confidence=confidence,
+    )
+    assert not runtime_metadata_disables_declared_input_fields(
+        state=None,
+        source=source,
+        confidence=confidence,
+    )
 
 
 def test_runtime_input_field_extraction_understands_explicit_absence() -> None:

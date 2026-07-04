@@ -3376,7 +3376,87 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     assert validation.valid
 
 
-def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
+def test_compile_outline_flow_keeps_declared_runtime_fields_for_policy_default_metadata(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Audience aware reply",
+            "plan_rationale": "Classify the request and adapt the response.",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Classify request",
+                    "instructions": "Classify the incoming customer request.",
+                    "output_fields": [
+                        {
+                            "name": "category",
+                            "field_type": "string",
+                            "description": "Request category.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft reply",
+                    "instructions": "Draft a concise reply for the selected audience.",
+                    "output_type": "text",
+                    "uses_form_fields": ["audience"],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=NO_EXTRA_RUNTIME_METADATA,
+            source="policy_default",
+            confidence="medium",
+        ),
+    }
+
+    with caplog.at_level(
+        logging.INFO,
+        logger=CREATE_COMPILER_LOGGER,
+    ):
+        draft = compile_create_intent_to_spec(
+            outline,
+            context=create_compile_context_from_planning_state(state),
+        )
+    validation = validate_spec(draft)
+
+    assert [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_runtime_metadata_input_fields_dropped"
+    ] == []
+    assert [field.name for field in (draft.form_fields or [])] == ["audience"]
+    assert draft.steps[1].input_bindings == {
+        "question": "{{ step_a.output.structured }}\n\naudience: {{ flow_input.audience }}"
+    }
+    assert validation.valid
+
+
+def test_compile_outline_flow_drops_runtime_fields_for_explicit_no_metadata_decision(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     outline = parse_create_flow_intent_arguments(
@@ -3449,8 +3529,8 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
         "runtime_metadata_fields": ResolvedSlot(
             name="runtime_metadata_fields",
             value=NO_EXTRA_RUNTIME_METADATA,
-            source="policy_default",
-            confidence="medium",
+            source="structured_answer",
+            confidence="high",
         ),
     }
 

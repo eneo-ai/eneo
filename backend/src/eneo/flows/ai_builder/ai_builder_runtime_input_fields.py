@@ -3,13 +3,14 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, assert_never
 
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     normalize_discovery_text,
 )
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
+from eneo.flows.ai_builder.planning_state import SlotConfidence, SlotSource
 
 RuntimeMetadataState: TypeAlias = Literal[
     "no_extra_metadata",
@@ -443,6 +444,25 @@ def runtime_metadata_allows_input_fields(
     state: RuntimeMetadataState | None,
 ) -> bool:
     return state in _RUNTIME_METADATA_STATES_ALLOWING_FIELDS
+
+
+def runtime_metadata_disables_declared_input_fields(
+    *,
+    state: RuntimeMetadataState | None,
+    source: SlotSource | None,
+    confidence: SlotConfidence | None,
+) -> bool:
+    if state != NO_EXTRA_RUNTIME_METADATA or source is None:
+        return False
+
+    match source:
+        case "structured_answer" | "requirements_summary":
+            return True
+        case "heuristic" | "model":
+            return confidence == "high"
+        case "flow_default" | "policy_default":
+            return False
+    return assert_never(source)
 
 
 def infer_runtime_metadata_slot(text: str) -> RuntimeMetadataState | None:

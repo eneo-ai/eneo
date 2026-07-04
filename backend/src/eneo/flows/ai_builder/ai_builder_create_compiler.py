@@ -35,12 +35,12 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
     RuntimeMetadataState,
     extract_runtime_input_field_hints,
     normalize_runtime_metadata_state,
     runtime_metadata_allows_input_fields,
+    runtime_metadata_disables_declared_input_fields,
 )
 from eneo.flows.ai_builder.ai_builder_step_skeleton import (
     StepSkeletonOutputTypeDrift,
@@ -94,6 +94,7 @@ class CreateCompileContext:
     pattern_chain_steps: tuple[str, ...] = ()
     ui_language: str | None = None
     runtime_metadata_state: RuntimeMetadataState | None = None
+    runtime_metadata_disables_declared_input_fields: bool = False
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
 
@@ -349,6 +350,11 @@ def create_compile_context_from_planning_state(
     runtime_input_hint_source: RuntimeInputFieldHintSource | None = None,
 ) -> CreateCompileContext | None:
     runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
+    metadata_disables_declared_input_fields = (
+        _runtime_metadata_disables_declared_input_fields_from_planning_state(
+            planning_state
+        )
+    )
     runtime_input_field_hints = _runtime_input_field_hints_from_source(
         runtime_metadata_state=runtime_metadata_state,
         runtime_input_hint_source=runtime_input_hint_source,
@@ -359,6 +365,9 @@ def create_compile_context_from_planning_state(
         return CreateCompileContext(
             ui_language=ui_language,
             runtime_metadata_state=runtime_metadata_state,
+            runtime_metadata_disables_declared_input_fields=(
+                metadata_disables_declared_input_fields
+            ),
             runtime_input_field_hints=runtime_input_field_hints,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
@@ -376,6 +385,9 @@ def create_compile_context_from_planning_state(
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
         ui_language=ui_language,
         runtime_metadata_state=runtime_metadata_state,
+        runtime_metadata_disables_declared_input_fields=(
+            metadata_disables_declared_input_fields
+        ),
         runtime_input_field_hints=runtime_input_field_hints,
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
@@ -391,6 +403,21 @@ def _runtime_metadata_state_from_planning_state(
         return None
     slot = planning_state.resolved_slots.get("runtime_metadata_fields")
     return normalize_runtime_metadata_state(slot.value if slot is not None else None)
+
+
+def _runtime_metadata_disables_declared_input_fields_from_planning_state(
+    planning_state: PlanningState | None,
+) -> bool:
+    if planning_state is None:
+        return False
+    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
+    if slot is None:
+        return False
+    return runtime_metadata_disables_declared_input_fields(
+        state=normalize_runtime_metadata_state(slot.value),
+        source=slot.source,
+        confidence=slot.confidence,
+    )
 
 
 def _runtime_input_field_hints_from_source(
@@ -550,15 +577,28 @@ def _compile_form_fields(
     runtime_input_field_hints = (
         context.runtime_input_field_hints if context is not None else ()
     )
-    if runtime_metadata_state == NO_EXTRA_RUNTIME_METADATA:
+    metadata_disables_declared_input_fields = (
+        context.runtime_metadata_disables_declared_input_fields
+        if context is not None
+        else False
+    )
+    if runtime_metadata_state is not None and not runtime_metadata_allows_input_fields(
+        runtime_metadata_state
+    ):
         _log_dropped_runtime_metadata_input_fields(
             field_names=[
-                *(field.variable_name for field in intent_fields),
+                *(
+                    field.variable_name
+                    for field in intent_fields
+                    if metadata_disables_declared_input_fields
+                ),
                 *(hint.variable_name for hint in runtime_input_field_hints),
             ],
-            runtime_metadata_state=NO_EXTRA_RUNTIME_METADATA,
+            runtime_metadata_state=runtime_metadata_state,
         )
-        return [], []
+        runtime_input_field_hints = ()
+        if metadata_disables_declared_input_fields:
+            return [], []
 
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
@@ -573,7 +613,7 @@ def _compile_form_fields(
         fields.append(_compile_input_field(field))
 
     seen = {field.name for field in fields}
-    for hint in context.runtime_input_field_hints if context is not None else ():
+    for hint in runtime_input_field_hints:
         if is_primary_runtime_input_shadow_field(
             variable_name=hint.variable_name,
             field_type=hint.field_type,

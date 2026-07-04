@@ -7,6 +7,8 @@ content through the create/edit tool schema.
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_SELECTION_WITHOUT,
@@ -29,7 +31,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     render_result_contract_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 
 
 def build_plan_proposal_system_prompt(
@@ -57,7 +59,7 @@ def build_plan_proposal_system_prompt(
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
             "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
             "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
-            "- Runtime metadata policy is enforced by the compiler; leave input_fields empty unless resolved slots or confirmed requirements clearly ask for runtime metadata.",
+            "- Runtime metadata policy is compiler-owned: do not invent input_fields from defaults. Declare secondary input_fields only when confirmed requirements, confirmed resolved slots, or the semantic workflow clearly needs runtime variables; if a resolved slot shows an explicit no-extra-fields decision, leave them empty.",
             "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription unless the user explicitly asks to review, approve, or edit the transcript itself.",
             "- For that transcript-review case, include the leading transcription step with review_mode; the backend attaches the checkpoint to its inserted transcription/upload step.",
             "- When the user explicitly asks to review, approve, or edit a step output before later steps continue, set that step's review_mode. Do not model human review as a separate AI step or as instruction prose.",
@@ -187,9 +189,24 @@ def _resolved_slots_block(planning_state: PlanningState) -> str:
     if not planning_state.resolved_slots:
         return "- none"
     return "\n".join(
-        f"- {name}: {slot.value}"
+        f"- {name}: {slot.value} ({_resolved_slot_prompt_status(slot)})"
         for name, slot in sorted(planning_state.resolved_slots.items())
     )
+
+
+def _resolved_slot_prompt_status(slot: ResolvedSlot) -> str:
+    match slot.source:
+        case "structured_answer" | "requirements_summary":
+            return "confirmed"
+        case "flow_default":
+            return "from existing flow"
+        case "policy_default":
+            return "policy default assumption"
+        case "heuristic":
+            return f"heuristic inference, {slot.confidence} confidence"
+        case "model":
+            return f"model inference, {slot.confidence} confidence"
+    return assert_never(slot.source)
 
 
 def _resource_context_block(

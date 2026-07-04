@@ -19,6 +19,8 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
+    SlotConfidence,
+    SlotSource,
     StepTriple,
 )
 
@@ -65,6 +67,8 @@ def _state_with_slot(
     value: str,
     *,
     state: PlanningState | None = None,
+    source: SlotSource = "structured_answer",
+    confidence: SlotConfidence = "high",
 ) -> PlanningState:
     base_state = state or PlanningState.empty()
     return base_state.model_copy(
@@ -74,8 +78,8 @@ def _state_with_slot(
                 slot_name: ResolvedSlot(
                     name=slot_name,
                     value=value,
-                    source="structured_answer",
-                    confidence="high",
+                    source=source,
+                    confidence=confidence,
                 ),
             }
         },
@@ -195,7 +199,38 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     assert "input_fields" in prompt
     assert "Runtime metadata policy" in prompt
     assert "compiler" in prompt
-    assert "clearly ask for runtime metadata" in prompt
+    assert "do not invent input_fields from defaults" in prompt
+    assert "explicit no-extra-fields decision" in prompt
+
+
+def test_plan_proposal_prompt_marks_resolved_slot_decision_strength() -> None:
+    state = _state_with_slot(
+        "runtime_metadata_fields",
+        "no_extra_metadata",
+        source="policy_default",
+        confidence="medium",
+        state=_state_with_slot(
+            "terminal_output",
+            "structured_json",
+            source="structured_answer",
+        ),
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="Ta input JSON och returnera bara JSON enligt output-schemat.",
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "- terminal_output: structured_json (confirmed)" in prompt
+    assert (
+        "- runtime_metadata_fields: no_extra_metadata (policy default assumption)"
+    ) in prompt
 
 
 def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
