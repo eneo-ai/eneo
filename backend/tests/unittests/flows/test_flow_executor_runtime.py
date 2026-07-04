@@ -83,6 +83,10 @@ from eneo.flows.runtime.step_execution_result import (
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
+from eneo.flows.runtime.step_execution_runtime import (
+    RAG_RETRIEVAL_QUERY_CHAR_LIMIT,
+    derive_rag_retrieval_query,
+)
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -3716,6 +3720,76 @@ def _step_for_execute_step(*, step_order: int = 1) -> RuntimeStep:
     )
 
 
+def test_derive_rag_retrieval_query_keeps_short_input_unchanged():
+    derivation = derive_rag_retrieval_query(
+        step=_step_for_execute_step(),
+        input_text="hello",
+    )
+
+    assert derivation.query == "hello"
+    assert derivation.to_metadata() == {
+        "strategy": "input_text",
+        "input_truncated": False,
+        "query_length": 5,
+    }
+
+
+def test_derive_rag_retrieval_query_bounds_long_input_without_description():
+    full_underlag = "Long transcript body. " * 5000
+
+    derivation = derive_rag_retrieval_query(
+        step=_step_for_execute_step(),
+        input_text=full_underlag,
+    )
+
+    assert derivation.query == full_underlag[:RAG_RETRIEVAL_QUERY_CHAR_LIMIT]
+    assert derivation.to_metadata() == {
+        "strategy": "input_text",
+        "input_truncated": True,
+        "query_length": RAG_RETRIEVAL_QUERY_CHAR_LIMIT,
+    }
+
+
+def test_derive_rag_retrieval_query_combines_description_and_bounded_excerpt():
+    step = replace(
+        _step_for_execute_step(),
+        user_description="Identify procurement risks.",
+    )
+
+    derivation = derive_rag_retrieval_query(
+        step=step,
+        input_text="Policy context. " * 5000,
+    )
+
+    assert derivation.query.startswith("Identify procurement risks.")
+    assert "Policy context." in derivation.query
+    assert len(derivation.query) == RAG_RETRIEVAL_QUERY_CHAR_LIMIT
+    assert derivation.to_metadata() == {
+        "strategy": "step_description_with_input_excerpt",
+        "input_truncated": True,
+        "query_length": RAG_RETRIEVAL_QUERY_CHAR_LIMIT,
+    }
+
+
+def test_derive_rag_retrieval_query_bounds_overlong_description():
+    step = replace(
+        _step_for_execute_step(),
+        user_description="D" * (RAG_RETRIEVAL_QUERY_CHAR_LIMIT + 50),
+    )
+
+    derivation = derive_rag_retrieval_query(
+        step=step,
+        input_text="Policy context.",
+    )
+
+    assert derivation.query == "D" * RAG_RETRIEVAL_QUERY_CHAR_LIMIT
+    assert derivation.to_metadata() == {
+        "strategy": "step_description_only",
+        "input_truncated": True,
+        "query_length": RAG_RETRIEVAL_QUERY_CHAR_LIMIT,
+    }
+
+
 def _assistant_for_snapshot(
     *,
     assistant_id,
@@ -3983,10 +4057,16 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
 
     executor.references_service.get_references.assert_awaited_once()
     rag_kwargs = executor.references_service.get_references.await_args.kwargs
+    assert rag_kwargs["question"] == "hello"
     assert rag_kwargs["version"] == 1
     assert rag_kwargs["include_info_blobs"] is False
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == chunks
     assert output.rag_metadata is not None
+    assert output.rag_metadata["query_derivation"] == {
+        "strategy": "input_text",
+        "input_truncated": False,
+        "query_length": 5,
+    }
     assert output.rag_metadata["status"] == "success"
     assert output.rag_metadata["chunks_retrieved"] == 2
     assert output.rag_metadata["raw_chunks_count"] == 2
@@ -4000,6 +4080,115 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     assert output.rag_metadata["references"][0]["matched_chunk_count"] == 2
     assert output.rag_metadata["references"][0]["best_score"] == pytest.approx(0.91)
     assert len(output.rag_metadata["references"][0]["chunks"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_step_derives_bounded_rag_query_from_step_description(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = replace(
+        _step_for_execute_step(),
+        user_description="Identify procurement risks and cite policy context.",
+    )
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    full_underlag = "Introductory procurement record. " + (
+        "Long supporting material that should stay in the LLM prompt only. " * 4000
+    )
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=full_underlag,
+            source_text=full_underlag,
+            input_source="flow_input",
+        )
+    )
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    source_id = uuid4()
+    chunk = SimpleNamespace(
+        info_blob_id=source_id,
+        info_blob_title="Procurement policy",
+        chunk_no=1,
+        score=0.83,
+        text="Procurement policy chunk.",
+    )
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=[chunk], no_duplicate_chunks=[chunk])
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    rag_kwargs = executor.references_service.get_references.await_args.kwargs
+    query = rag_kwargs["question"]
+    assert "Identify procurement risks and cite policy context." in query
+    assert query != full_underlag
+    assert len(query) <= 2048
+    assert len(query) < len(full_underlag)
+    assert assistant.get_response.await_args.kwargs["question"] == full_underlag
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["query_derivation"] == {
+        "strategy": "step_description_with_input_excerpt",
+        "input_truncated": True,
+        "query_length": len(query),
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_step_derives_bounded_rag_query_from_long_input_without_description(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    full_underlag = "Long transcript body. " * 5000
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=full_underlag,
+            source_text=full_underlag,
+            input_source="flow_input",
+        )
+    )
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=[], no_duplicate_chunks=[])
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    query = executor.references_service.get_references.await_args.kwargs["question"]
+    assert query == full_underlag[:2048]
+    assert assistant.get_response.await_args.kwargs["question"] == full_underlag
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["query_derivation"] == {
+        "strategy": "input_text",
+        "input_truncated": True,
+        "query_length": 2048,
+    }
 
 
 @pytest.mark.asyncio
@@ -4120,7 +4309,10 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
 async def test_execute_step_skips_rag_when_input_is_whitespace(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
-    step = _step_for_execute_step()
+    step = replace(
+        _step_for_execute_step(),
+        user_description="Use policy knowledge to classify the input.",
+    )
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
@@ -4147,6 +4339,11 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
 
     executor.references_service.get_references.assert_not_awaited()
     assert output.rag_metadata is not None
+    assert output.rag_metadata["query_derivation"] == {
+        "strategy": "empty_input",
+        "input_truncated": False,
+        "query_length": 0,
+    }
     assert output.rag_metadata["status"] == "skipped_no_input"
     assert output.rag_metadata["attempted"] is False
 

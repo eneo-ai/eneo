@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Final, Protocol, Sequence, cast
+from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import Completion
@@ -58,6 +58,71 @@ def _string_key_dict(value: object) -> dict[str, Any]:
 
 logger = logging.getLogger(__name__)
 LLM_TASK_CANCELLATION_GRACE_SECONDS: Final[float] = 2.0
+RAG_RETRIEVAL_QUERY_CHAR_LIMIT: Final[int] = 2048
+
+RagQueryDerivationStrategy = Literal[
+    "empty_input",
+    "input_text",
+    "step_description_only",
+    "step_description_with_input_excerpt",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RagQueryDerivation:
+    query: str
+    strategy: RagQueryDerivationStrategy
+    input_truncated: bool
+
+    def to_metadata(self) -> dict[str, object]:
+        return {
+            "strategy": self.strategy,
+            "input_truncated": self.input_truncated,
+            "query_length": len(self.query),
+        }
+
+
+def derive_rag_retrieval_query(
+    *,
+    step: RuntimeStep,
+    input_text: str,
+) -> RagQueryDerivation:
+    input_body = input_text.strip()
+    if not input_body:
+        return RagQueryDerivation(
+            query="",
+            strategy="empty_input",
+            input_truncated=False,
+        )
+
+    step_description = (step.user_description or "").strip()
+    if not step_description:
+        query = input_body[:RAG_RETRIEVAL_QUERY_CHAR_LIMIT]
+        return RagQueryDerivation(
+            query=query,
+            strategy="input_text",
+            input_truncated=len(input_body) > len(query),
+        )
+
+    separator = "\n\nInput excerpt:\n"
+    available_for_input = (
+        RAG_RETRIEVAL_QUERY_CHAR_LIMIT - len(step_description) - len(separator)
+    )
+    if available_for_input <= 0:
+        query = step_description[:RAG_RETRIEVAL_QUERY_CHAR_LIMIT]
+        return RagQueryDerivation(
+            query=query,
+            strategy="step_description_only",
+            input_truncated=True,
+        )
+
+    input_excerpt = input_body[:available_for_input]
+    query = f"{step_description}{separator}{input_excerpt}"
+    return RagQueryDerivation(
+        query=query,
+        strategy="step_description_with_input_excerpt",
+        input_truncated=len(input_body) > len(input_excerpt),
+    )
 
 
 class VariableResolverProtocol(Protocol):
@@ -950,13 +1015,19 @@ async def complete_step_execution(
         else None
     )
 
+    rag_query_derivation = derive_rag_retrieval_query(
+        step=step,
+        input_text=prepared.step_input.text,
+    )
     info_blob_chunks, rag_metadata, rag_diagnostics = await deps.retrieve_rag_chunks(
         assistant=prepared.assistant,
-        question=prepared.step_input.text,
+        question=rag_query_derivation.query,
         run_id=run.id,
         step_order=step.step_order,
     )
     diagnostics.extend(rag_diagnostics)
+    if rag_metadata is not None:
+        rag_metadata["query_derivation"] = rag_query_derivation.to_metadata()
 
     model_kwargs = prepared.assistant.completion_model_kwargs
     original_kwargs = model_kwargs
