@@ -19,6 +19,7 @@
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
   import type { FlowRunBlocker } from "$lib/features/flows/flowRunWizard";
+  import { formatBytes } from "$lib/features/flows/flowByteSize";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
   import FlowRunResumePrompt from "./FlowRunResumePrompt.svelte";
   import FlowRunStorageDegradedNotice from "./FlowRunStorageDegradedNotice.svelte";
@@ -129,18 +130,6 @@
       default:
         return labels.document;
     }
-  }
-
-  function formatBytes(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let unitIndex = 0;
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024;
-      unitIndex += 1;
-    }
-    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 
   const supportsAudioRecording = $derived(step.input_format === "audio");
