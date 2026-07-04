@@ -16,6 +16,9 @@ from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     compile_ordered_edit_proposal,
     materialize_ordered_edit_proposal,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_step_input_bindings,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
@@ -49,11 +52,22 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.input_binding_contract_rules import (
+    lower_source_refs_to_question_binding,
+)
 from eneo.main.exceptions import BadRequestException
 
 
 def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
     return OrderedEditProposal(plan_rationale="Update the flow.", **kwargs)
+
+
+def _lowered_question(input_bindings: dict[str, object] | None) -> str:
+    lowered = lower_source_refs_to_question_binding(input_bindings)
+    assert lowered is not None
+    question = lowered.get("question")
+    assert isinstance(question, str)
+    return question
 
 
 def test_ordered_edit_proposal_requires_plan_rationale() -> None:
@@ -493,8 +507,129 @@ def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_ste
     )
 
     assert result.steps[1].input_bindings == {
-        "question": "answer: {{ step_a.output.structured.answer }}"
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "answer",
+                "label": "answer",
+            }
+        ]
     }
+    assert (
+        _lowered_question(result.steps[1].input_bindings)
+        == "answer: {{ step_a.output.structured.answer }}"
+    )
+
+
+def test_step_input_bindings_emit_source_refs_for_previous_output() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[],
+        uses_previous_outputs=[PreviousOutputRef(from_step=1)],
+        prior_steps=[_step("step_a", None, "Draft")],
+    )
+
+    assert bindings == {
+        "source_refs": [
+            {"step_ref": "step_a", "output": "text"},
+            {"step_ref": "step_a", "output": "text", "label": "Step 1 output"},
+        ]
+    }
+    assert _lowered_question(bindings) == (
+        "{{ step_a.output.text }}\n\nStep 1 output: {{ step_a.output.text }}"
+    )
+
+
+def test_step_input_bindings_emit_source_refs_for_implicit_structured_blob() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[],
+        uses_previous_outputs=[],
+        prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+    )
+
+    assert bindings == {"source_refs": [{"step_ref": "step_a", "output": "structured"}]}
+    assert _lowered_question(bindings) == "{{ step_a.output.structured }}"
+
+
+def test_step_input_bindings_keep_immediate_field_suppression() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[PreviousFieldRef(from_step=1, field_path="items.0.name")],
+        uses_previous_outputs=[],
+        prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+    )
+
+    assert bindings == {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "items.0.name",
+                "label": "name",
+            }
+        ]
+    }
+    assert (
+        _lowered_question(bindings)
+        == "name: {{ step_a.output.structured.items.0.name }}"
+    )
+
+
+def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[PreviousFieldRef(from_step=1, field_path="answer")],
+        uses_previous_outputs=[],
+        prior_steps=[
+            _step("step_a", None, "Extract answer", output_type=OutputType.JSON),
+            _step("step_b", None, "Extract summary", output_type=OutputType.JSON),
+        ],
+    )
+
+    assert bindings == {
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "answer",
+                "label": "answer",
+            },
+        ]
+    }
+    assert _lowered_question(bindings) == (
+        "{{ step_b.output.structured }}\n\n"
+        "answer: {{ step_a.output.structured.answer }}"
+    )
+
+
+def test_step_input_bindings_fall_back_to_question_for_template_labels() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[
+            PreviousFieldRef(
+                from_step=1,
+                field_path="answer",
+                label="{{ bad }}",
+            )
+        ],
+        uses_previous_outputs=[],
+        prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+    )
+
+    assert bindings == {"question": "{{ bad }}: {{ step_a.output.structured.answer }}"}
 
 
 def test_edit_intent_add_step_drops_create_only_previous_refs() -> None:
@@ -560,9 +695,10 @@ def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder()
         ),
     )
 
-    assert result.steps[1].input_bindings == {
-        "question": "answer: {{ step_a.output.structured.answer }}"
-    }
+    assert (
+        _lowered_question(result.steps[1].input_bindings)
+        == "answer: {{ step_a.output.structured.answer }}"
+    )
 
 
 def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() -> None:

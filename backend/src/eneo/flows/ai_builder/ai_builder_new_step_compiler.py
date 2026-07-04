@@ -24,6 +24,11 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_variable_definitions import form_field_reference_expression
+from eneo.flows.input_binding_contract_rules import (
+    InputBindingContractError,
+    SourceRefBinding,
+    lower_source_refs_to_question_binding,
+)
 
 logger = logging.getLogger(__name__)
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
@@ -239,19 +244,30 @@ def compile_step_input_bindings(
     if input_source.value == "all_previous_steps":
         return None
 
-    source_reference = _resolve_source_reference(
+    source_ref_binding = _resolve_source_ref_binding(
         input_source=input_source,
         input_type=input_type,
         prior_steps=prior_steps,
     )
-    explicit_previous_fields = _compile_previous_field_sections(
+    source_reference = (
+        source_ref_binding.rendered_section()
+        if source_ref_binding is not None
+        else _resolve_source_reference(
+            input_source=input_source,
+            input_type=input_type,
+            prior_steps=prior_steps,
+        )
+    )
+    previous_field_refs = _compile_previous_field_source_refs(
         uses_previous_fields,
         prior_steps,
     )
-    explicit_previous_outputs = _compile_previous_output_sections(
+    explicit_previous_fields = [ref.rendered_section() for ref in previous_field_refs]
+    previous_output_refs = _compile_previous_output_source_refs(
         uses_previous_outputs,
         prior_steps,
     )
+    explicit_previous_outputs = [ref.rendered_section() for ref in previous_output_refs]
     structured_previous_text_input = (
         input_source.value == "previous_step"
         and input_type.value == "text"
@@ -278,6 +294,7 @@ def compile_step_input_bindings(
 
     explicit_previous_sections = [*explicit_previous_fields, *explicit_previous_outputs]
     sections: list[str] = []
+    source_refs: list[SourceRefBinding] = []
     if source_reference is not None and not _should_suppress_source_reference(
         input_source=input_source,
         uses_previous_fields=uses_previous_fields,
@@ -286,8 +303,12 @@ def compile_step_input_bindings(
         explicit_previous_sections=explicit_previous_sections,
     ):
         sections.append(source_reference)
+        if source_ref_binding is not None:
+            source_refs.append(source_ref_binding)
     sections.extend(explicit_previous_fields)
+    source_refs.extend(previous_field_refs)
     sections.extend(explicit_previous_outputs)
+    source_refs.extend(previous_output_refs)
     if uses_form_fields:
         form_field_lines = [
             f"{field_name}: {form_field_reference_expression(field_name)}"
@@ -296,6 +317,13 @@ def compile_step_input_bindings(
         sections.append("\n".join(form_field_lines))
     if not sections:
         return None
+    if not uses_form_fields and len(source_refs) == len(sections):
+        source_ref_payloads = _source_ref_payloads_if_equivalent(
+            source_refs,
+            expected_question="\n\n".join(sections),
+        )
+        if source_ref_payloads is not None:
+            return {"source_refs": source_ref_payloads}
     return {"question": "\n\n".join(sections)}
 
 
@@ -449,34 +477,77 @@ def _resolve_source_reference(
     return None
 
 
-def _compile_previous_field_sections(
+def _resolve_source_ref_binding(
+    *,
+    input_source: InputSource,
+    input_type: InputType,
+    prior_steps: list[StepSpec],
+) -> SourceRefBinding | None:
+    if input_source != InputSource.PREVIOUS_STEP or not prior_steps:
+        return None
+    previous_step = prior_steps[-1]
+    output = (
+        "structured"
+        if input_type == InputType.JSON or previous_step.output_type == OutputType.JSON
+        else "text"
+    )
+    return SourceRefBinding(step_ref=previous_step.plan_step_ref, output=output)
+
+
+def _compile_previous_field_source_refs(
     uses_previous_fields: list[PreviousFieldRef],
     prior_steps: list[StepSpec],
-) -> list[str]:
-    sections: list[str] = []
+) -> list[SourceRefBinding]:
+    refs: list[SourceRefBinding] = []
     for field_ref in uses_previous_fields:
         if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
             continue
         source_step = prior_steps[field_ref.from_step - 1]
         label = field_ref.label or default_previous_field_label(field_ref.field_path)
-        sections.append(
-            f"{label}: {{{{ {source_step.plan_step_ref}.output.structured.{field_ref.field_path} }}}}"
+        refs.append(
+            SourceRefBinding(
+                step_ref=source_step.plan_step_ref,
+                output="structured",
+                field_path=tuple(field_ref.field_path.split(".")),
+                label=label,
+            )
         )
-    return sections
+    return refs
 
 
-def _compile_previous_output_sections(
+def _compile_previous_output_source_refs(
     uses_previous_outputs: list[PreviousOutputRef],
     prior_steps: list[StepSpec],
-) -> list[str]:
-    sections: list[str] = []
+) -> list[SourceRefBinding]:
+    refs: list[SourceRefBinding] = []
     for output_ref in uses_previous_outputs:
         if output_ref.from_step < 1 or output_ref.from_step > len(prior_steps):
             continue
         source_step = prior_steps[output_ref.from_step - 1]
         label = output_ref.label or f"Step {output_ref.from_step} output"
-        sections.append(f"{label}: {{{{ {source_step.plan_step_ref}.output.text }}}}")
-    return sections
+        refs.append(
+            SourceRefBinding(
+                step_ref=source_step.plan_step_ref,
+                output="text",
+                label=label,
+            )
+        )
+    return refs
+
+
+def _source_ref_payloads_if_equivalent(
+    source_refs: list[SourceRefBinding],
+    *,
+    expected_question: str,
+) -> list[dict[str, object]] | None:
+    payloads = [ref.binding_payload() for ref in source_refs]
+    try:
+        lowered = lower_source_refs_to_question_binding({"source_refs": payloads})
+    except InputBindingContractError:
+        return None
+    if lowered is None or lowered.get("question") != expected_question:
+        return None
+    return payloads
 
 
 def default_previous_field_label(field_path: str) -> str:

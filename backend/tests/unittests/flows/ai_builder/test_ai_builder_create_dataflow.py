@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import FormFieldSpec
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 
 
 def test_create_dataflow_does_not_import_critic_invariants() -> None:
@@ -685,7 +686,7 @@ def test_normalize_create_step_mechanics_rewrites_final_assembler_to_section_out
     assert assembler.uses_previous_fields == []
 
     spec = compile_create_steps_to_spec(flow_name="Document report", steps=normalized)
-    question = spec.steps[-2].input_bindings["question"]
+    question = effective_question_binding(spec.steps[-2].input_bindings) or ""
 
     assert "{{ step_a.output.text }}" not in question
     assert "{{ step_b.output.structured" not in question

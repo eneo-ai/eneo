@@ -27,7 +27,10 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
-from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.input_binding_contract_rules import (
+    SOURCE_REFS_BINDING_KEY,
+    effective_question_binding,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -261,6 +264,7 @@ def _normalize_source_material_underlag(
         )
         existing_question = effective_question_binding(boundary.step.input_bindings)
         normalized_bindings = dict(boundary.step.input_bindings or {})
+        normalized_bindings.pop(SOURCE_REFS_BINDING_KEY, None)
         normalized_bindings["question"] = source_material_question_for_boundary(
             boundary,
             existing_question=existing_question,

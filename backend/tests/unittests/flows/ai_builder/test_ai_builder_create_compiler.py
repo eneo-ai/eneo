@@ -86,6 +86,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.output_processing import validate_against_contract
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
@@ -97,6 +98,17 @@ from tests.unittests.flows.ai_builder.authoring_command_assertions import (
 
 PROPOSAL_INTENT_LOGGER = "eneo.flows.ai_builder.ai_builder_proposal_intent"
 CREATE_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_create_compiler"
+
+
+def _question_binding(input_bindings: dict[str, object] | None) -> str:
+    assert input_bindings is not None
+    question = effective_question_binding(input_bindings)
+    assert question is not None
+    return question
+
+
+def _optional_question_binding(input_bindings: dict[str, object] | None) -> str:
+    return effective_question_binding(input_bindings) or ""
 
 
 def _normalize_create_steps(
@@ -1135,7 +1147,7 @@ def test_compile_create_steps_to_spec_uses_previous_fields_to_generate_field_lev
 
     second_step = compiled.steps[1]
     assert second_step.input_bindings is not None
-    assert second_step.input_bindings["question"] == (
+    assert _question_binding(second_step.input_bindings) == (
         "Sammanfattning: {{ step_a.output.structured.sammanfattning }}\n\n"
         "Första riskrubrik: {{ step_a.output.structured.risker.0.rubrik }}\n\n"
         "referensnummer: {{ flow_input.referensnummer }}"
@@ -1191,7 +1203,7 @@ def test_compile_create_steps_to_spec_keeps_previous_json_when_field_ref_is_non_
 
     third_step = compiled.steps[2]
     assert third_step.input_bindings is not None
-    assert third_step.input_bindings["question"] == (
+    assert _question_binding(third_step.input_bindings) == (
         "{{ step_b.output.structured }}\n\n"
         "Transkription: {{ step_a.output.structured.transcription_text }}"
     )
@@ -1239,7 +1251,7 @@ def test_compile_create_steps_to_spec_keeps_previous_json_when_output_ref_is_non
 
     third_step = compiled.steps[2]
     assert third_step.input_bindings is not None
-    assert third_step.input_bindings["question"] == (
+    assert _question_binding(third_step.input_bindings) == (
         "Titel.: {{ step_b.output.structured.meeting_title }}\n\n"
         "Source material: {{ step_a.output.text }}"
     )
@@ -1525,7 +1537,7 @@ def test_compile_create_intent_threads_declared_previous_refs() -> None:
     )
 
     compiled = compile_create_intent_to_spec(outline)
-    question = compiled.steps[2].input_bindings["question"]
+    question = _question_binding(compiled.steps[2].input_bindings)
 
     assert "Ärende-id: {{ step_a.output.structured.case_id }}" in question
     assert "Utkast: {{ step_b.output.text }}" in question
@@ -1577,12 +1589,11 @@ def test_compile_create_intent_remaps_declared_refs_across_backend_prefix() -> N
     assert compiled.steps[0].output_type == OutputType.TEXT
     assert compiled.steps[1].output_type == OutputType.JSON
     assert body_step.input_bindings is not None
-    assert (
-        "Ärende-id: {{ step_b.output.structured.case_id }}"
-        in body_step.input_bindings["question"]
+    assert "Ärende-id: {{ step_b.output.structured.case_id }}" in _question_binding(
+        body_step.input_bindings
     )
-    assert (
-        "step_a.output.structured.case_id" not in body_step.input_bindings["question"]
+    assert "step_a.output.structured.case_id" not in _question_binding(
+        body_step.input_bindings
     )
 
 
@@ -1629,7 +1640,7 @@ def test_compile_create_intent_drops_invalid_declared_previous_field_refs() -> N
     )
 
     compiled = compile_create_intent_to_spec(outline)
-    question = (compiled.steps[2].input_bindings or {}).get("question", "")
+    question = _optional_question_binding(compiled.steps[2].input_bindings)
 
     assert "Saknat fält" not in question
     assert "Textsteg kan inte ha strukturfält" not in question
@@ -1686,7 +1697,7 @@ def test_compile_create_intent_remaps_declared_refs_after_leading_fold() -> None
     )
 
     compiled = compile_create_intent_to_spec(outline)
-    question = (compiled.steps[2].input_bindings or {}).get("question", "")
+    question = _optional_question_binding(compiled.steps[2].input_bindings)
 
     assert [step.name for step in compiled.steps] == [
         "Extrahera första ärende",
@@ -3413,8 +3424,8 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_for
     assert compiled.form_fields is not None
     assert [field.name for field in (compiled.form_fields or [])] == ["audience"]
     assert compiled.form_fields[0].options is None
-    first_question = compiled.steps[0].input_bindings or {}
-    assert "{{ flow_input.audience }}" in str(first_question.get("question") or "")
+    first_question = _optional_question_binding(compiled.steps[0].input_bindings)
+    assert "{{ flow_input.audience }}" in first_question
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
 
@@ -3479,10 +3490,8 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
         "audience",
         "report_type",
     ]
-    first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
-    second_question = str(
-        (compiled.steps[1].input_bindings or {}).get("question") or ""
-    )
+    first_question = _optional_question_binding(compiled.steps[0].input_bindings)
+    second_question = _optional_question_binding(compiled.steps[1].input_bindings)
     assert "{{ flow_input.report_type }}" in first_question
     assert "{{ flow_input.audience }}" in second_question
     assert find_unused_form_fields(compiled) == []
@@ -3599,7 +3608,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
     assert draft.form_fields[0].label == "Audience explicit"
     assert compiled.form_fields is not None
     assert [field.name for field in (compiled.form_fields or [])] == ["audience"]
-    first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
+    first_question = _optional_question_binding(compiled.steps[0].input_bindings)
     assert first_question.count("{{ flow_input.audience }}") == 1
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
@@ -3638,7 +3647,7 @@ def test_compile_outline_flow_orphan_uses_form_fields_reference_is_dropped_silen
     # The orphan reference does not pull a field into form_fields and
     # does not poison the step's bindings with `{{ missing_field }}`.
     assert [field.name for field in (draft.form_fields or [])] == []
-    first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
+    first_question = _optional_question_binding(compiled.steps[0].input_bindings)
     assert "{{ missing_field }}" not in first_question
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
@@ -3973,7 +3982,7 @@ def test_compile_outline_flow_drops_runtime_fields_for_explicit_no_metadata_deci
     assert draft.form_fields is None
     assert compiled.form_fields is None
     question_bindings = [
-        step.input_bindings["question"]
+        _question_binding(step.input_bindings)
         for step in compiled.steps
         if step.input_bindings is not None
     ]
@@ -4061,7 +4070,7 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
     assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert compiled.form_fields is not None
     assert "{{ flow_input.audience }}" in str(
-        (compiled.steps[1].input_bindings or {}).get("question") or ""
+        _optional_question_binding(compiled.steps[1].input_bindings)
     )
     assert validation.valid
 
@@ -4136,8 +4145,18 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     assert compiled.steps[0].input_bindings == {"question": "{{ indata_text }}"}
     assert compiled.steps[1].input_type.value == "text"
     assert compiled.steps[1].input_bindings == {
-        "question": "Declared category: {{ step_a.output.structured.category }}"
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "category",
+                "label": "Declared category",
+            }
+        ]
     }
+    assert _question_binding(compiled.steps[1].input_bindings) == (
+        "Declared category: {{ step_a.output.structured.category }}"
+    )
     assert validation.valid
 
 
@@ -4823,7 +4842,7 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
     assert compiled.steps[2].input_bindings is not None
     assert (
         "Declared sections: {{ step_b.output.structured.sections }}"
-        in compiled.steps[2].input_bindings["question"]
+        in _question_binding(compiled.steps[2].input_bindings)
     )
     assert validation.valid
 
@@ -5237,7 +5256,7 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
     assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
     assert body_step.input_bindings is not None
-    body_question = body_step.input_bindings["question"]
+    body_question = _question_binding(body_step.input_bindings)
     assert ".output.structured.sections" in body_question
     assert ".output.structured.overall_summary" in body_question
     assert compiled.steps[-2].input_contract is None
@@ -5322,7 +5341,7 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
     assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
     assert body_step.input_bindings is not None
-    body_question = body_step.input_bindings["question"]
+    body_question = _question_binding(body_step.input_bindings)
     assert ".output.structured.sections" in body_question
     assert ".output.structured.overall_summary" in body_question
     assert "Source material: {{ step_a.output.text }}" in body_question
@@ -5421,13 +5440,13 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
     assert body_step.input_bindings is not None
-    body_question = body_step.input_bindings["question"]
+    body_question = _question_binding(body_step.input_bindings)
     assert "meeting_title" in body_question
     assert "decisions_summary" in body_question
 
     composer = compiled.steps[-2]
     assert composer.input_bindings is not None
-    question = composer.input_bindings["question"]
+    question = _question_binding(composer.input_bindings)
     assert "step_" in question and "output.structured" in question
 
     context = CriticContext(
@@ -6732,8 +6751,8 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
         ],
     )
 
-    outline_question = outline_compiled.steps[-1].input_bindings["question"]
-    direct_question = direct_compiled.steps[-1].input_bindings["question"]
+    outline_question = _question_binding(outline_compiled.steps[-1].input_bindings)
+    direct_question = _question_binding(direct_compiled.steps[-1].input_bindings)
 
     assert "Källmaterial: {{ step_a.output.text }}" in outline_question
     assert "Källmaterial: {{ step_a.output.text }}" in direct_question
@@ -6791,12 +6810,31 @@ def test_non_material_report_multi_json_keeps_json_input_when_source_prior_bound
     assert composer.input_type == InputType.JSON
     assert composer.input_contract is None
     assert composer.input_bindings == {
-        "question": (
-            "Beskrivning: {{ step_b.output.structured.context }}\n\n"
-            "Beskrivning: {{ step_c.output.structured.decisions }}\n\n"
-            "Källmaterial: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "context",
+                "label": "Beskrivning",
+            },
+            {
+                "step_ref": "step_c",
+                "output": "structured",
+                "field_path": "decisions",
+                "label": "Beskrivning",
+            },
+            {
+                "step_ref": "step_a",
+                "output": "text",
+                "label": "Källmaterial",
+            },
+        ]
     }
+    assert _question_binding(composer.input_bindings) == (
+        "Beskrivning: {{ step_b.output.structured.context }}\n\n"
+        "Beskrivning: {{ step_c.output.structured.decisions }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
+    )
 
 
 def test_normalize_create_step_mechanics_is_idempotent_for_targeted_underlag() -> None:
@@ -6977,7 +7015,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
     metadata_step = compiled.steps[2]
     assert metadata_step.input_type.value == "text"
     assert compiled.steps[2].input_bindings is not None
-    metadata_question = compiled.steps[2].input_bindings["question"]
+    metadata_question = _question_binding(compiled.steps[2].input_bindings)
     assert (
         "Fullständig transkription.: "
         "{{ step_b.output.structured.transcription_text }}" in metadata_question
@@ -6992,7 +7030,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
 
     compiled_body_step = compiled.steps[4]
     assert compiled_body_step.input_bindings is not None
-    protocol_question = compiled_body_step.input_bindings["question"]
+    protocol_question = _question_binding(compiled_body_step.input_bindings)
     assert (
         "Fullständig transkription.: {{ step_b.output.structured.transcription_text }}"
         in protocol_question
@@ -7065,9 +7103,9 @@ def test_compile_create_steps_to_spec_direct_audio_docx_bad_shape_gets_source_un
         terminal_output_type=OutputType.DOCX,
     )
 
-    metadata_question = compiled.steps[2].input_bindings["question"]
-    protocol_question = compiled.steps[3].input_bindings["question"]
-    docx_question = normalized_compiled.steps[4].input_bindings["question"]
+    metadata_question = _question_binding(compiled.steps[2].input_bindings)
+    protocol_question = _question_binding(compiled.steps[3].input_bindings)
+    docx_question = _question_binding(normalized_compiled.steps[4].input_bindings)
     assert compiled.steps[2].input_type.value == "text"
     assert compiled.steps[2].input_contract is None
     assert compiled.steps[3].input_type.value == "text"
@@ -7160,37 +7198,36 @@ def test_compile_create_steps_to_spec_audio_report_section_extractors_keep_trans
         assert step.input_type.value == "text"
         assert step.input_contract is None
         assert step.input_bindings is not None
-        question = step.input_bindings["question"]
+        question = _question_binding(step.input_bindings)
         assert "Källmaterial: {{ step_a.output.text }}" in question
     terminal_step = normalized_compiled.steps[5]
     assert terminal_step.input_type.value == "text"
     assert terminal_step.input_contract is None
     assert terminal_step.input_bindings is not None
-    assert (
-        "Källmaterial: {{ step_a.output.text }}"
-        in terminal_step.input_bindings["question"]
+    assert "Källmaterial: {{ step_a.output.text }}" in _question_binding(
+        terminal_step.input_bindings
     )
     assert (
         "Beskrivning: {{ step_b.output.structured.meeting_context }}"
-        in compiled.steps[2].input_bindings["question"]
+        in _question_binding(compiled.steps[2].input_bindings)
     )
-    assert (
-        "{{ step_b.output.structured }}"
-        not in compiled.steps[2].input_bindings["question"]
+    assert "{{ step_b.output.structured }}" not in _question_binding(
+        compiled.steps[2].input_bindings
     )
     assert (
         "Beskrivning: {{ step_c.output.structured.background_notes }}"
-        in compiled.steps[3].input_bindings["question"]
+        in _question_binding(compiled.steps[3].input_bindings)
     )
-    assert (
-        "{{ step_c.output.structured }}"
-        not in compiled.steps[3].input_bindings["question"]
+    assert "{{ step_c.output.structured }}" not in _question_binding(
+        compiled.steps[3].input_bindings
     )
     assert (
         "Beskrivning: {{ step_d.output.structured.discussion_notes }}"
-        in compiled.steps[4].input_bindings["question"]
+        in _question_binding(compiled.steps[4].input_bindings)
     )
-    assert "{{ step_e.output.structured }}" in terminal_step.input_bindings["question"]
+    assert "{{ step_e.output.structured }}" in _question_binding(
+        terminal_step.input_bindings
+    )
     assert validate_spec(compiled).valid
 
 
@@ -7241,15 +7278,28 @@ def test_compile_create_steps_to_spec_text_report_keeps_source_and_structured_un
     assert analysis_step.input_type.value == "text"
     assert analysis_step.input_contract is None
     assert analysis_step.input_bindings == {
-        "question": (
-            "Beskrivning: {{ step_b.output.structured.meeting_context }}\n\n"
-            "Källmaterial: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "meeting_context",
+                "label": "Beskrivning",
+            },
+            {
+                "step_ref": "step_a",
+                "output": "text",
+                "label": "Källmaterial",
+            },
+        ]
     }
+    assert _question_binding(analysis_step.input_bindings) == (
+        "Beskrivning: {{ step_b.output.structured.meeting_context }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
+    )
     assert report_step.input_type.value == "text"
     assert report_step.input_contract is None
     assert report_step.input_bindings is not None
-    report_question = report_step.input_bindings["question"]
+    report_question = _question_binding(report_step.input_bindings)
     assert (
         "Beskrivning: {{ step_b.output.structured.meeting_context }}" in report_question
     )
@@ -7342,7 +7392,7 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
     assert protocol_step.input_type.value == "text"
     assert protocol_step.output_type.value == "text"
     assert compiled.steps[3].input_bindings is not None
-    protocol_question = compiled.steps[3].input_bindings["question"]
+    protocol_question = _question_binding(compiled.steps[3].input_bindings)
     assert "transcription_text" in protocol_question
     assert "meeting_title" in protocol_question
     assert validation.valid
@@ -7443,15 +7493,28 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         for step in compiled.steps
     )
     assert compiled.steps[2].input_bindings == {
-        "question": (
-            "Gemensam möteskontext.: "
-            "{{ step_b.output.structured.meeting_context }}\n\n"
-            "Källmaterial: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "meeting_context",
+                "label": "Gemensam möteskontext.",
+            },
+            {
+                "step_ref": "step_a",
+                "output": "text",
+                "label": "Källmaterial",
+            },
+        ]
     }
+    assert _question_binding(compiled.steps[2].input_bindings) == (
+        "Gemensam möteskontext.: "
+        "{{ step_b.output.structured.meeting_context }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
+    )
     assert compiled.steps[3].input_source == InputSource.PREVIOUS_STEP
     assert compiled.steps[3].input_bindings is not None
-    body_question = compiled.steps[3].input_bindings["question"]
+    body_question = _question_binding(compiled.steps[3].input_bindings)
     assert "meeting_context" in body_question
     assert "background_points" in body_question
     assert compiled.steps[4].input_source == InputSource.PREVIOUS_STEP
@@ -7499,12 +7562,25 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
         for step in compiled.steps
     )
     assert compiled.steps[2].input_bindings == {
-        "question": (
-            "Important source facts extracted from the input material.: "
-            "{{ step_b.output.structured.source_facts }}\n\n"
-            "Källmaterial: {{ step_a.output.text }}"
-        )
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "source_facts",
+                "label": "Important source facts extracted from the input material.",
+            },
+            {
+                "step_ref": "step_a",
+                "output": "text",
+                "label": "Källmaterial",
+            },
+        ]
     }
+    assert _question_binding(compiled.steps[2].input_bindings) == (
+        "Important source facts extracted from the input material.: "
+        "{{ step_b.output.structured.source_facts }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
+    )
     assert validation.valid
 
 
@@ -8315,8 +8391,11 @@ def test_compile_create_steps_to_spec_bridges_structured_previous_output_into_te
     compiled = draft
 
     assert compiled.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}"
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
     }
+    assert _question_binding(compiled.steps[1].input_bindings) == (
+        "{{ step_a.output.structured }}"
+    )
 
 
 def test_compile_create_steps_to_spec_prefers_specific_previous_fields_for_text_input() -> (
@@ -8356,8 +8435,18 @@ def test_compile_create_steps_to_spec_prefers_specific_previous_fields_for_text_
     compiled = draft
 
     assert compiled.steps[1].input_bindings == {
-        "question": "Summary: {{ step_a.output.structured.summary }}"
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "summary",
+                "label": "Summary",
+            }
+        ]
     }
+    assert _question_binding(compiled.steps[1].input_bindings) == (
+        "Summary: {{ step_a.output.structured.summary }}"
+    )
 
 
 def test_compile_outline_flow_logs_semantic_output_type_drift(

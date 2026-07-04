@@ -35,6 +35,17 @@ class SourceRefBinding:
             return expression
         return f"{self.label}: {expression}"
 
+    def binding_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "step_ref": self.step_ref,
+            "output": self.output,
+        }
+        if self.field_path:
+            payload["field_path"] = ".".join(self.field_path)
+        if self.label is not None:
+            payload["label"] = self.label
+        return payload
+
 
 def question_binding(input_bindings: object) -> str | None:
     """Return only the raw runtime `question` binding."""

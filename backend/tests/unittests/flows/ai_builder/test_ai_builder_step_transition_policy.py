@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_step_input_bindings,
+)
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
     supports_inline_inref_citation,
 )
 from eneo.flows.ai_builder.ai_builder_underlag_policy import is_source_surfacing_text
+from eneo.flows.application.flow_draft_materialization import (
+    compile_flow_draft_changeset,
+)
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -1380,6 +1386,34 @@ def test_normalize_ai_builder_spec_preserves_source_refs_complete_underlag() -> 
         and change.code == "source_material_underlag_completed"
         for step, change in changes
     )
+
+
+def test_compiler_source_refs_complete_once_after_normalization_and_lowering() -> None:
+    spec = _text_report_source_material_spec()
+    compiled_bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[],
+        uses_previous_outputs=[],
+        prior_steps=spec.steps[:3],
+    )
+    spec = _text_report_source_material_spec(final_input_bindings=compiled_bindings)
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+    shared = compile_flow_draft_changeset(normalized, current_flow=None)
+
+    assert any(
+        step.plan_step_ref == "step_d"
+        and change.code == "source_material_underlag_completed"
+        for step, change in changes
+    )
+    assert shared.compiled_steps[3].input_bindings == {
+        "question": (
+            "{{ step_3.output.structured }}\n\n"
+            "Source material: {{ step_1.output.text }}"
+        )
+    }
 
 
 def test_normalize_ai_builder_spec_treats_source_only_underlag_as_intentional_partial() -> (

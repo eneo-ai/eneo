@@ -39,6 +39,7 @@ from eneo.flows.flow_authoring_spec import (
     InputType,
     OutputType,
 )
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 
 
 def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
@@ -354,8 +355,8 @@ def _structured_field(
 
 def _question_binding(input_bindings: dict[str, object] | None) -> str:
     assert input_bindings is not None
-    question = input_bindings["question"]
-    assert isinstance(question, str)
+    question = effective_question_binding(input_bindings)
+    assert question is not None
     return question
 
 
