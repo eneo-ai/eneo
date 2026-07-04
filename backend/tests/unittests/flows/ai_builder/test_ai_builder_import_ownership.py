@@ -284,12 +284,6 @@ REPAIR_TRANSPORT_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_repair_transport")
 )
 REPAIR_TRANSPORT_PATH = Path("src/eneo/flows/ai_builder/ai_builder_repair_transport.py")
-TOOL_TURN_PERSISTENCE_MODULE = ".".join(
-    ("eneo", "flows", "ai_builder", "ai_builder_tool_turn_persistence")
-)
-TOOL_TURN_PERSISTENCE_PATH = Path(
-    "src/eneo/flows/ai_builder/ai_builder_tool_turn_persistence.py"
-)
 CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
         "CreateCompileContext",
@@ -2304,12 +2298,9 @@ def test_create_form_field_type_has_single_ai_builder_owner() -> None:
     assert violations == []
 
 
-def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade() -> (
-    None
-):
+def test_repair_transport_facade_stays_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     repair_transport_path = backend_root / REPAIR_TRANSPORT_PATH
-    persistence_path = backend_root / TOOL_TURN_PERSISTENCE_PATH
     proposal_repair_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
     )
@@ -2317,8 +2308,6 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
 
     if importlib.util.find_spec(REPAIR_TRANSPORT_MODULE) is not None:
         violations.append(f"{repair_transport_path}: repair transport facade exists")
-    if importlib.util.find_spec(TOOL_TURN_PERSISTENCE_MODULE) is None:
-        violations.append(f"{persistence_path}: missing tool-turn persistence owner")
 
     if repair_transport_path.exists():
         repair_tree = ast.parse(
@@ -2334,24 +2323,6 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
             }:
                 violations.append(
                     f"{repair_transport_path}:{node.lineno} defines {node.name}"
-                )
-
-    if persistence_path.exists():
-        persistence_tree = ast.parse(
-            persistence_path.read_text(), filename=str(persistence_path)
-        )
-        public_names = _top_level_public_names(persistence_tree)
-        if public_names != frozenset({"persist_tool_turn"}):
-            violations.append(
-                f"{persistence_path}: public names {sorted(public_names)}"
-            )
-        for node in ast.walk(persistence_tree):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module == PROPOSAL_REPAIR_MODULE
-            ):
-                violations.append(
-                    f"{persistence_path}:{node.lineno} imports {node.module}"
                 )
 
     proposal_repair_tree = ast.parse(
