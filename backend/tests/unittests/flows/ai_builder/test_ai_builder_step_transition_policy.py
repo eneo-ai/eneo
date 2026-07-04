@@ -1359,6 +1359,29 @@ def test_normalize_ai_builder_spec_preserves_text_report_complete_underlag() -> 
     )
 
 
+def test_normalize_ai_builder_spec_preserves_source_refs_complete_underlag() -> None:
+    bindings = {
+        "source_refs": [
+            {"step_ref": "step_c", "output": "structured"},
+            {
+                "step_ref": "step_a",
+                "output": "text",
+                "label": "Source material",
+            },
+        ]
+    }
+    spec = _text_report_source_material_spec(final_input_bindings=bindings)
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[3].input_bindings == bindings
+    assert not any(
+        step.plan_step_ref == "step_d"
+        and change.code == "source_material_underlag_completed"
+        for step, change in changes
+    )
+
+
 def test_normalize_ai_builder_spec_treats_source_only_underlag_as_intentional_partial() -> (
     None
 ):

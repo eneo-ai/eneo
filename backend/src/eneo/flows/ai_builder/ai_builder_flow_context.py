@@ -15,6 +15,7 @@ from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
@@ -69,10 +70,8 @@ def _build_detailed_flow_context(
                 f"({step.input_source} → {step.input_type} → {step.output_mode} → {step.output_type})"
             )
 
-            if step.input_bindings and isinstance(
-                step.input_bindings.get("question"), str
-            ):
-                question = step.input_bindings["question"]
+            question = effective_question_binding(step.input_bindings)
+            if question is not None:
                 truncated = question[:150] + "..." if len(question) > 150 else question
                 lines.append(f'     Underlag: "{truncated}"')
 

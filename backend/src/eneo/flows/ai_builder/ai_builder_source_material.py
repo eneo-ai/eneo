@@ -19,7 +19,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import question_binding
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
@@ -99,7 +99,7 @@ def iter_compiled_source_material_boundaries(
 def source_material_binding_status(
     boundary: CompiledSourceMaterialBoundary,
 ) -> SourceMaterialBindingStatus:
-    question = question_binding(boundary.step.input_bindings)
+    question = effective_question_binding(boundary.step.input_bindings)
     if question is None:
         return SourceMaterialBindingStatus.NEEDS_COMPLETION
 

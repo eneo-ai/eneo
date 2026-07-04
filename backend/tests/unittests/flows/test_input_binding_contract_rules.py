@@ -4,6 +4,7 @@ import pytest
 
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
+    effective_question_binding,
     input_contract_conflicts_with_question_binding,
     lower_source_refs_to_question_binding,
     question_binding,
@@ -23,6 +24,24 @@ def test_question_binding_ignores_missing_blank_or_non_string_values() -> None:
     assert question_binding({}) is None
     assert question_binding({"question": "  "}) is None
     assert question_binding({"question": 42}) is None
+
+
+def test_effective_question_binding_lowers_authoring_source_refs() -> None:
+    assert (
+        effective_question_binding(
+            {
+                "source_refs": [
+                    {
+                        "step_ref": "step_a",
+                        "output": "structured",
+                        "field_path": "decisions",
+                        "label": "Beslut",
+                    }
+                ]
+            }
+        )
+        == "Beslut: {{ step_a.output.structured.decisions }}"
+    )
 
 
 def test_input_contract_conflicts_only_when_question_binding_supplies_input() -> None:

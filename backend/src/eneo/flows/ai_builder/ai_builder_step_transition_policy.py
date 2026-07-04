@@ -27,7 +27,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
-from eneo.flows.input_binding_contract_rules import question_binding
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -259,7 +259,7 @@ def _normalize_source_material_underlag(
             for index, candidate in enumerate(spec.steps)
             if candidate is boundary.step
         )
-        existing_question = question_binding(boundary.step.input_bindings)
+        existing_question = effective_question_binding(boundary.step.input_bindings)
         normalized_bindings = dict(boundary.step.input_bindings or {})
         normalized_bindings["question"] = source_material_question_for_boundary(
             boundary,
@@ -689,7 +689,7 @@ def _artifact_helper_source_binding(
     spec: FlowDraftSpecCore,
     artifact_step: StepSpec,
 ) -> str | None:
-    question = question_binding(artifact_step.input_bindings)
+    question = effective_question_binding(artifact_step.input_bindings)
     if question:
         return question
     if artifact_step.input_source != InputSource.PREVIOUS_STEP:
@@ -773,7 +773,7 @@ def _can_rewire_all_previous_to_previous_step(
     if step.input_source != InputSource.ALL_PREVIOUS_STEPS:
         return False
 
-    question = question_binding(step.input_bindings)
+    question = effective_question_binding(step.input_bindings)
     if question is None:
         return repeated_all_previous and not preserve_as_final_fan_in
 
@@ -865,7 +865,7 @@ def normalize_ai_builder_step(
             updates["output_config"] = normalized_output_config
 
     if (
-        question_binding(step.input_bindings) is not None
+        effective_question_binding(step.input_bindings) is not None
         and step.input_contract is not None
     ):
         updates["input_contract"] = None

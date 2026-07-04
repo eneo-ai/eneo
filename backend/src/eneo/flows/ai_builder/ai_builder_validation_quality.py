@@ -23,7 +23,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import question_binding
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -273,7 +273,7 @@ def lint_all_previous_with_specific_refs(
     for step in spec.steps:
         if step.input_source != InputSource.ALL_PREVIOUS_STEPS:
             continue
-        question = question_binding(step.input_bindings)
+        question = effective_question_binding(step.input_bindings)
         if question is None:
             continue
         refs = analyze_template(
@@ -310,7 +310,7 @@ def lint_unfiltered_structured_interpolation(
     }
 
     for step in spec.steps:
-        question = question_binding(step.input_bindings)
+        question = effective_question_binding(step.input_bindings)
         if question is None:
             continue
         refs = analyze_template(

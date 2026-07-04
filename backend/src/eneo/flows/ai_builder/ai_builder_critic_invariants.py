@@ -71,6 +71,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -968,10 +969,8 @@ def _composer_question_prior_text_output_ref_count(
     *, spec: FlowDraftSpecCore, composer_index: int
 ) -> int:
     composer = spec.steps[composer_index]
-    if composer.input_bindings is None:
-        return 0
-    question = composer.input_bindings.get("question")
-    if not isinstance(question, str) or not question:
+    question = effective_question_binding(composer.input_bindings)
+    if question is None:
         return 0
 
     prior_text_indexes = {
@@ -1038,10 +1037,8 @@ def _composer_question_targets_prior_structured_step(
     if structured_step_index >= composer_index:
         return False
     composer = spec.steps[composer_index]
-    if composer.input_bindings is None:
-        return False
-    question = composer.input_bindings.get("question")
-    if not isinstance(question, str) or not question:
+    question = effective_question_binding(composer.input_bindings)
+    if question is None:
         return False
     step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
     form_field_names = {field.name for field in (spec.form_fields or [])}
@@ -1365,10 +1362,8 @@ def _composer_question_distinct_prior_structured_step_count(
     and still leaves earlier predecessors silently dropped).
     """
     composer = spec.steps[composer_index]
-    if composer.input_bindings is None:
-        return 0
-    question = composer.input_bindings.get("question")
-    if not isinstance(question, str) or not question:
+    question = effective_question_binding(composer.input_bindings)
+    if question is None:
         return 0
     step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
     form_field_names = {field.name for field in (spec.form_fields or [])}

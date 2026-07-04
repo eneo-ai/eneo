@@ -61,10 +61,13 @@ def _draft(
     )
 
 
-def _report_spec(*, final_question: str | None = None) -> FlowDraftSpecCore:
-    final_bindings = (
-        {"question": final_question} if final_question is not None else None
-    )
+def _report_spec(
+    *,
+    final_question: str | None = None,
+    final_bindings: dict[str, object] | None = None,
+) -> FlowDraftSpecCore:
+    if final_bindings is None and final_question is not None:
+        final_bindings = {"question": final_question}
     return FlowDraftSpecCore(
         flow_name="Customer meeting report",
         steps=[
@@ -131,6 +134,27 @@ def test_source_material_status_is_complete_for_structured_and_source_binding() 
                 "{{ step_b.output.structured }}\n\n"
                 "Source material: {{ step_a.output.text }}"
             )
+        )
+    )
+
+    assert (
+        source_material_binding_status(boundary) is SourceMaterialBindingStatus.COMPLETE
+    )
+
+
+def test_source_material_status_reads_authoring_source_refs() -> None:
+    boundary = _only_boundary(
+        _report_spec(
+            final_bindings={
+                "source_refs": [
+                    {"step_ref": "step_b", "output": "structured"},
+                    {
+                        "step_ref": "step_a",
+                        "output": "text",
+                        "label": "Source material",
+                    },
+                ]
+            },
         )
     )
 

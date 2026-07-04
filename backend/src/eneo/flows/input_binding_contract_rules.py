@@ -37,6 +37,8 @@ class SourceRefBinding:
 
 
 def question_binding(input_bindings: object) -> str | None:
+    """Return only the raw runtime `question` binding."""
+
     if not isinstance(input_bindings, Mapping):
         return None
     bindings = cast(Mapping[object, object], input_bindings)
@@ -44,6 +46,13 @@ def question_binding(input_bindings: object) -> str | None:
     if isinstance(question, str) and question.strip():
         return question
     return None
+
+
+def effective_question_binding(input_bindings: object) -> str | None:
+    """Return the authoring-effective question after lowering `source_refs`."""
+
+    lowered = lower_source_refs_to_question_binding(input_bindings)
+    return question_binding(lowered)
 
 
 def input_contract_conflicts_with_question_binding(
