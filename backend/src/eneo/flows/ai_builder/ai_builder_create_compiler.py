@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
+from typing import cast
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     derive_aggregation_intent_from_slots,
@@ -58,6 +60,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -69,6 +72,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
@@ -97,6 +101,7 @@ class CreateCompileContext:
     runtime_metadata_disables_declared_input_fields: bool = False
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
+    terminal_output_schema: JsonObject | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
@@ -235,6 +240,7 @@ def compile_create_intent_to_spec(
             steps=steps,
             review_mode=backend_audio_transcription_review_mode,
         )
+    terminal_output_schema = context.terminal_output_schema if context else None
     steps = _attach_unreferenced_form_fields_to_final_step(
         steps=steps,
         known_field_order=known_field_order,
@@ -251,6 +257,7 @@ def compile_create_intent_to_spec(
         steps=steps,
         document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
         aggregation_intent=aggregation_intent,
+        terminal_output_schema=terminal_output_schema,
     )
 
 
@@ -300,7 +307,12 @@ def compile_create_steps_to_spec(
     steps: list[NewStepDraft],
     document_body_writer_step_indexes: tuple[int, ...] = (),
     aggregation_intent: AggregationIntent = "linear",
+    terminal_output_schema: JsonObject | None = None,
 ) -> FlowDraftSpecCore:
+    steps = _clear_terminal_schema_output_fields(
+        steps=steps,
+        terminal_output_schema=terminal_output_schema,
+    )
     normalized_steps = normalize_create_step_mechanics(
         steps=steps,
         form_fields=form_fields or [],
@@ -317,6 +329,10 @@ def compile_create_steps_to_spec(
                 prior_steps=compiled_steps,
             )
         )
+    compiled_steps = _apply_terminal_output_schema(
+        compiled_steps,
+        terminal_output_schema=terminal_output_schema,
+    )
 
     compiled = FlowDraftSpecCore(
         flow_name=normalize_flow_name(flow_name),
@@ -329,6 +345,44 @@ def compile_create_steps_to_spec(
         ),
     )
     return compiled
+
+
+def _clear_terminal_schema_output_fields(
+    *,
+    steps: list[NewStepDraft],
+    terminal_output_schema: JsonObject | None,
+) -> list[NewStepDraft]:
+    if (
+        terminal_output_schema is None
+        or not steps
+        or steps[-1].output_type != OutputType.JSON
+        or steps[-1].output_fields is None
+    ):
+        return steps
+    # Avoid prompt guidance from stale model fields contradicting the exact schema.
+    return [*steps[:-1], steps[-1].model_copy(update={"output_fields": None})]
+
+
+def _apply_terminal_output_schema(
+    compiled_steps: list[StepSpec],
+    *,
+    terminal_output_schema: JsonObject | None,
+) -> list[StepSpec]:
+    if (
+        terminal_output_schema is None
+        or not compiled_steps
+        or compiled_steps[-1].output_type != OutputType.JSON
+    ):
+        return compiled_steps
+    terminal_step = compiled_steps[-1].model_copy(
+        update={
+            "output_contract": cast(
+                FlowPersistedJsonObject,
+                deepcopy(terminal_output_schema),
+            )
+        }
+    )
+    return [*compiled_steps[:-1], terminal_step]
 
 
 def _document_body_writer_step_refs(
@@ -371,15 +425,15 @@ def create_compile_context_from_planning_state(
             runtime_input_field_hints=runtime_input_field_hints,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
+    runtime_input_type = _runtime_input_type_from_architecture(
+        architecture
+    ) or _runtime_input_type_from_planning_state(planning_state)
+    final_output_type = _final_output_type_from_architecture(
+        architecture
+    ) or _final_output_type_from_planning_state(planning_state)
     return CreateCompileContext(
-        runtime_input_type=(
-            _runtime_input_type_from_architecture(architecture)
-            or _runtime_input_type_from_planning_state(planning_state)
-        ),
-        final_output_type=(
-            _final_output_type_from_architecture(architecture)
-            or _final_output_type_from_planning_state(planning_state)
-        ),
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
         final_output_mode=_final_output_mode_from_architecture(architecture),
         pattern_ids=_pattern_ids_from_architecture(architecture),
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
@@ -392,6 +446,10 @@ def create_compile_context_from_planning_state(
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
             architecture,
+        ),
+        terminal_output_schema=_terminal_output_schema_from_planning_state(
+            planning_state,
+            final_output_type=final_output_type,
         ),
     )
 
@@ -485,6 +543,19 @@ def _final_output_type_from_planning_state(state: PlanningState) -> OutputType |
         "structured_text": OutputType.TEXT,
         "text": OutputType.TEXT,
     }.get(slot.value)
+
+
+def _terminal_output_schema_from_planning_state(
+    state: PlanningState,
+    *,
+    final_output_type: OutputType | None,
+) -> JsonObject | None:
+    if final_output_type != OutputType.JSON:
+        return None
+    evidence = state.output_schema_evidence
+    if evidence is None:
+        return None
+    return evidence.json_schema
 
 
 def _final_output_type_from_architecture(

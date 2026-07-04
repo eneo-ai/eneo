@@ -72,6 +72,7 @@ from eneo.flows.ai_builder.pattern_registry import (
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommitDraft,
+    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -85,6 +86,8 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.output_processing import validate_against_contract
+from eneo.main.exceptions import TypedIOValidationException
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
     self_correction_intent_with_step_assumptions_payload,
 )
@@ -121,6 +124,7 @@ def _compile_create_steps(
     steps: list[NewStepDraft],
     document_body_writer_step_indexes: tuple[int, ...] = (),
     aggregation_intent: AggregationIntent = "linear",
+    terminal_output_schema: dict[str, object] | None = None,
 ) -> FlowDraftSpecCore:
     return compile_create_steps_to_spec(
         flow_name=flow_name,
@@ -129,6 +133,7 @@ def _compile_create_steps(
         steps=steps,
         document_body_writer_step_indexes=document_body_writer_step_indexes,
         aggregation_intent=aggregation_intent,
+        terminal_output_schema=terminal_output_schema,
     )
 
 
@@ -249,6 +254,15 @@ def _committed_architecture_state(
         )
     )
     return state
+
+
+def _output_schema_evidence(schema: dict[str, object]) -> OutputSchemaEvidence:
+    return OutputSchemaEvidence(
+        json_schema=schema,
+        source="freeform_text",
+        confidence="high",
+        evidence=["message:msg_schema", "fenced_json_schema"],
+    )
 
 
 def _structured_field_snapshot(
@@ -387,6 +401,139 @@ def _source_facts_fields_snapshot() -> list[dict[str, object]]:
             ],
         ),
     ]
+
+
+def test_compile_context_carries_output_schema_for_terminal_json_only() -> None:
+    schema: dict[str, object] = {
+        "type": "object",
+        "properties": {"status": {"type": "string"}},
+        "required": ["status"],
+    }
+    json_state = _committed_architecture_state(
+        input_type="text",
+        output_type="json",
+        output_mode="pass_through",
+        chosen_patterns=["text_to_json"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+    )
+    json_state.output_schema_evidence = _output_schema_evidence(schema)
+    text_state = _committed_architecture_state(
+        input_type="text",
+        output_type="text",
+        output_mode="pass_through",
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+    )
+    text_state.output_schema_evidence = _output_schema_evidence(schema)
+
+    json_context = create_compile_context_from_planning_state(json_state)
+    text_context = create_compile_context_from_planning_state(text_state)
+
+    assert json_context is not None
+    assert json_context.terminal_output_schema == schema
+    assert text_context is not None
+    assert text_context.terminal_output_schema is None
+
+
+def test_compile_create_intent_applies_exact_terminal_output_schema_evidence() -> None:
+    schema: dict[str, object] = {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["approved", "rejected"],
+                "description": "Final status.",
+            },
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+        "required": ["status"],
+        "additionalProperties": True,
+    }
+    state = _committed_architecture_state(
+        input_type="text",
+        output_type="json",
+        output_mode="pass_through",
+        chosen_patterns=["text_to_json"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+    )
+    state.output_schema_evidence = _output_schema_evidence(schema)
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Structured status",
+            "plan_rationale": "Return the requested status object.",
+            "steps": [
+                {
+                    "name": "Return status",
+                    "instructions": "Return the status.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "model_supplied_stale_field",
+                            "field_type": "string",
+                            "description": "Wrong field.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=create_compile_context_from_planning_state(state),
+    )
+    terminal_step = compiled.steps[-1]
+
+    assert terminal_step.output_contract == schema
+    assert "model_supplied_stale_field" not in terminal_step.assistant_spec.instructions
+    validate_against_contract(
+        {"status": "approved", "created_at": "2026-07-04T12:00:00Z", "extra": "ok"},
+        terminal_step.output_contract,
+        label="terminal output",
+    )
+    with pytest.raises(TypedIOValidationException):
+        validate_against_contract(
+            {"status": "pending"},
+            terminal_step.output_contract,
+            label="terminal output",
+        )
+
+
+def test_compile_create_steps_applies_schema_only_to_terminal_json_step() -> None:
+    terminal_schema: dict[str, object] = {
+        "type": "object",
+        "properties": {"final_status": {"type": "string", "enum": ["done"]}},
+        "required": ["final_status"],
+        "additionalProperties": False,
+    }
+    compiled = _compile_create_steps(
+        steps=[
+            NewStepDraft(
+                name="Extract facts",
+                instructions="Extract facts.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+                output_fields=[_field("facts", "string")],
+            ),
+            NewStepDraft(
+                name="Normalize final",
+                instructions="Create the final status object.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                output_fields=[_field("stale_final_field", "string")],
+            ),
+        ],
+        terminal_output_schema=terminal_schema,
+    )
+
+    first_step, terminal_step = compiled.steps
+    assert first_step.output_contract is not None
+    assert set(first_step.output_contract["properties"]) == {"facts"}
+    assert terminal_step.input_contract == first_step.output_contract
+    assert terminal_step.output_contract == terminal_schema
+    assert "stale_final_field" not in terminal_step.assistant_spec.instructions
 
 
 @dataclass(frozen=True, slots=True)
