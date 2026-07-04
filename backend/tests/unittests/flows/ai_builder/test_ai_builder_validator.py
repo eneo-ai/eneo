@@ -1917,13 +1917,15 @@ class TestQualityLint:
             for warning in result.warnings
         )
 
-    def test_source_material_boundary_allows_structured_subfield_underlag(self) -> None:
+    def test_source_material_boundary_warns_for_structured_subfield_only_underlag(
+        self,
+    ) -> None:
         result = validate_spec(
             _spec(
                 [
                     _step(
                         ref="step_a",
-                        name="Transkribera ljud",
+                        name="Transcribe vendor call",
                         input_source=InputSource.FLOW_INPUT,
                         input_type=InputType.AUDIO,
                         output_mode=OutputMode.TRANSCRIBE_ONLY,
@@ -1931,32 +1933,30 @@ class TestQualityLint:
                     ),
                     _step(
                         ref="step_b",
-                        name="Extrahera IBIC",
+                        name="Extract contract facts",
                         input_source=InputSource.PREVIOUS_STEP,
                         input_type=InputType.TEXT,
                         output_type=OutputType.JSON,
                         output_contract={
                             "type": "object",
                             "properties": {
-                                "brukare": {
+                                "contract": {
                                     "type": "object",
-                                    "properties": {
-                                        "kan_uttrycka_behov_sjalv": {"type": "string"}
-                                    },
+                                    "properties": {"delivery_risk": {"type": "string"}},
                                 }
                             },
                         },
                     ),
                     _step(
                         ref="step_c",
-                        name="Skapa DOCX",
+                        name="Create contract memo",
                         input_source=InputSource.PREVIOUS_STEP,
                         input_type=InputType.JSON,
                         output_type=OutputType.DOCX,
                         input_bindings={
                             "question": (
-                                "Behov: "
-                                "{{ step_b.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
+                                "Risk: "
+                                "{{ step_b.output.structured.contract.delivery_risk }}"
                             )
                         },
                     ),
@@ -1965,8 +1965,9 @@ class TestQualityLint:
         )
 
         assert result.valid
-        assert not any(
+        assert any(
             warning.code == "source_material_boundary_missing_underlag"
+            and warning.step_ref == "step_c"
             for warning in result.warnings
         )
 

@@ -1594,22 +1594,22 @@ def test_normalize_ai_builder_spec_preserves_existing_source_material_question_t
     }
 
 
-def test_normalize_ai_builder_spec_preserves_intentional_structured_field_underlag() -> (
+def test_normalize_ai_builder_spec_completes_structured_field_only_source_material() -> (
     None
 ):
     spec = FlowDraftSpecCore(
-        flow_name="IBIC till DOCX",
+        flow_name="Contract memo",
         form_fields=[
             FormFieldSpec(
-                name="Brukarens namn",
+                name="review_audience",
                 type="text",
-                label="Brukarens namn",
+                label="Review audience",
             )
         ],
         steps=[
             _step(
                 ref="step_a",
-                name="Transkribera ljud",
+                name="Transcribe vendor call",
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.AUDIO,
                 output_type=OutputType.TEXT,
@@ -1617,21 +1617,21 @@ def test_normalize_ai_builder_spec_preserves_intentional_structured_field_underl
             ),
             _step(
                 ref="step_b",
-                name="Extrahera IBIC",
+                name="Extract contract facts",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.JSON,
             ),
             _step(
                 ref="step_c",
-                name="Skapa genomförandeplan",
+                name="Create contract memo",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
                 output_type=OutputType.DOCX,
                 input_bindings={
                     "question": (
-                        "Brukare: {{ Brukarens namn }}\n"
-                        "Behov: {{ step_b.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
+                        "Audience: {{ review_audience }}\n"
+                        "Risk: {{ step_b.output.structured.contract.delivery_risk }}"
                     )
                 },
             ),
@@ -1643,8 +1643,14 @@ def test_normalize_ai_builder_spec_preserves_intentional_structured_field_underl
         terminal_output_type=OutputType.DOCX,
     )
 
-    assert normalized.steps[2].input_bindings == spec.steps[2].input_bindings
-    assert not any(
+    assert normalized.steps[2].input_bindings == {
+        "question": (
+            "Audience: {{ review_audience }}\n"
+            "Risk: {{ step_b.output.structured.contract.delivery_risk }}\n\n"
+            "Source material: {{ step_a.output.text }}"
+        )
+    }
+    assert any(
         change.code == "source_material_underlag_completed"
         for _step_spec, change in changes
     )

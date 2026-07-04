@@ -116,10 +116,7 @@ def source_material_binding_status(
     )
     if mentions_structured and mentions_source:
         return SourceMaterialBindingStatus.COMPLETE
-    if mentions_source or _question_mentions_prior_structured_subfield(
-        question=question,
-        prior_steps=boundary.prior_steps,
-    ):
+    if mentions_source:
         return SourceMaterialBindingStatus.INTENTIONAL_PARTIAL
     return SourceMaterialBindingStatus.NEEDS_COMPLETION
 
@@ -200,25 +197,6 @@ def source_material_label_for_text(text: str) -> str:
     if contains_any_token_prefix(normalized, _SWEDISH_LABEL_TOKENS):
         return "Källmaterial"
     return "Source material"
-
-
-def _question_mentions_prior_structured_subfield(
-    *,
-    question: str,
-    prior_steps: Sequence[StepSpec],
-) -> bool:
-    return any(
-        reference.tail.startswith("output.structured.")
-        and any(
-            _reference_targets_step(
-                reference,
-                step,
-                step_order=_step_order_for(step, known_steps=prior_steps),
-            )
-            for step in prior_steps
-        )
-        for reference in _analyze_step_references(question, known_steps=prior_steps)
-    )
 
 
 def _analyze_step_references(
