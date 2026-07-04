@@ -33,7 +33,7 @@ from eneo.flows.api.flow_models import (
     FormFieldPublic,
     StepRunInput,
 )
-from eneo.flows.domain.flow import Flow, FlowRunReviewCheckpoint, FlowSparse
+from eneo.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowSparse
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.enums import (
     FlowOutputMode,
@@ -41,6 +41,7 @@ from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
+    FlowRunStatus,
     FlowStepAttemptStatus,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -488,6 +489,36 @@ def test_review_checkpoint_public_exposes_render_contract() -> None:
         "properties": {"transcription": {"type": "string"}},
     }
     assert not hasattr(public, "output_contract_json")
+
+
+def test_run_public_exposes_only_semantic_input_payload() -> None:
+    now = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
+    run = FlowRun(
+        id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=3,
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
+        tenant_id=uuid4(),
+        trace_id=uuid4(),
+        status=FlowRunStatus.COMPLETED,
+        input_payload_json={
+            "employee_name": "Alex Example",
+            "expected_flow_version": 3,
+            "transkribering": "cached transcript",
+            "step_inputs": {"step-id": {"file_ids": ["file-id"]}},
+            "file_ids": ["removed-top-level-file-id"],
+        },
+        output_payload_json=None,
+        job_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    public = FlowAssembler().to_run_public(run)
+
+    assert public.input_payload_json == {"employee_name": "Alex Example"}
+    assert "expected_flow_version" in (run.input_payload_json or {})
 
 
 def _review_checkpoint_payload() -> dict[str, object]:

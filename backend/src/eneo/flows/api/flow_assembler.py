@@ -35,6 +35,7 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
+from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.http_transport import (
     HttpAuthoredConfig,
@@ -117,6 +118,9 @@ class FlowAssembler:
         )
         return FlowRunPublic.model_validate(run).model_copy(
             update={
+                "input_payload_json": read_semantic_flow_input_payload(
+                    run.input_payload_json
+                ),
                 "result_files": list(result_files),
                 "token_usage": public_token_usage,
             }

@@ -688,6 +688,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     )
     assert first_run_response.status_code == 201, first_run_response.text
     first_run = first_run_response.json()
+    assert first_run["input_payload_json"] == {"text": "hello"}
     assert [request.run_id for request in dispatch_requests] == [UUID(first_run["id"])]
 
     immediate_poll_response = await client.get(
@@ -697,7 +698,9 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert immediate_poll_response.status_code == 200, immediate_poll_response.text
-    assert immediate_poll_response.json()["id"] == first_run["id"]
+    immediate_poll = immediate_poll_response.json()
+    assert immediate_poll["id"] == first_run["id"]
+    assert immediate_poll["input_payload_json"] == {"text": "hello"}
 
     replay_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
