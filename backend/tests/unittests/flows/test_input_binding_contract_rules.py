@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.input_binding_contract_rules import (
+    InputBindingContractError,
     input_contract_conflicts_with_question_binding,
+    lower_source_refs_to_question_binding,
     question_binding,
+    source_ref_bindings,
     unsupported_input_binding_key,
 )
 
@@ -37,7 +42,83 @@ def test_input_contract_conflicts_only_when_question_binding_supplies_input() ->
     )
 
 
-def test_unsupported_input_binding_key_allows_only_question_today() -> None:
+def test_source_refs_lower_to_question_binding() -> None:
+    assert lower_source_refs_to_question_binding(
+        {
+            "question": "Draft intro",
+            "source_refs": [
+                {
+                    "step_ref": "step_a",
+                    "output": "text",
+                    "label": "Source material",
+                },
+                {
+                    "step_ref": "step_b",
+                    "output": "structured",
+                    "field_path": "decisions",
+                },
+                {
+                    "step_ref": "step_c",
+                    "output": "structured",
+                },
+            ],
+        }
+    ) == {
+        "question": (
+            "Draft intro\n\n"
+            "Source material: {{ step_a.output.text }}\n\n"
+            "{{ step_b.output.structured.decisions }}\n\n"
+            "{{ step_c.output.structured }}"
+        )
+    }
+
+
+def test_source_refs_lower_without_existing_question() -> None:
+    assert lower_source_refs_to_question_binding(
+        {
+            "source_refs": [
+                {
+                    "step_ref": "step_a",
+                    "output": "structured",
+                    "field_path": "summary.notes",
+                    "label": "Structured notes",
+                }
+            ],
+        }
+    ) == {
+        "question": ("Structured notes: {{ step_a.output.structured.summary.notes }}")
+    }
+
+
+def test_source_refs_empty_list_lowers_to_absent_binding() -> None:
+    assert lower_source_refs_to_question_binding({"source_refs": []}) is None
+
+
+@pytest.mark.parametrize(
+    "input_bindings",
+    [
+        {"source_refs": {}},
+        {"source_refs": ["step_a"]},
+        {"source_refs": [{"step_ref": "step_a", "output": "json"}]},
+        {
+            "source_refs": [
+                {"step_ref": "step_a", "output": "text", "field_path": "summary"}
+            ]
+        },
+        {
+            "source_refs": [
+                {"step_ref": "step_a", "output": "text", "label": "{{ bad }}"}
+            ]
+        },
+        {"source_refs": [{"step_ref": "step_a", "output": "text", "unexpected": True}]},
+    ],
+)
+def test_source_refs_reject_invalid_shape(input_bindings: object) -> None:
+    with pytest.raises(InputBindingContractError):
+        source_ref_bindings(input_bindings)
+
+
+def test_runtime_binding_key_validation_still_rejects_authoring_source_refs() -> None:
     assert (
         unsupported_input_binding_key({"question": "{{ step_a.output.text }}"}) is None
     )

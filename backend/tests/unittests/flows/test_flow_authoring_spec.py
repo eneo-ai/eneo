@@ -15,6 +15,10 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     StepSpec,
 )
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
+)
+from eneo.flows.flow_validators import collect_step_graph_issues
 
 _LOCAL_ID = "11111111-1111-4111-8111-111111111111"
 
@@ -168,6 +172,31 @@ def test_step_spec_strips_completion_model_ref_for_transcribe_only() -> None:
     assert step.assistant_spec.model_ref is None
 
 
+def test_step_spec_rejects_malformed_source_refs() -> None:
+    with pytest.raises(ValidationError):
+        _step(input_bindings={"source_refs": [{"step_ref": "step_a"}]})
+
+
+def test_source_refs_forward_references_fail_authoring_validation_path() -> None:
+    steps = [
+        _step(plan_step_ref="step_a"),
+        _step(
+            plan_step_ref="step_b",
+            name="Summarize",
+            input_source=InputSource.PREVIOUS_STEP,
+            input_bindings={"source_refs": [{"step_ref": "step_b", "output": "text"}]},
+        ),
+    ]
+
+    issues = collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(steps)
+    )
+
+    assert [issue.message for issue in issues if issue.step_order == 2] == [
+        "Input bindings may only reference outputs from earlier steps."
+    ]
+
+
 @pytest.mark.parametrize(
     "output_mode", [OutputMode.PASS_THROUGH, OutputMode.TEMPLATE_FILL]
 )
@@ -183,17 +212,19 @@ def _step(
     input_bindings: FlowPersistedJsonObject | None = None,
     *,
     plan_step_ref: str = "collect_input",
+    name: str = "Collect input",
+    input_source: InputSource = InputSource.FLOW_INPUT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     model_ref: str | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_step_ref,
-        name="Collect input",
+        name=name,
         assistant_spec=AssistantSpec(
             instructions="Use the provided input.",
             model_ref=model_ref,
         ),
-        input_source=InputSource.FLOW_INPUT,
+        input_source=input_source,
         output_mode=output_mode,
         input_bindings=input_bindings,
     )

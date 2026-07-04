@@ -421,6 +421,46 @@ def test_shared_compile_compiles_generic_edit_changeset_shape() -> None:
     assert len(shared.assistants_to_delete) == 1
 
 
+def test_shared_compile_lowers_authoring_source_refs_to_runtime_question() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Source material flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", name="Collect"),
+            _step_spec(
+                plan_step_ref="step_b",
+                name="Summarize",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_bindings={
+                    "question": "Write the final memo.",
+                    "source_refs": [
+                        {
+                            "step_ref": "step_a",
+                            "output": "text",
+                            "label": "Transcript",
+                        },
+                        {
+                            "step_ref": "step_a",
+                            "output": "structured",
+                            "field_path": "decisions",
+                            "label": "Decisions",
+                        },
+                    ],
+                },
+            ),
+        ],
+    )
+
+    shared = compile_flow_draft_changeset(spec, current_flow=None)
+
+    assert shared.compiled_steps[1].input_bindings == {
+        "question": (
+            "Write the final memo.\n\n"
+            "Transcript: {{ step_1.output.text }}\n\n"
+            "Decisions: {{ step_1.output.structured.decisions }}"
+        )
+    }
+
+
 def test_shared_compile_ignores_document_body_writer_refs() -> None:
     steps = [
         _step_spec(plan_step_ref="step_a"),

@@ -28,6 +28,7 @@ from eneo.flows.enums import (
 from eneo.flows.flow_capability_manifest import requires_completion_model
 from eneo.flows.flow_resource_bindings import is_uuid_shaped_resource_ref
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+from eneo.flows.input_binding_contract_rules import validate_source_refs_binding
 
 
 class AssistantSpecLocalRefNotPortableError(ValueError):
@@ -110,6 +111,7 @@ class StepSpec(BaseModel):
     ) -> FlowPersistedJsonObject | None:
         if value is None:
             return None
+        validate_source_refs_binding(value)
         question = value.get("question")
         if isinstance(question, str):
             return {

@@ -12,6 +12,9 @@ from eneo.flows.enums import (
     FlowOutputType,
 )
 from eneo.flows.flow_authoring_spec import AssistantSpec, StepSpec
+from eneo.flows.input_binding_contract_rules import (
+    lower_source_refs_to_question_binding,
+)
 
 _TEMPLATE_EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
@@ -43,9 +46,8 @@ def rewrite_step_spec_variables(
         )
 
     if step_spec.input_bindings:
-        rewritten_bindings = rewrite_variable_value(
-            step_spec.input_bindings, ref_to_order
-        )
+        input_bindings = lower_source_refs_to_question_binding(step_spec.input_bindings)
+        rewritten_bindings = rewrite_variable_value(input_bindings, ref_to_order)
         if rewritten_bindings != step_spec.input_bindings:
             updates["input_bindings"] = rewritten_bindings
 
