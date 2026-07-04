@@ -1635,7 +1635,7 @@ def test_compile_create_intent_drops_invalid_declared_previous_field_refs() -> N
     assert "Textsteg kan inte ha strukturfält" not in question
 
 
-def test_compile_create_intent_clears_declared_refs_after_leading_fold() -> None:
+def test_compile_create_intent_remaps_declared_refs_after_leading_fold() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Foldad referens",
@@ -1693,9 +1693,9 @@ def test_compile_create_intent_clears_declared_refs_after_leading_fold() -> None
         "Extrahera kontrollärende",
         "Skriv sammanställning",
     ]
-    assert "Rätt ärende-id" not in question
-    assert "Första ärende-id.: {{ step_a.output.structured.case_id }}" in question
-    assert "Kontrollärende-id.: {{ step_b.output.structured.case_id }}" in question
+    assert "Rätt ärende-id: {{ step_a.output.structured.case_id }}" in question
+    assert "Första ärende-id." not in question
+    assert "Kontrollärende-id." not in question
 
 
 def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
@@ -4094,6 +4094,13 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
                     "name": "Draft reply",
                     "instructions": "Draft a concise customer reply.",
                     "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 2,
+                            "field_path": "category",
+                            "label": "Declared category",
+                        }
+                    ],
                 },
             ],
         }
@@ -4127,7 +4134,10 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     assert draft.steps[0].input_type.value == "text"
     assert draft.steps[0].output_type.value == "json"
     assert compiled.steps[0].input_bindings == {"question": "{{ indata_text }}"}
-    assert compiled.steps[1].input_type.value == "json"
+    assert compiled.steps[1].input_type.value == "text"
+    assert compiled.steps[1].input_bindings == {
+        "question": "Declared category: {{ step_a.output.structured.category }}"
+    }
     assert validation.valid
 
 
@@ -4758,6 +4768,13 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
                 {
                     "name": "Skriv dokumenttext",
                     "instructions": "Skriv ett sammanhängande dokument från rubrikerna.",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 2,
+                            "field_path": "sections",
+                            "label": "Declared sections",
+                        }
+                    ],
                 },
             ],
         }
@@ -4803,6 +4820,11 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
     assert drop_records
     assert getattr(drop_records[0], "step_name") == "Transkribera ljud"
     assert compiled.steps[0].output_mode.value == "transcribe_only"
+    assert compiled.steps[2].input_bindings is not None
+    assert (
+        "Declared sections: {{ step_b.output.structured.sections }}"
+        in compiled.steps[2].input_bindings["question"]
+    )
     assert validation.valid
 
 

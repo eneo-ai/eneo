@@ -194,6 +194,9 @@ def test_plan_proposal_prompt_allows_create_only_declared_previous_refs() -> Non
     assert "uses_previous_outputs" in create_prompt
     assert "1-based earlier propose_flow step numbers" in create_prompt
     assert "Do not author field-level previous-step paths" not in create_prompt
+    assert "backend-owned refs" not in create_prompt
+    assert "raw input bindings" in create_prompt
+    assert "step refs" in create_prompt
     assert "uses_previous_fields" not in edit_prompt
     assert "uses_previous_outputs" not in edit_prompt
 

@@ -27,7 +27,11 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
     make_plan_step_ref,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    PreviousFieldRef,
+    PreviousOutputRef,
+)
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
@@ -115,6 +119,12 @@ class RuntimeInputFieldHintSource:
     aggregated_conversation_text: str
 
 
+@dataclass(frozen=True, slots=True)
+class SemanticStepRewrite:
+    steps: list[SemanticStepIntent]
+    original_to_current_step: dict[int, int]
+
+
 def compile_create_intent_to_spec(
     intent: CreateFlowIntent,
     *,
@@ -158,7 +168,8 @@ def compile_create_intent_to_spec(
         pattern_ids=pattern_resolution.pattern_ids,
         chain_steps=pattern_resolution.chain_steps,
     )
-    semantic_steps_input = _normalize_leading_audio_transcription_step(
+    semantic_steps_original = list(intent.steps)
+    semantic_step_rewrite = _normalize_leading_audio_transcription_step(
         steps=list(intent.steps),
         runtime_input_type=runtime_input_type,
         backend_audio_transcription_inserted=backend_audio_transcription_inserted,
@@ -170,13 +181,15 @@ def compile_create_intent_to_spec(
             backend_audio_transcription_inserted=backend_audio_transcription_inserted,
         )
     )
-    semantic_steps_input = _fold_leading_zero_contract_text_steps(
-        steps=semantic_steps_input,
+    semantic_step_rewrite = _fold_leading_zero_contract_text_steps(
+        rewrite=semantic_step_rewrite,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
     )
-    if semantic_steps_input != list(intent.steps):
-        semantic_steps_input = _clear_declared_previous_refs(semantic_steps_input)
+    semantic_steps_input = _remap_declared_previous_refs_after_semantic_rewrite(
+        rewrite=semantic_step_rewrite,
+        original_steps=semantic_steps_original,
+    )
 
     semantic_steps: list[StepSkeletonSemanticContent] = []
     for semantic_step in semantic_steps_input:
@@ -287,23 +300,74 @@ def _semantic_content_from_intent_step(
     )
 
 
-def _clear_declared_previous_refs(
-    steps: list["SemanticStepIntent"],
+def _remap_declared_previous_refs_after_semantic_rewrite(
+    *,
+    rewrite: SemanticStepRewrite,
+    original_steps: list["SemanticStepIntent"],
 ) -> list["SemanticStepIntent"]:
+    if rewrite.steps == original_steps:
+        return rewrite.steps
+
     updated: list[SemanticStepIntent] = []
-    for step in steps:
+    for current_step_number, step in enumerate(rewrite.steps, start=1):
         if not step.uses_previous_fields and not step.uses_previous_outputs:
+            updated.append(step)
+            continue
+        remapped_fields = _remap_declared_previous_field_refs(
+            step.uses_previous_fields,
+            original_to_current_step=rewrite.original_to_current_step,
+            current_step_number=current_step_number,
+        )
+        remapped_outputs = _remap_declared_previous_output_refs(
+            step.uses_previous_outputs,
+            original_to_current_step=rewrite.original_to_current_step,
+            current_step_number=current_step_number,
+        )
+        if (
+            remapped_fields == step.uses_previous_fields
+            and remapped_outputs == step.uses_previous_outputs
+        ):
             updated.append(step)
             continue
         updated.append(
             step.model_copy(
                 update={
-                    "uses_previous_fields": [],
-                    "uses_previous_outputs": [],
+                    "uses_previous_fields": remapped_fields,
+                    "uses_previous_outputs": remapped_outputs,
                 }
             )
         )
     return updated
+
+
+def _remap_declared_previous_field_refs(
+    refs: list[PreviousFieldRef],
+    *,
+    original_to_current_step: dict[int, int],
+    current_step_number: int,
+) -> list[PreviousFieldRef]:
+    remapped: list[PreviousFieldRef] = []
+    for ref in refs:
+        current_source_step = original_to_current_step.get(ref.from_step)
+        if current_source_step is None or current_source_step >= current_step_number:
+            continue
+        remapped.append(ref.model_copy(update={"from_step": current_source_step}))
+    return remapped
+
+
+def _remap_declared_previous_output_refs(
+    refs: list[PreviousOutputRef],
+    *,
+    original_to_current_step: dict[int, int],
+    current_step_number: int,
+) -> list[PreviousOutputRef]:
+    remapped: list[PreviousOutputRef] = []
+    for ref in refs:
+        current_source_step = original_to_current_step.get(ref.from_step)
+        if current_source_step is None or current_source_step >= current_step_number:
+            continue
+        remapped.append(ref.model_copy(update={"from_step": current_source_step}))
+    return remapped
 
 
 def _log_skeleton_output_type_drifts(
@@ -768,10 +832,10 @@ def _log_dropped_primary_input_shadow_fields(
 
 def _fold_leading_zero_contract_text_steps(
     *,
-    steps: list["SemanticStepIntent"],
+    rewrite: SemanticStepRewrite,
     runtime_input_type: InputType,
     final_output_type: OutputType,
-) -> list["SemanticStepIntent"]:
+) -> SemanticStepRewrite:
     """Fold low-value leading text hops without interpreting their wording.
 
     Small models sometimes emit a first step whose only job is "receive/use the
@@ -781,15 +845,16 @@ def _fold_leading_zero_contract_text_steps(
     verbatim by concatenation.
     """
 
+    steps = rewrite.steps
     if runtime_input_type != InputType.TEXT or len(steps) < 2:
-        return steps
+        return rewrite
 
     target_index = _leading_fold_target_index(
         steps=steps,
         final_output_type=final_output_type,
     )
     if target_index is None or target_index == 0:
-        return steps
+        return rewrite
 
     folded_steps = steps[:target_index]
     target_step = steps[target_index]
@@ -808,7 +873,19 @@ def _fold_leading_zero_contract_text_steps(
             "final_output_type": final_output_type.value,
         },
     )
-    return [merged, *steps[target_index + 1 :]]
+    current_to_original_step = {
+        current_step: original_step
+        for original_step, current_step in rewrite.original_to_current_step.items()
+    }
+    original_to_current_step = {
+        original_step: current_step - target_index
+        for current_step, original_step in current_to_original_step.items()
+        if current_step >= target_index + 1
+    }
+    return SemanticStepRewrite(
+        steps=[merged, *steps[target_index + 1 :]],
+        original_to_current_step=original_to_current_step,
+    )
 
 
 def _normalize_leading_audio_transcription_step(
@@ -816,18 +893,24 @@ def _normalize_leading_audio_transcription_step(
     steps: list["SemanticStepIntent"],
     runtime_input_type: InputType,
     backend_audio_transcription_inserted: bool,
-) -> list["SemanticStepIntent"]:
+) -> SemanticStepRewrite:
+    unchanged = SemanticStepRewrite(
+        steps=steps,
+        original_to_current_step={
+            step_number: step_number for step_number in range(1, len(steps) + 1)
+        },
+    )
     if (
         runtime_input_type != InputType.AUDIO
         or not backend_audio_transcription_inserted
         or len(steps) < 2
     ):
-        return steps
+        return unchanged
     first_step = steps[0]
     if not _is_redundant_audio_transcription_step(first_step):
-        return steps
+        return unchanged
     if not _has_no_external_step_refs(first_step):
-        return steps
+        return unchanged
     if not _is_plain_text_semantic_step(first_step):
         rewritten = first_step.model_copy(
             update={
@@ -839,13 +922,21 @@ def _normalize_leading_audio_transcription_step(
             "ai_builder_redundant_audio_transcription_semantic_step_rewritten",
             extra={"step_name": first_step.name},
         )
-        return [rewritten, *steps[1:]]
+        return SemanticStepRewrite(
+            steps=[rewritten, *steps[1:]],
+            original_to_current_step=unchanged.original_to_current_step,
+        )
 
     logger.info(
         "ai_builder_redundant_audio_transcription_semantic_step_dropped",
         extra={"step_name": first_step.name},
     )
-    return steps[1:]
+    return SemanticStepRewrite(
+        steps=steps[1:],
+        original_to_current_step={
+            step_number: step_number - 1 for step_number in range(2, len(steps) + 1)
+        },
+    )
 
 
 def _redundant_leading_audio_transcription_review_mode(
