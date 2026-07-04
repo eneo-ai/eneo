@@ -66,6 +66,7 @@ def build_plan_proposal_system_prompt(
             "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription unless the user explicitly asks to review, approve, or edit the transcript itself.",
             "- For that transcript-review case, include the leading transcription step with review_mode; the backend attaches the checkpoint to its inserted transcription/upload step.",
             "- When the user explicitly asks to review, approve, or edit a step output before later steps continue, set that step's review_mode. Do not model human review as a separate AI step or as instruction prose.",
+            "- When a later create-mode step needs specific fields or full text from an earlier propose_flow step, declare `uses_previous_fields` or `uses_previous_outputs` with 1-based earlier propose_flow step numbers. Leave them empty when unsure; the backend validates and may fill gaps.",
             "- The backend compiles step topology, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",
         ]
         if not is_edit_mode
@@ -91,7 +92,6 @@ def build_plan_proposal_system_prompt(
         *([section_rule] if section_rule is not None else []),
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",
-        "- Do not author field-level previous-step paths; let the backend wire dataflow.",
         "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, or backend-owned refs.",
         "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`, `mcp_server_refs`, `mcp_tool_refs`).",
         "- The backend will compile, validate, and persist the plan for user approval.",

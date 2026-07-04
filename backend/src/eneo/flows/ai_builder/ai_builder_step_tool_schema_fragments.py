@@ -45,6 +45,36 @@ def build_previous_field_refs_schema() -> dict[str, Any]:
     }
 
 
+def build_previous_output_refs_schema() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "description": (
+            "Optional full-output reuse intent for earlier text-producing steps. "
+            "The backend compiles these into explicit underlag bindings."
+        ),
+        "items": {
+            "type": "object",
+            "required": ["from_step"],
+            "properties": {
+                "from_step": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "1-based earlier step number to reuse the full text output from."
+                    ),
+                },
+                "label": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional human-readable label to use in the compiled underlag."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        },
+    }
+
+
 def build_resource_ref_property_schemas(
     *,
     model_refs: list[str] | None,

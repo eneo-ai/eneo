@@ -164,6 +164,40 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     assert "assistant_ref" not in prompt
 
 
+def test_plan_proposal_prompt_allows_create_only_declared_previous_refs() -> None:
+    state = _planning_state_with_architecture(
+        StepTriple(
+            input_type="text",
+            output_type="text",
+            output_mode="pass_through",
+        )
+    )
+
+    create_prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+    edit_prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=True,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "uses_previous_fields" in create_prompt
+    assert "uses_previous_outputs" in create_prompt
+    assert "1-based earlier propose_flow step numbers" in create_prompt
+    assert "Do not author field-level previous-step paths" not in create_prompt
+    assert "uses_previous_fields" not in edit_prompt
+    assert "uses_previous_outputs" not in edit_prompt
+
+
 def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
     state = PlanningState.empty()
     state.file_roles = [

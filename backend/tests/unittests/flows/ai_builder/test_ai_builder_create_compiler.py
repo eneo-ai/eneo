@@ -1438,6 +1438,266 @@ def test_parse_create_flow_intent_arguments_rejects_invalid_review_mode() -> Non
         )
 
 
+def test_parse_create_flow_intent_arguments_preserves_declared_previous_refs() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Deklarerat dataflöde",
+            "plan_rationale": "Återanvänd tydliga tidigare resultat.",
+            "steps": [
+                {
+                    "name": "Extrahera ärende",
+                    "instructions": "Extrahera ärende-id.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Ärende-id.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv utkast",
+                    "instructions": "Skriv ett första utkast.",
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapporten från ärende-id och källtext.",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "case_id",
+                            "label": "Ärende-id",
+                        }
+                    ],
+                    "uses_previous_outputs": [{"from_step": 2, "label": "Utkast"}],
+                },
+            ],
+        }
+    )
+
+    final_step = outline.steps[2]
+    assert [
+        (ref.from_step, ref.field_path, ref.label)
+        for ref in final_step.uses_previous_fields
+    ] == [(1, "case_id", "Ärende-id")]
+    assert [(ref.from_step, ref.label) for ref in final_step.uses_previous_outputs] == [
+        (2, "Utkast")
+    ]
+
+
+def test_compile_create_intent_threads_declared_previous_refs() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Deklarerat dataflöde",
+            "plan_rationale": "Återanvänd tydliga tidigare resultat.",
+            "steps": [
+                {
+                    "name": "Extrahera ärende",
+                    "instructions": "Extrahera ärende-id.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Ärende-id.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv utkast",
+                    "instructions": "Skriv ett första utkast.",
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapporten från ärende-id och källtext.",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "case_id",
+                            "label": "Ärende-id",
+                        }
+                    ],
+                    "uses_previous_outputs": [{"from_step": 2, "label": "Utkast"}],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(outline)
+    question = compiled.steps[2].input_bindings["question"]
+
+    assert "Ärende-id: {{ step_a.output.structured.case_id }}" in question
+    assert "Utkast: {{ step_b.output.text }}" in question
+
+
+def test_compile_create_intent_remaps_declared_refs_across_backend_prefix() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Ljud till rapport",
+            "plan_rationale": "Transkribera ljud och skriv rapport.",
+            "steps": [
+                {
+                    "name": "Extrahera ärende",
+                    "instructions": "Extrahera ärende-id från transkriptionen.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Ärende-id.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapporten från ärende-id.",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "case_id",
+                            "label": "Ärende-id",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.PDF,
+            ui_language="sv",
+        ),
+    )
+    body_step = compiled.steps[2]
+
+    assert compiled.steps[0].output_type == OutputType.TEXT
+    assert compiled.steps[1].output_type == OutputType.JSON
+    assert body_step.input_bindings is not None
+    assert (
+        "Ärende-id: {{ step_b.output.structured.case_id }}"
+        in body_step.input_bindings["question"]
+    )
+    assert (
+        "step_a.output.structured.case_id" not in body_step.input_bindings["question"]
+    )
+
+
+def test_compile_create_intent_drops_invalid_declared_previous_field_refs() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Tolerera felaktiga deklarerade refs",
+            "plan_rationale": "Felaktiga modellrefs ska inte krascha skapandet.",
+            "steps": [
+                {
+                    "name": "Extrahera ärende",
+                    "instructions": "Extrahera ärende-id.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Ärende-id.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv utkast",
+                    "instructions": "Skriv ett första utkast.",
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapporten från giltigt underlag.",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "missing",
+                            "label": "Saknat fält",
+                        },
+                        {
+                            "from_step": 2,
+                            "field_path": "case_id",
+                            "label": "Textsteg kan inte ha strukturfält",
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(outline)
+    question = (compiled.steps[2].input_bindings or {}).get("question", "")
+
+    assert "Saknat fält" not in question
+    assert "Textsteg kan inte ha strukturfält" not in question
+
+
+def test_compile_create_intent_clears_declared_refs_after_leading_fold() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Foldad referens",
+            "plan_rationale": "Undvik felkoppling efter fold.",
+            "steps": [
+                {
+                    "name": "Ta emot material",
+                    "instructions": "Använd användarens text som material.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Extrahera första ärende",
+                    "instructions": "Extrahera ärende-id från materialet.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Första ärende-id.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Extrahera kontrollärende",
+                    "instructions": "Extrahera ett kontroll-id från materialet.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Kontrollärende-id.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv sammanställning",
+                    "instructions": "Skriv sammanställningen från rätt ärende-id.",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 2,
+                            "field_path": "case_id",
+                            "label": "Rätt ärende-id",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(outline)
+    question = (compiled.steps[2].input_bindings or {}).get("question", "")
+
+    assert [step.name for step in compiled.steps] == [
+        "Extrahera första ärende",
+        "Extrahera kontrollärende",
+        "Skriv sammanställning",
+    ]
+    assert "Rätt ärende-id" not in question
+    assert "Första ärende-id.: {{ step_a.output.structured.case_id }}" in question
+    assert "Kontrollärende-id.: {{ step_b.output.structured.case_id }}" in question
+
+
 def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
     outline = parse_create_flow_intent_arguments(
         {
@@ -2114,7 +2374,9 @@ def test_structured_field_depth_above_three_is_rejected() -> None:
         )
 
 
-def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
+def test_outline_flow_schema_exposes_declared_previous_refs_and_hides_mechanics() -> (
+    None
+):
     schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
     )
@@ -2128,6 +2390,8 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
 
     assert leaked_backend_keys == []
     assert "uses_form_fields" in step_props
+    assert "uses_previous_fields" in step_props
+    assert "uses_previous_outputs" in step_props
 
 
 def test_outline_flow_schema_uses_flow_derived_enums() -> None:
@@ -2671,7 +2935,7 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
                     "input_source": "all_previous_steps",
                     "input_type": "json",
                     "input_bindings": {"question": "{{ step_a.output.text }}"},
-                    "uses_previous_fields": [{"from_step": 1, "field_path": "x"}],
+                    "output_contract": {"type": "object"},
                 }
             ],
         }

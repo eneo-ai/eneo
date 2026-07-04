@@ -14,14 +14,20 @@ from eneo.flows.ai_builder.ai_builder_authoring_projection import (
 )
 from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     compile_ordered_edit_proposal,
+    materialize_ordered_edit_proposal,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
+    PreviousOutputRef,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    AddStep as IntentAddStep,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AssistantSpecPatch,
     ModifyExistingStep,
+    SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     OrderedEditProposal as IntentOrderedEditProposal,
@@ -489,6 +495,30 @@ def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_ste
     assert result.steps[1].input_bindings == {
         "question": "answer: {{ step_a.output.structured.answer }}"
     }
+
+
+def test_edit_intent_add_step_drops_create_only_previous_refs() -> None:
+    proposal = IntentOrderedEditProposal(
+        plan_rationale="Add a step.",
+        steps=[
+            IntentAddStep(
+                step=SemanticStepIntent(
+                    name="Use prior result",
+                    instructions="Use a prior result.",
+                    uses_previous_fields=[
+                        PreviousFieldRef(from_step=1, field_path="answer")
+                    ],
+                    uses_previous_outputs=[PreviousOutputRef(from_step=1)],
+                )
+            )
+        ],
+    )
+
+    materialized = materialize_ordered_edit_proposal(proposal)
+
+    assert isinstance(materialized.steps[0], AddStep)
+    assert materialized.steps[0].step.uses_previous_fields == []
+    assert materialized.steps[0].step.uses_previous_outputs == []
 
 
 def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder() -> (

@@ -175,6 +175,8 @@ def compile_create_intent_to_spec(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
     )
+    if semantic_steps_input != list(intent.steps):
+        semantic_steps_input = _clear_declared_previous_refs(semantic_steps_input)
 
     semantic_steps: list[StepSkeletonSemanticContent] = []
     for semantic_step in semantic_steps_input:
@@ -274,6 +276,8 @@ def _semantic_content_from_intent_step(
         ),
         output_fields=tuple(step.output_fields or ()),
         uses_form_fields=tuple(uses_form_fields),
+        uses_previous_fields=tuple(step.uses_previous_fields),
+        uses_previous_outputs=tuple(step.uses_previous_outputs),
         model_ref=step.model_ref,
         knowledge_refs=tuple(step.knowledge_refs),
         mcp_server_refs=tuple(step.mcp_server_refs),
@@ -281,6 +285,25 @@ def _semantic_content_from_intent_step(
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
     )
+
+
+def _clear_declared_previous_refs(
+    steps: list["SemanticStepIntent"],
+) -> list["SemanticStepIntent"]:
+    updated: list[SemanticStepIntent] = []
+    for step in steps:
+        if not step.uses_previous_fields and not step.uses_previous_outputs:
+            updated.append(step)
+            continue
+        updated.append(
+            step.model_copy(
+                update={
+                    "uses_previous_fields": [],
+                    "uses_previous_outputs": [],
+                }
+            )
+        )
+    return updated
 
 
 def _log_skeleton_output_type_drifts(
@@ -948,6 +971,8 @@ def _has_no_external_step_refs(step: "SemanticStepIntent") -> bool:
         not step.knowledge_refs
         and not step.mcp_server_refs
         and not step.mcp_tool_refs
+        and not step.uses_previous_fields
+        and not step.uses_previous_outputs
         and not step.citations_requested
     )
 
@@ -1005,6 +1030,8 @@ def _is_zero_contract_text_step(step: "SemanticStepIntent") -> bool:
         and not step.knowledge_refs
         and not step.mcp_server_refs
         and not step.mcp_tool_refs
+        and not step.uses_previous_fields
+        and not step.uses_previous_outputs
         and not step.citations_requested
         and step.review_mode is None
     )

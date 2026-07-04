@@ -295,6 +295,7 @@ class TestBuildEditFlowToolSchema:
         assert "instructions" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
         assert "uses_previous_fields" not in add_payload["properties"]
+        assert "uses_previous_outputs" not in add_payload["properties"]
         assert add_payload["properties"]["review_mode"]["enum"] == [
             "view",
             "edit",
@@ -310,7 +311,13 @@ class TestBuildEditFlowToolSchema:
 
         add_payload = _add_step_payload_schema(schema)
 
-        assert set(add_payload["properties"]) == set(SemanticStepIntent.model_fields)
+        assert set(add_payload["properties"]) < set(SemanticStepIntent.model_fields)
+        assert set(SemanticStepIntent.model_fields) - set(
+            add_payload["properties"]
+        ) == {
+            "uses_previous_fields",
+            "uses_previous_outputs",
+        }
 
     def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
         self,

@@ -8,7 +8,12 @@ from typing import Literal
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
+    PreviousFieldRef,
+    PreviousOutputRef,
     StructuredFieldDraft,
+)
+from eneo.flows.ai_builder.ai_builder_structured_field_paths import (
+    missing_draft_field_path,
 )
 from eneo.flows.ai_builder.pattern_registry import (
     ANALYSIS_OR_QUALITY_REVIEW_STEP,
@@ -82,6 +87,8 @@ class StepSkeletonSemanticContent:
     requested_output_type: OutputType | None = None
     output_fields: tuple[StructuredFieldDraft, ...] = ()
     uses_form_fields: tuple[str, ...] = ()
+    uses_previous_fields: tuple[PreviousFieldRef, ...] = ()
+    uses_previous_outputs: tuple[PreviousOutputRef, ...] = ()
     model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
     mcp_server_refs: tuple[str, ...] = ()
@@ -339,13 +346,22 @@ class StepSkeletonPlan:
         steps: list[NewStepDraft] = []
         output_type_drifts: list[StepSkeletonOutputTypeDrift] = []
         document_body_writer_step_indexes: list[int] = []
+        semantic_step_to_compiled_step: dict[int, int] = {}
         semantic_index = 0
 
         for slot_index, slot in enumerate(slots):
             content: StepSkeletonSemanticContent | None = None
+            semantic_step_number: int | None = None
             if slot.role == "semantic_required":
+                semantic_step_number = semantic_index + 1
                 content = semantic_steps[semantic_index]
                 semantic_index += 1
+                # Model refs are semantic-step numbered; compose owns compiled ordinals.
+                content = _remap_semantic_previous_refs(
+                    content,
+                    semantic_step_to_compiled_step=semantic_step_to_compiled_step,
+                    prior_steps=steps,
+                )
             step, drift = _compose_step_skeleton_slot(
                 slot=slot,
                 content=content,
@@ -356,6 +372,8 @@ class StepSkeletonPlan:
                 ),
             )
             steps.append(step)
+            if semantic_step_number is not None:
+                semantic_step_to_compiled_step[semantic_step_number] = len(steps)
             if _slot_writes_document_body(slot):
                 document_body_writer_step_indexes.append(len(steps) - 1)
             if drift is not None:
@@ -648,6 +666,12 @@ def _compose_step_skeleton_slot(
             uses_form_fields=(
                 list(content.uses_form_fields) if content is not None else []
             ),
+            uses_previous_fields=(
+                list(content.uses_previous_fields) if content is not None else []
+            ),
+            uses_previous_outputs=(
+                list(content.uses_previous_outputs) if content is not None else []
+            ),
             document_delivery_mode=(
                 "not_applicable"
                 if output_type == OutputType.JSON
@@ -663,6 +687,70 @@ def _compose_step_skeleton_slot(
         ),
         output_type_drift,
     )
+
+
+def _remap_semantic_previous_refs(
+    content: StepSkeletonSemanticContent,
+    *,
+    semantic_step_to_compiled_step: dict[int, int],
+    prior_steps: list[NewStepDraft],
+) -> StepSkeletonSemanticContent:
+    if not content.uses_previous_fields and not content.uses_previous_outputs:
+        return content
+    return replace(
+        content,
+        uses_previous_fields=_remap_semantic_previous_field_refs(
+            content.uses_previous_fields,
+            semantic_step_to_compiled_step=semantic_step_to_compiled_step,
+            prior_steps=prior_steps,
+        ),
+        uses_previous_outputs=_remap_semantic_previous_output_refs(
+            content.uses_previous_outputs,
+            semantic_step_to_compiled_step=semantic_step_to_compiled_step,
+            prior_steps=prior_steps,
+        ),
+    )
+
+
+def _remap_semantic_previous_field_refs(
+    refs: tuple[PreviousFieldRef, ...],
+    *,
+    semantic_step_to_compiled_step: dict[int, int],
+    prior_steps: list[NewStepDraft],
+) -> tuple[PreviousFieldRef, ...]:
+    remapped: list[PreviousFieldRef] = []
+    for ref in refs:
+        compiled_step_number = semantic_step_to_compiled_step.get(ref.from_step)
+        if compiled_step_number is None:
+            continue
+        source_step = prior_steps[compiled_step_number - 1]
+        if (
+            source_step.output_type != OutputType.JSON
+            or source_step.output_fields is None
+        ):
+            continue
+        if missing_draft_field_path(source_step.output_fields, ref.field_path):
+            continue
+        remapped.append(ref.model_copy(update={"from_step": compiled_step_number}))
+    return tuple(remapped)
+
+
+def _remap_semantic_previous_output_refs(
+    refs: tuple[PreviousOutputRef, ...],
+    *,
+    semantic_step_to_compiled_step: dict[int, int],
+    prior_steps: list[NewStepDraft],
+) -> tuple[PreviousOutputRef, ...]:
+    remapped: list[PreviousOutputRef] = []
+    for ref in refs:
+        compiled_step_number = semantic_step_to_compiled_step.get(ref.from_step)
+        if compiled_step_number is None:
+            continue
+        source_step = prior_steps[compiled_step_number - 1]
+        if source_step.output_type != OutputType.TEXT:
+            continue
+        remapped.append(ref.model_copy(update={"from_step": compiled_step_number}))
+    return tuple(remapped)
 
 
 def _compose_output_fields(
