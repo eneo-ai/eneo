@@ -11,6 +11,12 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     compute_unresolved_core_slots,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
@@ -24,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
+    ReviseArchitecture,
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -32,7 +39,6 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     SlotConfidence,
     SlotSource,
-    StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
@@ -41,6 +47,7 @@ ExpectedDecisionType: TypeAlias = (
     | type[CommitArchitecture]
     | type[ConfirmRequirements]
     | type[GenerateProposal]
+    | type[ReviseArchitecture]
 )
 
 
@@ -77,21 +84,18 @@ def _state(**slots: str) -> PlanningState:
     return state
 
 
+def _finalized_commit_for_state(state: PlanningState) -> ArchitectureCommit:
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    return finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+
+
 def _committed_state(**slots: str) -> PlanningState:
     state = _state(**slots)
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="d" * 64,
-    )
+    state.architecture_commit = _finalized_commit_for_state(state)
     return state
 
 
@@ -125,6 +129,38 @@ def _model_medium_output_state() -> PlanningState:
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "structured_text",
+        source="model",
+        confidence="medium",
+    )
+    return state
+
+
+def _committed_state_with_commit_grade_output_drift() -> PlanningState:
+    state = _committed_state(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="flexible_document_case",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    return state
+
+
+def _committed_state_with_weak_output_drift() -> PlanningState:
+    state = _committed_state(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="flexible_document_case",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
         source="model",
         confidence="medium",
     )
@@ -198,6 +234,18 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
             id="committed requirements ask for deterministic confirmation",
             state=committed,
             expected_type=ConfirmRequirements,
+        ),
+        TurnDecisionCase(
+            id="commit-grade architecture drift revises before confirmation",
+            state=_committed_state_with_commit_grade_output_drift(),
+            expected_type=ReviseArchitecture,
+        ),
+        TurnDecisionCase(
+            id="weak architecture drift reopens canonical output question",
+            state=_committed_state_with_weak_output_drift(),
+            expected_type=AskCanonicalQuestion,
+            expected_slot_name="terminal_output",
+            requirements_confirmed=True,
         ),
         TurnDecisionCase(
             id="confirmed create requirements generate proposal",

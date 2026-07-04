@@ -3,10 +3,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import get_args
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
     ConfirmRequirements,
+    ReviseArchitecture,
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -39,6 +46,15 @@ def _state(**slots: str) -> PlanningState:
     state = PlanningState.empty()
     state.resolved_slots = {name: _slot(name, value) for name, value in slots.items()}
     return state
+
+
+def _finalized_commit_for_state(state: PlanningState) -> ArchitectureCommit:
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    return finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
 
 
 def _decision(
@@ -96,19 +112,7 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         docx_output_mode="generated_docx",
         runtime_metadata_fields="no_extra_metadata",
     )
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            ),
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state.architecture_commit = _finalized_commit_for_state(state)
     decision = _decision(state=state, ui_language="sv")
 
     assert isinstance(decision, ConfirmRequirements)
@@ -129,7 +133,7 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         "Genererad DOCX utan mall",
         "Ibland ett, ibland flera dokument",
         "Inga extra fält",
-        "dokument till text",
+        "Skapa DOCX",
     }
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
@@ -145,19 +149,7 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
         structured_analysis_need="use_structured_analysis",
         runtime_metadata_fields="no_extra_metadata",
     )
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="audio",
-                output_type="docx",
-                output_mode="pass_through",
-            ),
-        ],
-        chosen_patterns=["audio_to_artifact_report"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="b" * 64,
-    )
+    state.architecture_commit = _finalized_commit_for_state(state)
     decision = _decision(state=state, ui_language="sv")
 
     assert isinstance(decision, ConfirmRequirements)
@@ -181,19 +173,7 @@ def test_server_confirmation_names_json_to_json_architecture() -> None:
         structured_analysis_need="use_structured_analysis",
         runtime_metadata_fields="no_extra_metadata",
     )
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="json",
-                output_type="json",
-                output_mode="pass_through",
-            ),
-        ],
-        chosen_patterns=["json_to_structured_payload"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="c" * 64,
-    )
+    state.architecture_commit = _finalized_commit_for_state(state)
     decision = _decision(state=state, ui_language="sv")
 
     assert isinstance(decision, ConfirmRequirements)
@@ -201,6 +181,61 @@ def test_server_confirmation_names_json_to_json_architecture() -> None:
         decision.topic: decision.decision for decision in decision.payload.key_decisions
     }
     assert decisions["Planerad bearbetning"] == "JSON till JSON"
+
+
+def test_server_revises_architecture_for_commit_grade_terminal_output_change() -> None:
+    state = _state(primary_runtime_input="text", terminal_output="pdf_document")
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            ),
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="f" * 64,
+    )
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert isinstance(decision, ReviseArchitecture)
+    assert decision.architecture_commit.tuples_chain[0].output_type == "pdf"
+    assert decision.architecture_commit.chosen_patterns == ["text_to_artifact_report"]
+
+
+def test_server_reasks_when_pinned_commit_conflicts_with_weak_output_slot() -> None:
+    state = _state(primary_runtime_input="text")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+        source="model",
+        confidence="medium",
+    )
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            ),
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+
+    decision = _decision(
+        state=state,
+        ui_language="sv",
+        requirements_confirmed=True,
+    )
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "terminal_output"
 
 
 def test_server_confirmation_separates_decisions_from_assumptions() -> None:
@@ -230,19 +265,7 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
             source="flow_default",
         ),
     }
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="audio",
-                output_type="text",
-                output_mode="transcribe_only",
-            ),
-        ],
-        chosen_patterns=["audio_transcription"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="d" * 64,
-    )
+    state.architecture_commit = _finalized_commit_for_state(state)
 
     decision = _decision(state=state, ui_language="sv")
 
@@ -277,19 +300,7 @@ def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
         slot_name: _slot(slot_name, value, source=source)
         for source, (slot_name, value) in source_to_slot.items()
     }
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="audio",
-                output_type="text",
-                output_mode="transcribe_only",
-            ),
-        ],
-        chosen_patterns=["audio_transcription"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="e" * 64,
-    )
+    state.architecture_commit = _finalized_commit_for_state(state)
 
     decision = _decision(state=state, ui_language="sv")
 

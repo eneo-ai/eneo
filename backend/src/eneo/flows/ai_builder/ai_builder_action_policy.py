@@ -15,6 +15,9 @@ from typing import Literal
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_commit_invariance import (
+    architecture_commit_draft_matches_pinned,
+)
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
@@ -32,6 +35,7 @@ PlannerActionKind = Literal[
     "ask_question",
     "confirm_requirements",
     "commit_architecture",
+    "revise_architecture",
     "propose_plan",
 ]
 
@@ -73,8 +77,36 @@ def build_planner_action_policy(
         session_state=session_state,
         commit_grade_slot_names=commit_grade_slot_names,
     )
+    architecture_committed = session_state.architecture_commit is not None
+    pinned_commit_matches_current_slots = architecture_commit_draft_matches_pinned(
+        before=session_state.architecture_commit,
+        after=derived_commit,
+    )
+    architecture_drift_detected = (
+        architecture_committed
+        and derived_commit is not None
+        and not pinned_commit_matches_current_slots
+    )
     ask_targets: tuple[str, ...]
-    if session_state.architecture_commit is not None:
+    if architecture_drift_detected and unresolved_core_slots:
+        ask_targets = _ordered_ask_targets(
+            selected_discovery_question_ids=(),
+            architecture_required_slots=unresolved_core_slots,
+            derived_commit_required_slots=frozenset(),
+            commit_grade_slot_names=commit_grade_slot_names,
+        )
+    elif (
+        architecture_drift_detected
+        and not unresolved_core_slots
+        and unresolved_commit_slots
+    ):
+        ask_targets = _ordered_ask_targets(
+            selected_discovery_question_ids=(),
+            architecture_required_slots=frozenset(),
+            derived_commit_required_slots=unresolved_commit_slots,
+            commit_grade_slot_names=commit_grade_slot_names,
+        )
+    elif architecture_committed:
         ask_targets = ()
     else:
         ask_targets = _ordered_ask_targets(
@@ -94,7 +126,7 @@ def build_planner_action_policy(
     else:
         blocked["ask_question"] = "no unresolved ask_question targets"
 
-    if session_state.architecture_commit is not None:
+    if architecture_committed:
         blocked["commit_architecture"] = "architecture is already committed"
     elif unresolved_architectural_choices - commit_grade_slot_names:
         blocked["commit_architecture"] = (
@@ -115,9 +147,34 @@ def build_planner_action_policy(
     else:
         allowed.append("commit_architecture")
 
-    if session_state.architecture_commit is None:
+    if not architecture_committed:
+        blocked["revise_architecture"] = "architecture has not been committed"
+    elif ask_targets:
+        blocked["revise_architecture"] = (
+            "architecture choices need confirmation: " + ", ".join(ask_targets)
+        )
+    elif derived_commit is None:
+        blocked["revise_architecture"] = (
+            "architecture cannot be derived from resolved state"
+        )
+    elif not architecture_drift_detected:
+        blocked["revise_architecture"] = "architecture already matches committed state"
+    else:
+        allowed.append("revise_architecture")
+
+    if not architecture_committed:
         blocked["confirm_requirements"] = "architecture has not been committed"
         blocked["propose_plan"] = "architecture has not been committed"
+    elif ask_targets:
+        blocked["confirm_requirements"] = (
+            "architecture choices need confirmation before requirements confirmation"
+        )
+        blocked["propose_plan"] = (
+            "architecture choices need confirmation before plan proposal"
+        )
+    elif architecture_drift_detected:
+        blocked["confirm_requirements"] = "architecture revision has not been committed"
+        blocked["propose_plan"] = "architecture revision has not been committed"
     elif not requirements_confirmed:
         allowed.append("confirm_requirements")
         blocked["propose_plan"] = "requirements have not been confirmed"
@@ -155,6 +212,7 @@ def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKi
 
     for action in (
         "ask_question",
+        "revise_architecture",
         "commit_architecture",
         "confirm_requirements",
         "propose_plan",

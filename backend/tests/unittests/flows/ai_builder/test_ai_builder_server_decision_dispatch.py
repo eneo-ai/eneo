@@ -6,6 +6,13 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    canonical_architecture_commit_payload,
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
@@ -20,13 +27,13 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     BuilderTurnDecision,
     CommitArchitecture,
+    ReviseArchitecture,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
     PlanningState,
     ResolvedSlot,
-    StepTriple,
 )
 
 
@@ -90,19 +97,30 @@ def _confirmed_state() -> PlanningState:
             "no_extra_metadata",
         ),
     }
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            ),
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
+    state.architecture_commit = _finalized_commit_for_state(state)
+    return state
+
+
+def _draft_for_state(state: PlanningState) -> ArchitectureCommitDraft:
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    return draft
+
+
+def _finalized_commit_for_state(state: PlanningState) -> ArchitectureCommit:
+    return finalize_architecture_commit(
+        _draft_for_state(state),
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
     )
+
+
+def _revised_pdf_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "text"),
+        "terminal_output": _slot("terminal_output", "pdf_document"),
+        "pdf_generation_mode": _slot("pdf_generation_mode", "generated_pdf"),
+    }
     return state
 
 
@@ -166,21 +184,10 @@ async def test_server_question_uses_catalog_legacy_question_id_for_slot_rename()
 async def test_architecture_commit_chains_persisted_requirements_confirmation() -> None:
     repo = AsyncMock()
     repo.commit_turn.side_effect = [5, 6]
-    repo.load_planning_state.return_value = _confirmed_state()
+    state = _confirmed_state()
+    repo.load_planning_state.return_value = state
     conversation = [ConversationMessage(role="user", content="Build a document flow")]
-    decision = CommitArchitecture(
-        architecture_commit=ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="document",
-                    output_type="text",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=["summarize_text"],
-            required_capabilities=[],
-        )
-    )
+    decision = CommitArchitecture(architecture_commit=_draft_for_state(state))
 
     result = await dispatch_server_decision(
         _request(repo=repo, decision=decision, conversation=conversation)
@@ -195,4 +202,35 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
     assert first_commit["architecture_commit"] is not None
     second_commit = repo.commit_turn.await_args_list[1].kwargs
     assert [message.role for message in second_commit["new_messages"]] == ["assistant"]
+    assert result.new_planning_state_version == 6
+
+
+@pytest.mark.asyncio
+async def test_architecture_revision_persists_revised_commit_and_status() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = [5, 6]
+    now = datetime(2026, 4, 24, tzinfo=timezone.utc)
+    state = _revised_pdf_state()
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(draft, now=lambda: now)
+    repo.load_planning_state.return_value = state
+    conversation = [ConversationMessage(role="user", content="Make it PDF instead")]
+    decision = ReviseArchitecture(architecture_commit=draft)
+
+    result = await dispatch_server_decision(
+        _request(repo=repo, decision=decision, conversation=conversation)
+    )
+
+    assert result.action_kind == "revise_architecture"
+    assert [event.event for event in result.events] == [
+        "status",
+        "requirements_summary",
+    ]
+    assert result.events[0].data.status == "architecture_revised"
+    first_commit = repo.commit_turn.await_args_list[0].kwargs
+    persisted_commit = first_commit["architecture_commit"]
+    assert isinstance(persisted_commit, ArchitectureCommit)
+    assert canonical_architecture_commit_payload(persisted_commit) == (
+        canonical_architecture_commit_payload(draft)
+    )
     assert result.new_planning_state_version == 6

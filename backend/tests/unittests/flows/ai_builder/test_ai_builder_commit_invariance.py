@@ -1,9 +1,8 @@
-"""Contract tests for `assert_architecture_commit_unchanged`.
+"""Contract tests for AI Builder architecture commit invariants.
 
-The helper is extracted from the repair helper's inline drift detector
-so multiple call sites — repair, dispatcher post-commit check, and the
-materialization bridge — share one source of truth for "is this the
-same commit".
+The helpers provide one source of truth for "is this the same commit" at
+boundaries that need strict persisted-state preservation or semantic
+draft-vs-pinned comparison.
 
 Enforced invariants (five-state transition matrix):
 
@@ -31,6 +30,7 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
+    architecture_commit_draft_matches_pinned,
     assert_architecture_commit_draft_matches_pinned,
     assert_architecture_commit_unchanged,
 )
@@ -160,6 +160,47 @@ class TestExceptionType:
 
 
 class TestDraftPreservation:
+    def test_matching_semantic_draft_returns_true(self) -> None:
+        prior = _make_commit(
+            required_capabilities=["output_mode_pass_through", "input_text"],
+            chosen_patterns=["summarize_text"],
+        )
+        draft = ArchitectureCommitDraft(
+            tuples_chain=prior.tuples_chain,
+            chosen_patterns=["summarize_text"],
+            required_capabilities=["input_text", "output_mode_pass_through"],
+        )
+
+        assert architecture_commit_draft_matches_pinned(
+            before=prior,
+            after=draft,
+        )
+
+    def test_different_semantic_draft_returns_false(self) -> None:
+        prior = _make_commit()
+        draft = ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="json",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=prior.chosen_patterns,
+            required_capabilities=prior.required_capabilities,
+        )
+
+        assert not architecture_commit_draft_matches_pinned(
+            before=prior,
+            after=draft,
+        )
+
+    def test_missing_prior_or_draft_returns_true(self) -> None:
+        prior = _make_commit()
+
+        assert architecture_commit_draft_matches_pinned(before=None, after=None)
+        assert architecture_commit_draft_matches_pinned(before=prior, after=None)
+
     def test_matching_semantic_draft_preserves_pinned_commit(self) -> None:
         prior = _make_commit(
             required_capabilities=["output_mode_pass_through", "input_text"],
@@ -202,6 +243,7 @@ class TestPublicSurface:
         from eneo.flows.ai_builder import ai_builder_commit_invariance as module
 
         for symbol in (
+            "architecture_commit_draft_matches_pinned",
             "assert_architecture_commit_draft_matches_pinned",
             "assert_architecture_commit_unchanged",
             "CommitDriftError",

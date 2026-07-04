@@ -1,10 +1,9 @@
-"""Commit-preservation invariant used across AI Builder authoring.
+"""Commit-preservation invariants for AI Builder authoring.
 
 The architecture commit is the pinned contract between the planner's
-discovery phase and downstream persistence. Any code that transforms a
-planner response after the commit lands — proposal validation, proposal
-submission, and the materialization bridge before it writes a draft flow —
-must verify the transform did not silently drift the commit.
+discovery phase and downstream persistence. Boundaries that transform
+planner state after the commit lands can use these helpers to fail loudly
+when the semantic architecture drifts outside an explicit revision path.
 
 Persisted-commit preservation uses full canonical-form equality via
 `model_dump(mode="json")`. LLM-facing draft preservation is structural:
@@ -93,9 +92,7 @@ def assert_architecture_commit_draft_matches_pinned(
     """
     if before is None or after is None:
         return
-    if canonical_architecture_commit_payload(before) != (
-        canonical_architecture_commit_payload(after)
-    ):
+    if not architecture_commit_draft_matches_pinned(before=before, after=after):
         raise CommitDriftError(
             "architecture_commit draft mutated the pinned committed "
             "architecture (tuples_chain / chosen_patterns / "
@@ -104,7 +101,20 @@ def assert_architecture_commit_draft_matches_pinned(
         )
 
 
+def architecture_commit_draft_matches_pinned(
+    *,
+    before: ArchitectureCommit | None,
+    after: ArchitectureCommitDraft | None,
+) -> bool:
+    if before is None or after is None:
+        return True
+    return canonical_architecture_commit_payload(before) == (
+        canonical_architecture_commit_payload(after)
+    )
+
+
 __all__ = [
+    "architecture_commit_draft_matches_pinned",
     "CommitDriftError",
     "assert_architecture_commit_draft_matches_pinned",
     "assert_architecture_commit_unchanged",

@@ -47,6 +47,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
+    ReviseArchitecture,
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
@@ -62,6 +63,7 @@ logger = get_logger(__name__)
 ServerDecisionKind = Literal[
     "ask_question",
     "commit_architecture",
+    "revise_architecture",
     "confirm_requirements",
 ]
 
@@ -97,7 +99,19 @@ async def dispatch_server_decision(
         case AskCanonicalQuestion():
             return await _dispatch_question(request, decision)
         case CommitArchitecture():
-            return await _dispatch_architecture_commit(request, decision)
+            return await _dispatch_architecture_commit(
+                request,
+                decision,
+                action_kind="commit_architecture",
+                status="architecture_committed",
+            )
+        case ReviseArchitecture():
+            return await _dispatch_architecture_commit(
+                request,
+                decision,
+                action_kind="revise_architecture",
+                status="architecture_revised",
+            )
         case ConfirmRequirements():
             return await _dispatch_requirements_confirmation(request, decision)
         case GenerateProposal() as unhandled:
@@ -193,7 +207,10 @@ async def _dispatch_question(
 
 async def _dispatch_architecture_commit(
     request: ServerDecisionDispatchRequest,
-    decision: CommitArchitecture,
+    decision: CommitArchitecture | ReviseArchitecture,
+    *,
+    action_kind: ServerDecisionKind,
+    status: Literal["architecture_committed", "architecture_revised"],
 ) -> ServerDecisionDispatchResult:
     new_version = await request.repo.commit_turn(
         turn=request.turn,
@@ -201,7 +218,7 @@ async def _dispatch_architecture_commit(
         flow=request.flow,
         architecture_commit=finalize_architecture_commit(decision.architecture_commit),
     )
-    events: list[AIBuilderStreamEvent] = [build_status_event("architecture_committed")]
+    events: list[AIBuilderStreamEvent] = [build_status_event(status)]
 
     chained_turn = replace(
         request.turn,
@@ -240,7 +257,7 @@ async def _dispatch_architecture_commit(
         new_version = chained.new_planning_state_version
 
     return ServerDecisionDispatchResult(
-        action_kind="commit_architecture",
+        action_kind=action_kind,
         events=tuple(events),
         new_planning_state_version=new_version,
     )

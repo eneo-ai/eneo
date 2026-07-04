@@ -10,18 +10,22 @@ from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
     compute_unresolved_core_slots,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
     SlotSource,
-    StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
@@ -59,18 +63,11 @@ def _state_with_resolved_slots(*slot_names: str) -> PlanningState:
 
 def _state_with_architecture_commit() -> PlanningState:
     state = _state_with_resolved_slots("primary_runtime_input", "terminal_output")
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="text",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
     )
     return state
 
@@ -438,6 +435,55 @@ def test_policy_allows_requirements_confirmation_after_architecture_commit() -> 
 
     assert policy.allowed_action_kinds == ("confirm_requirements",)
     assert "commit_architecture" in policy.blocked_action_reasons
+    assert "propose_plan" in policy.blocked_action_reasons
+
+
+def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -> None:
+    state = _state_with_architecture_commit()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "flexible_document_case",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=compute_unresolved_core_slots(state),
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("revise_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+    assert "confirm_requirements" in policy.blocked_action_reasons
+    assert "propose_plan" in policy.blocked_action_reasons
+
+
+def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -> None:
+    state = _state_with_architecture_commit()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+        source="model",
+        confidence="medium",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=compute_unresolved_core_slots(state),
+        selected_discovery_question_ids=(),
+        requirements_confirmed=True,
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("terminal_output",)
+    assert "revise_architecture" in policy.blocked_action_reasons
     assert "propose_plan" in policy.blocked_action_reasons
 
 

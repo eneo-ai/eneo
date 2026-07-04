@@ -55,6 +55,11 @@ class CommitArchitecture:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviseArchitecture:
+    architecture_commit: ArchitectureCommitDraft
+
+
+@dataclass(frozen=True, slots=True)
 class ConfirmRequirements:
     payload: RequirementsSummaryPayload
 
@@ -65,7 +70,11 @@ class GenerateProposal:
 
 
 BuilderTurnDecision: TypeAlias = (
-    AskCanonicalQuestion | CommitArchitecture | ConfirmRequirements | GenerateProposal
+    AskCanonicalQuestion
+    | CommitArchitecture
+    | ReviseArchitecture
+    | ConfirmRequirements
+    | GenerateProposal
 )
 
 
@@ -125,6 +134,11 @@ def _decision_from_policy(
         draft = derive_architecture_commit_draft(session_state)
         if draft is not None:
             return CommitArchitecture(architecture_commit=draft)
+
+    if "revise_architecture" in action_policy.allowed_action_kinds:
+        draft = derive_architecture_commit_draft(session_state)
+        if draft is not None:
+            return ReviseArchitecture(architecture_commit=draft)
 
     if "confirm_requirements" in action_policy.allowed_action_kinds:
         return ConfirmRequirements(
@@ -441,5 +455,6 @@ __all__ = [
     "CommitArchitecture",
     "ConfirmRequirements",
     "GenerateProposal",
+    "ReviseArchitecture",
     "resolve_turn_control",
 ]
