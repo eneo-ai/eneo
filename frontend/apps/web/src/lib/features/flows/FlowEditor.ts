@@ -20,9 +20,6 @@ import {
 } from "./flowFormSchema";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues } from "./flowStepTypes";
-import { getTemplateFillOutputConfig } from "./templateFillConfig";
-import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
-import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
 import {
   getFlowWizardMetadata,
   getUnifiedFlowSaveStatus,
@@ -35,6 +32,10 @@ import {
   getStableStepKey,
   buildBlankStep
 } from "./flowStepPayloadShaping";
+import {
+  computeStepConfigValidationIssues,
+  hasDeletedStepReferences
+} from "./flowStepConfigValidation";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -194,66 +195,24 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function syncStepConfigValidation(steps: FlowStep[]) {
-    const entries = new Map<string, string[]>();
-    for (const step of steps) {
-      if (step.output_mode === "template_fill") {
-        const config = getTemplateFillOutputConfig(step);
-        if (!config.template_asset_id) {
-          entries.set(`${stepConfigValidationPrefix}template_fill_no_template:${step.step_order}`, [
-            "template_fill_no_template"
-          ]);
-        }
-      }
-      if (step.output_mode === "http_post") {
-        const config = parseHttpAuthoredConfig(
-          step.output_config,
-          createDefaultHttpConfig("output", "POST")
-        );
-        if (!config.url.trim()) {
-          entries.set(`${stepConfigValidationPrefix}http_missing_url:${step.step_order}`, [
-            "http_missing_url"
-          ]);
-        }
-      }
-      if (step.input_source === "http_get" || step.input_source === "http_post") {
-        const config = parseHttpAuthoredConfig(
-          step.input_config,
-          createDefaultHttpConfig("input", step.input_source === "http_get" ? "GET" : "POST")
-        );
-        if (!config.url.trim()) {
-          entries.set(`${stepConfigValidationPrefix}http_missing_url:${step.step_order}`, [
-            "http_missing_url"
-          ]);
-        }
-      }
-    }
-    replaceFlowValidationErrors(stepConfigValidationPrefix, entries);
+    replaceFlowValidationErrors(
+      stepConfigValidationPrefix,
+      computeStepConfigValidationIssues(steps, stepConfigValidationPrefix)
+    );
   }
-
-  // Matches the exact synthetic token pattern: {{step_N_deleted...}}
-  const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
 
   function revalidateDeletedStepReferences() {
     const steps = get(editor.state.update).steps ?? [];
-    let hasDeletedReferences = false;
+    const cachedPromptTextByAssistantId = new Map<string, string>();
     for (const step of steps) {
-      // Check input_bindings.question (step-level)
-      const bindings = step.input_bindings as { question?: string } | null | undefined;
-      if (typeof bindings?.question === "string" && DELETED_STEP_TOKEN.test(bindings.question)) {
-        hasDeletedReferences = true;
-        break;
-      }
-      // Check cached assistant prompt text
       const cached = assistantSaveManager.getCached(step.assistant_id);
       if (!cached || typeof cached !== "object") continue;
       const prompt = (cached as { prompt?: { text?: unknown } }).prompt;
-      const text = typeof prompt?.text === "string" ? prompt.text : "";
-      if (DELETED_STEP_TOKEN.test(text)) {
-        hasDeletedReferences = true;
-        break;
+      if (typeof prompt?.text === "string") {
+        cachedPromptTextByAssistantId.set(step.assistant_id, prompt.text);
       }
     }
-    if (!hasDeletedReferences) {
+    if (!hasDeletedStepReferences(steps, cachedPromptTextByAssistantId)) {
       setFlowValidationError("deleted-step-reference", null);
     }
   }
