@@ -8,6 +8,13 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_commit_invariance import CommitDriftError
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderEditApproval,
@@ -39,7 +46,10 @@ from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import ArchitectureCommit, PlanningState
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -55,6 +65,11 @@ from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
+)
+
+_TEXT_SUMMARY_REQUEST = (
+    "Skapa ett enkelt flöde som tar emot en kort text från användaren "
+    "och sammanfattar den i tre tydliga punkter."
 )
 
 
@@ -239,6 +254,15 @@ def _make_repo_mock() -> AsyncMock:
     return repo
 
 
+def _text_architecture_commit() -> ArchitectureCommit:
+    state = build_planning_state_from_conversation(
+        [ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST)]
+    )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    return finalize_architecture_commit(draft)
+
+
 def _make_turn_spec() -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Unit plan",
@@ -327,6 +351,71 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
     assert repo.update_session_latest_plan.await_args.kwargs["plan_id"] == (
         repo.create_plan.return_value.id
     )
+
+
+@pytest.mark.asyncio
+async def test_store_plan_rejects_proposal_when_current_slots_drift_from_commit() -> (
+    None
+):
+    repo = _make_repo_mock()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=_TEXT_SUMMARY_REQUEST,
+        ),
+        ConversationMessage(
+            role="user",
+            content="Ändra slutresultatet till PDF istället.",
+        ),
+    ]
+    prior_state = PlanningState.empty()
+    prior_state.architecture_commit = _text_architecture_commit()
+    repo.load_planning_state.return_value = prior_state
+    repo.append_session_messages.side_effect = lambda **_: list(conversation)
+
+    with pytest.raises(CommitDriftError, match="draft mutated"):
+        await store_plan_and_update_conversation(
+            repo=repo,
+            turn=_make_turn(base_version=7),
+            conversation=conversation,
+            new_messages_start=len(conversation),
+            assistant_content="plan ready",
+            tool_call_id="call-unit-1",
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            arguments={},
+            compiled=_compiled_proposal(),
+        )
+
+    repo.save_planning_state.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_store_plan_preserves_proposal_when_current_slots_match_commit() -> None:
+    repo = _make_repo_mock()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=_TEXT_SUMMARY_REQUEST,
+        )
+    ]
+    prior_state = PlanningState.empty()
+    prior_state.architecture_commit = _text_architecture_commit()
+    repo.load_planning_state.return_value = prior_state
+    repo.append_session_messages.side_effect = lambda **_: list(conversation)
+
+    await store_plan_and_update_conversation(
+        repo=repo,
+        turn=_make_turn(base_version=7),
+        conversation=conversation,
+        new_messages_start=len(conversation),
+        assistant_content="plan ready",
+        tool_call_id="call-unit-1",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={},
+        compiled=_compiled_proposal(),
+    )
+
+    repo.save_planning_state.assert_awaited_once()
 
 
 @pytest.mark.asyncio

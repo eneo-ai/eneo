@@ -1,15 +1,14 @@
-"""Commit-preservation invariants for AI Builder authoring.
+"""Semantic architecture-commit invariants for AI Builder authoring.
 
 The architecture commit is the pinned contract between the planner's
 discovery phase and downstream persistence. Boundaries that transform
-planner state after the commit lands can use these helpers to fail loudly
-when the semantic architecture drifts outside an explicit revision path.
+planner state after the commit lands can use this helper to fail loudly when
+the semantic architecture drifts outside an explicit revision path.
 
-Persisted-commit preservation uses full canonical-form equality via
-`model_dump(mode="json")`. LLM-facing draft preservation is structural:
-the model may re-emit the semantic body, but server-owned fields
-(`architecture_hash`, `committed_at`) are never model-authored and are
-therefore ignored for draft-vs-pinned comparison.
+LLM-facing draft preservation is structural: the model may re-emit the
+semantic body, but server-owned fields (`architecture_hash`, `committed_at`)
+are never model-authored and are therefore ignored for draft-vs-pinned
+comparison.
 
 Callers that need a structured rejection rather than an exception catch
 `CommitDriftError` and translate it at their own boundary. The helper
@@ -32,53 +31,6 @@ class CommitDriftError(ValueError):
     """The architecture commit was mutated or dropped after it was pinned."""
 
 
-def assert_architecture_commit_unchanged(
-    *,
-    before: ArchitectureCommit | None,
-    after: ArchitectureCommit | None,
-) -> None:
-    """Raise `CommitDriftError` if `after` does not preserve `before`.
-
-    Transition matrix (atomic — callers compose policy on top):
-      - `before=None, after=any`: no raise (initial-commit path).
-      - `before=set, after=None`: raise (commit silently dropped).
-      - `before=set, after` with different `architecture_hash`: raise.
-      - `before=set, after` with matching hash but divergent body
-        (`tuples_chain` / `chosen_patterns` / `required_capabilities` /
-        `committed_at`): raise — a persisted commit with matching hash
-        but divergent body is corrupt state, not preservation.
-      - `before=set, after` byte-identical: no raise.
-
-    Caller composition: some boundaries implement preservation-by-absence
-    on top of this strict contract, short-circuiting on `after is None`
-    before invoking the matching invariant helper. The `after=None` raise
-    path stays here as a defensive default for callers that need strict
-    persisted-state preservation, so forgetting to short-circuit fails
-    loud rather than silently accepting a dropped commit.
-    """
-    if before is None:
-        return
-    if after is None:
-        raise CommitDriftError(
-            "architecture_commit was dropped; the committed architecture is "
-            "pinned and must be preserved "
-            f"(prior architecture_hash={before.architecture_hash})"
-        )
-    if after.architecture_hash != before.architecture_hash:
-        raise CommitDriftError(
-            "architecture_hash changed from "
-            f"{before.architecture_hash} to {after.architecture_hash}; "
-            "the committed architecture is pinned and must be preserved"
-        )
-    if before.model_dump(mode="json") != after.model_dump(mode="json"):
-        raise CommitDriftError(
-            f"architecture_hash={before.architecture_hash} was preserved but "
-            "the commit body was mutated (tuples_chain / chosen_patterns / "
-            "required_capabilities / committed_at). A matching hash on a "
-            "different persisted body is corrupt state, not preservation"
-        )
-
-
 def assert_architecture_commit_draft_matches_pinned(
     *,
     before: ArchitectureCommit | None,
@@ -86,9 +38,8 @@ def assert_architecture_commit_draft_matches_pinned(
 ) -> None:
     """Raise when an LLM-facing commit draft drifts from a pinned commit.
 
-    Unlike `assert_architecture_commit_unchanged`, this helper compares
-    only semantic structure because the LLM-facing draft has no
-    server-owned `architecture_hash` or `committed_at` fields.
+    The helper compares only semantic structure because the LLM-facing draft
+    has no server-owned `architecture_hash` or `committed_at` fields.
     """
     if before is None or after is None:
         return
@@ -117,5 +68,4 @@ __all__ = [
     "architecture_commit_draft_matches_pinned",
     "CommitDriftError",
     "assert_architecture_commit_draft_matches_pinned",
-    "assert_architecture_commit_unchanged",
 ]

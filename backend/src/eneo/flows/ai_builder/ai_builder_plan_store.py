@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_commit_invariance import (
+    assert_architecture_commit_draft_matches_pinned,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
 )
@@ -122,6 +128,11 @@ async def store_plan_and_update_conversation(
         )
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
         carry_forward_persisted_planner_state(planning_state, prior_state)
+        prior_commit = prior_state.architecture_commit if prior_state else None
+        assert_architecture_commit_draft_matches_pinned(
+            before=prior_commit,
+            after=derive_architecture_commit_draft(planning_state),
+        )
         new_version = await repo.save_planning_state(
             session_id=turn.session_id,
             tenant_id=turn.tenant_id,
