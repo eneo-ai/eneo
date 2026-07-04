@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
     FileRoleEvidence,
+    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -63,6 +64,20 @@ def _state(
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         architecture_commit=architecture_commit,
+    )
+
+
+def _output_schema_evidence() -> OutputSchemaEvidence:
+    return OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+            "required": ["decision"],
+            "additionalProperties": False,
+        },
+        source="freeform_text",
+        confidence="high",
+        evidence=["message:msg_schema", "fenced_json_schema"],
     )
 
 
@@ -225,6 +240,194 @@ class TestFileRoleEvidencePreservation:
         carry_forward_persisted_planner_state(rebuilt, persisted)
 
         assert rebuilt.file_roles == [current_role]
+
+
+class TestOutputSchemaEvidencePreservation:
+    def test_carries_forward_persisted_output_schema_evidence(self) -> None:
+        persisted_evidence = _output_schema_evidence()
+        rebuilt = _state()
+        persisted = _state()
+        persisted.output_schema_evidence = persisted_evidence
+
+        carry_forward_persisted_planner_state(rebuilt, persisted)
+
+        assert rebuilt.output_schema_evidence is persisted_evidence
+
+    def test_current_turn_output_schema_evidence_wins(self) -> None:
+        current = _output_schema_evidence()
+        stale = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {"old": {"type": "string"}},
+            },
+            source="freeform_text",
+            confidence="high",
+            evidence=["message:old", "fenced_json_schema"],
+        )
+        rebuilt = _state()
+        rebuilt.output_schema_evidence = current
+        persisted = _state()
+        persisted.output_schema_evidence = stale
+
+        carry_forward_persisted_planner_state(rebuilt, persisted)
+
+        assert rebuilt.output_schema_evidence is current
+
+
+class TestOutputSchemaEvidenceDerivation:
+    def test_captures_explicit_output_json_schema_from_user_fence(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_schema",
+                    role="user",
+                    content=(
+                        "Flödet ska returnera detta output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {\n'
+                        '    "decision": {"type": "string"},\n'
+                        '    "deadline": {"type": "string"}\n'
+                        "  },\n"
+                        '  "required": ["decision"],\n'
+                        '  "additionalProperties": false\n'
+                        "}\n"
+                        "```"
+                    ),
+                )
+            ]
+        )
+
+        evidence = state.output_schema_evidence
+        assert evidence is not None
+        assert evidence.json_schema["type"] == "object"
+        properties = evidence.json_schema["properties"]
+        assert isinstance(properties, dict)
+        assert "decision" in properties
+        assert evidence.source == "freeform_text"
+        assert evidence.confidence == "high"
+        assert evidence.evidence == ["message:msg_schema", "fenced_json_schema"]
+
+    def test_ignores_fenced_json_example_instance(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_example",
+                    role="user",
+                    content=(
+                        "Exempel på output:\n"
+                        "```json\n"
+                        '{"decision": "bevilja", "deadline": "2026-07-04"}\n'
+                        "```"
+                    ),
+                )
+            ]
+        )
+
+        assert state.output_schema_evidence is None
+
+    def test_ignores_json_instance_even_near_output_schema_label(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_instance",
+                    role="user",
+                    content=(
+                        "Det här är output JSON schema:\n"
+                        "```json\n"
+                        '{"decision": "bevilja", "deadline": "2026-07-04"}\n'
+                        "```"
+                    ),
+                )
+            ]
+        )
+
+        assert state.output_schema_evidence is None
+
+    def test_ignores_invalid_output_schema(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_invalid_schema",
+                    role="user",
+                    content=(
+                        "Output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {"decision": {"type": 3}}\n'
+                        "}\n"
+                        "```"
+                    ),
+                )
+            ]
+        )
+
+        assert state.output_schema_evidence is None
+
+    def test_ignores_top_level_array_output_schema_for_field_evidence(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_array_schema",
+                    role="user",
+                    content=(
+                        "Output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "array",\n'
+                        '  "items": {\n'
+                        '    "type": "object",\n'
+                        '    "properties": {"decision": {"type": "string"}}\n'
+                        "  }\n"
+                        "}\n"
+                        "```"
+                    ),
+                )
+            ]
+        )
+
+        assert state.output_schema_evidence is None
+
+    def test_latest_valid_output_schema_evidence_wins(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_old_schema",
+                    role="user",
+                    content=(
+                        "Output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {"old_field": {"type": "string"}}\n'
+                        "}\n"
+                        "```"
+                    ),
+                ),
+                ConversationMessage(
+                    message_id="msg_new_schema",
+                    role="user",
+                    content=(
+                        "Uppdaterat output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {"new_field": {"type": "string"}}\n'
+                        "}\n"
+                        "```"
+                    ),
+                ),
+            ]
+        )
+
+        evidence = state.output_schema_evidence
+        assert evidence is not None
+        properties = evidence.json_schema["properties"]
+        assert isinstance(properties, dict)
+        assert list(properties) == ["new_field"]
+        assert evidence.evidence == ["message:msg_new_schema", "fenced_json_schema"]
 
 
 class TestReturnValue:

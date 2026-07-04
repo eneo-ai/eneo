@@ -37,10 +37,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from eneo.files.file_models import FileType
 from eneo.flows.enums import AIBuilderInputType
+from eneo.json_types import JsonObject
 
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 2
+BUILDER_SCHEMA_VERSION: int = 3
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
@@ -197,6 +198,13 @@ class FileRoleEvidence(_PlanningModel):
     evidence: list[str] = Field(default_factory=list[str])
 
 
+class OutputSchemaEvidence(_PlanningModel):
+    json_schema: JsonObject
+    source: Literal["freeform_text"]
+    confidence: SignalConfidence
+    evidence: list[str] = Field(default_factory=list[str])
+
+
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
@@ -206,6 +214,7 @@ class PlanningState(_PlanningModel):
         default_factory=dict[str, ResolvedSlot]
     )
     file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
+    output_schema_evidence: OutputSchemaEvidence | None = None
     architecture_commit: ArchitectureCommit | None = None
 
     @model_validator(mode="after")

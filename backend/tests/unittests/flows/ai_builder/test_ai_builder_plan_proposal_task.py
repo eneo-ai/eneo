@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     FileRoleEvidence,
+    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -201,6 +202,39 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
     assert "Uploaded file roles:" in prompt
     assert "- avtalsmall.docx: template (heuristic, medium confidence)" in prompt
     assert "- lagstod.pdf: reference_material (heuristic, medium confidence)" in prompt
+
+
+def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None:
+    state = PlanningState.empty()
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {
+                "decision": {"type": "string"},
+                "next_steps": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["decision"],
+            "additionalProperties": False,
+        },
+        source="freeform_text",
+        confidence="high",
+        evidence=["message:msg_schema", "fenced_json_schema"],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Return decisions as JSON."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Output schema evidence:" in prompt
+    assert "decision, next_steps" in prompt
+    assert "freeform_text, high confidence" in prompt
+    assert "Use output_fields consistent with these user-declared fields." in prompt
+    assert "additionalProperties" not in prompt
 
 
 def test_plan_proposal_prompt_honors_continue_without_mcp_decision():

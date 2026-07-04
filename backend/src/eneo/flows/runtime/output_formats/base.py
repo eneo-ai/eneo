@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Protocol
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.output_processing import (
     StructuredOutputValue,
     prune_extras_to_strict_schema,
+    schema_yields_top_level_object,
 )
 from eneo.flows.runtime.models import StepDiagnostic
 
@@ -105,22 +106,6 @@ def append_output_format_instructions(prompt: str, instructions: Sequence[str]) 
         return prompt
     suffix = "\n".join(instructions)
     return f"{prompt}\n\n{suffix}" if prompt.strip() else suffix
-
-
-def schema_yields_top_level_object(schema: FlowPersistedJsonObject) -> bool:
-    raw_type = schema.get("type")
-    if isinstance(raw_type, str):
-        return raw_type == "object"
-    if isinstance(raw_type, list):
-        declared = {
-            item for item in cast(list[object], raw_type) if isinstance(item, str)
-        }
-        return "object" in declared and "array" not in declared
-    if isinstance(schema.get("properties"), dict):
-        return True
-    if "items" in schema:
-        return False
-    return False
 
 
 def json_schema_instructions(

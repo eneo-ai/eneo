@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import assert_never
 
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    top_level_schema_property_names,
+)
 from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_SELECTION_WITHOUT,
     mcp_selected_server_refs_from_values,
@@ -106,6 +109,9 @@ def build_plan_proposal_system_prompt(
     file_roles_block = _file_roles_block(planning_state)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])
+    output_schema_block = _output_schema_evidence_block(planning_state)
+    if output_schema_block is not None:
+        lines.extend(["", "Output schema evidence:", output_schema_block])
     if result_contract_block is not None:
         lines.extend(["", "Result contract:", result_contract_block])
     section_block = _requested_output_sections_block(requested_output_sections)
@@ -218,6 +224,21 @@ def _file_roles_block(planning_state: PlanningState) -> str | None:
     return "\n".join(
         f"- {item.filename}: {item.role} ({item.source}, {item.confidence} confidence)"
         for item in planning_state.file_roles
+    )
+
+
+def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
+    evidence = planning_state.output_schema_evidence
+    if evidence is None:
+        return None
+    fields = top_level_schema_property_names(evidence.json_schema)
+    field_text = ", ".join(fields) if fields else "top-level object"
+    return "\n".join(
+        [
+            f"- source: {evidence.source}, {evidence.confidence} confidence",
+            f"- declared top-level fields: {field_text}",
+            "- Use output_fields consistent with these user-declared fields.",
+        ]
     )
 
 

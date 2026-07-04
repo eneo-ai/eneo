@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
     FileRoleEvidence,
+    OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -35,8 +36,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_two(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 2
+    def test_builder_schema_version_is_three(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 3
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -65,6 +66,7 @@ class TestEmptyConstruction:
         assert state.signals == []
         assert state.resolved_slots == {}
         assert state.file_roles == []
+        assert state.output_schema_evidence is None
         assert state.architecture_commit is None
 
 
@@ -115,6 +117,16 @@ class TestRoundTrip:
                     evidence=["filename:mall"],
                 )
             ],
+            output_schema_evidence=OutputSchemaEvidence(
+                json_schema={
+                    "type": "object",
+                    "properties": {"decision": {"type": "string"}},
+                    "required": ["decision"],
+                },
+                source="freeform_text",
+                confidence="high",
+                evidence=["message:msg_schema", "fenced_json_schema"],
+            ),
             architecture_commit=ArchitectureCommit(
                 tuples_chain=[
                     StepTriple(

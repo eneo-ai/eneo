@@ -192,6 +192,22 @@ def schema_expects_structured(schema: dict[str, Any]) -> bool:
     return isinstance(schema.get("properties"), dict) or "items" in schema
 
 
+def schema_yields_top_level_object(schema: dict[str, Any]) -> bool:
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        return raw_type == "object"
+    if isinstance(raw_type, list):
+        declared = {
+            item for item in cast(list[object], raw_type) if isinstance(item, str)
+        }
+        return "object" in declared and "array" not in declared
+    if isinstance(schema.get("properties"), dict):
+        return True
+    if "items" in schema:
+        return False
+    return False
+
+
 def compile_validators(
     runtime_steps: list[Any],
 ) -> dict[tuple[str, int], jsonschema.Draft202012Validator]:

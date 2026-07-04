@@ -2,15 +2,17 @@
 
 This module owns the deterministic path from a compacted conversation
 to a stamped `PlanningState`. Planner prompt rendering lives elsewhere;
-this layer only resolves durable slots, result signals, and committed
-architecture state.
+this layer only resolves durable slots, result signals, schema evidence,
+and committed architecture state.
 """
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     slot_classification_from_metadata,
@@ -61,6 +63,7 @@ from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -69,6 +72,12 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import Flow
+from eneo.flows.output_processing import (
+    schema_yields_top_level_object,
+    validate_schema_syntax,
+)
+from eneo.json_types import JsonObject
+from eneo.main.exceptions import TypedIOValidationException
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +153,37 @@ _STRUCTURE_PROMOTING_POST_PROCESSING_GOALS: frozenset[str] = frozenset(
     }
 )
 
+_FENCED_JSON_BLOCK_RE = re.compile(
+    r"```(?:json|jsonschema|schema)?\s*(.*?)```",
+    re.IGNORECASE | re.DOTALL,
+)
+_JSON_SCHEMA_SHAPE_KEYS = frozenset(
+    {
+        "$schema",
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "oneOf",
+    }
+)
+_OUTPUT_SCHEMA_LABELS = (
+    "output schema",
+    "output json schema",
+    "json output schema",
+    "result schema",
+    "response schema",
+    "schema för utdata",
+    "schema för resultat",
+    "utdata schema",
+    "utdataschema",
+    "resultatschema",
+    "output-schemat",
+    "utdata-schemat",
+)
+
 
 def build_planning_state_from_conversation(
     conversation: list[ConversationMessage],
@@ -162,6 +202,7 @@ def build_planning_state_from_conversation(
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         resolved_slots=resolved_slots,
+        output_schema_evidence=_derive_output_schema_evidence(conversation),
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
     return state
@@ -223,11 +264,74 @@ def carry_forward_persisted_planner_state(
         and persisted.architecture_commit is not None
     ):
         rebuilt.architecture_commit = persisted.architecture_commit
+    if (
+        rebuilt.output_schema_evidence is None
+        and persisted.output_schema_evidence is not None
+    ):
+        rebuilt.output_schema_evidence = persisted.output_schema_evidence
     current_file_ids = {item.file_id for item in rebuilt.file_roles}
     for file_role in persisted.file_roles:
         if file_role.file_id not in current_file_ids:
             rebuilt.file_roles.append(file_role)
             current_file_ids.add(file_role.file_id)
+
+
+def _derive_output_schema_evidence(
+    conversation: list[ConversationMessage],
+) -> OutputSchemaEvidence | None:
+    evidence: OutputSchemaEvidence | None = None
+    for message in conversation:
+        if message.role != "user" or not message.content:
+            continue
+        for match in _FENCED_JSON_BLOCK_RE.finditer(message.content):
+            if not _mentions_output_schema_near_fence(message.content, match):
+                continue
+            schema = _parse_output_schema_candidate(match.group(1))
+            if schema is None:
+                continue
+            evidence = OutputSchemaEvidence(
+                json_schema=schema,
+                source="freeform_text",
+                confidence="high",
+                evidence=[f"message:{message.message_id}", "fenced_json_schema"],
+            )
+    return evidence
+
+
+def _mentions_output_schema_near_fence(
+    content: str,
+    match: re.Match[str],
+) -> bool:
+    # Labels usually sit immediately before the fence; keep the window local
+    # so unrelated earlier schema talk does not claim a later JSON example.
+    start = max(0, match.start() - 240)
+    end = min(len(content), match.end() + 80)
+    window = content[start:end].casefold()
+    return any(label in window for label in _OUTPUT_SCHEMA_LABELS)
+
+
+def _parse_output_schema_candidate(raw_json: str) -> JsonObject | None:
+    try:
+        parsed: object = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    # `json.loads` object keys are strings; the cast preserves the shared JSON alias.
+    candidate = cast(JsonObject, parsed)
+    if not _looks_like_json_schema(candidate):
+        return None
+    try:
+        validate_schema_syntax(candidate, label="output_schema_evidence")
+    except TypedIOValidationException:
+        return None
+    if not schema_yields_top_level_object(candidate):
+        return None
+    return candidate
+
+
+def _looks_like_json_schema(candidate: JsonObject) -> bool:
+    return any(key in candidate for key in _JSON_SCHEMA_SHAPE_KEYS)
 
 
 def merge_llm_resolved_slots(
