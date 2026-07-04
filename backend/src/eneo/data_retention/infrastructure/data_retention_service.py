@@ -883,27 +883,52 @@ class DataRetentionService:
             FlowStepAttempts.id,
             FlowStepAttempts.flow_run_id,
             FlowStepAttempts.provenance_json,
+            FlowStepAttempts.input_payload_json,
+            FlowStepAttempts.output_payload_json,
         ).where(
             sa.and_(
                 FlowStepAttempts.flow_run_id.in_(set(actions_by_run_id)),
-                FlowStepAttempts.provenance_json.is_not(None),
+                sa.or_(
+                    FlowStepAttempts.provenance_json.is_not(None),
+                    FlowStepAttempts.input_payload_json.is_not(None),
+                    FlowStepAttempts.output_payload_json.is_not(None),
+                ),
             )
         )
         attempt_rows = await self.session.execute(attempt_stmt)
         debug_step_attempts = 0
         for row in attempt_rows.fetchall():
             action = actions_by_run_id[row.flow_run_id]
-            if _is_current_attempt_retention_marker(row.provenance_json):
+            provenance_to_clear = (
+                None
+                if _is_current_attempt_retention_marker(row.provenance_json)
+                else row.provenance_json
+            )
+            cleared_field_count = sum(
+                value is not None
+                for value in (
+                    provenance_to_clear,
+                    row.input_payload_json,
+                    row.output_payload_json,
+                )
+            )
+            if cleared_field_count == 0:
                 continue
             marker = _build_attempt_retention_marker(
                 action=action,
                 object_id=str(row.id),
-                counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+                counts=RunDebugAttemptRetentionCounts(
+                    cleared_field_count=cleared_field_count
+                ),
             )
             attempt_result = await self.session.execute(
                 sa.update(FlowStepAttempts)
                 .where(FlowStepAttempts.id == row.id)
-                .values(provenance_json=marker)
+                .values(
+                    provenance_json=marker,
+                    input_payload_json=None,
+                    output_payload_json=None,
+                )
             )
             debug_step_attempts += affected_row_count(attempt_result)
 

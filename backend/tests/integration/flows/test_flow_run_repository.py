@@ -2614,6 +2614,8 @@ async def test_finish_attempt_is_idempotent(
             attempt_no=1,
             tenant_id=admin_user.tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
+            input_payload_json={"question": "original", "api_key": "super-secret"},
+            output_payload_json={"summary": "done"},
         )
         second = await run_repo.finish_attempt(
             run_id=run.id,
@@ -2621,11 +2623,30 @@ async def test_finish_attempt_is_idempotent(
             attempt_no=1,
             tenant_id=admin_user.tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
+            input_payload_json={"question": "overwritten"},
+            output_payload_json={"summary": "overwritten"},
         )
 
         assert first is not None
         assert first.finished_at is not None
+        assert first.input_payload_json == {
+            "question": "original",
+            "api_key": "super-secret",
+        }
+        assert first.output_payload_json == {"summary": "done"}
         assert second is None
+        stored_attempt = await session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run.id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == 1)
+        )
+        assert stored_attempt is not None
+        assert stored_attempt.input_payload_json == {
+            "question": "original",
+            "api_key": "super-secret",
+        }
+        assert stored_attempt.output_payload_json == {"summary": "done"}
 
 
 @pytest.mark.asyncio

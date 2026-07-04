@@ -45,6 +45,12 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_evidence_bundle import (
+    build_evidence_bundle,
+    redact_evidence_bundle,
+)
+from eneo.flows.flow_run_evidence_export_manifest import EvidenceExportContext
+from eneo.flows.flow_run_export_json import render_evidence_json_export
 from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
 )
@@ -410,6 +416,14 @@ async def _mark_run_completed(
             attempt_no=1,
             tenant_id=tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
+            input_payload_json={
+                "input": f"step-{step.step_order}",
+                "api_key": "super-secret",
+            },
+            output_payload_json={
+                "text": f"output-{step.step_order}",
+                "url": "https://example.org/hook?token=top-secret",
+            },
         )
         assert finished_attempt is not None
         await session.execute(
@@ -420,8 +434,14 @@ async def _mark_run_completed(
             .values(
                 status=FlowStepResultStatus.COMPLETED.value,
                 current_attempt_no=attempt.attempt_no,
-                input_payload_json={"input": f"step-{step.step_order}"},
-                output_payload_json={"text": f"output-{step.step_order}"},
+                input_payload_json={
+                    "input": f"step-{step.step_order}",
+                    "api_key": "super-secret",
+                },
+                output_payload_json={
+                    "text": f"output-{step.step_order}",
+                    "url": "https://example.org/hook?token=top-secret",
+                },
                 effective_prompt=f"prompt-{step.step_order}",
                 model_parameters_json={"temperature": 0},
                 num_tokens_input=step.step_order,
@@ -1474,6 +1494,184 @@ async def test_rerun_attempt_start_and_success_records_lineage(
         )
         assert prior_attempt is not None
         assert prior_attempt.superseded_by_attempt_id == started_attempt.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_rerun_export_preserves_superseded_attempt_payloads(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        accepted = await _accept_rerun(session=session, scenario=scenario)
+        root_invalidated_step = next(
+            step
+            for step in accepted.invalidated_steps
+            if step.step_id == scenario.root_step_id
+        )
+        assert root_invalidated_step.prior_attempt_id is not None
+
+        started_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=accepted.operation.root_attempt_no,
+            celery_task_id="rerun-root-attempt",
+            rerun_operation_id=accepted.operation.id,
+            predecessor_attempt_id=root_invalidated_step.prior_attempt_id,
+        )
+        await rerun_repo.link_rerun_invalidated_step_attempt(
+            operation_id=accepted.operation.id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            new_attempt_no=started_attempt.attempt_no,
+            new_attempt_id=started_attempt.id,
+        )
+        await rerun_repo.mark_rerun_operation_running(
+            operation_id=accepted.operation.id,
+            tenant_id=scenario.tenant_id,
+            root_attempt_id=started_attempt.id,
+        )
+
+        claimed_row = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.id == root_invalidated_step.prior_step_result_id
+            )
+        )
+        assert claimed_row is not None
+        saved_result = await run_repo.save_step_result(
+            scenario.flow_run_id,
+            FlowFactory()
+            .from_flow_step_result_db(claimed_row)
+            .model_copy(
+                update={
+                    "status": FlowStepResultStatus.COMPLETED,
+                    "current_attempt_no": started_attempt.attempt_no,
+                    "input_payload_json": {
+                        "input": "rerun-step-1",
+                        "api_key": "rerun-secret",
+                    },
+                    "output_payload_json": {"text": "rerun output"},
+                    "error_message": None,
+                },
+                deep=True,
+            ),
+            tenant_id=scenario.tenant_id,
+            attempt_no=started_attempt.attempt_no,
+        )
+        assert saved_result is not None
+        finished_attempt = await run_repo.finish_attempt(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.root_step_id,
+            attempt_no=started_attempt.attempt_no,
+            tenant_id=scenario.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            input_payload_json=saved_result.input_payload_json,
+            output_payload_json=saved_result.output_payload_json,
+        )
+        assert finished_attempt is not None
+        assert (
+            await rerun_repo.close_active_rerun_operations_for_terminal_run(
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                target_status=FlowRunStatus.COMPLETED,
+            )
+        ) == 1
+
+        run = await run_repo.get(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        version = await FlowVersionRepository(
+            session=session, factory=FlowFactory()
+        ).get(
+            flow_id=scenario.flow_id,
+            version=run.flow_version,
+            tenant_id=scenario.tenant_id,
+        )
+        step_results = await run_repo.list_step_results(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        step_attempts = await run_repo.list_step_attempts(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        bundle = build_evidence_bundle(
+            run=run,
+            version=version,
+            step_results=step_results,
+            step_attempts=step_attempts,
+            rerun_operations=await rerun_repo.list_rerun_operations_for_run(
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+            ),
+            rerun_invalidated_steps=(
+                await rerun_repo.list_rerun_invalidated_steps_for_run(
+                    run_id=scenario.flow_run_id,
+                    tenant_id=scenario.tenant_id,
+                )
+            ),
+        )
+        raw_export = render_evidence_json_export(
+            bundle=bundle,
+            context=EvidenceExportContext(
+                detail_mode="raw",
+                export_reason="rerun-superseded-evidence-test",
+            ),
+        )
+        redacted_export = render_evidence_json_export(
+            bundle=redact_evidence_bundle(bundle),
+            context=EvidenceExportContext(
+                detail_mode="redacted",
+                export_reason="rerun-superseded-evidence-test",
+            ),
+        )
+
+    raw_prior_attempt = next(
+        attempt
+        for attempt in raw_export["bundle"]["step_attempts"]
+        if (
+            attempt["id"] == str(root_invalidated_step.prior_attempt_id)
+            and attempt["superseded_by_attempt_id"] == str(started_attempt.id)
+        )
+    )
+    redacted_prior_attempt = next(
+        attempt
+        for attempt in redacted_export["bundle"]["step_attempts"]
+        if attempt["id"] == raw_prior_attempt["id"]
+    )
+    assert raw_prior_attempt["input_payload_json"] == {
+        "input": "step-1",
+        "api_key": "super-secret",
+    }
+    assert raw_prior_attempt["output_payload_json"] == {
+        "text": "output-1",
+        "url": "https://example.org/hook?token=top-secret",
+    }
+    assert redacted_prior_attempt["input_payload_json"]["api_key"] == "[REDACTED]"
+    assert redacted_prior_attempt["output_payload_json"]["url"] == (
+        "https://example.org/hook?token=%5BREDACTED%5D"
+    )
+    assert any(
+        path.endswith(".input_payload_json.api_key")
+        for path in redacted_export["redaction"]["masked_paths"]
+    )
 
 
 @pytest.mark.asyncio

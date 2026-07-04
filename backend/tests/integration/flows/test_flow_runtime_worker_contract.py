@@ -818,6 +818,12 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert len(attempt_rows) == 1
         assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
         assert attempt_rows[0].finished_at is not None
+        assert attempt_rows[0].input_payload_json == (
+            step_result_rows[0].input_payload_json
+        )
+        assert attempt_rows[0].output_payload_json == {
+            "text": "The run completed.",
+        }
 
         evidence = (
             await container.flow_run_evidence_service().get_redacted_evidence_bundle(
@@ -903,6 +909,15 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         )
         assert rerun_attempt_rows[1].predecessor_attempt_id == rerun_attempt_rows[0].id
         assert rerun_attempt_rows[1].rerun_operation_id == rerun_result.operation.id
+        assert rerun_attempt_rows[0].output_payload_json == {
+            "text": "The run completed.",
+        }
+        assert rerun_attempt_rows[1].input_payload_json == (
+            rerun_step_result.input_payload_json
+        )
+        assert rerun_attempt_rows[1].output_payload_json == {
+            "text": "The rerun completed.",
+        }
 
         operation_row = await session.scalar(
             sa.select(FlowRunRerunOperations).where(
@@ -955,6 +970,12 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         ]
         assert rerun_evidence["step_results"][0]["current_attempt_no"] == 2
         assert rerun_evidence["step_results"][0]["output_payload_json"] == {
+            "text": "The rerun completed.",
+        }
+        assert rerun_evidence["step_attempts"][0]["output_payload_json"] == {
+            "text": "The run completed.",
+        }
+        assert rerun_evidence["step_attempts"][1]["output_payload_json"] == {
             "text": "The rerun completed.",
         }
 

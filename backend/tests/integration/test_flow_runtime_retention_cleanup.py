@@ -319,6 +319,8 @@ async def _create_flow_runtime_fixture(
         num_tokens_input=10,
         num_tokens_output=20,
         provenance_json={"artifacts": {"items": ["debug"]}},
+        input_payload_json={"text": "sensitive attempt input"},
+        output_payload_json={"text": "sensitive attempt output"},
         started_at=created_at,
         finished_at=created_at,
         created_at=created_at,
@@ -1788,7 +1790,52 @@ async def test_cleanup_old_flow_runtime_data_redacts_tenant_debug_before_later_f
     assert attempt_marker.tombstone.actor_source == FLOW_RETENTION_ACTOR_SOURCE
     assert attempt_marker.tombstone.object_id == str(fixture.step_attempt.id)
     assert isinstance(attempt_marker.tombstone.counts, RunDebugAttemptRetentionCounts)
-    assert attempt_marker.tombstone.counts.cleared_field_count == 1
+    assert attempt_marker.tombstone.counts.cleared_field_count == 3
+    assert refreshed_attempt.input_payload_json is None
+    assert refreshed_attempt.output_payload_json is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_flow_runtime_data_redacts_attempt_payloads_without_provenance(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=10,
+        flow_retention_days=30,
+        flow_settings={
+            "retention_policy": {
+                "run_debug_evidence_days": 7,
+            }
+        },
+    )
+    fixture.step_attempt.provenance_json = None
+    await async_session.flush()
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["debug_step_attempts"] == 1
+    refreshed_attempt = await async_session.get(
+        FlowStepAttempts, fixture.step_attempt.id
+    )
+    assert refreshed_attempt is not None
+    assert refreshed_attempt.input_payload_json is None
+    assert refreshed_attempt.output_payload_json is None
+    attempt_marker = FlowAttemptRetentionMarker.model_validate(
+        refreshed_attempt.provenance_json
+    )
+    assert isinstance(attempt_marker.tombstone.counts, RunDebugAttemptRetentionCounts)
+    assert attempt_marker.tombstone.counts.cleared_field_count == 2
 
 
 @pytest.mark.asyncio
@@ -1829,6 +1876,8 @@ async def test_cleanup_old_flow_runtime_data_does_not_redact_from_flow_retention
     assert refreshed_step_result.model_parameters_json == {"temperature": 0.1}
     assert refreshed_attempt is not None
     assert refreshed_attempt.provenance_json == {"artifacts": {"items": ["debug"]}}
+    assert refreshed_attempt.input_payload_json == {"text": "sensitive attempt input"}
+    assert refreshed_attempt.output_payload_json == {"text": "sensitive attempt output"}
 
 
 @pytest.mark.asyncio

@@ -1189,6 +1189,8 @@ class FlowRunRepository:
         num_tokens_input: int | None = None,
         num_tokens_output: int | None = None,
         provenance_json: dict[str, Any] | None = None,
+        input_payload_json: FlowPersistedJsonObject | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowStepAttempt | None:
         row = await self.session.scalar(
             sa.update(FlowStepAttempts)
@@ -1209,6 +1211,8 @@ class FlowRunRepository:
                 num_tokens_input=num_tokens_input,
                 num_tokens_output=num_tokens_output,
                 provenance_json=provenance_json,
+                input_payload_json=input_payload_json,
+                output_payload_json=output_payload_json,
                 finished_at=datetime.now(timezone.utc),
             )
             .returning(FlowStepAttempts)

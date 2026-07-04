@@ -1605,6 +1605,8 @@ class FlowRunExecutor:
                 state=state,
                 step=step,
             ),
+            input_payload_json=failure_plan.failed_result.input_payload_json,
+            output_payload_json=failure_plan.failed_result.output_payload_json,
         )
         await self.flow_run_repo.save_step_result(
             run_id,
@@ -1665,6 +1667,8 @@ class FlowRunExecutor:
                 state=state,
                 step=step,
             ),
+            input_payload_json=failure_plan.failed_result.input_payload_json,
+            output_payload_json=failure_plan.failed_result.output_payload_json,
         )
         await self.flow_run_repo.save_step_result(
             run_id,
@@ -1736,6 +1740,8 @@ class FlowRunExecutor:
                 step_result=step_result,
                 attempt_start=attempt_start,
             ),
+            input_payload_json=saved_result.input_payload_json,
+            output_payload_json=saved_result.output_payload_json,
         )
         if commit:
             await self._commit()
