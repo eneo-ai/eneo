@@ -23,8 +23,7 @@
     getAvailableOutputTypes,
     getFlowStepValidationIssues,
     getSelectableInputSourceOptions,
-    getSelectableInputTypeOptions,
-    OUTPUT_MODES
+    getSelectableInputTypeOptions
   } from "$lib/features/flows/flowStepTypes";
   import {
     needsTranscribeOnlyOutputModeReset,
@@ -76,13 +75,14 @@
   import { FlowTemplateState } from "./FlowTemplateState.svelte.ts";
 
   // Extracted helpers
-  import {
-    getInputTypeLabel,
-    getOutputTypeLabel,
-    getInputSourceLabel,
-    getIssueMessage
-  } from "./flowStepEditHelpers";
+  import { getInputTypeLabel, getInputSourceLabel, getIssueMessage } from "./flowStepEditHelpers";
   import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
+  import {
+    getChapterWhatStatus,
+    getChapterOutputStatus,
+    getChapterControlStatus,
+    getChapterAdvancedStatus
+  } from "./flowStepChapterStatus";
   import {
     type AdvancedJsonField,
     getStepKeyForAdvancedJson,
@@ -719,29 +719,11 @@
   // Set when the capsule's "add instruction" action fires so the instruction
   // editor focuses once it mounts (the AI section is unmounted while collapsed).
   let focusInstructionPending = $state(false);
-  const chapterWhatStatus = $derived(
-    activeStep
-      ? `${getInputTypeLabel(activeStep.input_type)} → ${getOutputTypeLabel(activeStep.output_type)}`
-      : ""
-  );
-  const chapterOutputStatus = $derived.by(() => {
-    if (!activeStep) return "";
-    const modeLabel =
-      OUTPUT_MODES.find((option) => option.value === activeStep.output_mode)?.label ?? "";
-    const outputLabel = getOutputTypeLabel(activeStep.output_type);
-    return modeLabel ? `${outputLabel} · ${modeLabel}` : outputLabel;
-  });
-  const chapterControlStatus = $derived(
-    activeStep
-      ? activeStep.output_classification_override == null
-        ? m.flow_step_security_inherit()
-        : `K${activeStep.output_classification_override}`
-      : ""
-  );
+  const chapterWhatStatus = $derived(activeStep ? getChapterWhatStatus(activeStep) : "");
+  const chapterOutputStatus = $derived(activeStep ? getChapterOutputStatus(activeStep) : "");
+  const chapterControlStatus = $derived(activeStep ? getChapterControlStatus(activeStep) : "");
   const chapterAdvancedStatus = $derived(
-    activeStep && (activeStep.input_contract != null || activeStep.output_contract != null)
-      ? m.flow_chapter_advanced_custom()
-      : m.flow_chapter_advanced_default()
+    activeStep ? getChapterAdvancedStatus(activeStep) : m.flow_chapter_advanced_default()
   );
   const inputTemplateText = $derived(
     activeStep && activeStep.input_bindings && typeof activeStep.input_bindings === "object"
