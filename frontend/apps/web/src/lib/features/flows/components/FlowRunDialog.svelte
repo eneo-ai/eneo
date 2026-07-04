@@ -10,14 +10,10 @@
   } from "@eneo/eneo-js";
   import { createFlowRuntimeUploadTimeoutController } from "@eneo/eneo-js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as Field from "$lib/components/ui/field/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
-  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { EneoError } from "@eneo/eneo-js";
-  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -64,12 +60,15 @@
   } from "$lib/features/flows/flowRunWizard";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { formatBytes } from "$lib/features/flows/flowByteSize";
-  import { IconXMark } from "@eneo/icons/x-mark";
   import { getFlowRunDialogLabels } from "./flowRunDialogLabels";
   import FlowRunDialogForm from "./FlowRunDialogForm.svelte";
   import FlowRunDialogRuntimeStep from "./FlowRunDialogRuntimeStep.svelte";
   import FlowRunDialogReview from "./FlowRunDialogReview.svelte";
   import FlowRunDialogTemplateOverview from "./FlowRunDialogTemplateOverview.svelte";
+  import FlowRunDialogHeader from "./FlowRunDialogHeader.svelte";
+  import FlowRunDialogWizardHeader from "./FlowRunDialogWizardHeader.svelte";
+  import FlowRunDialogFreeformPage from "./FlowRunDialogFreeformPage.svelte";
+  import FlowRunDialogFooter from "./FlowRunDialogFooter.svelte";
   import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
   import { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import { onDestroy, onMount } from "svelte";
@@ -232,6 +231,11 @@
   const canSubmitRun = $derived(
     runContract !== null && !runContractError && !isSubmitting && runBlockers.length === 0
   );
+  const isReviewPage = $derived(currentPage?.kind === "review");
+  const showReuseLastInput = $derived(
+    lastInputPayload !== null && (currentPage?.kind === "form" || currentPage?.kind === "freeform")
+  );
+  const showPrevious = $derived(currentPageIndex > 0);
 
   const currentStepUploadedFiles = $derived(
     currentRuntimeStep ? fileInputState.getUploadedFiles(currentRuntimeStep.step_id) : []
@@ -1070,50 +1074,13 @@
     onInteractOutside={handleInteractOutside}
     onEscapeKeydown={handleEscapeKeydown}
   >
-    <header class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-      <div class="flex items-start justify-between gap-4">
-        <div class="min-w-0">
-          <Dialog.Title class="text-primary text-lg font-semibold tracking-tight sm:text-xl">
-            {m.flow_run_trigger()}
-          </Dialog.Title>
-          <Dialog.Description
-            class="text-secondary mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
-          >
-            <span class="text-primary truncate font-medium">{flow.name}</span>
-            {#if stepCount > 0}
-              <Badge variant="outline" class="h-5 text-xs font-medium tabular-nums">
-                {m.flow_run_step_count({ count: String(stepCount) })}
-              </Badge>
-            {/if}
-          </Dialog.Description>
-        </div>
-        {#if isDirty && !isSubmitting}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            class="text-muted hover:text-primary -mt-1 -mr-1 shrink-0"
-            aria-label={m.flow_run_trigger_close()}
-            onclick={requestCloseConfirmation}
-          >
-            <IconXMark />
-          </Button>
-        {:else}
-          <Dialog.Close>
-            {#snippet child({ props })}
-              <Button
-                {...props}
-                variant="ghost"
-                size="icon-sm"
-                class="text-muted hover:text-primary -mt-1 -mr-1 shrink-0"
-                aria-label={m.flow_run_trigger_close()}
-              >
-                <IconXMark />
-              </Button>
-            {/snippet}
-          </Dialog.Close>
-        {/if}
-      </div>
-    </header>
+    <FlowRunDialogHeader
+      flowName={flow.name}
+      {stepCount}
+      {isDirty}
+      {isSubmitting}
+      onRequestClose={requestCloseConfirmation}
+    />
 
     {#if runContract === null && !runContractError}
       <div class="mt-5 flex flex-col gap-3 px-4 sm:px-6 lg:px-8" aria-busy="true">
@@ -1142,63 +1109,15 @@
         </Alert.Root>
       </div>
     {:else if currentPage}
-      <div class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 lg:px-8">
-        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_17rem] md:items-center">
-          <div class="min-w-0">
-            <p class="text-muted mb-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
-              {#if currentPage.kind === "runtime-step"}
-                {m.flow_run_input_progress({
-                  n: String(currentInputPosition),
-                  total: String(runtimeInputTotal)
-                })}
-              {:else}
-                {progressLabel}
-              {/if}
-            </p>
-            <h3
-              class="text-primary text-base font-semibold tracking-tight sm:text-lg"
-              data-wizard-heading
-              tabindex="-1"
-            >
-              {#if currentPage.kind === "runtime-step"}
-                {m.flow_run_input_for_step({
-                  order: String(currentPage.stepOrder),
-                  name: currentPage.stepLabel
-                })}
-              {:else}
-                {currentPage.title}
-              {/if}
-            </h3>
-            <p class="text-secondary mt-1 text-sm leading-relaxed">
-              {currentPage.description}
-            </p>
-          </div>
-          <nav class="flex items-center gap-1.5" aria-label={progressLabel}>
-            {#each wizardPages as page, pageIndex (page.id)}
-              {@const isCompleted = pageIndex < currentPageIndex}
-              {@const isCurrent = pageIndex === currentPageIndex}
-              {@const isClickable = isCompleted}
-              <button
-                type="button"
-                title={page.title}
-                class="focus-visible:ring-ring/50 relative h-1.5 flex-1 rounded-full transition-colors duration-200 before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted
-                  ? 'bg-accent-default'
-                  : isCurrent
-                    ? 'bg-accent-default/55'
-                    : 'bg-hover-dimmer'}"
-                aria-label={page.title}
-                aria-current={isCurrent ? "step" : undefined}
-                disabled={!isClickable}
-                class:cursor-pointer={isClickable}
-                class:cursor-default={!isClickable}
-                onclick={() => {
-                  if (isClickable) goToPageById(page.id);
-                }}
-              ></button>
-            {/each}
-          </nav>
-        </div>
-      </div>
+      <FlowRunDialogWizardHeader
+        {wizardPages}
+        {currentPage}
+        {currentPageIndex}
+        {progressLabel}
+        {currentInputPosition}
+        {runtimeInputTotal}
+        onGoToPage={goToPageById}
+      />
 
       <div
         class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 sm:py-6 lg:px-8"
@@ -1220,19 +1139,10 @@
             {labels}
           />
         {:else if currentPage.kind === "freeform"}
-          <Field.Field>
-            <Field.Label for="flow-run-freeform-input" class="text-sm font-medium">
-              {m.flow_run_input()}
-            </Field.Label>
-            <Field.Description>{m.flow_run_input_desc()}</Field.Description>
-            <Textarea
-              id="flow-run-freeform-input"
-              class="min-h-[14rem] font-mono text-[0.8125rem] leading-relaxed"
-              value={launchInputState.freeformText}
-              oninput={(event) => launchInputState.setFreeformText(event.currentTarget.value)}
-              placeholder={m.flow_run_input_placeholder()}
-            />
-          </Field.Field>
+          <FlowRunDialogFreeformPage
+            freeformText={launchInputState.freeformText}
+            onInput={(value) => launchInputState.setFreeformText(value)}
+          />
         {:else if currentPage.kind === "runtime-step" && currentRuntimeStep}
           <FlowRunDialogRuntimeStep
             step={currentRuntimeStep}
@@ -1292,115 +1202,23 @@
       </div>
     {/if}
 
-    <!-- Footer -->
-    <footer
-      class="border-default shrink-0 border-t px-4 py-3 sm:px-6 sm:py-3.5 lg:px-8 {showCloseConfirmation
-        ? 'bg-warning-dimmer/25'
-        : ''}"
-    >
-      {#if showCloseConfirmation}
-        <div
-          class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-          role="alertdialog"
-          aria-label={labels.closeConfirmTitle}
-          aria-describedby="close-confirm-desc"
-        >
-          <div class="min-w-0">
-            <p class="text-primary text-sm font-medium">{labels.closeConfirmTitle}</p>
-            <p id="close-confirm-desc" class="text-muted mt-0.5 text-sm">
-              {labels.closeConfirmMessage}
-            </p>
-          </div>
-          <div class="flex shrink-0 gap-2">
-            <Button variant="outline" size="sm" onclick={handleCancelClose}>
-              {labels.closeConfirmKeep}
-            </Button>
-            <Dialog.Close>
-              {#snippet child({ props })}
-                <Button variant="destructive" size="sm" {...props}>
-                  {labels.closeConfirmDiscard}
-                </Button>
-              {/snippet}
-            </Dialog.Close>
-          </div>
-        </div>
-      {:else}
-        <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <div class="order-2 flex gap-2 sm:order-1">
-            {#if lastInputPayload && (currentPage?.kind === "form" || currentPage?.kind === "freeform")}
-              <Button variant="outline" onclick={applyLastRunInput} class="w-full sm:w-auto">
-                {m.flow_run_reuse_last_input()}
-              </Button>
-            {/if}
-          </div>
-
-          <div class="order-1 flex-grow sm:order-2">
-            {#if currentPage?.kind !== "review" && !canGoNext && nextDisabledReason}
-              <p
-                class="text-muted text-sm leading-relaxed sm:text-right"
-                role="status"
-                aria-live="polite"
-              >
-                {nextDisabledReason}
-              </p>
-            {/if}
-          </div>
-
-          <div
-            class="order-2 flex w-full flex-col gap-2 sm:order-3 sm:w-auto sm:flex-row sm:items-center"
-          >
-            {#if currentPage && currentPage.kind === "review"}
-              <Button
-                onclick={triggerRun}
-                disabled={!canSubmitRun}
-                class="order-1 w-full min-w-[8rem] sm:order-3 sm:w-auto"
-              >
-                {#if isSubmitting}
-                  <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
-                {/if}
-                {m.flow_run_trigger_confirm()}
-              </Button>
-            {:else}
-              <Button
-                onclick={goToNextPage}
-                disabled={!canGoNext}
-                title={nextDisabledReason}
-                class="order-1 w-full min-w-[7rem] sm:order-3 sm:w-auto"
-              >
-                {labels.next}
-              </Button>
-            {/if}
-
-            {#if isDirty && !isSubmitting}
-              <Button
-                variant="outline"
-                onclick={requestCloseConfirmation}
-                class="order-3 w-full sm:order-2 sm:w-auto"
-              >
-                {m.cancel()}
-              </Button>
-            {:else}
-              <Dialog.Close>
-                {#snippet child({ props })}
-                  <Button variant="outline" class="order-3 w-full sm:order-2 sm:w-auto" {...props}>
-                    {m.cancel()}
-                  </Button>
-                {/snippet}
-              </Dialog.Close>
-            {/if}
-
-            {#if currentPageIndex > 0}
-              <Button
-                variant="outline"
-                onclick={goToPreviousPage}
-                class="order-2 w-full sm:order-1 sm:w-auto"
-              >
-                {labels.previous}
-              </Button>
-            {/if}
-          </div>
-        </div>
-      {/if}
-    </footer>
+    <FlowRunDialogFooter
+      {showCloseConfirmation}
+      {isDirty}
+      {isSubmitting}
+      {canGoNext}
+      {canSubmitRun}
+      {isReviewPage}
+      {showReuseLastInput}
+      {showPrevious}
+      {nextDisabledReason}
+      {labels}
+      onCancelClose={handleCancelClose}
+      onGoNext={goToNextPage}
+      onGoPrevious={goToPreviousPage}
+      onTriggerRun={triggerRun}
+      onApplyLastInput={applyLastRunInput}
+      onRequestClose={requestCloseConfirmation}
+    />
   </Dialog.Content>
 </Dialog.Root>
