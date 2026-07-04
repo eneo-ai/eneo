@@ -42,6 +42,7 @@ function makeEneo(
   overrides: {
     assistantGet?: (...args: unknown[]) => unknown;
     assistantUpdate?: (...args: unknown[]) => unknown;
+    assistantCreate?: (...args: unknown[]) => unknown;
     flowUpdate?: (...args: unknown[]) => unknown;
   } = {}
 ): Eneo {
@@ -52,7 +53,7 @@ function makeEneo(
     flows: {
       update: overrides.flowUpdate ?? vi.fn(),
       assistants: {
-        create: vi.fn(),
+        create: overrides.assistantCreate ?? vi.fn(),
         get: overrides.assistantGet ?? vi.fn(),
         update: overrides.assistantUpdate ?? vi.fn()
       }
@@ -377,6 +378,59 @@ describe("FlowEditor form field reference rewrites", () => {
 });
 
 describe("FlowEditor step mutation commands", () => {
+  const echoUpdate = () =>
+    vi.fn(async (args: unknown) => {
+      const { flow, update } = args as { flow: Flow; update: Partial<Flow> };
+      return { ...flow, ...update, steps: update.steps ?? flow.steps };
+    });
+
+  it("addStep seeds a first step from position with the seed output type", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [] }),
+      eneo: makeEneo({
+        assistantCreate: vi.fn(async () => ({ id: "assistant-new" })),
+        flowUpdate: echoUpdate()
+      })
+    });
+    try {
+      await editor.addStep({ name: "Doc", output_type: "docx" });
+      const steps = get(editor.state.update).steps ?? [];
+      expect(steps).toHaveLength(1);
+      expect(steps[0]).toMatchObject({
+        assistant_id: "assistant-new",
+        step_order: 1,
+        user_description: "Doc",
+        input_source: "flow_input",
+        input_type: "text",
+        output_type: "docx",
+        output_mode: "pass_through"
+      });
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("insertStepAfter derives a previous_step input from the prior step's output", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1, { output_type: "json" })] }),
+      eneo: makeEneo({
+        assistantCreate: vi.fn(async () => ({ id: "assistant-2" })),
+        flowUpdate: echoUpdate()
+      })
+    });
+    try {
+      await editor.insertStepAfter(1);
+      const steps = get(editor.state.update).steps ?? [];
+      expect(steps).toHaveLength(2);
+      const inserted = steps.find((s) => s.assistant_id === "assistant-2")!;
+      expect(inserted.step_order).toBe(2);
+      expect(inserted.input_source).toBe("previous_step");
+      expect(inserted.input_type).toBe("json");
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("keeps question binding that matches assistant prompt during editor initialization", async () => {
     const prompt = "Use the uploaded case material";
     const flow = makeFlow(null, {

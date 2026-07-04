@@ -33,7 +33,7 @@ export function buildBlankStep(params: {
   name: string;
   isFirst: boolean;
   prevStepOutputType?: FlowStep["output_type"];
-  outputMode?: FlowStep["output_mode"];
+  outputMode?: "pass_through";
   outputType?: FlowStep["output_type"];
 }): Partial<FlowStep> & { id: string } {
   return {

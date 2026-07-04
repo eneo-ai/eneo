@@ -87,10 +87,9 @@ describe("buildBlankStep", () => {
       name: "Doc",
       isFirst: false,
       prevStepOutputType: "text",
-      outputMode: "template_fill",
       outputType: "docx"
     });
-    expect(step.output_mode).toBe("template_fill");
+    expect(step.output_mode).toBe("pass_through");
     expect(step.output_type).toBe("docx");
   });
 });
