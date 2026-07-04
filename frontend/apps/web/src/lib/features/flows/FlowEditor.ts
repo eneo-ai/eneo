@@ -26,16 +26,13 @@ import {
   type FlowWizardMetadata
 } from "./flowEditorMetadata";
 import { isFlowRetentionDays, parseFlowRetentionDaysInput } from "./flowEditorRetention";
-import {
-  stripTemporaryStepId,
-  isValidStepIndex,
-  getStableStepKey,
-  buildBlankStep
-} from "./flowStepPayloadShaping";
+import { stripTemporaryStepId, isValidStepIndex, buildBlankStep } from "./flowStepPayloadShaping";
 import {
   computeStepConfigValidationIssues,
   hasDeletedStepReferences
 } from "./flowStepConfigValidation";
+import { rewriteStepBindings } from "./flowVariableReferenceRewriter";
+import { computeStepOrderRemap } from "./flowStepOrderRemap";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -689,52 +686,9 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   async function applyStepsWithSafeOrderRemap(nextSteps: FlowStep[]): Promise<void> {
     const previousSteps = [...(get(editor.state.update).steps ?? [])];
-    const previousOrderByKey = new Map<string, number>();
-    for (let i = 0; i < previousSteps.length; i += 1) {
-      const step = previousSteps[i];
-      previousOrderByKey.set(getStableStepKey(step, i), step.step_order);
-    }
-
-    const remapByOldOrder = new Map<number, number>();
-    const seenOldOrders = new Set<number>();
-    const rewrittenSteps = nextSteps.map((step, index) => {
-      const key = getStableStepKey(step, index);
-      const oldOrder = previousOrderByKey.get(key);
-      if (oldOrder !== undefined) {
-        remapByOldOrder.set(oldOrder, step.step_order);
-        seenOldOrders.add(oldOrder);
-      }
-      return { ...step };
-    });
-
-    const deletedOrders = new Set<number>();
-    for (const previousStep of previousSteps) {
-      if (!seenOldOrders.has(previousStep.step_order)) {
-        deletedOrders.add(previousStep.step_order);
-      }
-    }
-
-    const impactedDeletedReferences = new Set<number>();
-    for (let i = 0; i < rewrittenSteps.length; i += 1) {
-      const step = rewrittenSteps[i];
-      const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
-      const question = typeof bindings?.question === "string" ? bindings.question : null;
-      if (question) {
-        const remapped = remapStepOrderTemplateTokens(question, remapByOldOrder, deletedOrders);
-        if (remapped.changed) {
-          rewrittenSteps[i] = {
-            ...step,
-            input_bindings: {
-              ...(bindings ?? {}),
-              question: remapped.text
-            }
-          };
-        }
-        for (const deletedReference of remapped.rewrittenDeletedReferences) {
-          impactedDeletedReferences.add(deletedReference);
-        }
-      }
-    }
+    const { rewrittenSteps, remapByOldOrder, deletedOrders, impactedDeletedBindingOrders } =
+      computeStepOrderRemap(previousSteps, nextSteps);
+    const impactedDeletedReferences = new Set<number>(impactedDeletedBindingOrders);
 
     editor.state.update.update((resource) => ({
       ...resource,
@@ -816,17 +770,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       }
     }
 
-    const nextSteps = steps.map((step) => {
-      const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
-      const question = typeof bindings?.question === "string" ? bindings.question : null;
-      if (!question) return step;
-      const rewritten = rewriteFormFieldReferences(question);
-      if (rewritten === question) return step;
-      return {
-        ...step,
-        input_bindings: { ...(bindings ?? {}), question: rewritten }
-      };
-    });
+    const nextSteps = rewriteStepBindings(steps, rewriteFormFieldReferences);
     editor.state.update.update((resource) => ({ ...resource, steps: nextSteps }));
     scheduleAutoSave();
 
@@ -867,18 +811,11 @@ function createFlowEditor(data: FlowEditorInitData) {
     }
 
     const allSteps = get(editor.state.update).steps ?? [];
-    const nextSteps = allSteps.map((step) => {
-      if (step.step_order <= renamedStepOrder) return step;
-      const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
-      const question = typeof bindings?.question === "string" ? bindings.question : null;
-      if (!question) return step;
-      const rewritten = replaceExactTemplateToken(question, fromToken, toToken);
-      if (rewritten === question) return step;
-      return {
-        ...step,
-        input_bindings: { ...(bindings ?? {}), question: rewritten }
-      };
-    });
+    const nextSteps = rewriteStepBindings(
+      allSteps,
+      (question) => replaceExactTemplateToken(question, fromToken, toToken),
+      (step) => step.step_order <= renamedStepOrder
+    );
     editor.state.update.update((resource) => ({ ...resource, steps: nextSteps }));
     scheduleAutoSave();
 
