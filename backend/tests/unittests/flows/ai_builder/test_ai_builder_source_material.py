@@ -163,6 +163,74 @@ def test_source_material_status_reads_authoring_source_refs() -> None:
     )
 
 
+def test_source_material_status_treats_typed_structured_fields_as_structured() -> None:
+    boundary = _only_boundary(
+        _report_spec(
+            final_bindings={
+                "source_refs": [
+                    {
+                        "step_ref": "step_b",
+                        "output": "structured",
+                        "field_path": "decisions",
+                        "label": "Decisions",
+                    },
+                    {
+                        "step_ref": "step_a",
+                        "output": "text",
+                        "label": "Source material",
+                    },
+                ]
+            },
+        )
+    )
+
+    assert (
+        source_material_binding_status(boundary) is SourceMaterialBindingStatus.COMPLETE
+    )
+
+
+def test_source_material_status_reads_source_only_source_refs_as_partial() -> None:
+    boundary = _only_boundary(
+        _report_spec(
+            final_bindings={
+                "source_refs": [
+                    {
+                        "step_ref": "step_a",
+                        "output": "text",
+                        "label": "Source material",
+                    }
+                ]
+            },
+        )
+    )
+
+    assert (
+        source_material_binding_status(boundary)
+        is SourceMaterialBindingStatus.INTENTIONAL_PARTIAL
+    )
+
+
+def test_source_material_status_combines_question_and_source_refs() -> None:
+    boundary = _only_boundary(
+        _report_spec(
+            final_bindings={
+                "question": "{{ step_b.output.structured }}",
+                "source_refs": [
+                    {
+                        "step_ref": "step_a",
+                        "output": "text",
+                        "label": "Source material",
+                    }
+                ],
+            },
+        )
+    )
+
+    assert (
+        source_material_binding_status(boundary) is SourceMaterialBindingStatus.COMPLETE
+    )
+
+
 def test_source_material_status_keeps_source_only_binding_intentional_partial() -> None:
     boundary = _only_boundary(
         _report_spec(final_question="Source material: {{ step_a.output.text }}")

@@ -19,7 +19,12 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.input_binding_contract_rules import (
+    SourceRefBinding,
+    SourceRefOutput,
+    question_binding,
+    source_ref_bindings,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
@@ -99,20 +104,36 @@ def iter_compiled_source_material_boundaries(
 def source_material_binding_status(
     boundary: CompiledSourceMaterialBoundary,
 ) -> SourceMaterialBindingStatus:
-    question = effective_question_binding(boundary.step.input_bindings)
-    if question is None:
+    input_bindings = boundary.step.input_bindings
+    question = question_binding(input_bindings)
+    source_refs = source_ref_bindings(input_bindings)
+    if question is None and not source_refs:
         return SourceMaterialBindingStatus.NEEDS_COMPLETION
 
-    mentions_structured = _question_mentions_immediate_structured(
-        question=question,
-        previous_step=boundary.previous_step,
-        previous_step_order=boundary.previous_step_order,
-        known_steps=(*boundary.prior_steps, boundary.step),
+    mentions_structured = _source_refs_target_step_output(
+        source_refs=source_refs,
+        step=boundary.previous_step,
+        output="structured",
+    ) or (
+        question is not None
+        and _question_mentions_immediate_structured(
+            question=question,
+            previous_step=boundary.previous_step,
+            previous_step_order=boundary.previous_step_order,
+            known_steps=(*boundary.prior_steps, boundary.step),
+        )
     )
-    mentions_source = _question_mentions_prior_text_source(
-        question=question,
-        source_step=boundary.primary_source_step,
-        prior_steps=boundary.prior_steps,
+    mentions_source = _source_refs_target_step_output(
+        source_refs=source_refs,
+        step=boundary.primary_source_step,
+        output="text",
+    ) or (
+        question is not None
+        and _question_mentions_prior_text_source(
+            question=question,
+            source_step=boundary.primary_source_step,
+            prior_steps=boundary.prior_steps,
+        )
     )
     if mentions_structured and mentions_source:
         return SourceMaterialBindingStatus.COMPLETE
@@ -156,6 +177,18 @@ def source_material_question_for_boundary(
     ):
         sections.append(source_material)
     return "\n\n".join(sections)
+
+
+def _source_refs_target_step_output(
+    *,
+    source_refs: Sequence[SourceRefBinding],
+    step: StepSpec,
+    output: SourceRefOutput,
+) -> bool:
+    return any(
+        ref.step_ref == step.plan_step_ref and ref.output == output
+        for ref in source_refs
+    )
 
 
 def _question_mentions_immediate_structured(
