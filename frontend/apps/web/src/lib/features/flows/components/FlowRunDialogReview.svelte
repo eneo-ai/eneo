@@ -13,6 +13,7 @@
   } from "$lib/features/flows/flowFormSchema";
   import type { FlowRunBlocker, FlowRunReviewSummaryItem } from "$lib/features/flows/flowRunWizard";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
+  import { formatBytes } from "$lib/features/flows/flowByteSize";
 
   let {
     runBlockers,
@@ -38,18 +39,6 @@
 
   function getStepLabel(step: FlowRunContractStepInput): string {
     return step.label?.trim() || labels.unnamedStep(step.step_order);
-  }
-
-  function formatBytes(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let unitIndex = 0;
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024;
-      unitIndex += 1;
-    }
-    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 </script>
 
