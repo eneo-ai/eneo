@@ -8,7 +8,6 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { writable } from "svelte/store";
   import { IconWorkflow } from "@eneo/icons/workflow";
   import { MousePointerClick } from "lucide-svelte";
@@ -110,11 +109,10 @@
   import FlowStepAdvancedSection from "./FlowStepAdvancedSection.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import {
-    buildFlowStepMcpCompatibilityMap,
-    hasLoadedFlowStepMcpClassificationInputs,
     shouldShowStepMcpSection,
     summarizeAssistantMcp
   } from "$lib/features/flows/flowStepMcpConfig";
+  import { FlowStepMcpState } from "./FlowStepMcpState.svelte.ts";
 
   // ---------------------------------------------------------------------------
   // Props
@@ -189,9 +187,7 @@
   });
 
   const templateState = new FlowTemplateState({ eneo, flowEditor });
-  let assistantsById = new SvelteMap<string, unknown>();
-  let lastLoadedRevisionByAssistant = new SvelteMap<string, number>();
-  const loadingAssistantIds = new SvelteSet<string>();
+  const mcpState = new FlowStepMcpState({ flowEditor });
 
   // ---------------------------------------------------------------------------
   // Core derived state
@@ -525,74 +521,31 @@
   const mcpStatus = $derived(
     hasActiveMcp ? m.flow_section_status_mcp_active() : m.flow_section_status_mcp_none()
   );
-  const flowMcpCompatibilityById = $derived.by(() => {
-    if (!activeStep || !showMcpSection) {
-      return {};
-    }
-    const compatibilityMap = buildFlowStepMcpCompatibilityMap({
-      step: activeStep,
+  const flowMcpCompatibilityById = $derived(
+    mcpState.getCompatibilityById({
+      activeStep,
       steps,
-      assistantsById,
+      showMcpSection,
       availableServers: ($currentSpace.mcp_servers ?? []) as Array<{
         id: string;
         security_classification?: { security_level?: number; name?: string } | null;
       }>,
-      spaceSecurityClassification: $currentSpace.security_classification
-    });
-    return Object.fromEntries(
-      Object.entries(compatibilityMap).map(([serverId, compatibility]) => [
-        serverId,
-        {
-          ...compatibility,
-          reason: compatibility.isCompatible
-            ? undefined
-            : m.flow_step_mcp_server_does_not_meet_security_classification()
-        }
-      ])
-    );
-  });
-  const mcpCompatibilityReady = $derived(
-    hasLoadedFlowStepMcpClassificationInputs({
-      step: activeStep,
-      steps,
-      assistantsById
+      spaceSecurityClassification: $currentSpace.security_classification,
+      reasonWhenIncompatible: m.flow_step_mcp_server_does_not_meet_security_classification()
     })
   );
+  const mcpCompatibilityReady = $derived(mcpState.isCompatibilityReady({ activeStep, steps }));
 
+  // Read $assistantRevision here to force a re-run when an assistant save bumps
+  // the revision; the state class owns the map population and concurrency gate.
   $effect(() => {
-    const revision = $assistantRevision;
-    if (!showMcpSection) return;
-
-    if (assistantState.assistant && activeStep?.assistant_id) {
-      assistantsById.set(activeStep.assistant_id, assistantState.assistant);
-      lastLoadedRevisionByAssistant.set(activeStep.assistant_id, revision);
-    }
-
-    const assistantIds = steps
-      .map((step) => step.assistant_id)
-      .filter(
-        (assistantId): assistantId is string =>
-          typeof assistantId === "string" && assistantId.length > 0
-      );
-
-    for (const assistantId of assistantIds) {
-      if (
-        lastLoadedRevisionByAssistant.get(assistantId) === revision ||
-        loadingAssistantIds.has(assistantId)
-      ) {
-        continue;
-      }
-      loadingAssistantIds.add(assistantId);
-      void flowEditor
-        .loadAssistant(assistantId)
-        .then((assistant) => {
-          assistantsById.set(assistantId, assistant);
-          lastLoadedRevisionByAssistant.set(assistantId, revision);
-        })
-        .finally(() => {
-          loadingAssistantIds.delete(assistantId);
-        });
-    }
+    mcpState.syncAssistants({
+      revision: $assistantRevision,
+      activeStep,
+      steps,
+      activeAssistant: assistantState.assistant,
+      showMcpSection
+    });
   });
   const currentStepIssues = $derived(
     activeStep
