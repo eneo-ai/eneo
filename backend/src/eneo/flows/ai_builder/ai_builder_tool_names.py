@@ -1,4 +1,4 @@
-"""Retired AI Builder tool names kept stable for persisted conversation history."""
+"""AI Builder tool names persisted on assistant/tool turns."""
 
 from __future__ import annotations
 
