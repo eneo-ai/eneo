@@ -208,6 +208,20 @@ def test_docx_fill_and_create_are_distinct_shapes() -> None:
     assert fill_hashes.isdisjoint(create_hashes)
 
 
+def test_matrix_contains_json_input_output_schema_golden() -> None:
+    # Pins the JSON-in/JSON-out schema shape so the authoring-command contract
+    # carriage assertion is not vacuous.
+    schema_steps = [
+        (case.case_id, step.plan_step_ref)
+        for case in GOLDEN_CASES
+        for step in case.spec.steps
+        if step.input_type is InputType.JSON
+        and step.output_type is OutputType.JSON
+        and step.output_contract is not None
+    ]
+    assert schema_steps
+
+
 def test_golden_case_ids_are_unique() -> None:
     ids = [case.case_id for case in GOLDEN_CASES]
     assert len(ids) == len(set(ids))

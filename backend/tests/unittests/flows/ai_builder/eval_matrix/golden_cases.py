@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -69,6 +70,7 @@ def _step(
     input_type: InputType = InputType.TEXT,
     output_type: OutputType = OutputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
+    output_contract: FlowPersistedJsonObject | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
@@ -78,6 +80,7 @@ def _step(
         input_type=input_type,
         output_type=output_type,
         output_mode=output_mode,
+        output_contract=output_contract,
     )
 
 
@@ -127,6 +130,58 @@ def _extract_structured_fields() -> BuildableGoldenCase:
                 CompositionColumn.FORM_FIELDS_DECLARE_ONLY,
             }
         ),
+    )
+
+
+def _json_input_to_structured_output_with_contract() -> BuildableGoldenCase:
+    output_contract: FlowPersistedJsonObject = {
+        "type": "object",
+        "properties": {
+            "normalized_records": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "record_id": {"type": "string"},
+                        "amount": {"type": "number"},
+                        "status": {"type": "string"},
+                    },
+                    "required": ["record_id", "amount"],
+                    "additionalProperties": False,
+                },
+            },
+            "totals": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number"},
+                    "currency": {"type": "string"},
+                },
+                "required": ["amount", "currency"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["normalized_records", "totals"],
+        "additionalProperties": False,
+    }
+    spec = FlowDraftSpecCore(
+        flow_name="Normalisera JSON-underlag",
+        steps=[
+            _step(
+                "step_a",
+                "Normalisera JSON",
+                "Läs JSON-indatan och returnera normalized_records och totals "
+                "enligt det deklarerade kontraktet.",
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                output_contract=output_contract,
+            )
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="json_input_to_structured_output__contract",
+        capability_row=CapabilityRow.EXTRACT_STRUCTURED_FIELDS,
+        spec=spec,
+        declared_columns=frozenset({CompositionColumn.BASIC_SINGLE_STEP}),
     )
 
 
@@ -775,6 +830,7 @@ def _underlag_till_text_pipe() -> BuildableGoldenCase:
 GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _summarize_text(),
     _extract_structured_fields(),
+    _json_input_to_structured_output_with_contract(),
     _sectioned_form_intake(),
     _document_to_docx_template(),
     _document_to_docx_create(),

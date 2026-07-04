@@ -17,7 +17,7 @@ from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
 )
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -71,6 +71,9 @@ async def assert_create_spec_materializes_through_authoring_command_async(
     assert flow_service.replaced_bindings == command.resource_bindings
     assert flow_service.replaced_binding_source is FlowResourceBindingSource.AI_BUILDER
     _assert_materialized_steps_match_compiled(
+        declared_steps_by_plan_ref={
+            step.plan_step_ref: step for step in command.spec.steps
+        },
         materialized_steps=flow_service.materialized_steps,
         compiled_steps=prepared.changeset.compiled_steps,
         assistant_ids_by_plan_ref=flow_service.assistant_ids_by_plan_ref,
@@ -96,12 +99,14 @@ def _create_command(
 
 def _assert_materialized_steps_match_compiled(
     *,
+    declared_steps_by_plan_ref: dict[str, StepSpec],
     materialized_steps: tuple[FlowStep, ...],
     compiled_steps: list[FlowDraftCompiledStep],
     assistant_ids_by_plan_ref: dict[str, UUID],
 ) -> None:
     assert len(materialized_steps) == len(compiled_steps)
     for materialized, compiled in zip(materialized_steps, compiled_steps, strict=True):
+        declared = declared_steps_by_plan_ref[compiled.plan_step_ref]
         assert (
             materialized.assistant_id
             == assistant_ids_by_plan_ref[compiled.plan_step_ref]
@@ -119,6 +124,9 @@ def _assert_materialized_steps_match_compiled(
         assert materialized.input_config == compiled.input_config
         assert materialized.output_config == compiled.output_config
         assert materialized.review_policy == compiled.review_policy
+        # Anchor to the declared spec; materialized==compiled alone would miss
+        # a compiler regression that silently drops the contract.
+        assert compiled.output_contract == declared.output_contract
 
 
 class _ActiveTransactionSession:
