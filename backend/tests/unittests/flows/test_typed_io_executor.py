@@ -360,7 +360,8 @@ async def test_resolve_step_input_json_question_binding_overrides_previous_struc
     )
     assert resolved.structured is None
     assert resolved.used_question_binding is True
-    assert any(d.code == "flow_underlag_summary" for d in resolved.diagnostics)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
 
 
 @pytest.mark.asyncio
@@ -392,6 +393,77 @@ async def test_resolve_step_input_json_previous_step_parses_text_when_structured
 
     assert resolved.source_text == '{"k": 1}'
     assert resolved.structured == {"k": 1}
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_previous_step_structured_only_emits_underlag_summary(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="",
+            structured={"k": 1},
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.source_text == ""
+    assert resolved.text == json.dumps({"k": 1}, ensure_ascii=False)
+    assert not any(d.code == "empty_prior_step_input" for d in resolved.diagnostics)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+    assert summaries[0].severity == "info"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_previous_step_summary_counts_resolved_input_bytes(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    compact_text = '{"a":1}'
+    structured = {"a": 1}
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text=compact_text,
+            structured=structured,
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    expected_text = json.dumps(structured, ensure_ascii=False)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert resolved.source_text == '{"a":1}'
+    assert resolved.text == expected_text
+    assert len(summaries) == 1
+    assert f"{len(expected_text.encode('utf-8'))} bytes" in summaries[0].message
+    assert f"{len(compact_text.encode('utf-8'))} bytes" not in summaries[0].message
 
 
 @pytest.mark.asyncio
@@ -713,7 +785,9 @@ async def test_resolve_step_input_all_previous_steps_empty_content_sets_warning(
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_previous_step_with_content_has_no_warning(user):
+async def test_resolve_step_input_previous_step_with_content_emits_underlag_summary_info(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -736,7 +810,13 @@ async def test_resolve_step_input_previous_step_with_content_has_no_warning(user
     )
 
     assert resolved.source_text == "Hello world"
-    assert resolved.diagnostics == []
+    assert not any(d.code == "empty_prior_step_input" for d in resolved.diagnostics)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+    assert summaries[0].severity == "info"
+    assert "previous_step" in summaries[0].message
+    assert "step 1" in summaries[0].message
+    assert "11 bytes" in summaries[0].message
 
 
 @pytest.mark.asyncio
@@ -781,6 +861,12 @@ async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(u
 
     assert resolved.source_text == "<step_1_output>\ncached\n</step_1_output>\n"
     assert resolved.text == "<step_1_output>\ncached\n</step_1_output>\n"
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+    assert summaries[0].severity == "info"
+    assert "all_previous_steps" in summaries[0].message
+    assert "1 prior step" in summaries[0].message
+    assert f"{len(resolved.text.encode('utf-8'))} bytes" in summaries[0].message
 
 
 @pytest.mark.asyncio

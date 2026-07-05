@@ -257,16 +257,28 @@ async def resolve_step_input(
 
     if step.input_source in ("previous_step", "all_previous_steps"):
         has_substantive_input = False
+        source_description = ""
         if step.input_source == "previous_step":
-            has_substantive_input = bool(source_text.strip())
+            has_substantive_input = bool(source_text.strip()) or (
+                structured is not None and bool(input_text.strip())
+            )
+            source_description = f"step {step.step_order - 1} via previous_step"
         else:
-            for pr in prior_results:
+            prior_source_count = 0
+            prior_source_results = (
+                state.completed_by_order.values() if state else prior_results
+            )
+            for pr in prior_source_results:
                 if pr.step_order < step.step_order and isinstance(
                     pr.output_payload_json, dict
                 ):
                     if str(pr.output_payload_json.get("text", "")).strip():
+                        prior_source_count += 1
                         has_substantive_input = True
-                        break
+            prior_step_label = "step" if prior_source_count == 1 else "steps"
+            source_description = (
+                f"{prior_source_count} prior {prior_step_label} via all_previous_steps"
+            )
         if not has_substantive_input:
             diagnostics.append(
                 StepDiagnostic(
@@ -275,6 +287,17 @@ async def resolve_step_input(
                         f"Step {step.step_order}: input_source '{step.input_source}' resolved to "
                         f"empty text. The LLM received no substantive input from prior steps."
                     ),
+                )
+            )
+        elif not used_question_binding:
+            diagnostics.append(
+                StepDiagnostic(
+                    code="flow_underlag_summary",
+                    message=(
+                        f"Resolved implicit underlag from {source_description} "
+                        f"({len(input_text.encode('utf-8'))} bytes of resolved input text)."
+                    ),
+                    severity="info",
                 )
             )
 

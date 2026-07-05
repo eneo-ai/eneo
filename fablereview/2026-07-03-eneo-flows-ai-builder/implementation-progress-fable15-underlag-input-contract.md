@@ -24,7 +24,7 @@
 | 1. Duplicate `source_refs` | Implemented, peer-reviewed green, ready to commit | Builder compiler/normalizer for emission; `input_binding_contract_rules.py` for structural uniqueness; AI Builder validator for strict authoring gate | Duplicate refs by `(step_ref, output, field_path)` are collapsed before authoring validation, labeled refs win over unlabeled refs, runtime lowering still accepts duplicates, stale duplicate-pinning tests are flipped. |
 | 2. Effective underlag visibility and reorder safety | Pending | Frontend editor projection/rendering; `flowStepOrderRemap.ts`; backend snapshot only if a read-only projection is needed | Typed refs and implicit previous-step underlag are visible; reorder remaps bare `source_refs[].step_ref`; deleting a referenced step shows stale/deleted source instead of silent rebinding. |
 | 3. Upstream capture contract | Implemented, validation green, final peer verification pending | Create compiler collects downstream needs; schema-path helper owns terminal schema leaves; new-step instruction compiler renders bounded guidance | Raw source-reader steps preserve fields required by the nearest downstream JSON extraction or terminal schema; guidance is capped, deterministic, localized, and not duplicated when the instruction already names the field. |
-| 4. Implicit-underlag diagnostics | Pending | Runtime input-resolution diagnostics | Bindings-less previous-step input gets diagnostic parity with explicit underlag for evidence/debug transparency. |
+| 4. Implicit-underlag diagnostics | Implemented, validation green, peer commit-gate pending | Runtime input-resolution diagnostics | Bindings-less previous/all-previous input gets `flow_underlag_summary` evidence for substantive implicit underlag without changing prompt text or emitting redundant refs. |
 | 5. Source-ref writer consolidation / repair narrowing | Pending | Builder compiler/edit compiler and source-material normalizer | After create/edit compilers guarantee refs, delete or narrow repair that only compensates for invalid Builder output. |
 
 ## Slice 1 Boundaries
@@ -126,6 +126,50 @@ Forbidden in slice 3:
 | Claude peer loop iteration 2 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-plan-revised-20260705T110227Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; plan approved for implementation. |
 | Claude peer loop iteration 3 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-implementation-20260705T111634Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; found a non-blocking nested terminal-schema gap, now fixed before commit. |
 | Claude peer loop iteration 4 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-final-verification-20260705T112248Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; nested terminal-schema fix is commit-ready. |
+
+## Slice 4 Boundaries
+
+Allowed:
+
+- `backend/src/eneo/flows/runtime/step_input_resolution.py`
+- `backend/tests/unittests/flows/test_typed_io_executor.py`
+
+Forbidden in slice 4:
+
+- No frontend display or reorder work.
+- No prompt/input composition changes.
+- No persisted schema or API model changes.
+- No new provenance subsystem.
+- No `StepDiagnostic` type overhaul.
+
+## Slice 4 Implementation Notes
+
+- The existing prior-input diagnostic block now emits `flow_underlag_summary` with `severity="info"` for substantive implicit `previous_step` and `all_previous_steps` input.
+- The info summary is explicitly gated by `not used_question_binding` so explicit question bindings do not double-count diagnostics.
+- Byte count uses finalized `input_text`, matching the actual `StepInputValue.text` delivered to the step.
+- `all_previous_steps` source counts use the same source collection as the resolved text: `state.completed_by_order.values()` when state exists, otherwise `prior_results`, filtered to earlier step orders.
+- Structured-only implicit JSON input is treated as substantive when JSON normalization produces non-empty resolved input text.
+
+## Slice 4 Validation
+
+| Command | Result |
+|---|---|
+| `rg -n "flow_underlag_summary|empty_prior_step_input|diagnostics == \\[\\]|len\\([^\\n]*diagnostics\\)" backend/tests backend/src/eneo/flows \| head -220` | Confirmed exact diagnostic assertions outside `test_typed_io_executor.py` are unrelated RAG/evidence fixture paths. |
+| `uv run pytest tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_json_question_binding_overrides_previous_structured tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_previous_step_with_content_emits_underlag_summary_info tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_all_previous_steps_prefers_state_accumulator tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_json_previous_step_structured_only_emits_underlag_summary tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_json_previous_step_summary_counts_resolved_input_bytes tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_previous_step_missing_prior_returns_empty_text tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_all_previous_steps_empty_content_sets_warning` | 7 passed |
+| `uv run pytest tests/unittests/flows/test_typed_io_executor.py` | 58 passed |
+| `uv run ruff check src/eneo/flows/runtime/step_input_resolution.py tests/unittests/flows/test_typed_io_executor.py` | passed |
+| `uv run ruff format --check src/eneo/flows/runtime/step_input_resolution.py tests/unittests/flows/test_typed_io_executor.py` | passed |
+| `uv run pyright src/eneo/flows/runtime/step_input_resolution.py tests/unittests/flows/test_typed_io_executor.py` | 0 errors |
+
+## Slice 4 Peer Review
+
+| Reviewer | Artifact | Result |
+|---|---|---|
+| Claude peer loop iteration 1 | `.codex/artifacts/claude-peer-loop-fable-15-implicit-underlag-diagnostics-plan-20260705T113302Z.md` | `changes_required`; required single predicate owner, coherent all-previous metrics, honest structured JSON scope, and non-brittle tests. |
+| Claude peer loop iteration 2 | `.codex/artifacts/claude-peer-loop-fable-15-implicit-underlag-diagnostics-plan-revised-20260705T113949Z.md` | `changes_required`; required byte count from finalized `input_text` and a JSON byte-accuracy test. |
+| Claude peer loop iteration 3 | `.codex/artifacts/claude-peer-loop-fable-15-implicit-underlag-diagnostics-plan-final-20260705T114514Z.md` | `changes_required`; required explicit `not used_question_binding` gate and exact-one summary assertion. |
+| Claude peer loop iteration 4 | `.codex/artifacts/claude-peer-loop-fable-15-implicit-underlag-diagnostics-plan-green-check-20260705T115100Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; plan approved for implementation. |
+| Claude peer loop iteration 5 | `.codex/artifacts/claude-peer-loop-fable-15-implicit-underlag-diagnostics-implementation-20260705T115835Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; implementation is commit-ready. |
 
 ## Notes
 
