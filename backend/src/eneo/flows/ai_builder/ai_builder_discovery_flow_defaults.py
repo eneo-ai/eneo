@@ -55,20 +55,20 @@ class FlowCapabilityProfile:
         defaults: dict[str, set[str]] = defaultdict(set)
 
         if self.runtime_input_mode == "documents":
-            defaults["input_material_mode"].add("documents")
+            defaults["primary_runtime_input"].add("documents")
         elif self.runtime_input_mode == "audio":
-            defaults["input_material_mode"].add("audio")
+            defaults["primary_runtime_input"].add("audio")
         elif self.runtime_input_mode == "text":
-            defaults["input_material_mode"].add("text")
+            defaults["primary_runtime_input"].add("text")
         elif self.runtime_input_mode == "text_and_documents":
-            defaults["input_material_mode"].add("text_and_documents")
+            defaults["primary_runtime_input"].add("text_and_documents")
 
         if self.upload_pattern is not None:
             defaults["upload_pattern"].add(self.upload_pattern)
         if self.document_material_scope is not None:
             defaults["document_material_scope"].add(self.document_material_scope)
         if self.final_output_mode is not None:
-            defaults["final_output_mode"].add(self.final_output_mode)
+            defaults["terminal_output"].add(self.final_output_mode)
         if self.final_output_type == "docx":
             defaults["docx_output_mode"].add(
                 "template_fill_docx"

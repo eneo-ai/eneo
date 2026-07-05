@@ -34,12 +34,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     looks_like_case_scope_is_vague as _looks_like_case_scope_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    looks_like_input_mode_is_vague as _looks_like_input_mode_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    looks_like_output_is_vague as _looks_like_output_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     mixed_input_architecture_is_vague as _mixed_input_architecture_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -50,6 +44,9 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     post_processing_goal_is_vague as _post_processing_goal_is_vague,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    primary_runtime_input_is_vague as _primary_runtime_input_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     question_category as _question_category,
@@ -67,7 +64,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     structured_io_contract_is_vague as _structured_io_contract_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    ultra_vague_output_choice_is_vague as _ultra_vague_output_choice_is_vague,
+    terminal_output_is_vague as _terminal_output_is_vague,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    ultra_vague_terminal_output_choice_is_vague as _ultra_vague_terminal_output_choice_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
@@ -100,21 +100,21 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     document_material_scope_question,
     docx_output_mode_question,
     external_delivery_internal_output_question,
-    final_output_mode_question,
     final_output_scope_question,
     final_pdf_type_question,
     flow_input_architecture_question,
-    input_material_mode_question,
     localized_text,
     output_reader_question,
     pdf_generation_mode_question,
     post_processing_goal_question,
+    primary_runtime_input_question,
     processing_scope_question,
     question_exposure_for_id,
     question_suggestion_for_id,
     runtime_metadata_fields_question,
     structured_analysis_need_question,
     structured_io_contract_question,
+    terminal_output_question,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -279,16 +279,16 @@ def _build_case_scope_issue(
     )
 
 
-def _build_input_material_mode_issue(
+def _build_primary_runtime_input_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
 ) -> DiscoveryIssue | None:
-    if not _looks_like_input_mode_is_vague(profile):
+    if not _primary_runtime_input_is_vague(profile):
         return None
     if not (profile.document_like_input or _expresses_task_intent(profile.text)):
         return None
     return DiscoveryIssue(
-        issue_id="input_material_mode",
+        issue_id="primary_runtime_input",
         category="input",
         severity="blocking",
         message=localized_text(
@@ -296,7 +296,7 @@ def _build_input_material_mode_issue(
             "Det är fortfarande oklart vilket material användaren ska lämna vid körning.",
             "It is still unclear what kind of runtime material the user should provide.",
         ),
-        suggestion=input_material_mode_question(profile.language),
+        suggestion=primary_runtime_input_question(profile.language),
         question_level="blocking",
     )
 
@@ -396,7 +396,7 @@ def _build_external_delivery_unsupported_issue(
 ) -> DiscoveryIssue | None:
     if not _external_delivery_requested(profile):
         return None
-    if "final_output_mode" in profile.answers:
+    if "terminal_output" in profile.answers:
         return None
     return DiscoveryIssue(
         issue_id=EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
@@ -452,17 +452,17 @@ def _build_post_processing_goal_issue(
     )
 
 
-def _build_final_output_mode_issue(
+def _build_terminal_output_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
 ) -> DiscoveryIssue | None:
-    if _looks_like_output_is_vague(profile):
+    if _terminal_output_is_vague(profile):
         message = localized_text(
             profile.language,
             "Slutresultatet är fortfarande för vagt för att flödet ska kunna designas säkert.",
             "The final output format is still too vague to design the flow confidently.",
         )
-    elif _ultra_vague_output_choice_is_vague(profile):
+    elif _ultra_vague_terminal_output_choice_is_vague(profile):
         message = localized_text(
             profile.language,
             "Det är fortfarande oklart vilket slutresultat flödet ska leverera.",
@@ -471,11 +471,11 @@ def _build_final_output_mode_issue(
     else:
         return None
     return DiscoveryIssue(
-        issue_id="final_output_mode",
+        issue_id="terminal_output",
         category="output",
         severity="blocking",
         message=message,
-        suggestion=final_output_mode_question(profile.language),
+        suggestion=terminal_output_question(profile.language),
         question_level="blocking",
     )
 
@@ -633,7 +633,7 @@ def _build_runtime_metadata_fields_issue(
 _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_comparison_scope_conflict_issue,
     _build_case_scope_issue,
-    _build_input_material_mode_issue,
+    _build_primary_runtime_input_issue,
     _build_flow_input_architecture_issue,
     _build_document_kind_issue,
     _build_document_material_scope_issue,
@@ -641,7 +641,7 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_external_delivery_unsupported_issue,
     _build_structured_io_contract_issue,
     _build_post_processing_goal_issue,
-    _build_final_output_mode_issue,
+    _build_terminal_output_issue,
     _build_docx_output_mode_issue,
     _build_pdf_generation_mode_issue,
     _build_output_reader_issue,
@@ -742,9 +742,9 @@ def _trace_reason(
     if selected_issue.issue_id == "comparison_scope":
         return "missing_reference_source"
     if selected_issue.issue_id in {
-        "input_material_mode",
+        "primary_runtime_input",
         "flow_input_architecture",
-        "final_output_mode",
+        "terminal_output",
         "docx_output_mode",
         "pdf_generation_mode",
     }:
@@ -1011,12 +1011,12 @@ def _has_mvs_input(profile: DiscoveryProfile) -> bool:
     return (
         profile.document_like_input
         or profile.audio_like_input
-        or "input_material_mode" in profile.answers
+        or "primary_runtime_input" in profile.answers
     )
 
 
 def _has_mvs_output(profile: DiscoveryProfile) -> bool:
-    return profile.final_output_text_or_docx or "final_output_mode" in profile.answers
+    return profile.final_output_text_or_docx or "terminal_output" in profile.answers
 
 
 def _has_mvs_purpose(profile: DiscoveryProfile) -> bool:

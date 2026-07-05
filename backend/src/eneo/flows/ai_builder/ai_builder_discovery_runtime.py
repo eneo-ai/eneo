@@ -44,9 +44,6 @@ from eneo.flows.ai_builder.planning_state_builder import (
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
 )
-from eneo.flows.ai_builder.question_catalog import (
-    slot_name_for_legacy_question_id,
-)
 from eneo.flows.domain.flow import Flow
 
 
@@ -133,7 +130,7 @@ def _targeted_classification_bias(
     if answered is None:
         return None
     asked_question_id, latest_answer = answered
-    target_slot = slot_name_for_legacy_question_id(asked_question_id)
+    target_slot = asked_question_id
     if target_slot not in allowed_slot_values:
         return None
     return SlotClassificationBias(

@@ -32,9 +32,8 @@ from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
 )
 from eneo.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
     legal_slot_values,
-    slot_backed_legacy_question_ids,
-    slot_name_for_legacy_question_id,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 
@@ -131,11 +130,10 @@ def _has_unsupported_slot_value(
     question_id: str,
 ) -> bool:
     canonical_id = canonical_question_id(question_id)
-    if canonical_id not in slot_backed_legacy_question_ids():
+    if canonical_id not in QUESTION_CATALOG:
         return False
 
-    slot_name = slot_name_for_legacy_question_id(canonical_id)
-    allowed_values = {value.casefold() for value in legal_slot_values(slot_name)}
+    allowed_values = {value.casefold() for value in legal_slot_values(canonical_id)}
     return not question_answer_values(answer) <= allowed_values
 
 

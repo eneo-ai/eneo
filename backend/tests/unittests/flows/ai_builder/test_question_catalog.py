@@ -39,18 +39,12 @@ from eneo.flows.ai_builder.question_catalog import (
     QuestionTemplate,
     RenderedOption,
     RenderedQuestion,
-    legacy_question_id_for_slot,
     legal_slot_values,
     question_ids_for_slot,
     render_question,
-    slot_backed_legacy_question_ids,
-    slot_name_for_legacy_question_id,
-    slot_resolving_legacy_question_ids,
 )
 
-_SLOT_DERIVED_ISSUE_IDS = frozenset(
-    legacy_question_id_for_slot(slot_name) for slot_name in KNOWN_REQUIREMENT_SLOT_NAMES
-)
+_SLOT_DERIVED_ISSUE_IDS = KNOWN_REQUIREMENT_SLOT_NAMES
 
 _NON_SLOT_PRIORITY_ISSUE_IDS = frozenset(
     {
@@ -442,46 +436,14 @@ class TestCatalogInvariants:
         with pytest.raises(KeyError):
             legal_slot_values("unknown_slot")
 
-    def test_legacy_question_id_bridge_is_explicit_for_slot_renames(self) -> None:
-        assert legacy_question_id_for_slot("primary_runtime_input") == (
-            "input_material_mode"
-        )
-        assert legacy_question_id_for_slot("terminal_output") == "final_output_mode"
-        assert legacy_question_id_for_slot("document_material_scope") == (
-            "document_material_scope"
-        )
-        assert slot_name_for_legacy_question_id("input_material_mode") == (
-            "primary_runtime_input"
-        )
-        assert slot_name_for_legacy_question_id("final_output_mode") == (
-            "terminal_output"
-        )
-        assert slot_name_for_legacy_question_id("flow_input_architecture") == (
-            "primary_runtime_input"
-        )
-        assert slot_name_for_legacy_question_id("final_pdf_type") == ("terminal_output")
+    def test_slot_backed_question_ids_are_catalog_slot_names(self) -> None:
+        question_ids = frozenset(QUESTION_CATALOG)
 
-    def test_slot_backed_legacy_question_ids_are_catalog_derived(self) -> None:
-        question_ids = slot_backed_legacy_question_ids()
-
-        assert question_ids == frozenset(
-            legacy_question_id_for_slot(slot_name) for slot_name in QUESTION_CATALOG
-        )
-        assert "input_material_mode" in question_ids
-        assert "final_output_mode" in question_ids
+        assert question_ids == KNOWN_REQUIREMENT_SLOT_NAMES
+        assert "primary_runtime_input" in question_ids
+        assert "terminal_output" in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "final_pdf_type" not in question_ids
-
-    def test_slot_resolving_legacy_question_ids_include_extra_slot_targets(
-        self,
-    ) -> None:
-        question_ids = slot_resolving_legacy_question_ids()
-
-        assert question_ids == slot_backed_legacy_question_ids() | frozenset(
-            {"flow_input_architecture", "final_pdf_type"}
-        )
-        assert "processing_scope" not in question_ids
-        assert "output_style" not in question_ids
 
 
 class TestCatalogStaticDiscoveryMetadata:
@@ -502,10 +464,9 @@ class TestCatalogStaticDiscoveryMetadata:
 
     def test_slot_issue_metadata_is_derived_from_catalog(self) -> None:
         for slot_name, template in QUESTION_CATALOG.items():
-            issue_id = legacy_question_id_for_slot(slot_name)
-            assert QUESTION_FAMILY[issue_id] == template.family
-            assert DISCOVERY_ISSUE_PRIORITY[issue_id] == template.priority_base
-            assert _QUESTION_IMPACT[issue_id] == template.impact
+            assert QUESTION_FAMILY[slot_name] == template.family
+            assert DISCOVERY_ISSUE_PRIORITY[slot_name] == template.priority_base
+            assert _QUESTION_IMPACT[slot_name] == template.impact
 
     def test_priority_map_separates_slot_and_non_slot_issue_ids(self) -> None:
         expected_issue_ids = _SLOT_DERIVED_ISSUE_IDS | _NON_SLOT_PRIORITY_ISSUE_IDS
@@ -864,7 +825,7 @@ class TestDomainNeutrality:
 
 _SLOT_BACKED_DISCOVERY_GOLDEN = {
     ("primary_runtime_input", "sv"): {
-        "question_id": "input_material_mode",
+        "question_id": "primary_runtime_input",
         "question": "Vilket material ska flödet ta emot vid körning?",
         "options": (
             (
@@ -898,7 +859,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
         "exposure": "user_requirement",
     },
     ("primary_runtime_input", "en"): {
-        "question_id": "input_material_mode",
+        "question_id": "primary_runtime_input",
         "question": "What source material should the flow accept at runtime?",
         "options": (
             (
@@ -927,7 +888,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
         "exposure": "user_requirement",
     },
     ("terminal_output", "sv"): {
-        "question_id": "final_output_mode",
+        "question_id": "terminal_output",
         "question": "Vad ska flödet producera som slutresultat?",
         "options": (
             (
@@ -960,7 +921,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
         "exposure": "user_requirement",
     },
     ("terminal_output", "en"): {
-        "question_id": "final_output_mode",
+        "question_id": "terminal_output",
         "question": "What should the flow produce as the final output?",
         "options": (
             (
@@ -1472,10 +1433,8 @@ class TestSlotBackedDiscoveryQuestionProjection:
         slot_name: str,
         locale: DiscoveryLanguage,
     ) -> None:
-        question_id = legacy_question_id_for_slot(slot_name)
-
         assert (
-            _discovery_payload(question_id, locale)
+            _discovery_payload(slot_name, locale)
             == (_SLOT_BACKED_DISCOVERY_GOLDEN[(slot_name, locale)])
         )
 
@@ -1491,9 +1450,9 @@ class TestSlotBackedDiscoveryQuestionProjection:
         self,
         locale: DiscoveryLanguage,
     ) -> None:
-        input_projection = _discovery_payload("input_material_mode", locale)
+        input_projection = _discovery_payload("primary_runtime_input", locale)
         flow_architecture = _discovery_payload("flow_input_architecture", locale)
-        terminal_projection = _discovery_payload("final_output_mode", locale)
+        terminal_projection = _discovery_payload("terminal_output", locale)
         final_pdf_type = _discovery_payload("final_pdf_type", locale)
 
         assert flow_architecture["question_id"] == "flow_input_architecture"
@@ -1511,7 +1470,7 @@ class TestSlotBackedDiscoveryQuestionProjection:
         )
 
         suggestion = external_delivery_internal_output_question(locale)
-        final_output = _discovery_payload("final_output_mode", locale)
+        final_output = _discovery_payload("terminal_output", locale)
 
         assert suggestion.question != final_output["question"]
         assert suggestion.question_id == final_output["question_id"]

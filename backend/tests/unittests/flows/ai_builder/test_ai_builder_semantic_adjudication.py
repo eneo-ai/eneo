@@ -40,7 +40,7 @@ async def test_pending_question_adjudication_resolves_paraphrase() -> None:
                     "id": "tool-1",
                     "name": "ask_structured_question",
                     "arguments": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "question": "Vad ska flödet producera som slutresultat?",
                         "options": [
                             {
@@ -69,11 +69,11 @@ async def test_pending_question_adjudication_resolves_paraphrase() -> None:
     )
 
     assert result is not None
-    assert result.question_id == "final_output_mode"
+    assert result.question_id == "terminal_output"
     assert result.selected_option_ids == ("pdf_document",)
     assert result.selected_values == ("pdf_document",)
     assert result.to_question_answer() == {
-        "question_id": "final_output_mode",
+        "question_id": "terminal_output",
         "selected_option_ids": ["pdf_document"],
         "selected_values": ["pdf_document"],
     }
@@ -94,7 +94,7 @@ async def test_pending_question_adjudication_rejects_invalid_option() -> None:
                     "id": "tool-1",
                     "name": "ask_structured_question",
                     "arguments": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "question": "Vad ska flödet producera som slutresultat?",
                         "options": [
                             {

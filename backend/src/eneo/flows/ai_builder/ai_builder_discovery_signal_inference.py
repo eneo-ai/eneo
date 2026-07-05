@@ -37,15 +37,15 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
 
     signals: dict[str, set[str]] = {}
     input_intent = resolve_input_intent(normalized, {})
-    input_material_mode = _infer_input_material_mode(normalized, input_intent)
-    if _document_signals_apply(input_intent, input_material_mode):
+    primary_runtime_input = _infer_primary_runtime_input(normalized, input_intent)
+    if _document_signals_apply(input_intent, primary_runtime_input):
         _add_signal(signals, "document_kind", _infer_document_kind(normalized))
         _add_signal(
             signals,
             "document_material_scope",
             _infer_document_material_scope(normalized),
         )
-    _add_signal(signals, "input_material_mode", input_material_mode)
+    _add_signal(signals, "primary_runtime_input", primary_runtime_input)
     _add_signal(
         signals,
         "flow_input_architecture",
@@ -257,7 +257,7 @@ def _infer_document_material_scope(text: str) -> str | None:
     return None
 
 
-def _infer_input_material_mode(
+def _infer_primary_runtime_input(
     text: str,
     input_intent: InputIntentResolution,
 ) -> str | None:
@@ -284,11 +284,11 @@ def _infer_input_material_mode(
 
 def _document_signals_apply(
     input_intent: InputIntentResolution,
-    input_material_mode: str | None,
+    primary_runtime_input: str | None,
 ) -> bool:
-    if input_material_mode == "json":
+    if primary_runtime_input == "json":
         return False
-    if input_material_mode in {"documents", "text_and_documents"}:
+    if primary_runtime_input in {"documents", "text_and_documents"}:
         return True
     return (
         not input_intent.audio_requested

@@ -48,14 +48,14 @@ _DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
 def question_category(question_id: str) -> str:
     return {
         "processing_scope": "scope",
-        "input_material_mode": "input",
+        "primary_runtime_input": "input",
         "flow_input_architecture": "input",
         "document_kind": "input",
         "document_material_scope": "input",
         "post_processing_goal": "outcome",
         "structured_io_contract": "outcome",
         "comparison_scope": "comparison",
-        "final_output_mode": "output",
+        "terminal_output": "output",
         "docx_output_mode": "output",
         "pdf_generation_mode": "output",
         "output_reader": "output",
@@ -135,18 +135,18 @@ def looks_like_case_scope_is_vague(profile: DiscoveryProfile) -> bool:
     )
 
 
-def looks_like_input_mode_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "input_material_mode"):
+def primary_runtime_input_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "primary_runtime_input"):
         return False
-    if "input_material_mode" in profile.answers:
+    if "primary_runtime_input" in profile.answers:
         return False
     if profile.input_intent.needs_architecture_clarification:
         return False
     return profile.input_intent.primary_runtime_input == "unknown"
 
 
-def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "final_output_mode"):
+def terminal_output_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "terminal_output"):
         return False
     text = profile.text
     if profile.output_intent.terminal_output is not None:
@@ -155,7 +155,7 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if mentions_output_change(text):
         return False
-    if profile.flow_defaults.get("final_output_mode"):
+    if profile.flow_defaults.get("terminal_output"):
         return False
     if (
         profile.document_like_input
@@ -164,7 +164,7 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
         or profile.final_output_text_or_docx
     ):
         return True
-    if "final_output_mode" not in profile.answers and expresses_task_intent(text):
+    if "terminal_output" not in profile.answers and expresses_task_intent(text):
         return True
     return mentions_any(
         text,
@@ -182,14 +182,14 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
     )
 
 
-def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "final_output_mode"):
+def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "terminal_output"):
         return False
     if profile.output_intent.terminal_output is not None:
         return False
-    if "final_output_mode" in profile.answers:
+    if "terminal_output" in profile.answers:
         return False
-    if profile.flow_defaults.get("final_output_mode"):
+    if profile.flow_defaults.get("terminal_output"):
         return False
     if profile.case_like_flow or profile.comparison_requested:
         return False
@@ -403,8 +403,8 @@ def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if "document_material_scope" in profile.flow_defaults:
         return False
-    if "input_material_mode" in answers and "text" in " ".join(
-        answers["input_material_mode"]
+    if "primary_runtime_input" in answers and "text" in " ".join(
+        answers["primary_runtime_input"]
     ):
         return False
     if "comparison_scope" in answers:
@@ -459,12 +459,12 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         key in answers
         for key in (
             "processing_scope",
-            "input_material_mode",
-            "final_output_mode",
+            "primary_runtime_input",
+            "terminal_output",
         )
     ):
         return False
-    if "runtime_metadata_fields" in answers and "input_material_mode" in answers:
+    if "runtime_metadata_fields" in answers and "primary_runtime_input" in answers:
         return False
     if (
         profile.output_intent.terminal_output is not None
@@ -628,7 +628,7 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
     text = profile.text
     if "final_pdf_type" in answers:
         return False
-    if "final_output_mode" in answers:
+    if "terminal_output" in answers:
         return False
     output_choice = profile.output_intent.terminal_output
     if output_choice != "pdf_document":
@@ -657,7 +657,7 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
     planner_patterns = detect_planner_pattern_signals(text)
     if "structured_analysis_need" in answers:
         return False
-    if "structured_json" in answers.get("final_output_mode", set()):
+    if "structured_json" in answers.get("terminal_output", set()):
         return False
     post_processing_goal = profile.resolved_slot("post_processing_goal")
     if post_processing_goal is not None and post_processing_goal.value in {
@@ -719,7 +719,7 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
 def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
     if looks_like_case_scope_is_vague(profile):
         return False
-    if looks_like_input_mode_is_vague(profile):
+    if primary_runtime_input_is_vague(profile):
         return False
     if profile.input_intent.needs_architecture_clarification:
         return False
@@ -734,9 +734,9 @@ def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
         return False
     if document_kind_is_vague(profile):
         return False
-    if looks_like_output_is_vague(profile):
+    if terminal_output_is_vague(profile):
         return False
-    if ultra_vague_output_choice_is_vague(profile):
+    if ultra_vague_terminal_output_choice_is_vague(profile):
         return False
     if needs_docx_mode_choice(profile):
         return False

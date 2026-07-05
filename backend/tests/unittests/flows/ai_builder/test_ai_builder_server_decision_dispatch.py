@@ -188,9 +188,7 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
 
 
 @pytest.mark.asyncio
-async def test_server_question_uses_catalog_legacy_question_id_for_slot_rename() -> (
-    None
-):
+async def test_server_question_uses_canonical_slot_name_question_id() -> None:
     repo = AsyncMock()
     repo.commit_turn.return_value = 5
     conversation = [ConversationMessage(role="user", content="Build a flow")]
@@ -206,18 +204,18 @@ async def test_server_question_uses_catalog_legacy_question_id_for_slot_rename()
     assert [event.event for event in result.events] == ["text", "question"]
     question_event = result.events[1]
     assert isinstance(question_event, AIBuilderQuestionEvent)
-    assert question_event.data.question_id == "input_material_mode"
+    assert question_event.data.question_id == "primary_runtime_input"
 
     repo.commit_turn.assert_awaited_once()
     new_messages = repo.commit_turn.await_args.kwargs["new_messages"]
     assistant_message = new_messages[-2]
     assert assistant_message.metadata is not None
-    assert assistant_message.metadata["question_id"] == "input_material_mode"
+    assert assistant_message.metadata["question_id"] == "primary_runtime_input"
     assert assistant_message.tool_calls is not None
     tool_call = assistant_message.tool_calls[0]
     arguments = tool_call["arguments"]
     assert isinstance(arguments, dict)
-    assert arguments["question_id"] == "input_material_mode"
+    assert arguments["question_id"] == "primary_runtime_input"
     assert result.new_planning_state_version == 5
 
 

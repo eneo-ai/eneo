@@ -15,6 +15,7 @@ from typing import Literal
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_commit_invariance import (
     architecture_commit_draft_matches_pinned,
 )
@@ -23,7 +24,6 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.ai_builder.question_catalog import slot_name_for_legacy_question_id
 
 CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
     "primary_runtime_input",
@@ -235,7 +235,7 @@ def _ordered_ask_targets(
     seen: set[str] = set()
 
     def append_target(raw_target: str) -> None:
-        target = slot_name_for_legacy_question_id(raw_target)
+        target = canonical_question_id(raw_target)
         if (
             target not in KNOWN_REQUIREMENT_SLOT_NAMES
             or target in commit_grade_slot_names

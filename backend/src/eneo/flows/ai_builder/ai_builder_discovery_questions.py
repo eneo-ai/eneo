@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryLanguage,
     DiscoveryQuestionOption,
@@ -10,7 +11,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import (
 )
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
-    legacy_question_id_for_slot,
     render_question,
 )
 
@@ -45,7 +45,7 @@ def _catalog_question(
     template = QUESTION_CATALOG[slot_name]
     rendered = render_question(slot_name, language)
     return DiscoveryQuestionSuggestion(
-        question_id=legacy_question_id_for_slot(slot_name),
+        question_id=slot_name,
         question=rendered.question,
         options=tuple(
             DiscoveryQuestionOption(
@@ -93,7 +93,7 @@ def processing_scope_question(
     )
 
 
-def input_material_mode_question(
+def primary_runtime_input_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
     return _catalog_question("primary_runtime_input", language=language)
@@ -292,7 +292,7 @@ def comparison_scope_question(
     )
 
 
-def final_output_mode_question(
+def terminal_output_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
     return _catalog_question("terminal_output", language=language)
@@ -301,7 +301,7 @@ def final_output_mode_question(
 def external_delivery_internal_output_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    base = final_output_mode_question(language)
+    base = terminal_output_question(language)
     return DiscoveryQuestionSuggestion(
         question_id=base.question_id,
         question=localized_text(
@@ -478,14 +478,14 @@ def question_suggestion_for_id(
 ) -> DiscoveryQuestionSuggestion | None:
     builders: dict[str, Callable[[DiscoveryLanguage], DiscoveryQuestionSuggestion]] = {
         "processing_scope": processing_scope_question,
-        "input_material_mode": input_material_mode_question,
+        "primary_runtime_input": primary_runtime_input_question,
         "flow_input_architecture": flow_input_architecture_question,
         "document_kind": document_kind_question,
         "document_material_scope": document_material_scope_question,
         "post_processing_goal": post_processing_goal_question,
         "structured_io_contract": structured_io_contract_question,
         "comparison_scope": comparison_scope_question,
-        "final_output_mode": final_output_mode_question,
+        "terminal_output": terminal_output_question,
         "docx_output_mode": docx_output_mode_question,
         "output_reader": output_reader_question,
         "final_output_scope": final_output_scope_question,
@@ -494,7 +494,7 @@ def question_suggestion_for_id(
         "final_pdf_type": final_pdf_type_question,
         "pdf_generation_mode": pdf_generation_mode_question,
     }
-    builder = builders.get(question_id)
+    builder = builders.get(canonical_question_id(question_id))
     if builder is None:
         return None
     return builder(language)

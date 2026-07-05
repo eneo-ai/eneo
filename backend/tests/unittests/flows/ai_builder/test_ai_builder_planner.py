@@ -316,7 +316,7 @@ async def test_resolve_user_question_metadata_uses_freeform_inference_before_adj
 ):
     planner = _make_planner()
     inferred_answer = {
-        "question_id": "input_material_mode",
+        "question_id": "primary_runtime_input",
         "selected_values": ["documents"],
     }
 
@@ -386,7 +386,7 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
         message="documents",
         question_answer={
             "kind": "structured_question_answer",
-            "question_id": "input_material_mode",
+            "question_id": "primary_runtime_input",
             "selected_values": ["documents"],
         },
         litellm_model="openai/gpt-5.4",
@@ -395,7 +395,7 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
 
     assert result.metadata == {
         "question_answer": {
-            "question_id": "input_material_mode",
+            "question_id": "primary_runtime_input",
             "selected_values": ["documents"],
         }
     }
@@ -459,14 +459,14 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
         (
             {
                 "kind": "structured_question_answer",
-                "question_id": "input_material_mode",
+                "question_id": "primary_runtime_input",
             },
             "empty_question_answer",
         ),
         (
             {
                 "kind": "structured_question_answer",
-                "question_id": "input_material_mode",
+                "question_id": "primary_runtime_input",
                 "selected_values": ["banana"],
             },
             "unsupported_question_value",
@@ -578,7 +578,7 @@ async def test_resolve_user_question_metadata_marks_auxiliary_llm_when_pending_a
                     "id": "call_q1",
                     "name": "ask_structured_question",
                     "arguments": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "question": "What should the flow produce?",
                         "options": [
                             {"id": "structured_text", "label": "Structured text"},
@@ -602,7 +602,7 @@ async def test_resolve_user_question_metadata_marks_auxiliary_llm_when_pending_a
             "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
             return_value=PendingQuestionResolution(
-                question_id="final_output_mode",
+                question_id="terminal_output",
                 selected_option_ids=("pdf_document",),
                 selected_values=("pdf_document",),
             ),
@@ -634,7 +634,7 @@ async def test_resolve_user_question_metadata_infers_final_output_answer_from_st
                     "id": "call_q1",
                     "name": "ask_structured_question",
                     "arguments": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "question": "Vad ska flödet producera som slutresultat?",
                         "options": [
                             {
@@ -664,7 +664,7 @@ async def test_resolve_user_question_metadata_infers_final_output_answer_from_st
     assert result.is_requirements_confirmation is False
     assert result.metadata == {
         "question_answer": {
-            "question_id": "final_output_mode",
+            "question_id": "terminal_output",
             "selected_option_id": "pdf_document",
             "selected_value": "pdf_document",
             "answer": "pdf_document",
@@ -737,7 +737,7 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
     requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = SimpleNamespace(
         mvs_met=False,
-        selected_question_ids=("input_material_mode",),
+        selected_question_ids=("primary_runtime_input",),
     )
     planning_state = build_planning_state_from_conversation(conversation)
 

@@ -4,10 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryIssue
-from eneo.flows.ai_builder.question_catalog import (
-    QUESTION_CATALOG,
-    legacy_question_id_for_slot,
-)
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 _NON_SLOT_DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
     # Cross-slot contradiction gate; must precede ordinary clarification.
@@ -32,8 +29,7 @@ _NON_SLOT_DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
 }
 
 _CATALOG_DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
-    legacy_question_id_for_slot(template.id): template.priority_base
-    for template in QUESTION_CATALOG.values()
+    template.id: template.priority_base for template in QUESTION_CATALOG.values()
 }
 
 DISCOVERY_ISSUE_PRIORITY: Mapping[str, int] = MappingProxyType(

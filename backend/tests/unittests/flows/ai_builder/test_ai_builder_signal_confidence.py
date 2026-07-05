@@ -20,7 +20,7 @@ class TestSignalConfidence:
                 content="Dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_ids": ["documents"],
                         "selected_values": ["documents"],
                     },
@@ -28,7 +28,7 @@ class TestSignalConfidence:
             ),
         ]
         signals = score_conversation_signals(conversation)
-        doc_signals = [s for s in signals if s.question_id == "input_material_mode"]
+        doc_signals = [s for s in signals if s.question_id == "primary_runtime_input"]
         assert len(doc_signals) >= 1
         assert all(s.confidence == "high" for s in doc_signals)
         assert all(s.source == "structured_answer" for s in doc_signals)
@@ -112,7 +112,7 @@ class TestSignalConfidence:
                 content="Dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_ids": ["documents"],
                         "selected_values": ["documents"],
                     },

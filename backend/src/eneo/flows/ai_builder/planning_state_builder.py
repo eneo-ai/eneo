@@ -404,10 +404,10 @@ def _latest_non_json_output_answer_index(
         question_id = question_answer_question_id(answer)
         if question_id is None:
             continue
-        if canonical_question_id(question_id) != "final_output_mode":
+        if canonical_question_id(question_id) != "terminal_output":
             continue
         values = {
-            canonical_option_id("final_output_mode", value)
+            canonical_option_id("terminal_output", value)
             for value in question_answer_values(answer)
         }
         if values and "structured_json" not in values:
@@ -758,7 +758,7 @@ def _resolve_slots(
         slots["primary_runtime_input"] = _build_slot(
             name="primary_runtime_input",
             value=primary_runtime_input,
-            question_id="input_material_mode",
+            question_id="primary_runtime_input",
             conversation=conversation,
             flow_defaults=flow_defaults,
             requirements_state=requirements_state,
@@ -771,7 +771,7 @@ def _resolve_slots(
         slots["terminal_output"] = _build_slot(
             name="terminal_output",
             value=output_intent.terminal_output,
-            question_id="final_output_mode",
+            question_id="terminal_output",
             conversation=conversation,
             flow_defaults=flow_defaults,
             requirements_state=requirements_state,
@@ -1059,13 +1059,13 @@ def _requirements_summary_supports_slot(
     summary_value: str,
     slot_value: str,
 ) -> bool:
-    if question_id == "input_material_mode":
+    if question_id == "primary_runtime_input":
         return (
             resolve_input_intent(summary_value, {}).primary_runtime_input == slot_value
         )
 
     output_intent = resolve_output_intent(summary_value, {})
-    if question_id == "final_output_mode":
+    if question_id == "terminal_output":
         return output_intent.terminal_output == slot_value
     if question_id == "docx_output_mode":
         return output_intent.docx_output_mode == slot_value
@@ -1111,7 +1111,7 @@ def _heuristic_slot_confidence(
     slot_value: str,
     freeform_text: str,
 ) -> SlotConfidence:
-    if question_id == "final_output_mode":
+    if question_id == "terminal_output":
         return _heuristic_terminal_output_confidence(slot_value, freeform_text)
     if question_id == "docx_output_mode":
         return _heuristic_docx_output_mode_confidence(slot_value, freeform_text)
@@ -1135,7 +1135,7 @@ def _heuristic_slot_confidence(
             if infer_post_processing_goal(freeform_text) == slot_value
             else "medium"
         )
-    if question_id != "input_material_mode" or not freeform_text:
+    if question_id != "primary_runtime_input" or not freeform_text:
         return "medium"
 
     input_intent = resolve_input_intent(freeform_text, {})

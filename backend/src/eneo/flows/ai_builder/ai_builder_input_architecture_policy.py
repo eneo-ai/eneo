@@ -379,7 +379,7 @@ def _resolve_primary_from_answers(
     if architecture.intersection({"document_primary_input", "generic_file_input"}):
         return "documents"
 
-    input_modes = answer_signals.get("input_material_mode", set())
+    input_modes = answer_signals.get("primary_runtime_input", set())
     if "text_and_documents" in input_modes:
         return "text_and_documents"
     if "json" in input_modes:
@@ -396,7 +396,7 @@ def _resolve_primary_from_answers(
 def _resolve_primary_from_defaults(
     defaults: dict[str, set[str]],
 ) -> PrimaryRuntimeInput:
-    input_modes = defaults.get("input_material_mode", set())
+    input_modes = defaults.get("primary_runtime_input", set())
     if "json" in input_modes:
         return "json"
     if "audio" in input_modes:
@@ -440,11 +440,11 @@ def _audio_requested(
     defaults: dict[str, set[str]],
     text: str,
 ) -> bool:
-    if "audio" in answer_signals.get("input_material_mode", set()):
+    if "audio" in answer_signals.get("primary_runtime_input", set()):
         return True
     if "audio_primary_input" in answer_signals.get("flow_input_architecture", set()):
         return True
-    if "audio" in defaults.get("input_material_mode", set()):
+    if "audio" in defaults.get("primary_runtime_input", set()):
         return True
     return _audio_runtime_input_requested(text)
 
@@ -458,11 +458,11 @@ def _document_requested(
         {"document_primary_input", "generic_file_input"}
     ):
         return True
-    if answer_signals.get("input_material_mode", set()).intersection(
+    if answer_signals.get("primary_runtime_input", set()).intersection(
         {"documents", "text_and_documents"}
     ):
         return True
-    if defaults.get("input_material_mode", set()).intersection(
+    if defaults.get("primary_runtime_input", set()).intersection(
         {"documents", "text_and_documents"}
     ):
         return True
@@ -605,7 +605,7 @@ def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bo
         return False
     return bool(
         explicit_question_ids.intersection(
-            {"flow_input_architecture", "input_material_mode"}
+            {"flow_input_architecture", "primary_runtime_input"}
         )
     )
 

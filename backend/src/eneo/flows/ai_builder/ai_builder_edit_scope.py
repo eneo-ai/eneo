@@ -341,7 +341,7 @@ def _input_family_changed(
     if any(
         key in active_explicit_question_ids
         for key in (
-            "input_material_mode",
+            "primary_runtime_input",
             "flow_input_architecture",
             "document_kind",
             "document_material_scope",

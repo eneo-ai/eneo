@@ -4,10 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import DiscoveryFamily
-from eneo.flows.ai_builder.question_catalog import (
-    QUESTION_CATALOG,
-    legacy_question_id_for_slot,
-)
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 _NON_SLOT_QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
     # Cross-slot contradiction gate; never asked as a catalog slot question.
@@ -29,8 +26,7 @@ _NON_SLOT_QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
 }
 
 _CATALOG_QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
-    legacy_question_id_for_slot(template.id): template.family
-    for template in QUESTION_CATALOG.values()
+    template.id: template.family for template in QUESTION_CATALOG.values()
 }
 
 QUESTION_FAMILY: Mapping[str, DiscoveryFamily] = MappingProxyType(

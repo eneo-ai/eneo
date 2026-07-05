@@ -1684,7 +1684,7 @@ class TestSendMessageStructuredQuestion:
                     content="Dokument",
                     metadata={
                         "question_answer": {
-                            "question_id": "input_material_mode",
+                            "question_id": "primary_runtime_input",
                             "selected_option_ids": ["documents"],
                             "selected_values": ["documents"],
                         },
@@ -1724,7 +1724,7 @@ class TestSendMessageStructuredQuestion:
         completion_service._get_adapter.return_value = adapter
 
         duplicate_question_args = {
-            "question_id": "final_output_mode",
+            "question_id": "terminal_output",
             "question": "Vad ska flödet producera som slutresultat?",
             "options": [
                 {"id": "structured_text", "label": "Text"},
@@ -1823,7 +1823,7 @@ class TestSendMessageStructuredQuestion:
             "processing_scope",
             "document_kind",
             "document_material_scope",
-            "final_output_mode",
+            "terminal_output",
         }
         assert data["question_id"] != "multi_file_strategy"
 

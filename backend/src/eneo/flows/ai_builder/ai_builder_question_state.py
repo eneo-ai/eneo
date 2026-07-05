@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     assistant_question_id_from_metadata,
     file_ids_from_metadata,
@@ -94,9 +95,12 @@ def assistant_question_id(
     )
     question_id = assistant_question_id_from_metadata(metadata)
     if question_id is not None:
-        return question_id
+        return canonical_question_id(question_id)
 
-    return _question_id_from_legacy_tool_calls(message)
+    tool_question_id = _question_id_from_legacy_tool_calls(message)
+    if tool_question_id is None:
+        return None
+    return canonical_question_id(tool_question_id)
 
 
 def _is_user_evidence(message: ConversationMessage | Mapping[str, Any]) -> bool:

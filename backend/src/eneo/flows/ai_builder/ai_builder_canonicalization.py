@@ -3,21 +3,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
-from eneo.flows.ai_builder.question_catalog import (
-    slot_resolving_legacy_question_ids,
-)
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 QUESTION_ID_ALIASES: dict[str, str] = {
-    "final_output_format": "final_output_mode",
-    "primary_output_format": "final_output_mode",
-    "output_format": "final_output_mode",
+    "final_output_format": "terminal_output",
+    "final_output_mode": "terminal_output",
+    "input_material_mode": "primary_runtime_input",
+    "primary_output_format": "terminal_output",
+    "output_format": "terminal_output",
     "file_handling_mode": "document_material_scope",
     "upload_mode": "document_material_scope",
-    "final_output_type": "final_output_mode",
+    "final_output_type": "terminal_output",
 }
 
 OPTION_ID_ALIASES: dict[str, dict[str, str]] = {
-    "final_output_mode": {
+    "terminal_output": {
         "text_output": "structured_text",
         "text_brief": "structured_text",
         "structured_text": "structured_text",
@@ -52,12 +52,14 @@ _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
         "processing_scope",
         "document_kind",
         "comparison_scope",
+        "final_pdf_type",
+        "flow_input_architecture",
         "output_reader",
         "final_output_scope",
     }
 )
 SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = (
-    slot_resolving_legacy_question_ids() | _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS
+    frozenset(QUESTION_CATALOG) | _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS
 )
 
 

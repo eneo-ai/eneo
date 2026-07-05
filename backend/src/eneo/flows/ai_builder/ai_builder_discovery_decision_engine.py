@@ -44,8 +44,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import DiscoveryImpact
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
-    legacy_question_id_for_slot,
-    slot_name_for_legacy_question_id,
 )
 
 _NON_SLOT_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
@@ -68,8 +66,7 @@ _NON_SLOT_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
 }
 
 _CATALOG_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
-    legacy_question_id_for_slot(template.id): template.impact
-    for template in QUESTION_CATALOG.values()
+    template.id: template.impact for template in QUESTION_CATALOG.values()
 }
 
 _QUESTION_IMPACT: Mapping[str, DiscoveryImpact] = MappingProxyType(
@@ -243,7 +240,7 @@ def _dynamic_issue_priority_offset(
     ):
         return -20
     if (
-        issue.issue_id == "final_output_mode"
+        issue.issue_id == "terminal_output"
         and profile.output_intent.terminal_output is None
         and profile.input_intent.primary_runtime_input != "unknown"
         and not profile.case_like_flow
@@ -295,7 +292,7 @@ def candidate_confidence(
     slot_classification_result: SlotClassificationResult | None,
 ) -> tuple[DiscoveryConfidence, DiscoveryResolvedBy, tuple[str, ...]]:
     if slot_classification_result is not None and question_id is not None:
-        classification_slot_name = slot_name_for_legacy_question_id(question_id)
+        classification_slot_name = question_id
         for slot in slot_classification_result.slots:
             if slot.slot_name != classification_slot_name:
                 continue
@@ -340,11 +337,11 @@ def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None
 def candidate_assumption_safe(issue_id: str, profile: DiscoveryProfile) -> bool:
     if issue_id in {
         "comparison_scope_conflict",
-        "input_material_mode",
+        "primary_runtime_input",
         "flow_input_architecture",
         "comparison_scope",
         "structured_io_contract",
-        "final_output_mode",
+        "terminal_output",
         "docx_output_mode",
         "pdf_generation_mode",
     }:

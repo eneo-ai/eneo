@@ -666,7 +666,7 @@ async def test_runtime_discovery_asks_output_question_when_model_guesses_uncerta
         for issue in analysis.blocking_issues
         if issue.suggestion is not None
     }
-    assert "final_output_mode" in question_ids
+    assert "terminal_output" in question_ids
     assert analysis.ready_for_confirmation is False
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
@@ -788,7 +788,7 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
     litellm_client.acompletion.assert_awaited_once()
 
 
-def test_targeted_bias_maps_legacy_question_id_to_slot() -> None:
+def test_targeted_bias_canonicalizes_legacy_question_id_to_slot() -> None:
     bias = _targeted_classification_bias(
         [
             ConversationMessage(
@@ -803,7 +803,7 @@ def test_targeted_bias_maps_legacy_question_id_to_slot() -> None:
 
     assert bias is not None
     assert bias.target_slot_name == "terminal_output"
-    assert bias.asked_question_id == "final_output_mode"
+    assert bias.asked_question_id == "terminal_output"
     assert bias.latest_user_answer == "en fil jag kan ladda ner"
 
 

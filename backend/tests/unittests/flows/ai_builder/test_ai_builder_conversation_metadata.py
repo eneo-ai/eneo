@@ -39,7 +39,7 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
     metadata = metadata_for_user_message(
         question_answer={
             "kind": "structured_question_answer",
-            "question_id": "input_material_mode",
+            "question_id": "primary_runtime_input",
             "selected_option_id": "documents",
             "selected_value": "documents",
             "ui_language": "sv",
@@ -49,7 +49,7 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
 
     assert metadata == {
         "question_answer": {
-            "question_id": "input_material_mode",
+            "question_id": "primary_runtime_input",
             "selected_option_id": "documents",
             "selected_value": "documents",
         },
@@ -57,7 +57,7 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
     }
     answer = question_answer_from_metadata(metadata)
     assert answer is not None
-    assert question_answer_question_id(answer) == "input_material_mode"
+    assert question_answer_question_id(answer) == "primary_runtime_input"
 
 
 def test_requirements_confirmation_is_persisted_as_top_level_metadata() -> None:

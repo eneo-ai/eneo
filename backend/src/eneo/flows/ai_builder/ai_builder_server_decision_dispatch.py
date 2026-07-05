@@ -51,7 +51,6 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.ai_builder.question_catalog import legacy_question_id_for_slot
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -133,7 +132,7 @@ async def _dispatch_question(
     request: ServerDecisionDispatchRequest,
     decision: AskCanonicalQuestion,
 ) -> ServerDecisionDispatchResult:
-    question_id = legacy_question_id_for_slot(decision.slot_name)
+    question_id = decision.slot_name
     discovery_followup = build_discovery_followup(
         request.conversation,
         flow=request.flow,

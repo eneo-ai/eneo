@@ -331,9 +331,9 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "final_output_mode"
+        assert analysis.next_issue.issue_id == "terminal_output"
         assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "final_output_mode"
+        assert analysis.next_issue.suggestion.question_id == "terminal_output"
 
     def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(
         self,
@@ -523,7 +523,7 @@ class TestExtendedClarificationHints:
                         "id": "call_output",
                         "name": "ask_structured_question",
                         "arguments": {
-                            "question_id": "final_output_mode",
+                            "question_id": "terminal_output",
                             "question": "Vad ska flödet producera som slutresultat?",
                             "options": [],
                         },
@@ -545,7 +545,7 @@ class TestExtendedClarificationHints:
 
         assert followup is not None
         question_data = followup.question_data
-        assert question_data.question_id == "final_output_mode"
+        assert question_data.question_id == "terminal_output"
 
     def test_rich_prompt_uses_full_question_budget_when_slots_remain(
         self,
@@ -578,7 +578,7 @@ class TestExtendedClarificationHints:
                 content="Structured text output",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_ids": ["structured_text"],
                         "selected_values": ["structured_text"],
                     }
@@ -621,7 +621,7 @@ class TestExtendedClarificationHints:
                 content="Documents",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_ids": ["documents"],
                         "selected_values": ["documents"],
                     }
@@ -632,7 +632,7 @@ class TestExtendedClarificationHints:
                 content="DOCX document",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_ids": ["docx_document"],
                         "selected_values": ["docx_document"],
                     }
@@ -703,7 +703,7 @@ class TestExtendedClarificationHints:
             for issue in analysis.blocking_issues
             if issue.suggestion is not None
         ]
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     def test_pdf_template_expectation_asks_pdf_generation_mode_before_docx_mode(
         self,
@@ -729,7 +729,7 @@ class TestExtendedClarificationHints:
                 content="PDF-dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "pdf_document",
                         "answer": "pdf_document",
                     }
@@ -778,7 +778,7 @@ class TestExtendedClarificationHints:
         ]
 
         assert "flow_input_architecture" not in question_ids
-        assert "input_material_mode" not in question_ids
+        assert "primary_runtime_input" not in question_ids
 
     def test_audio_report_prompt_with_keywords_does_not_reopen_input_or_output_questions(
         self,
@@ -805,7 +805,7 @@ class TestExtendedClarificationHints:
         ]
 
         assert "flow_input_architecture" not in question_ids
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     def test_swedish_audio_prompt_with_terminal_word_file_is_ready_for_confirmation(
         self,
@@ -829,9 +829,9 @@ class TestExtendedClarificationHints:
         ]
 
         assert analysis.ready_for_confirmation is True
-        assert "input_material_mode" not in question_ids
+        assert "primary_runtime_input" not in question_ids
         assert "flow_input_architecture" not in question_ids
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
         assert "docx_output_mode" not in question_ids
 
     def test_template_file_role_requires_docx_mode_when_generated_docx_is_defaulted(
@@ -926,7 +926,7 @@ class TestExtendedClarificationHints:
                 content="DOCX document",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_ids": ["docx_document"],
                         "selected_values": ["docx_document"],
                     },
@@ -998,7 +998,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "input_material_mode" not in question_ids
+        assert "primary_runtime_input" not in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "primary_runtime_input" not in question_ids
 
@@ -1052,7 +1052,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "input_material_mode" not in question_ids
+        assert "primary_runtime_input" not in question_ids
         assert "flow_input_architecture" not in question_ids
 
     def test_edit_flow_uses_existing_flow_defaults_before_reasking_output_or_metadata(
@@ -1117,7 +1117,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
         assert "document_kind" not in question_ids
         assert "output_reader" not in question_ids
@@ -1198,7 +1198,7 @@ class TestExtendedClarificationHints:
                 content="Dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_id": "documents",
                         "answer": "documents",
                     },
@@ -1222,7 +1222,7 @@ class TestExtendedClarificationHints:
                 content="PDF-dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "pdf_document",
                         "answer": "pdf_document",
                     },
@@ -1284,9 +1284,9 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "input_material_mode" not in question_ids
+        assert "primary_runtime_input" not in question_ids
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "final_output_mode"
+        assert analysis.next_issue.issue_id == "terminal_output"
 
     def test_generic_uploaded_pdf_docx_prompt_defaults_generated_docx_without_reasking(
         self,
@@ -1396,9 +1396,9 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "final_output_mode"
+        assert analysis.next_issue.issue_id == "terminal_output"
         assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "final_output_mode"
+        assert analysis.next_issue.suggestion.question_id == "terminal_output"
 
     def test_bare_transcription_prompt_asks_outcome_after_output_answer(
         self,
@@ -1414,7 +1414,7 @@ class TestExtendedClarificationHints:
                 content="Strukturerat textresultat",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_values": ["structured_text"],
                     },
                     "ui_language": "sv",
@@ -1452,9 +1452,9 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "input_material_mode"
+        assert analysis.next_issue.issue_id == "primary_runtime_input"
         assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "input_material_mode"
+        assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
 
     def test_detailed_task_spec_with_unknown_input_still_asks_input_question(
         self,
@@ -1477,9 +1477,9 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "input_material_mode"
+        assert analysis.next_issue.issue_id == "primary_runtime_input"
         assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "input_material_mode"
+        assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
 
     def test_pure_information_question_does_not_trigger_workflow_fallback(
         self,
@@ -1644,13 +1644,13 @@ class TestExtendedClarificationHints:
         assert analysis.ready_for_confirmation is False
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id in {
-            "final_output_mode",
+            "terminal_output",
             "post_processing_goal",
         }
         assert analysis.decision_trace is not None
         assert analysis.decision_trace.selected_action == "ask"
         assert analysis.decision_trace.selected_question_id in {
-            "final_output_mode",
+            "terminal_output",
             "post_processing_goal",
         }
 
@@ -1762,7 +1762,7 @@ class TestExtendedClarificationHints:
                 content="PDF-dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_values": ["pdf_document"],
                     },
                     "ui_language": "sv",
@@ -1803,7 +1803,7 @@ class TestExtendedClarificationHints:
                 content="Dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_values": ["documents"],
                     },
                     "ui_language": "sv",
@@ -1988,9 +1988,9 @@ class TestExtendedClarificationHints:
         )
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "input_material_mode"
+        assert analysis.next_issue.issue_id == "primary_runtime_input"
         assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "input_material_mode"
+        assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
 
     @pytest.mark.asyncio
     async def test_classifier_raw_outcome_does_not_skip_bare_transcription_followup(
@@ -2007,7 +2007,7 @@ class TestExtendedClarificationHints:
                 content="PDF-dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_values": ["pdf_document"],
                     },
                     "ui_language": "sv",
@@ -2201,7 +2201,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     def test_swedish_short_summary_output_does_not_reopen_final_output_mode(
         self,
@@ -2221,7 +2221,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     @pytest.mark.parametrize(
         ("prompt", "language", "assistant_snippet", "question_snippet"),
@@ -2281,7 +2281,7 @@ class TestExtendedClarificationHints:
         question_data = followup.question_data
         assistant_text = followup.assistant_text
         assert issue.issue_id == "external_delivery_unsupported"
-        assert question_data.question_id == "final_output_mode"
+        assert question_data.question_id == "terminal_output"
         assert assistant_snippet in assistant_text
         assert question_snippet in question_data.question
 
@@ -2337,7 +2337,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
         assert "docx_output_mode" not in question_ids
 
     def test_word_input_form_fields_do_not_resolve_as_template_fill_output(
@@ -2362,7 +2362,7 @@ class TestExtendedClarificationHints:
         ]
 
         assert "docx_output_mode" not in question_ids
-        assert "final_output_mode" in question_ids
+        assert "terminal_output" in question_ids
 
     def test_text_answer_flow_does_not_reopen_final_output_mode(self) -> None:
         conversation = [
@@ -2385,7 +2385,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     def test_edit_prompt_short_summary_output_does_not_reopen_final_output_mode(
         self,
@@ -2427,7 +2427,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     def test_edit_prompt_word_template_fill_output_does_not_reask_docx_mode(
         self,
@@ -2470,7 +2470,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
         assert "docx_output_mode" not in question_ids
 
     def test_contract_heavy_prompt_infers_output_from_detailed_description(
@@ -2503,7 +2503,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "final_output_mode" not in question_ids
+        assert "terminal_output" not in question_ids
 
     def test_contract_flow_freeform_case_scope_resolves_document_material_scope(
         self,
@@ -2569,7 +2569,7 @@ class TestExtendedClarificationHints:
                 content="Dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_id": "documents",
                         "answer": "documents",
                     },
@@ -2593,7 +2593,7 @@ class TestExtendedClarificationHints:
                 content="Strukturerat textresultat.",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "structured_text",
                         "answer": "structured_text",
                     },
@@ -2637,7 +2637,7 @@ class TestExtendedClarificationHints:
                 content="Dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_id": "documents",
                         "answer": "documents",
                     },
@@ -2661,7 +2661,7 @@ class TestExtendedClarificationHints:
                 content="Strukturerat textresultat.",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "structured_text",
                         "answer": "structured_text",
                     },
@@ -2862,7 +2862,7 @@ class TestExtendedClarificationHints:
                 content="Behåll samma riktning.",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "docx_document",
                         "selected_value": "docx_document",
                         "answer": "docx_document",
@@ -2899,7 +2899,7 @@ class TestExtendedClarificationHints:
                 content="PDF-dokument",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "pdf_document",
                         "answer": "pdf_document",
                     },
@@ -2927,7 +2927,7 @@ class TestPlannerConversationEncoding:
                 content="Documents",
                 metadata={
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_ids": ["documents"],
                         "selected_values": ["documents"],
                     }
@@ -2937,7 +2937,7 @@ class TestPlannerConversationEncoding:
 
         assert payload["role"] == "user"
         assert "Structured answer metadata" in payload["content"]
-        assert "input_material_mode" in payload["content"]
+        assert "primary_runtime_input" in payload["content"]
 
     def test_unexpected_conversation_role_fails_loud_for_llm_context(self) -> None:
         with pytest.raises(

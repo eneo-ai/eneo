@@ -215,7 +215,7 @@ class SendMessageRequest(BaseModel):
                 "file_ids": ["00000000-0000-0000-0000-000000000099"],
                 "question_answer": {
                     "kind": "structured_question_answer",
-                    "question_id": "final_output_mode",
+                    "question_id": "terminal_output",
                     "selected_option_ids": ["structured_json"],
                     "selected_values": ["structured_json"],
                 },

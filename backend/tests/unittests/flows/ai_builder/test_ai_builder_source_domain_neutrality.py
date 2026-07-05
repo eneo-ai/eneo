@@ -32,17 +32,17 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     document_kind_question,
     document_material_scope_question,
     docx_output_mode_question,
-    final_output_mode_question,
     final_output_scope_question,
     final_pdf_type_question,
     flow_input_architecture_question,
-    input_material_mode_question,
     output_reader_question,
     pdf_generation_mode_question,
     post_processing_goal_question,
+    primary_runtime_input_question,
     processing_scope_question,
     runtime_metadata_fields_question,
     structured_analysis_need_question,
+    terminal_output_question,
 )
 
 # Tokens that must not appear in the default-surface discovery questions
@@ -94,14 +94,14 @@ class TestDiscoveryQuestionsRenderNeutrality:
         """
         builders = (
             ("processing_scope", processing_scope_question),
-            ("input_material_mode", input_material_mode_question),
+            ("primary_runtime_input", primary_runtime_input_question),
             ("flow_input_architecture", flow_input_architecture_question),
             ("document_kind", document_kind_question),
             ("document_material_scope", document_material_scope_question),
             ("post_processing_goal", post_processing_goal_question),
             ("comparison_scope_conflict", comparison_scope_conflict_question),
             ("comparison_scope", comparison_scope_question),
-            ("final_output_mode", final_output_mode_question),
+            ("terminal_output", terminal_output_question),
             ("docx_output_mode", docx_output_mode_question),
             ("output_reader", output_reader_question),
             ("final_output_scope", final_output_scope_question),

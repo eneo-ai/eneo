@@ -506,7 +506,7 @@ def normalize_requirements_summary_for_flow(
         return dict(requirements_data)
 
     default_runtime_input = _single_runtime_input_default(
-        build_flow_discovery_defaults(flow).get("input_material_mode", set())
+        build_flow_discovery_defaults(flow).get("primary_runtime_input", set())
     )
     if default_runtime_input is None:
         return dict(requirements_data)
@@ -552,7 +552,7 @@ def _conversation_explicitly_changes_runtime_input(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
     default_runtime_input: str,
 ) -> bool:
-    if has_explicit_structured_answer(conversation, "input_material_mode"):
+    if has_explicit_structured_answer(conversation, "primary_runtime_input"):
         return True
     if has_explicit_structured_answer(conversation, "flow_input_architecture"):
         return True
@@ -645,7 +645,7 @@ def question_is_already_resolved(
     freeform_text = aggregate_freeform_user_text(conversation)
     flow_defaults = build_flow_discovery_defaults(flow)
 
-    if canonical_id == "final_output_mode":
+    if canonical_id == "terminal_output":
         return (
             resolve_explicit_output_choice(
                 freeform_text,
@@ -706,10 +706,10 @@ def resolve_explicit_output_choice(
 
     if (
         flow_defaults
-        and "final_output_mode" in flow_defaults
+        and "terminal_output" in flow_defaults
         and not mentions_output_change(normalized_text)
     ):
-        defaults = flow_defaults["final_output_mode"]
+        defaults = flow_defaults["terminal_output"]
         return next(iter(defaults)) if defaults else None
 
     if _looks_like_text_analysis_output(normalized_text):
@@ -748,7 +748,7 @@ def _resolve_direct_output_choice(
     scoped_text: RoleScopedText,
     answer_signals: dict[str, set[str]],
 ) -> str | None:
-    output_values = answer_signals.get("final_output_mode", set())
+    output_values = answer_signals.get("terminal_output", set())
     pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
     role_scoped_text = (
         scoped_text.replacement_target_text
@@ -850,13 +850,13 @@ def terminal_output_uncertainty_is_unresolved(
     flow_defaults: dict[str, set[str]] | None = None,
     conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None = None,
 ) -> bool:
-    if answer_signals.get("final_output_mode"):
+    if answer_signals.get("terminal_output"):
         return False
 
     normalized_text = normalize_signal_text(text)
     if (
         flow_defaults
-        and flow_defaults.get("final_output_mode")
+        and flow_defaults.get("terminal_output")
         and not mentions_output_change(normalized_text)
     ):
         return False
@@ -1076,7 +1076,7 @@ def resolve_docx_output_mode(
             return "template_fill_docx"
         return (
             "generated_docx"
-            if "docx_document" in answer_signals.get("final_output_mode", set())
+            if "docx_document" in answer_signals.get("terminal_output", set())
             else None
         )
 
@@ -1188,9 +1188,9 @@ def _reconcile_terminal_output_with_declared_schema(
     }:
         return terminal_output
     if conversation is not None:
-        if has_explicit_structured_answer(conversation, "final_output_mode"):
+        if has_explicit_structured_answer(conversation, "terminal_output"):
             return terminal_output
-    elif answer_signals.get("final_output_mode"):
+    elif answer_signals.get("terminal_output"):
         return terminal_output
     return "structured_json"
 
@@ -1393,7 +1393,7 @@ def needs_structured_extraction(
     if step_count < 2:
         return False
 
-    if "structured_json" in answer_signals.get("final_output_mode", set()):
+    if "structured_json" in answer_signals.get("terminal_output", set()):
         return False
 
     if terminal_output_type not in {OutputType.TEXT, OutputType.DOCX, OutputType.PDF}:

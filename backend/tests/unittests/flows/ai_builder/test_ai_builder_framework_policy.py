@@ -39,9 +39,7 @@ from eneo.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from eneo.flows.ai_builder.question_catalog import (
-    slot_resolving_legacy_question_ids,
-)
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     OutputType,
@@ -379,7 +377,7 @@ def test_resolve_explicit_output_choice_respects_existing_flow_default_when_outp
     output = resolve_explicit_output_choice(
         "Behåll samma flöde men lägg till makrotrender och geopolitiska signaler.",
         {},
-        flow_defaults={"final_output_mode": {"structured_text"}},
+        flow_defaults={"terminal_output": {"structured_text"}},
     )
 
     assert output == "structured_text"
@@ -454,7 +452,7 @@ def test_resolve_docx_output_mode_ignores_generic_template_wording_when_output_i
 ):
     mode = resolve_docx_output_mode(
         "Jag vill fylla i en mall men slutresultatet ska vara en PDF.",
-        {"final_output_mode": {"pdf_document"}},
+        {"terminal_output": {"pdf_document"}},
         explicit_output="pdf_document",
     )
 
@@ -466,7 +464,7 @@ def test_resolve_docx_output_mode_detects_template_fill_for_docx_template_reques
 ):
     mode = resolve_docx_output_mode(
         "Skapa ett Word-dokument från en mall.",
-        {"final_output_mode": {"docx_document"}},
+        {"terminal_output": {"docx_document"}},
         explicit_output="docx_document",
     )
 
@@ -574,7 +572,7 @@ def test_audio_to_word_report_prompt_infers_audio_input_not_document_input() -> 
         [{"role": "user", "content": _AUDIO_TO_WORD_REPORT_PROMPT}]
     )
 
-    assert signals.get("input_material_mode") == {"audio"}
+    assert signals.get("primary_runtime_input") == {"audio"}
     assert "document_kind" not in signals
     assert "document_material_scope" not in signals
 
@@ -614,7 +612,7 @@ def test_resolve_docx_output_mode_defaults_when_docx_is_selected_via_structured_
 ):
     mode = resolve_docx_output_mode(
         "Behåll samma riktning.",
-        {"final_output_mode": {"docx_document"}},
+        {"terminal_output": {"docx_document"}},
         explicit_output="docx_document",
     )
 
@@ -640,7 +638,7 @@ def test_resolve_output_intent_keeps_plain_pdf_when_pdf_generation_mode_is_answe
     intent = resolve_output_intent(
         "Det ska vara en vanlig genererad PDF utan fast mall.",
         {
-            "final_output_mode": {"pdf_document"},
+            "terminal_output": {"pdf_document"},
             "pdf_generation_mode": {"generated_pdf"},
         },
     )
@@ -655,7 +653,7 @@ def test_resolve_pdf_generation_mode_defaults_when_pdf_is_selected_via_structure
 ):
     mode = resolve_pdf_generation_mode(
         "Behåll samma riktning.",
-        {"final_output_mode": {"pdf_document"}},
+        {"terminal_output": {"pdf_document"}},
         explicit_output="pdf_document",
     )
 
@@ -777,7 +775,7 @@ def test_normalizes_output_question_aliases_to_canonical_mode() -> None:
         }
     )
 
-    assert payload["question_id"] == "final_output_mode"
+    assert payload["question_id"] == "terminal_output"
     assert [option["id"] for option in payload["options"]] == [
         "structured_text",
         "docx_document",
@@ -786,7 +784,9 @@ def test_normalizes_output_question_aliases_to_canonical_mode() -> None:
 
 
 def test_canonical_question_id_is_available_from_canonicalization_module() -> None:
-    assert canonical_question_id("final_output_format") == "final_output_mode"
+    assert canonical_question_id("final_output_format") == "terminal_output"
+    assert canonical_question_id("final_output_mode") == "terminal_output"
+    assert canonical_question_id("input_material_mode") == "primary_runtime_input"
 
 
 def test_output_change_keywords_live_in_keywords_module() -> None:
@@ -803,7 +803,7 @@ def test_normalizes_output_answer_aliases_to_canonical_mode() -> None:
         }
     )
 
-    assert answer["question_id"] == "final_output_mode"
+    assert answer["question_id"] == "terminal_output"
     assert answer["selected_option_ids"] == ["docx_document"]
     assert answer["selected_values"] == ["docx_document"]
     assert answer["answer"] == "docx_document"
@@ -833,7 +833,7 @@ def test_normalizes_upload_and_output_type_aliases_to_framework_ids() -> None:
         "multiple_documents_case",
         "single_document_case",
     ]
-    assert output_answer["question_id"] == "final_output_mode"
+    assert output_answer["question_id"] == "terminal_output"
     assert output_answer["selected_option_id"] == "structured_json"
     assert output_answer["answer"] == "structured_json"
 
@@ -869,7 +869,7 @@ def test_extract_answer_signals_prefers_latest_structured_answer_for_same_questi
                 "content": "DOCX document",
                 "metadata": {
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "docx_document",
                         "answer": "docx_document",
                     }
@@ -880,7 +880,7 @@ def test_extract_answer_signals_prefers_latest_structured_answer_for_same_questi
                 "content": "PDF-dokument",
                 "metadata": {
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "pdf_document",
                         "answer": "pdf_document",
                     }
@@ -889,7 +889,7 @@ def test_extract_answer_signals_prefers_latest_structured_answer_for_same_questi
         ]
     )
 
-    assert signals["final_output_mode"] == {"pdf_document", "pdf-dokument"}
+    assert signals["terminal_output"] == {"pdf_document", "pdf-dokument"}
 
 
 def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
@@ -900,7 +900,7 @@ def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
                 "content": "Dokument",
                 "metadata": {
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_id": "documents",
                         "answer": "documents",
                     }
@@ -911,7 +911,7 @@ def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
                 "content": "Ljud",
                 "metadata": {
                     "question_answer": {
-                        "question_id": "input_material_mode",
+                        "question_id": "primary_runtime_input",
                         "selected_option_id": "audio",
                         "answer": "audio",
                     }
@@ -920,7 +920,7 @@ def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
         ]
     )
 
-    assert signals["input_material_mode"] == {"audio", "ljud"}
+    assert signals["primary_runtime_input"] == {"audio", "ljud"}
 
 
 def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structured_answer_labels() -> (
@@ -933,7 +933,7 @@ def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structu
                 "content": "DOCX document",
                 "metadata": {
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "docx_document",
                         "answer": "docx_document",
                     }
@@ -942,8 +942,8 @@ def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structu
         ]
     )
 
-    assert "input_material_mode" not in signals
-    assert signals["final_output_mode"] == {"docx_document", "docx document"}
+    assert "primary_runtime_input" not in signals
+    assert signals["terminal_output"] == {"docx_document", "docx document"}
 
 
 def test_latest_pending_structured_question_reads_backend_question_payload() -> None:
@@ -957,7 +957,7 @@ def test_latest_pending_structured_question_reads_backend_question_payload() -> 
                         "id": "call_1",
                         "name": "ask_structured_question",
                         "arguments": {
-                            "question_id": "final_output_mode",
+                            "question_id": "terminal_output",
                             "question": "Vad ska flödet producera som slutresultat?",
                             "options": [
                                 {
@@ -973,7 +973,7 @@ def test_latest_pending_structured_question_reads_backend_question_payload() -> 
     )
 
     assert question is not None
-    assert question["question_id"] == "final_output_mode"
+    assert question["question_id"] == "terminal_output"
 
 
 def test_infer_question_answer_from_freeform_matches_exact_option_label() -> None:
@@ -1111,7 +1111,7 @@ def test_extract_answer_signals_infers_freeform_document_signals_without_metadat
 
     assert "contracts_agreements" in signals["document_kind"]
     assert "multiple_documents_case" in signals["document_material_scope"]
-    assert "documents" in signals["input_material_mode"]
+    assert "documents" in signals["primary_runtime_input"]
 
 
 def test_extract_answer_signals_infers_swedish_flexible_pdf_answers() -> None:
@@ -1129,7 +1129,7 @@ def test_extract_answer_signals_infers_swedish_flexible_pdf_answers() -> None:
     )
 
     assert "flexible_document_case" in signals["document_material_scope"]
-    assert "documents" in signals["input_material_mode"]
+    assert "documents" in signals["primary_runtime_input"]
 
 
 def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() -> None:
@@ -1165,7 +1165,7 @@ def test_extract_answer_signals_infers_structured_analysis_from_rich_docx_workfl
         ]
     )
 
-    assert "documents" in signals["input_material_mode"]
+    assert "documents" in signals["primary_runtime_input"]
     assert "use_structured_analysis" in signals["structured_analysis_need"]
 
 
@@ -2007,7 +2007,7 @@ def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> No
                 content="DOCX document",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "docx_document",
                     }
                 },
@@ -2049,7 +2049,7 @@ def test_aggregate_freeform_user_text_keeps_long_freeform_message_even_with_stru
                 content="ändra så att jag får ut en word dokument istället för en pdf",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_option_id": "docx_document",
                     }
                 },
@@ -2070,7 +2070,7 @@ def test_aggregate_freeform_user_text_filters_structured_answer_echo_with_termin
                 content="pdf_document.",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_value": "pdf_document",
                     }
                 },
@@ -2091,7 +2091,7 @@ def test_aggregate_freeform_user_text_keeps_mixed_content_after_structured_answe
                 content="pdf_document. men lägg till källor också",
                 metadata={
                     "question_answer": {
-                        "question_id": "final_output_mode",
+                        "question_id": "terminal_output",
                         "selected_value": "pdf_document",
                     }
                 },
@@ -2136,7 +2136,7 @@ def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed
             content="DOCX document",
             metadata={
                 "question_answer": {
-                    "question_id": "final_output_mode",
+                    "question_id": "terminal_output",
                     "selected_option_id": "docx_document",
                 }
             },
@@ -2148,10 +2148,24 @@ def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed
     ]
 
     assert question_is_already_resolved(
-        "final_output_mode",
+        "terminal_output",
         conversation,
         flow=flow,
     )
+
+
+def test_slot_name_answer_signals_drive_input_and_output_resolution() -> None:
+    input_intent = resolve_input_intent(
+        "",
+        {"primary_runtime_input": {"audio"}},
+    )
+    output_choice = resolve_explicit_output_choice(
+        "",
+        {"terminal_output": {"structured_json"}},
+    )
+
+    assert input_intent.primary_runtime_input == "audio"
+    assert output_choice == "structured_json"
 
 
 def test_supported_structured_question_ids_partition_catalog_and_policy_ids() -> None:
@@ -2159,22 +2173,26 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
         {
             "comparison_scope",
             "document_kind",
+            "final_pdf_type",
             "final_output_scope",
+            "flow_input_architecture",
             "output_reader",
             "processing_scope",
         }
     )
+    slot_question_ids = frozenset(QUESTION_CATALOG)
 
     assert frozenset(supported_structured_question_ids()) == (
-        slot_resolving_legacy_question_ids() | non_slot_policy_ids
+        slot_question_ids | non_slot_policy_ids
     )
-    assert non_slot_policy_ids.isdisjoint(slot_resolving_legacy_question_ids())
+    assert non_slot_policy_ids.isdisjoint(slot_question_ids)
 
 
 @pytest.mark.parametrize(
     "question_id",
     [
-        "final_output_mode",
+        "primary_runtime_input",
+        "terminal_output",
         "flow_input_architecture",
         "final_pdf_type",
         "post_processing_goal",
@@ -2195,8 +2213,10 @@ def test_accepts_supported_structured_question_ids(question_id: str) -> None:
     "alias",
     [
         "file_handling_mode",
+        "final_output_mode",
         "final_output_format",
         "final_output_type",
+        "input_material_mode",
         "output_format",
         "primary_output_format",
         "upload_mode",

@@ -14,7 +14,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 _EXPECTED_BUILDER_NAMES: tuple[str, ...] = (
     "_build_comparison_scope_conflict_issue",
     "_build_case_scope_issue",
-    "_build_input_material_mode_issue",
+    "_build_primary_runtime_input_issue",
     "_build_flow_input_architecture_issue",
     "_build_document_kind_issue",
     "_build_document_material_scope_issue",
@@ -22,7 +22,7 @@ _EXPECTED_BUILDER_NAMES: tuple[str, ...] = (
     "_build_external_delivery_unsupported_issue",
     "_build_structured_io_contract_issue",
     "_build_post_processing_goal_issue",
-    "_build_final_output_mode_issue",
+    "_build_terminal_output_issue",
     "_build_docx_output_mode_issue",
     "_build_pdf_generation_mode_issue",
     "_build_output_reader_issue",
@@ -35,7 +35,7 @@ _EXPECTED_BUILDER_NAMES: tuple[str, ...] = (
 _EXPECTED_ISSUE_ID_BY_BUILDER: dict[str, str] = {
     "_build_comparison_scope_conflict_issue": "comparison_scope_conflict",
     "_build_case_scope_issue": "case_scope",
-    "_build_input_material_mode_issue": "input_material_mode",
+    "_build_primary_runtime_input_issue": "primary_runtime_input",
     "_build_flow_input_architecture_issue": "flow_input_architecture",
     "_build_document_kind_issue": "document_kind",
     "_build_document_material_scope_issue": "document_material_scope",
@@ -43,7 +43,7 @@ _EXPECTED_ISSUE_ID_BY_BUILDER: dict[str, str] = {
     "_build_external_delivery_unsupported_issue": "external_delivery_unsupported",
     "_build_structured_io_contract_issue": "structured_io_contract",
     "_build_post_processing_goal_issue": "post_processing_goal",
-    "_build_final_output_mode_issue": "final_output_mode",
+    "_build_terminal_output_issue": "terminal_output",
     "_build_docx_output_mode_issue": "docx_output_mode",
     "_build_pdf_generation_mode_issue": "pdf_generation_mode",
     "_build_output_reader_issue": "output_reader",
@@ -122,9 +122,9 @@ def test_discovery_issue_builders_construct_declared_issue_ids() -> None:
 def test_final_output_mode_builder_prefers_output_vague_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(discovery, "_looks_like_output_is_vague", lambda profile: True)
+    monkeypatch.setattr(discovery, "_terminal_output_is_vague", lambda profile: True)
     monkeypatch.setattr(
-        discovery, "_ultra_vague_output_choice_is_vague", lambda profile: True
+        discovery, "_ultra_vague_terminal_output_choice_is_vague", lambda profile: True
     )
     conversation = [
         ConversationMessage(
@@ -135,10 +135,10 @@ def test_final_output_mode_builder_prefers_output_vague_message(
     ]
     profile = build_discovery_profile(conversation)
 
-    issue = discovery._build_final_output_mode_issue(conversation, profile)
+    issue = discovery._build_terminal_output_issue(conversation, profile)
 
     assert issue is not None
-    assert issue.issue_id == "final_output_mode"
+    assert issue.issue_id == "terminal_output"
     assert issue.message == (
         "The final output format is still too vague to design the flow confidently."
     )

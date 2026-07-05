@@ -42,7 +42,6 @@ from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from eneo.flows.ai_builder.question_catalog import legacy_question_id_for_slot
 from eneo.flows.domain.flow import Flow
 
 _PROFILE_ANSWER_SOURCES: frozenset[str] = frozenset(
@@ -263,11 +262,11 @@ def build_discovery_profile(
         for question_id in (
             "processing_scope",
             "comparison_scope",
-            "input_material_mode",
+            "primary_runtime_input",
             "flow_input_architecture",
             "document_kind",
             "document_material_scope",
-            "final_output_mode",
+            "terminal_output",
             "docx_output_mode",
             "pdf_generation_mode",
             "final_pdf_type",
@@ -286,7 +285,7 @@ def build_discovery_profile(
     )
     explicit_input_question_ids = {
         question_id
-        for question_id in ("input_material_mode", "flow_input_architecture")
+        for question_id in ("primary_runtime_input", "flow_input_architecture")
         if has_explicit_structured_answer(conversation, question_id)
     }
     input_intent = resolve_input_intent(
@@ -296,8 +295,8 @@ def build_discovery_profile(
         explicit_question_ids=explicit_input_question_ids,
     )
     explicit_output = output_intent.terminal_output
-    default_input_modes = flow_defaults.get("input_material_mode", set())
-    default_output_mode = flow_defaults.get("final_output_mode", set())
+    default_input_modes = flow_defaults.get("primary_runtime_input", set())
+    default_output_mode = flow_defaults.get("terminal_output", set())
     edit_scope = resolve_edit_scope(
         edit_mode=flow is not None,
         capabilities=capabilities,
@@ -458,8 +457,7 @@ def answer_signals_from_planning_state(
     for slot in planning_state.resolved_slots.values():
         if slot.source not in accepted_sources:
             continue
-        question_id = legacy_question_id_for_slot(slot.name)
-        answers.setdefault(question_id, set()).add(slot.value)
+        answers.setdefault(slot.name, set()).add(slot.value)
     return answers
 
 
@@ -576,12 +574,12 @@ def should_prefer_structured_intermediate(
         input_intent.document_runtime_input_requested
         or "documents"
         in flow_defaults.get(
-            "input_material_mode",
+            "primary_runtime_input",
             set(),
         )
     )
     audio_like_input = input_intent.audio_requested or "audio" in flow_defaults.get(
-        "input_material_mode",
+        "primary_runtime_input",
         set(),
     )
     if not (document_like_input or audio_like_input):
