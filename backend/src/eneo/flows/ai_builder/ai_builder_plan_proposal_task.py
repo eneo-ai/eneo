@@ -34,7 +34,11 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     render_result_contract_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state import (
+    FileRoleEvidence,
+    PlanningState,
+    ResolvedSlot,
+)
 
 
 def build_plan_proposal_system_prompt(
@@ -222,9 +226,18 @@ def _file_roles_block(planning_state: PlanningState) -> str | None:
     if not planning_state.file_roles:
         return None
     return "\n".join(
-        f"- {item.filename}: {item.role} ({item.source}, {item.confidence} confidence)"
+        f"- {item.filename}: {item.role} "
+        f"({item.source}, {item.confidence} confidence"
+        f"{_candidate_roles_prompt_suffix(item)})"
         for item in planning_state.file_roles
     )
+
+
+def _candidate_roles_prompt_suffix(item: FileRoleEvidence) -> str:
+    candidate_roles = tuple(item.candidate_roles)
+    if not candidate_roles or candidate_roles == (item.role,):
+        return ""
+    return "; candidates: " + ", ".join(candidate_roles)
 
 
 def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:

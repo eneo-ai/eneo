@@ -36,8 +36,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_three(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 3
+    def test_builder_schema_version_is_four(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 4
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -115,6 +115,7 @@ class TestRoundTrip:
                     source="heuristic",
                     confidence="medium",
                     evidence=["filename:mall"],
+                    candidate_roles=["template"],
                 )
             ],
             output_schema_evidence=OutputSchemaEvidence(
@@ -210,6 +211,40 @@ class TestFileRoleEvidenceValidation:
         )
 
         assert evidence.role == "reference_material"
+
+    def test_file_role_evidence_preserves_candidate_roles(self) -> None:
+        evidence = FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="template",
+            source="heuristic",
+            confidence="medium",
+            candidate_roles=["template", "reference_material"],
+        )
+
+        assert evidence.role == "template"
+        assert evidence.candidate_roles == ["template", "reference_material"]
+
+    def test_file_role_evidence_rejects_candidates_without_primary_role(self) -> None:
+        with pytest.raises(ValidationError):
+            FileRoleEvidence(
+                file_id="00000000-0000-0000-0000-000000000701",
+                filename="lagmall.docx",
+                file_type="document",
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                    "document"
+                ),
+                role="template",
+                source="heuristic",
+                confidence="medium",
+                candidate_roles=["reference_material"],
+            )
 
     def test_file_role_evidence_rejects_unknown_role(self) -> None:
         with pytest.raises(ValidationError):

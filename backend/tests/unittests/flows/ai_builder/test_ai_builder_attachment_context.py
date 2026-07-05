@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from typing import get_args
 from uuid import uuid4
 
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    _FILE_ROLE_PRIORITY,
     AIBuilderAttachmentContextPolicy,
     build_ai_builder_attachment_context,
 )
+from eneo.flows.ai_builder.planning_state import FileRole
 
 
 def _make_file(
@@ -58,6 +61,10 @@ def test_build_ai_builder_attachment_context_truncates_per_file_and_total_budget
     assert len(result.included_file_ids) == 2
     assert result.truncated is True
     assert result.total_chars <= 70
+
+
+def test_file_role_priority_covers_all_declared_file_roles() -> None:
+    assert set(_FILE_ROLE_PRIORITY) == set(get_args(FileRole))
 
 
 def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> None:
@@ -127,6 +134,33 @@ def test_build_ai_builder_attachment_context_distinguishes_template_and_referenc
     assert result.context is not None
     assert "File role: template" in result.context
     assert "File role: reference_material" in result.context
+
+
+def test_build_ai_builder_attachment_context_preserves_conflicting_role_candidates() -> (
+    None
+):
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="lagmall.docx",
+                text="Lagstöd och föreskrifter som ska användas vid bedömning.",
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                    "document"
+                ),
+                file_type=FileType.DOCUMENT,
+            ),
+        ]
+    )
+
+    assert result is not None
+    evidence = result.evidence[0]
+    assert evidence.inferred_role == "template"
+    assert evidence.candidate_roles == ("template", "reference_material")
+    assert "filename:template_keyword" in evidence.role_evidence
+    assert "content:reference_keyword" in evidence.role_evidence
+    assert result.discovery_context is not None
+    assert "candidate_roles: template, reference_material" in result.discovery_context
 
 
 def test_build_ai_builder_attachment_context_avoids_substring_role_false_positives() -> (

@@ -32,6 +32,7 @@ class AIBuilderAttachmentEvidence:
     inferred_role: FileRole = "context_only"
     role_confidence: SignalConfidence = "low"
     role_evidence: tuple[str, ...] = ()
+    candidate_roles: tuple[FileRole, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,7 @@ def apply_attachment_file_roles_to_planning_state(
             source="heuristic",
             confidence=item.role_confidence,
             evidence=list(item.role_evidence),
+            candidate_roles=list(item.candidate_roles),
         )
     state.file_roles = list(roles_by_id.values())
 
@@ -91,22 +93,51 @@ def _filename_has_template_keyword(filename: str) -> bool:
     )
 
 
+_FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
+    "runtime_input_sample",
+    "template",
+    "reference_material",
+    "example_output",
+    "context_only",
+)
+
+
 def _infer_file_role(
     file: File,
     readable_text: str | None,
-) -> tuple[FileRole, SignalConfidence, tuple[str, ...]]:
+) -> tuple[FileRole, SignalConfidence, tuple[str, ...], tuple[FileRole, ...]]:
     filename = file.name.casefold()
     text = (readable_text or "").casefold()
+    candidate_confidence: dict[FileRole, SignalConfidence] = {}
+    candidate_evidence: dict[FileRole, list[str]] = {}
 
     if file.file_type == FileType.AUDIO:
-        return "runtime_input_sample", "high", ("file_type:audio",)
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="runtime_input_sample",
+            confidence="high",
+            evidence="file_type:audio",
+        )
     if _filename_has_template_keyword(filename):
-        return "template", "medium", ("filename:template_keyword",)
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="template",
+            confidence="medium",
+            evidence="filename:template_keyword",
+        )
     if "{{" in text or any(
         marker in text
         for marker in ("fyll i", "placeholder", "template variable", "mallfält")
     ):
-        return "template", "medium", ("content:template_marker",)
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="template",
+            confidence="medium",
+            evidence="content:template_marker",
+        )
     reference_tokens = (
         "lag",
         "lagstod",
@@ -120,12 +151,65 @@ def _infer_file_role(
         "reference",
     )
     if _contains_token(filename, reference_tokens):
-        return "reference_material", "medium", ("filename:reference_keyword",)
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="reference_material",
+            confidence="medium",
+            evidence="filename:reference_keyword",
+        )
     if _contains_token(text, reference_tokens):
-        return "reference_material", "medium", ("content:reference_keyword",)
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="reference_material",
+            confidence="medium",
+            evidence="content:reference_keyword",
+        )
     if _contains_token(filename, ("exempel", "example", "sample", "output")):
-        return "example_output", "medium", ("filename:example_keyword",)
-    return "context_only", "low", ("fallback:unclassified_file",)
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="example_output",
+            confidence="medium",
+            evidence="filename:example_keyword",
+        )
+    if not candidate_confidence:
+        _add_role_candidate(
+            candidate_confidence,
+            candidate_evidence,
+            role="context_only",
+            confidence="low",
+            evidence="fallback:unclassified_file",
+        )
+
+    candidate_role_items: list[FileRole] = []
+    for role in _FILE_ROLE_PRIORITY:
+        if role in candidate_confidence:
+            candidate_role_items.append(role)
+    candidate_roles = tuple(candidate_role_items)
+    primary_role = candidate_roles[0]
+    evidence_items: list[str] = []
+    for role in candidate_roles:
+        evidence_items.extend(candidate_evidence.get(role, []))
+    return (
+        primary_role,
+        candidate_confidence[primary_role],
+        tuple(evidence_items),
+        candidate_roles,
+    )
+
+
+def _add_role_candidate(
+    candidate_confidence: dict[FileRole, SignalConfidence],
+    candidate_evidence: dict[FileRole, list[str]],
+    *,
+    role: FileRole,
+    confidence: SignalConfidence,
+    evidence: str,
+) -> None:
+    candidate_confidence.setdefault(role, confidence)
+    candidate_evidence.setdefault(role, []).append(evidence)
 
 
 def build_ai_builder_attachment_context(
@@ -154,7 +238,10 @@ def build_ai_builder_attachment_context(
             )
             truncated = truncated or excerpt_truncated
 
-        role, role_confidence, role_evidence = _infer_file_role(file, text)
+        role, role_confidence, role_evidence, candidate_roles = _infer_file_role(
+            file,
+            text,
+        )
 
         attachment_evidence = AIBuilderAttachmentEvidence(
             file_id=file.id,
@@ -166,6 +253,7 @@ def build_ai_builder_attachment_context(
             inferred_role=role,
             role_confidence=role_confidence,
             role_evidence=role_evidence,
+            candidate_roles=candidate_roles,
         )
         evidence.append(attachment_evidence)
 
@@ -246,6 +334,8 @@ def _render_discovery_context(
             f"inferred_role: {item.inferred_role}",
             f"role_confidence: {item.role_confidence}",
         ]
+        if len(item.candidate_roles) > 1:
+            lines.append(f"candidate_roles: {', '.join(item.candidate_roles)}")
         for marker in item.role_evidence:
             lines.append(f"role_evidence: {marker}")
         if item.excerpt is not None:
