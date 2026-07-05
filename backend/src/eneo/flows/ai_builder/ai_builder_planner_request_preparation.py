@@ -134,6 +134,9 @@ class ServerOutputPrepared(_PreparedBase):
     server_decision: BuilderTurnDecision
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
+    resource_catalog: AIBuilderResourceCatalog
+    attachment_context: str | None
+    flow_context: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,21 +211,22 @@ async def prepare_planner_request(
             discovery_analysis=discovery_analysis,
             server_decision=turn_control.decision,
             planning_state=rebuilt_planning_state,
+            resource_catalog=resource_catalog,
+            attachment_context=(
+                attachment_context_result.context
+                if attachment_context_result is not None
+                else None
+            ),
+            flow_context=flow_context,
         )
 
-    confirmed_requirements = latest_confirmed_requirements(request.conversation)
-    section_signal_text = "\n".join(
-        part
-        for part in (
-            aggregate_freeform_user_text(request.conversation),
-            build_requirements_signal_text(confirmed_requirements),
-        )
-        if part
-    )
     assert isinstance(turn_control.decision, GenerateProposal)
-    proposal_system_prompt = build_plan_proposal_system_prompt(
+    return build_proposal_prepared(
+        requirements_state=requirements_state,
+        ui_language=ui_language,
+        slot_classification_metadata=discovery_runtime.slot_classification_metadata,
+        conversation=request.conversation,
         planning_state=rebuilt_planning_state,
-        confirmed_requirements=confirmed_requirements,
         attachment_context=(
             attachment_context_result.context
             if attachment_context_result is not None
@@ -231,37 +235,77 @@ async def prepare_planner_request(
         flow_context=flow_context,
         is_edit_mode=request.flow is not None,
         resource_catalog=resource_catalog,
-        mcp_selection_values=mcp_resource_selection_values(request.conversation),
-        requested_output_sections=extract_requested_output_sections(
-            section_signal_text
-        ),
-        plan_revision_context=build_plan_revision_prompt_block(
-            context=request.plan_edit_context,
-            prior_plan=request.prior_plan_for_revision,
-        ),
-    )
-    prepared_prompt = _prepare_prompt_messages(
-        conversation=request.conversation,
-        system_prompt=proposal_system_prompt,
+        plan_edit_context=request.plan_edit_context,
+        prior_plan_for_revision=request.prior_plan_for_revision,
         litellm_model=request.litellm_model,
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
         budget_policy=request.budget_policy,
+        attachment_file_count=len(request.attachment_files),
+    )
+
+
+def build_proposal_prepared(
+    *,
+    requirements_state: RequirementsState,
+    ui_language: str | None,
+    slot_classification_metadata: SlotClassificationMetadata | None,
+    conversation: list[ConversationMessage],
+    planning_state: PlanningState,
+    attachment_context: str | None,
+    flow_context: str | None,
+    is_edit_mode: bool,
+    resource_catalog: AIBuilderResourceCatalog,
+    plan_edit_context: AIBuilderPlanEditContext | None,
+    prior_plan_for_revision: BuilderPlan | None,
+    litellm_model: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy,
+    attachment_file_count: int,
+) -> ProposalPrepared:
+    confirmed_requirements = latest_confirmed_requirements(conversation)
+    section_signal_text = "\n".join(
+        part
+        for part in (
+            aggregate_freeform_user_text(conversation),
+            build_requirements_signal_text(confirmed_requirements),
+        )
+        if part
+    )
+    proposal_system_prompt = build_plan_proposal_system_prompt(
+        planning_state=planning_state,
+        confirmed_requirements=confirmed_requirements,
+        attachment_context=attachment_context,
+        flow_context=flow_context,
+        is_edit_mode=is_edit_mode,
+        resource_catalog=resource_catalog,
+        mcp_selection_values=mcp_resource_selection_values(conversation),
+        requested_output_sections=extract_requested_output_sections(
+            section_signal_text
+        ),
+        plan_revision_context=build_plan_revision_prompt_block(
+            context=plan_edit_context,
+            prior_plan=prior_plan_for_revision,
+        ),
+    )
+    prepared_prompt = _prepare_prompt_messages(
+        conversation=conversation,
+        system_prompt=proposal_system_prompt,
+        litellm_model=litellm_model,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        budget_policy=budget_policy,
     )
     logger.info(
         "AI Builder plan proposal prompt metrics",
         extra={
             "system_prompt_chars": prepared_prompt.system_prompt_chars,
-            "attachment_context_chars": len(
-                attachment_context_result.context
-                if attachment_context_result is not None
-                and attachment_context_result.context is not None
-                else ""
-            ),
+            "attachment_context_chars": len(attachment_context or ""),
             "conversation_budget_tokens": prepared_prompt.conversation_budget_tokens,
-            "conversation_message_count": len(request.conversation),
+            "conversation_message_count": len(conversation),
             "trimmed_message_count": prepared_prompt.trimmed_message_count,
-            "attachment_file_count": len(request.attachment_files),
+            "attachment_file_count": attachment_file_count,
             "confirmed_requirements_present": confirmed_requirements is not None,
         },
     )
@@ -269,13 +313,13 @@ async def prepare_planner_request(
     return ProposalPrepared(
         requirements_state=requirements_state,
         ui_language=ui_language,
-        slot_classification_metadata=discovery_runtime.slot_classification_metadata,
+        slot_classification_metadata=slot_classification_metadata,
         llm_messages=prepared_prompt.llm_messages,
         system_prompt_hash=prepared_prompt.system_prompt_hash,
-        plan_edit_context=request.plan_edit_context,
-        prior_plan_for_revision=request.prior_plan_for_revision,
+        plan_edit_context=plan_edit_context,
+        prior_plan_for_revision=prior_plan_for_revision,
         resource_catalog=resource_catalog,
-        planning_state=rebuilt_planning_state,
+        planning_state=planning_state,
     )
 
 

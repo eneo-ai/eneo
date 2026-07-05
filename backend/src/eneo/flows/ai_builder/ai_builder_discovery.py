@@ -842,9 +842,6 @@ def build_registry_question_followup(
     flow: Flow | None = None,
 ) -> BackendQuestion | None:
     canonical_id = canonical_question_id(question_id)
-    if question_is_already_resolved(canonical_id, conversation, flow=flow):
-        return None
-
     profile = _build_discovery_profile(conversation, flow=flow)
     suggestion = question_suggestion_for_id(canonical_id, language=profile.language)
     if suggestion is None or suggestion.exposure != "user_requirement":

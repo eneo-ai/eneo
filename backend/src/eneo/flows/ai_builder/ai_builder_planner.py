@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
 from uuid import UUID
 
@@ -32,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
+    build_proposal_prepared,
     prepare_planner_request,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_processor import (
@@ -48,6 +50,7 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionTelemetry,
     dispatch_server_decision,
 )
+from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
@@ -107,6 +110,42 @@ class AIBuilderPlanner:
             forced_proposal_temperature=forced_proposal_temperature,
             quality_retry_warning_codes=quality_retry_warning_codes,
         )
+
+    async def _stream_proposal_events(
+        self,
+        *,
+        turn: SessionSendTurn,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        proposal_request: ProposalPrepared,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        request_id: str,
+        flow: "Flow | None",
+        assistant_snapshots: AssistantAuthoringSnapshots | None,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        async for event in self.proposal_processor.propose_plan(
+            turn=turn,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            llm_messages=proposal_request.llm_messages,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            available_model_refs=proposal_request.resource_catalog.model_refs,
+            available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
+            resource_catalog=proposal_request.resource_catalog,
+            max_output_tokens=max_output_tokens,
+            proposal_temperature=self.planner_temperature,
+            request_id=request_id,
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+            assistant_metadata=build_assistant_message_metadata(conversation),
+            planning_state=proposal_request.planning_state,
+            plan_edit_context=proposal_request.plan_edit_context,
+            prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+        ):
+            yield event
 
     async def send_message(
         self,
@@ -258,33 +297,17 @@ class AIBuilderPlanner:
                 case ProposalPrepared() as proposal_request:
                     # Preserve proposal/server refresh-signal asymmetry: proposal
                     # writes stay lease-guarded inside the processor.
-                    async for event in self.proposal_processor.propose_plan(
+                    async for event in self._stream_proposal_events(
                         turn=turn,
                         conversation=conversation,
                         new_messages_start=new_messages_start,
-                        llm_messages=proposal_request.llm_messages,
+                        proposal_request=proposal_request,
                         litellm_model=litellm_model,
                         litellm_kwargs=litellm_kwargs,
-                        available_model_refs=(
-                            proposal_request.resource_catalog.model_refs
-                        ),
-                        available_kb_refs=(
-                            proposal_request.resource_catalog.knowledge_base_refs
-                        ),
-                        resource_catalog=proposal_request.resource_catalog,
                         max_output_tokens=max_output_tokens,
-                        proposal_temperature=self.planner_temperature,
                         request_id=request_id,
                         flow=flow,
                         assistant_snapshots=assistant_snapshots,
-                        assistant_metadata=build_assistant_message_metadata(
-                            conversation
-                        ),
-                        planning_state=proposal_request.planning_state,
-                        plan_edit_context=proposal_request.plan_edit_context,
-                        prior_plan_for_revision=(
-                            proposal_request.prior_plan_for_revision
-                        ),
                     ):
                         yield event
                     yield build_done_event()
@@ -339,6 +362,48 @@ class AIBuilderPlanner:
 
                     for event in dispatch_result.events:
                         yield event
+                    if dispatch_result.proposal_continuation is not None:
+                        continuation_turn = replace(
+                            turn,
+                            base_planning_state_version=(
+                                dispatch_result.new_planning_state_version
+                            ),
+                        )
+                        proposal_request = build_proposal_prepared(
+                            requirements_state=requirements_state,
+                            ui_language=ui_language,
+                            slot_classification_metadata=(
+                                planner_turn_request.slot_classification_metadata
+                            ),
+                            conversation=conversation,
+                            planning_state=(
+                                dispatch_result.proposal_continuation.planning_state
+                            ),
+                            attachment_context=planner_turn_request.attachment_context,
+                            flow_context=planner_turn_request.flow_context,
+                            is_edit_mode=flow is not None,
+                            resource_catalog=planner_turn_request.resource_catalog,
+                            plan_edit_context=plan_edit_context,
+                            prior_plan_for_revision=prior_plan_for_revision,
+                            litellm_model=litellm_model,
+                            max_input_tokens=max_input_tokens,
+                            max_output_tokens=max_output_tokens,
+                            budget_policy=budget_policy,
+                            attachment_file_count=len(attachment_files or []),
+                        )
+                        async for event in self._stream_proposal_events(
+                            turn=continuation_turn,
+                            conversation=conversation,
+                            new_messages_start=len(conversation),
+                            proposal_request=proposal_request,
+                            litellm_model=litellm_model,
+                            litellm_kwargs=litellm_kwargs,
+                            max_output_tokens=max_output_tokens,
+                            request_id=request_id,
+                            flow=flow,
+                            assistant_snapshots=assistant_snapshots,
+                        ):
+                            yield event
                     yield build_done_event()
                     return
                 case _:

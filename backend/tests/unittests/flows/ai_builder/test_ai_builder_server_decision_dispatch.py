@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
@@ -58,6 +59,7 @@ def _request(
     conversation: list[ConversationMessage],
     new_messages_start: int = 0,
     planning_state: PlanningState | None = None,
+    requirements_confirmed: bool = False,
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -67,7 +69,7 @@ def _request(
         new_messages_start=new_messages_start,
         flow=None,
         discovery_analysis=None,
-        requirements_confirmed=False,
+        requirements_confirmed=requirements_confirmed,
         ui_language="en",
         telemetry=ServerDecisionTelemetry(
             request_id="req-test",
@@ -131,7 +133,9 @@ def _revised_pdf_state() -> PlanningState:
 
 
 @pytest.mark.asyncio
-async def test_fallback_text_question_persists_user_and_assistant_turn() -> None:
+async def test_unrenderable_server_question_returns_typed_error_without_commit() -> (
+    None
+):
     repo = AsyncMock()
     repo.commit_turn.return_value = 5
     conversation = [ConversationMessage(role="user", content="Build a flow")]
@@ -144,12 +148,13 @@ async def test_fallback_text_question_persists_user_and_assistant_turn() -> None
         _request(repo=repo, decision=decision, conversation=conversation)
     )
 
-    assert [event.event for event in result.events] == ["text"]
-    repo.commit_turn.assert_awaited_once()
-    new_messages = repo.commit_turn.await_args.kwargs["new_messages"]
-    assert [message.role for message in new_messages] == ["user", "assistant"]
-    assert new_messages[-1].content == decision.prompt
-    assert result.new_planning_state_version == 5
+    assert [event.event for event in result.events] == ["error"]
+    error = result.events[0].data
+    assert error.code is AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
+    assert error.phase == "question"
+    assert error.details == {"question_id": "structured_analysis_need"}
+    repo.commit_turn.assert_not_awaited()
+    assert result.new_planning_state_version == 4
 
 
 @pytest.mark.asyncio
@@ -170,8 +175,8 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
     ]
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     decision = AskCanonicalQuestion(
-        slot_name="structured_analysis_need",
-        prompt="Should the flow use structured analysis?",
+        slot_name="primary_runtime_input",
+        prompt="What should the runtime input be?",
     )
 
     await dispatch_server_decision(
@@ -273,3 +278,32 @@ async def test_architecture_revision_persists_revised_commit_and_status() -> Non
         canonical_architecture_commit_payload(draft)
     )
     assert result.new_planning_state_version == 6
+
+
+@pytest.mark.asyncio
+async def test_confirmed_architecture_revision_returns_proposal_continuation() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    now = datetime(2026, 4, 24, tzinfo=timezone.utc)
+    state = _revised_pdf_state()
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(draft, now=lambda: now)
+    repo.load_planning_state.return_value = state
+    conversation = [ConversationMessage(role="user", content="Make it PDF instead")]
+    decision = ReviseArchitecture(architecture_commit=draft)
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=conversation,
+            requirements_confirmed=True,
+        )
+    )
+
+    assert result.action_kind == "revise_architecture"
+    assert [event.event for event in result.events] == ["status"]
+    assert result.events[0].data.status == "architecture_revised"
+    assert result.new_planning_state_version == 5
+    assert result.proposal_continuation is not None
+    assert result.proposal_continuation.planning_state is state

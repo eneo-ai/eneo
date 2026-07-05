@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncGenerator
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -29,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
+    build_status_event,
     build_text_event,
     encode_ai_builder_stream_event,
 )
@@ -54,11 +56,13 @@ from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionDispatchResult,
+    ServerDecisionProposalContinuation,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
+    ReviseArchitecture,
 )
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     resolve_user_question_metadata,
@@ -254,6 +258,13 @@ def _server_output_prepared() -> ServerOutputPrepared:
         ),
         discovery_analysis=DiscoveryAnalysis(issues=()),
         planning_state=PlanningState.empty(),
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+            prior_bindings=(),
+        ),
+        attachment_context=None,
+        flow_context=None,
     )
 
 
@@ -1353,6 +1364,63 @@ async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_di
 
     assert [event["event"] for event in events] == ["error", "done"]
     assert json.loads(events[0]["data"])["code"] == "session_send_lease_lost"
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_continues_to_proposal_after_confirmed_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    continuation_state = PlanningState.empty()
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        replace(
+            _server_output_prepared(),
+            requirements_state=_requirements_state_confirmed(),
+            server_decision=ReviseArchitecture(architecture_commit=cast(Any, object())),
+            planning_state=continuation_state,
+        ),
+    )
+
+    async def fake_dispatch(
+        request: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        assert isinstance(request.decision, ReviseArchitecture)
+        return ServerDecisionDispatchResult(
+            action_kind="revise_architecture",
+            events=(build_status_event("architecture_revised"),),
+            new_planning_state_version=9,
+            proposal_continuation=ServerDecisionProposalContinuation(
+                planning_state=continuation_state
+            ),
+        )
+
+    captured: dict[str, object] = {}
+
+    async def fake_propose_plan(
+        **kwargs: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        captured.update(kwargs)
+        yield build_text_event("proposal result")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["status", "text", "done"]
+    assert json.loads(events[0]["data"])["status"] == "architecture_revised"
+    assert events[1]["data"] == '{"text":"proposal result"}'
+    assert captured["new_messages_start"] == 1
+    assert captured["planning_state"] is continuation_state
+    turn = cast(object, captured["turn"])
+    assert getattr(turn, "base_planning_state_version") == 9
     planner.repo.release_session_send.assert_awaited_once()
 
 

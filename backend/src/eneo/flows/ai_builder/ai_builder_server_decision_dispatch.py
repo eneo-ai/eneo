@@ -18,6 +18,11 @@ from eneo.flows.ai_builder.ai_builder_discovery import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
+    build_ai_builder_error_event,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
     RequirementsSummaryPayload,
@@ -25,7 +30,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_events import (
     build_requirements_summary_event,
     build_status_event,
-    build_text_event,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     normalize_requirements_summary_for_flow,
@@ -94,6 +98,12 @@ class ServerDecisionDispatchResult:
     action_kind: ServerDecisionKind
     events: tuple[AIBuilderStreamEvent, ...]
     new_planning_state_version: int
+    proposal_continuation: ServerDecisionProposalContinuation | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ServerDecisionProposalContinuation:
+    planning_state: PlanningState
 
 
 async def dispatch_server_decision(
@@ -188,27 +198,26 @@ async def _dispatch_question(
             new_planning_state_version=persisted.new_planning_state_version,
         )
 
-    request.conversation.append(
-        ConversationMessage(
-            role="assistant",
-            content=decision.prompt,
-            metadata=build_assistant_message_metadata(
-                request.conversation,
-                planner_telemetry=telemetry,
-                base_metadata={"question_id": decision.slot_name},
-            ),
-        )
-    )
-    new_version = await request.repo.commit_turn(
-        turn=request.turn,
-        new_messages=request.conversation[request.new_messages_start :],
-        flow=request.flow,
-        planning_state_overlay=request.planning_state,
+    logger.error(
+        "AI Builder server question could not be rendered as a structured question.",
+        extra={
+            "question_id": question_id,
+            "request_id": request.telemetry.request_id,
+        },
     )
     return ServerDecisionDispatchResult(
         action_kind="ask_question",
-        events=(build_text_event(decision.prompt),),
-        new_planning_state_version=new_version,
+        events=(
+            build_ai_builder_error_event(
+                message="The AI Builder could not render the next question.",
+                code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                phase=AIBuilderErrorPhase.QUESTION,
+                request_id=request.telemetry.request_id,
+                diagnostic_context={"outcome_kind": "unrenderable_server_question"},
+                details={"question_id": question_id},
+            ),
+        ),
+        new_planning_state_version=request.turn.base_planning_state_version,
     )
 
 
@@ -262,6 +271,15 @@ async def _dispatch_architecture_commit(
         )
         events.extend(chained.events)
         new_version = chained.new_planning_state_version
+    elif isinstance(turn_control.decision, GenerateProposal):
+        return ServerDecisionDispatchResult(
+            action_kind=action_kind,
+            events=tuple(events),
+            new_planning_state_version=new_version,
+            proposal_continuation=ServerDecisionProposalContinuation(
+                planning_state=session_state,
+            ),
+        )
 
     return ServerDecisionDispatchResult(
         action_kind=action_kind,
@@ -359,6 +377,7 @@ def _server_turn_telemetry(
 __all__ = [
     "ServerDecisionDispatchRequest",
     "ServerDecisionDispatchResult",
+    "ServerDecisionProposalContinuation",
     "ServerDecisionTelemetry",
     "build_requirements_summary_payload",
     "dispatch_server_decision",

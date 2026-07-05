@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
     "primary_runtime_input",
@@ -238,6 +239,7 @@ def _ordered_ask_targets(
         target = canonical_question_id(raw_target)
         if (
             target not in KNOWN_REQUIREMENT_SLOT_NAMES
+            or not _is_user_requirement_question(target)
             or target in commit_grade_slot_names
             or target in seen
         ):
@@ -278,8 +280,14 @@ def _unresolved_slots_for_derived_commit(
         for pattern_id in commit.chosen_patterns
         if pattern_id in PATTERN_REGISTRY
         for slot_name in PATTERN_REGISTRY[pattern_id].required_architectural_slots
+        if _is_user_requirement_question(slot_name)
     )
     return required_slots - commit_grade_slot_names
+
+
+def _is_user_requirement_question(slot_name: str) -> bool:
+    template = QUESTION_CATALOG.get(slot_name)
+    return template is not None and template.exposure == "user_requirement"
 
 
 __all__ = [
