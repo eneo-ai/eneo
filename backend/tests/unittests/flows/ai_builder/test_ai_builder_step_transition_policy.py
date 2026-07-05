@@ -1427,6 +1427,33 @@ def test_normalize_ai_builder_spec_preserves_source_refs_complete_underlag() -> 
     )
 
 
+def test_normalize_ai_builder_spec_dedupes_existing_source_refs() -> None:
+    spec = _text_report_source_material_spec(
+        final_input_bindings={
+            "source_refs": [
+                {"step_ref": "step_c", "output": "structured"},
+                {"step_ref": "step_a", "output": "text"},
+                {
+                    "step_ref": "step_a",
+                    "output": "text",
+                    "label": "Source material",
+                },
+            ]
+        }
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[3].input_bindings == _completed_source_refs(
+        structured_step_ref="step_c",
+        source_step_ref="step_a",
+    )
+    assert any(
+        step.plan_step_ref == "step_d" and change.code == "source_refs_deduped"
+        for step, change in changes
+    )
+
+
 def test_compiler_source_refs_complete_once_after_normalization_and_materialization() -> (
     None
 ):

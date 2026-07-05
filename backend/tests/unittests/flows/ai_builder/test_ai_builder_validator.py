@@ -239,6 +239,35 @@ class TestDuplicates:
         assert any(e.code == "duplicate_step_name" for e in result.errors)
         _assert_single_error(result, code="duplicate_step_name", step_ref="step_b")
 
+    def test_duplicate_source_refs_rejected_as_structured_validation_error(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="Source"),
+                    _step(
+                        ref="step_b",
+                        name="Analyze",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={
+                            "source_refs": [
+                                {"step_ref": "step_a", "output": "text"},
+                                {
+                                    "step_ref": "step_a",
+                                    "output": "text",
+                                    "label": "Source material",
+                                },
+                            ]
+                        },
+                    ),
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(result, code="duplicate_source_ref", step_ref="step_b")
+
     def test_empty_step_name_rejected(self) -> None:
         result = validate_spec(_spec([_step(name="   ")]))
         assert not result.valid

@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
+    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
@@ -7306,6 +7307,45 @@ def test_compile_create_steps_to_spec_text_report_keeps_source_and_structured_un
     assert "Källmaterial: {{ step_a.output.text }}" in report_question
     assert "{{ step_b.output.structured }}" not in report_question
     assert "{{ step_c.output.structured }}" not in report_question
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_dedupes_overlapping_previous_output_refs() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera nyckelfakta",
+                instructions="Extrahera titel, datum och slutsatser.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("title", "string")],
+                uses_previous_outputs=[
+                    PreviousOutputRef(from_step=1, label="Document text")
+                ],
+            ),
+        ],
+    )
+
+    assert compiled.steps[1].input_bindings == {
+        "source_refs": [
+            {"step_ref": "step_a", "output": "text", "label": "Document text"}
+        ]
+    }
+    assert _question_binding(compiled.steps[1].input_bindings) == (
+        "Document text: {{ step_a.output.text }}"
+    )
     assert validate_spec(compiled).valid
 
 

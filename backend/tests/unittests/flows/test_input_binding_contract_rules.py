@@ -4,6 +4,8 @@ import pytest
 
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
+    SourceRefBinding,
+    dedupe_source_refs,
     effective_question_binding,
     input_contract_conflicts_with_question_binding,
     lower_source_refs_to_question_binding,
@@ -113,6 +115,38 @@ def test_source_refs_lower_without_existing_question() -> None:
     ) == {
         "question": ("Structured notes: {{ step_a.output.structured.summary.notes }}")
     }
+
+
+def test_source_refs_runtime_lowering_tolerates_duplicate_refs() -> None:
+    assert lower_source_refs_to_question_binding(
+        {
+            "source_refs": [
+                {"step_ref": "step_a", "output": "text"},
+                {"step_ref": "step_a", "output": "text", "label": "Step 1 output"},
+            ],
+        }
+    ) == {
+        "question": (
+            "{{ step_a.output.text }}\n\nStep 1 output: {{ step_a.output.text }}"
+        )
+    }
+
+
+def test_dedupe_source_refs_prefers_labeled_ref_and_first_labeled_tie() -> None:
+    assert [
+        ref.binding_payload()
+        for ref in dedupe_source_refs(
+            (
+                SourceRefBinding(step_ref="step_a", output="text"),
+                SourceRefBinding(
+                    step_ref="step_a", output="text", label="Step 1 output"
+                ),
+                SourceRefBinding(
+                    step_ref="step_a", output="text", label="Duplicate label"
+                ),
+            )
+        )
+    ] == [{"step_ref": "step_a", "output": "text", "label": "Step 1 output"}]
 
 
 def test_source_refs_empty_list_lowers_to_absent_binding() -> None:

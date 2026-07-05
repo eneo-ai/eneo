@@ -28,7 +28,10 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
 from eneo.flows.input_binding_contract_rules import (
+    SOURCE_REFS_BINDING_KEY,
+    dedupe_source_refs,
     effective_question_binding,
+    source_ref_bindings,
 )
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -861,6 +864,20 @@ def normalize_ai_builder_step(
         if normalized_output_config != step.output_config:
             updates["output_config"] = normalized_output_config
 
+    normalized_input_bindings = _dedupe_input_binding_source_refs(step.input_bindings)
+    if normalized_input_bindings != step.input_bindings:
+        updates["input_bindings"] = normalized_input_bindings
+        changes.append(
+            StepNormalizationChange(
+                code="source_refs_deduped",
+                field_suffix="input_bindings.source_refs",
+                message=(
+                    "Collapsed duplicate source_refs so the step receives each "
+                    "source material reference once."
+                ),
+            )
+        )
+
     if (
         effective_question_binding(step.input_bindings) is not None
         and step.input_contract is not None
@@ -895,6 +912,22 @@ def normalize_ai_builder_step(
     if not updates:
         return step, changes
     return step.model_copy(update=updates), changes
+
+
+def _dedupe_input_binding_source_refs(
+    input_bindings: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if input_bindings is None or SOURCE_REFS_BINDING_KEY not in input_bindings:
+        return input_bindings
+    source_refs = source_ref_bindings(input_bindings)
+    deduped_source_refs = dedupe_source_refs(source_refs)
+    if len(deduped_source_refs) == len(source_refs):
+        return input_bindings
+    normalized = dict(input_bindings)
+    normalized[SOURCE_REFS_BINDING_KEY] = [
+        ref.binding_payload() for ref in deduped_source_refs
+    ]
+    return normalized
 
 
 def supports_inline_inref_citation(

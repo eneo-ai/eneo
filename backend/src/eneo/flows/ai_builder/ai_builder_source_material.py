@@ -23,6 +23,7 @@ from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     SourceRefBinding,
     SourceRefOutput,
+    dedupe_source_refs,
     question_binding,
     source_ref_bindings,
 )
@@ -174,8 +175,9 @@ def source_material_bindings_for_boundary(
         bindings.pop("question", None)
     else:
         bindings["question"] = question
+    # Keep direct callers clean; full-spec normalization backstops edit flows.
     bindings[SOURCE_REFS_BINDING_KEY] = [
-        ref.binding_payload() for ref in completed_refs
+        ref.binding_payload() for ref in dedupe_source_refs(completed_refs)
     ]
     return bindings
 

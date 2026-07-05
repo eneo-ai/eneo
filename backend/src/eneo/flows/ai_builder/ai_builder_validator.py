@@ -38,6 +38,10 @@ from eneo.flows.flow_validators import (
 from eneo.flows.flow_validators_form import (
     validate_variable_alias_collisions_for_step_graph,
 )
+from eneo.flows.input_binding_contract_rules import (
+    InputBindingContractError,
+    duplicate_source_ref_expressions,
+)
 from eneo.main.exceptions import BadRequestException
 
 _BUILDER_IGNORED_FLOW_VALIDATION_CODES: frozenset[FlowGraphIssueCode] = frozenset(
@@ -134,6 +138,7 @@ def validate_spec(
     _validate_step_names_present(spec, result)
     _validate_model_refs(spec, result, available_model_refs)
     _validate_kb_refs(spec, result, available_kb_refs)
+    _validate_source_refs_unique(spec, result)
     _validate_flow_service_rules(spec, result)
     validate_variable_references(spec, result)
 
@@ -183,6 +188,32 @@ def _validate_step_names_present(
                 step_ref=step.plan_step_ref,
                 code="empty_step_name",
                 message="Step name cannot be empty.",
+            )
+
+
+def _validate_source_refs_unique(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
+    for step in spec.steps:
+        try:
+            duplicate_expressions = duplicate_source_ref_expressions(
+                step.input_bindings
+            )
+        except InputBindingContractError as exc:
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="invalid_source_refs",
+                message=str(exc),
+            )
+            continue
+        for expression in duplicate_expressions:
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="duplicate_source_ref",
+                message=(
+                    "input_bindings.source_refs contains duplicate material for "
+                    f"{expression}."
+                ),
             )
 
 

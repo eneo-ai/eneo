@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -45,6 +45,40 @@ class SourceRefBinding:
         if self.label is not None:
             payload["label"] = self.label
         return payload
+
+
+def dedupe_source_refs(
+    source_refs: Iterable[SourceRefBinding],
+) -> tuple[SourceRefBinding, ...]:
+    deduped: list[SourceRefBinding] = []
+    indexes_by_expression: dict[str, int] = {}
+    for ref in source_refs:
+        expression = ref.template_expression()
+        existing_index = indexes_by_expression.get(expression)
+        if existing_index is None:
+            indexes_by_expression[expression] = len(deduped)
+            deduped.append(ref)
+            continue
+        existing = deduped[existing_index]
+        if existing.label is None and ref.label is not None:
+            deduped[existing_index] = ref
+    return tuple(deduped)
+
+
+def duplicate_source_ref_expressions(input_bindings: object) -> tuple[str, ...]:
+    source_refs = source_ref_bindings(input_bindings)
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    duplicate_seen: set[str] = set()
+    for ref in source_refs:
+        expression = ref.template_expression()
+        if expression not in seen:
+            seen.add(expression)
+            continue
+        if expression not in duplicate_seen:
+            duplicates.append(expression)
+            duplicate_seen.add(expression)
+    return tuple(duplicates)
 
 
 def question_binding(input_bindings: object) -> str | None:

@@ -534,13 +534,28 @@ def test_step_input_bindings_emit_source_refs_for_previous_output() -> None:
 
     assert bindings == {
         "source_refs": [
-            {"step_ref": "step_a", "output": "text"},
             {"step_ref": "step_a", "output": "text", "label": "Step 1 output"},
         ]
     }
-    assert _lowered_question(bindings) == (
-        "{{ step_a.output.text }}\n\nStep 1 output: {{ step_a.output.text }}"
+    assert _lowered_question(bindings) == "Step 1 output: {{ step_a.output.text }}"
+
+
+def test_step_input_bindings_dedupe_source_refs_without_dropping_form_fields() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=["case_id"],
+        uses_previous_fields=[],
+        uses_previous_outputs=[PreviousOutputRef(from_step=1)],
+        prior_steps=[_step("step_a", None, "Draft")],
     )
+
+    assert bindings == {
+        "question": (
+            "Step 1 output: {{ step_a.output.text }}\n\n"
+            "case_id: {{ flow_input.case_id }}"
+        )
+    }
 
 
 def test_step_input_bindings_emit_source_refs_for_implicit_structured_blob() -> None:

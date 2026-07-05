@@ -27,6 +27,7 @@ from eneo.flows.flow_variable_definitions import form_field_reference_expression
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     SourceRefBinding,
+    dedupe_source_refs,
     lower_source_refs_to_question_binding,
 )
 
@@ -293,8 +294,7 @@ def compile_step_input_bindings(
         return None
 
     explicit_previous_sections = [*explicit_previous_fields, *explicit_previous_outputs]
-    sections: list[str] = []
-    source_refs: list[SourceRefBinding] = []
+    section_parts: list[str | SourceRefBinding] = []
     if source_reference is not None and not _should_suppress_source_reference(
         input_source=input_source,
         uses_previous_fields=uses_previous_fields,
@@ -302,19 +302,19 @@ def compile_step_input_bindings(
         source_reference=source_reference,
         explicit_previous_sections=explicit_previous_sections,
     ):
-        sections.append(source_reference)
         if source_ref_binding is not None:
-            source_refs.append(source_ref_binding)
-    sections.extend(explicit_previous_fields)
-    source_refs.extend(previous_field_refs)
-    sections.extend(explicit_previous_outputs)
-    source_refs.extend(previous_output_refs)
+            section_parts.append(source_ref_binding)
+        else:
+            section_parts.append(source_reference)
+    section_parts.extend(previous_field_refs)
+    section_parts.extend(previous_output_refs)
     if uses_form_fields:
         form_field_lines = [
             f"{field_name}: {form_field_reference_expression(field_name)}"
             for field_name in uses_form_fields
         ]
-        sections.append("\n".join(form_field_lines))
+        section_parts.append("\n".join(form_field_lines))
+    sections, source_refs = _render_deduped_input_sections(section_parts)
     if not sections:
         return None
     if not uses_form_fields and len(source_refs) == len(sections):
@@ -325,6 +325,33 @@ def compile_step_input_bindings(
         if source_ref_payloads is not None:
             return {"source_refs": source_ref_payloads}
     return {"question": "\n\n".join(sections)}
+
+
+def _render_deduped_input_sections(
+    section_parts: list[str | SourceRefBinding],
+) -> tuple[list[str], list[SourceRefBinding]]:
+    # Preserve non-ref sections while letting a later labeled ref win its slot.
+    deduped_refs_by_expression = {
+        ref.template_expression(): ref
+        for ref in dedupe_source_refs(
+            part for part in section_parts if isinstance(part, SourceRefBinding)
+        )
+    }
+    rendered_sections: list[str] = []
+    source_refs: list[SourceRefBinding] = []
+    rendered_ref_expressions: set[str] = set()
+    for part in section_parts:
+        if not isinstance(part, SourceRefBinding):
+            rendered_sections.append(part)
+            continue
+        expression = part.template_expression()
+        if expression in rendered_ref_expressions:
+            continue
+        ref = deduped_refs_by_expression[expression]
+        rendered_sections.append(ref.rendered_section())
+        source_refs.append(ref)
+        rendered_ref_expressions.add(expression)
+    return rendered_sections, source_refs
 
 
 def _should_suppress_source_reference(
