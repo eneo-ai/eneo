@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -54,6 +55,12 @@ if TYPE_CHECKING:
 _PRESERVED_PLAN_EDIT_TERMINAL_TYPES = frozenset(
     {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CreateContextualQualityFeedback:
+    feedback: str | None
+    failure_codes: frozenset[str] = frozenset()
 
 
 def warnings_for_quality_retry(
@@ -155,13 +162,13 @@ def format_contextual_quality_feedback(
     )
 
 
-def format_create_contextual_quality_feedback(
+def build_create_contextual_quality_feedback(
     *,
     conversation: list[ConversationMessage],
     spec: FlowDraftSpecCore,
     aggregation_intent: AggregationIntent,
     resource_catalog: "AIBuilderResourceCatalog | None",
-) -> str | None:
+) -> CreateContextualQualityFeedback:
     context = build_conversation_critic_context(
         conversation,
         spec,
@@ -171,7 +178,10 @@ def format_create_contextual_quality_feedback(
     )
     preflight = run_draft_preflight(context)
     enforce_architecture_critic_invariants(context, issues=preflight.issues)
-    return format_create_critic_feedback(preflight.semantic_issues)
+    return CreateContextualQualityFeedback(
+        feedback=format_create_critic_feedback(preflight.semantic_issues),
+        failure_codes=frozenset(issue.id for issue in preflight.semantic_issues),
+    )
 
 
 def resolve_ui_language(

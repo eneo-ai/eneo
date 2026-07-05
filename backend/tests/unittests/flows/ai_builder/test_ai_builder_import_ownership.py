@@ -54,7 +54,6 @@ BANNED_PROPOSAL_TOOL_NAMES = frozenset(
         "MCPClarificationFn",
         "ProposalToolDeps",
         "build_plan_event",
-        "format_create_contextual_quality_feedback",
         "format_revision_feedback",
         "format_validation_feedback",
         "proposal_deps",

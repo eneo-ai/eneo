@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorEvent,
     AIBuilderErrorPhase,
+    JsonScalar,
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
@@ -59,6 +60,7 @@ from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 MAX_SELF_CORRECTION_RETRIES = 3
+_MAX_PUBLIC_QUALITY_FAILURE_CODES = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +221,7 @@ def build_self_correction_error_event(
     *,
     feedback: str | None,
     failure_kind: ToolProcessingFailureKind | None,
+    failure_codes: frozenset[str] = frozenset(),
     request_id: str | None = None,
 ) -> AIBuilderErrorEvent:
     message = _self_correction_user_message(
@@ -230,7 +233,29 @@ def build_self_correction_error_event(
         code=_self_correction_error_code(failure_kind),
         phase=AIBuilderErrorPhase.SELF_CORRECTION,
         request_id=request_id,
+        details=_self_correction_error_details(
+            failure_kind=failure_kind,
+            failure_codes=failure_codes,
+        ),
     )
+
+
+def _self_correction_error_details(
+    *,
+    failure_kind: ToolProcessingFailureKind | None,
+    failure_codes: frozenset[str],
+) -> dict[str, JsonScalar] | None:
+    if failure_kind != "quality" or not failure_codes:
+        return None
+
+    sorted_codes = sorted(failure_codes)
+    public_codes = sorted_codes[:_MAX_PUBLIC_QUALITY_FAILURE_CODES]
+    details: dict[str, JsonScalar] = {
+        "quality_failure_codes": ",".join(public_codes),
+    }
+    if len(sorted_codes) > len(public_codes):
+        details["quality_failure_code_count"] = len(sorted_codes)
+    return details
 
 
 def _self_correction_user_message(
@@ -611,6 +636,7 @@ async def _request_self_correction_events(
                     yield build_self_correction_error_event(
                         feedback=repair_outcome.feedback,
                         failure_kind=repair_outcome.failure_kind,
+                        failure_codes=repair_outcome.failure_codes,
                         request_id=ctx.request_id,
                     )
                     return
@@ -679,6 +705,7 @@ async def _request_self_correction_events(
             yield build_self_correction_error_event(
                 feedback=forced_outcome.feedback,
                 failure_kind=forced_failure_kind,
+                failure_codes=forced_outcome.failure_codes,
                 request_id=ctx.request_id,
             )
             return

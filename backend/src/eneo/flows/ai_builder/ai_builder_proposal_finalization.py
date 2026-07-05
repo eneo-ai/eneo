@@ -31,8 +31,8 @@ from eneo.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
+    build_create_contextual_quality_feedback,
     format_contextual_quality_feedback,
-    format_create_contextual_quality_feedback,
     format_quality_feedback,
     format_validation_feedback,
     resolve_ui_language,
@@ -269,7 +269,7 @@ class CompiledProposalFinalizer:
                 compiled.validation,
                 quality_retry_warning_codes=self._quality_retry_warning_codes,
             )
-            contextual_hint = format_create_contextual_quality_feedback(
+            contextual_quality = build_create_contextual_quality_feedback(
                 conversation=request.conversation,
                 spec=compiled.content.spec,
                 aggregation_intent=compiled.aggregation_intent,
@@ -285,7 +285,7 @@ class CompiledProposalFinalizer:
                     hard_feedback,
                     mcp_policy_feedback,
                     quality_hint,
-                    contextual_hint,
+                    contextual_quality.feedback,
                 )
                 if feedback
             )
@@ -308,19 +308,20 @@ class CompiledProposalFinalizer:
                 retry_warning_codes=self._quality_retry_warning_codes,
             )
         )
-        contextual_quality_feedback = format_create_contextual_quality_feedback(
+        contextual_quality = build_create_contextual_quality_feedback(
             conversation=request.conversation,
             spec=compiled.content.spec,
             aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
         )
+        quality_failure_codes = quality_failure_codes | contextual_quality.failure_codes
         combined_quality_feedback = (
             "\n\n".join(
                 feedback
                 for feedback in (
                     mcp_policy_feedback,
                     quality_feedback,
-                    contextual_quality_feedback,
+                    contextual_quality.feedback,
                 )
                 if feedback is not None
             )

@@ -841,6 +841,53 @@ async def test_run_tool_self_correction_rejects_failure_after_normal_budget(
 
 
 @pytest.mark.asyncio
+async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes() -> (
+    None
+):
+    _, _, events = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="quality",
+        failure_codes=frozenset(
+            {
+                "section_text_steps_must_reference_source_json_fields",
+                "final_text_step_must_reference_relevant_structured_outputs",
+                "final_assembler_must_reference_explicit_section_outputs",
+                "prefer_targeted_underlag_over_all_previous_steps",
+            }
+        ),
+    )
+
+    payload = json.loads(events[-1]["data"])
+
+    assert payload["code"] == "self_correction_quality_failure"
+    assert payload["details"] == {
+        "quality_failure_codes": (
+            "final_assembler_must_reference_explicit_section_outputs,"
+            "final_text_step_must_reference_relevant_structured_outputs,"
+            "prefer_targeted_underlag_over_all_previous_steps"
+        ),
+        "quality_failure_code_count": 4,
+    }
+    assert "still bad" not in json.dumps(payload["details"])
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_keeps_non_quality_failure_codes_private() -> (
+    None
+):
+    _, _, events = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="validation",
+        failure_codes=frozenset({"duplicate_step_name"}),
+    )
+
+    payload = json.loads(events[-1]["data"])
+
+    assert payload["code"] == "self_correction_invalid_plan"
+    assert "details" not in payload
+
+
+@pytest.mark.asyncio
 async def test_run_tool_self_correction_adds_duplicate_name_outline_guidance() -> None:
     _, retry_feedback, _ = await _run_repair_capturing(
         max_retries=1,
@@ -1033,6 +1080,70 @@ async def test_run_tool_self_correction_emits_error_event_when_planner_bails_to_
     assert "platta ut JSON-fälten" not in combined_payload, (
         f"The planner's bail phrasing must not reach the user; got: {combined_payload}"
     )
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_forced_text_quality_failure_surfaces_codes() -> (
+    None
+):
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Här är en korrigerad plan.",
+                    tool_calls=None,
+                ),
+                finish_reason="stop",
+            )
+        ]
+    )
+    tool_response = _tool_response(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={"flow_name": "T", "plan_rationale": "R", "steps": []},
+    )
+
+    call_proposal_completion = AsyncMock(side_effect=[text_response, tool_response])
+
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(
+            feedback="still bad",
+            failure_kind="quality",
+            failure_codes=frozenset(
+                {
+                    "section_text_steps_must_reference_source_json_fields",
+                    "final_text_step_must_reference_relevant_structured_outputs",
+                }
+            ),
+        )
+
+    events: list[dict[str, str]] = []
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="Quality issues.",
+            llm_messages=[{"role": "user", "content": "build flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=0,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
+    ):
+        events.append(encode_ai_builder_stream_event(event))
+
+    payload = json.loads(events[-1]["data"])
+
+    assert payload["code"] == "self_correction_quality_failure"
+    assert payload["details"] == {
+        "quality_failure_codes": (
+            "final_text_step_must_reference_relevant_structured_outputs,"
+            "section_text_steps_must_reference_source_json_fields"
+        )
+    }
+    assert "still bad" not in json.dumps(payload["details"])
 
 
 @pytest.mark.asyncio

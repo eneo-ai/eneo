@@ -86,6 +86,49 @@ def _make_flow_spec() -> FlowDraftSpecCore:
     )
 
 
+def _structured_fan_in_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Structured report",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract A",
+                assistant_spec=AssistantSpec(instructions="Extract A."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Extract B",
+                assistant_spec=AssistantSpec(instructions="Extract B."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"detail": {"type": "string"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Write report",
+                assistant_spec=AssistantSpec(instructions="Write report."),
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+
 def _compiled_outline_proposal() -> CompiledProposal:
     return CompiledProposal(
         content=FlowBuilderProposalContent(
@@ -267,6 +310,45 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
     assert result.failure_kind == "quality"
     assert result.failure_codes == frozenset({"json_output_no_contract"})
     assert tracker.proposal_first_attempt_success is None
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_codes() -> (
+    None
+):
+    finalizer = _make_finalizer()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-contextual-quality",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+    compiled = CompiledProposal(
+        content=FlowBuilderProposalContent(
+            spec=_structured_fan_in_spec(),
+            plan_rationale="Compose a structured report.",
+        ),
+        validation=SpecValidationResult(),
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await finalizer.finalize_compiled_proposal(
+            _make_request(
+                request_id="req-contextual-quality",
+                usage_tracker=tracker,
+                compiled=compiled,
+            )
+        )
+
+    assert result.events == ()
+    assert result.failure_kind == "quality"
+    assert "prefer_targeted_underlag_over_all_previous_steps" in result.failure_codes
+    assert result.feedback is not None
+    assert "Quality issues" in result.feedback
     store_plan.assert_not_awaited()
 
 

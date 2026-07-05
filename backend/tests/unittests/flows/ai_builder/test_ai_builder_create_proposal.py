@@ -21,7 +21,7 @@ from eneo.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
-    format_create_contextual_quality_feedback,
+    build_create_contextual_quality_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
@@ -134,12 +134,12 @@ def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource
 
 
 def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
-    feedback = format_create_contextual_quality_feedback(
+    feedback = build_create_contextual_quality_feedback(
         conversation=[],
         spec=_structured_fan_in_spec(),
         aggregation_intent="linear",
         resource_catalog=None,
-    )
+    ).feedback
 
     assert feedback is not None
     assert "Quality issues" in feedback
@@ -155,7 +155,7 @@ def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
 
 def test_create_contextual_quality_feedback_still_enforces_architecture() -> None:
     with pytest.raises(AIBuilderArchitectureError):
-        format_create_contextual_quality_feedback(
+        build_create_contextual_quality_feedback(
             conversation=[],
             spec=_json_all_previous_architecture_spec(),
             aggregation_intent="linear",
