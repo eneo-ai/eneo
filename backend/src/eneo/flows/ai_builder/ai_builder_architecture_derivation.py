@@ -181,6 +181,7 @@ def _primary_pattern_id(
     structured_analysis = state.resolved_slots.get("structured_analysis_need")
     if (
         input_type in {FlowInputType.DOCUMENT, FlowInputType.FILE}
+        and output_type is not FlowOutputType.JSON
         and structured_analysis is not None
         and structured_analysis.value == "use_structured_analysis"
     ):

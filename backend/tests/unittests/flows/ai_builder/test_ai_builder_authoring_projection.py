@@ -246,8 +246,12 @@ def test_edit_overlay_compiles_form_field_refs_without_shadow_policy() -> None:
     )
 
     assert result.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\ntext: {{ flow_input.text }}"
+        "question": "text: {{ flow_input.text }}",
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}],
     }
+    assert _lowered_question(result.steps[1].input_bindings) == (
+        "text: {{ flow_input.text }}\n\n{{ step_a.output.structured }}"
+    )
 
 
 def test_edit_overlay_requires_step_coverage_or_removal() -> None:
@@ -407,8 +411,12 @@ def test_edit_overlay_add_step_uses_form_field_with_shared_new_step_compiler() -
     )
 
     assert result.steps[1].input_bindings == {
-        "question": "{{ step_a.output.text }}\n\ncase_id: {{ flow_input.case_id }}"
+        "question": "case_id: {{ flow_input.case_id }}",
+        "source_refs": [{"step_ref": "step_a", "output": "text"}],
     }
+    assert _lowered_question(result.steps[1].input_bindings) == (
+        "case_id: {{ flow_input.case_id }}\n\n{{ step_a.output.text }}"
+    )
 
 
 def test_edit_overlay_add_first_step_uses_form_field_without_source_reference() -> None:
@@ -551,11 +559,14 @@ def test_step_input_bindings_dedupe_source_refs_without_dropping_form_fields() -
     )
 
     assert bindings == {
-        "question": (
-            "Step 1 output: {{ step_a.output.text }}\n\n"
-            "case_id: {{ flow_input.case_id }}"
-        )
+        "question": "case_id: {{ flow_input.case_id }}",
+        "source_refs": [
+            {"step_ref": "step_a", "output": "text", "label": "Step 1 output"}
+        ],
     }
+    assert _lowered_question(bindings) == (
+        "case_id: {{ flow_input.case_id }}\n\nStep 1 output: {{ step_a.output.text }}"
+    )
 
 
 def test_step_input_bindings_emit_source_refs_for_implicit_structured_blob() -> None:
@@ -596,6 +607,37 @@ def test_step_input_bindings_keep_immediate_field_suppression() -> None:
         _lowered_question(bindings)
         == "name: {{ step_a.output.structured.items.0.name }}"
     )
+
+
+def test_step_input_bindings_collapse_broad_field_refs_to_structured_ref() -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        uses_form_fields=[],
+        uses_previous_fields=[
+            PreviousFieldRef(from_step=1, field_path="summary"),
+            PreviousFieldRef(from_step=1, field_path="details"),
+        ],
+        uses_previous_outputs=[],
+        prior_steps=[
+            _step(
+                "step_a",
+                None,
+                "Extract",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "details": {"type": "string"},
+                    },
+                },
+            )
+        ],
+    )
+
+    assert bindings == {"source_refs": [{"step_ref": "step_a", "output": "structured"}]}
+    assert _lowered_question(bindings) == "{{ step_a.output.structured }}"
 
 
 def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:

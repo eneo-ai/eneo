@@ -1156,9 +1156,9 @@ def test_compile_create_steps_to_spec_uses_previous_fields_to_generate_field_lev
     second_step = compiled.steps[1]
     assert second_step.input_bindings is not None
     assert _question_binding(second_step.input_bindings) == (
+        "referensnummer: {{ flow_input.referensnummer }}\n\n"
         "Sammanfattning: {{ step_a.output.structured.sammanfattning }}\n\n"
-        "Första riskrubrik: {{ step_a.output.structured.risker.0.rubrik }}\n\n"
-        "referensnummer: {{ flow_input.referensnummer }}"
+        "Första riskrubrik: {{ step_a.output.structured.risker.0.rubrik }}"
     )
 
 
@@ -3339,7 +3339,8 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     assert compiled.form_fields is not None
     assert compiled.form_fields[0].name == "case_id"
     assert compiled.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
+        "question": "case_id: {{ flow_input.case_id }}",
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}],
     }
     assert compiled.steps[2].input_bindings is None
     validation = validate_spec(compiled)
@@ -3799,7 +3800,8 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert compiled.form_fields is not None
     assert compiled.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\naudience: {{ flow_input.audience }}"
+        "question": "audience: {{ flow_input.audience }}",
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}],
     }
     assert validation.valid
 
@@ -3879,7 +3881,8 @@ def test_compile_outline_flow_keeps_declared_runtime_fields_for_policy_default_m
     ] == []
     assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert draft.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\naudience: {{ flow_input.audience }}"
+        "question": "audience: {{ flow_input.audience }}",
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}],
     }
     assert validation.valid
 
@@ -5449,7 +5452,7 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     assert body_step.input_type.value == "text"
     assert body_step.input_bindings is not None
     body_question = _question_binding(body_step.input_bindings)
-    assert "meeting_title" in body_question
+    assert "{{ step_b.output.structured }}" in body_question
     assert "decisions_summary" in body_question
 
     composer = compiled.steps[-2]
@@ -6011,10 +6014,11 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
         (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
     }
     assert (1, "product_name") in field_refs
+    assert (1, "product_price") in field_refs
     assert (2, "customer_segment") in field_refs
     assert (3, "delivery_window") in field_refs
-    assert len(field_refs) == 3, (
-        f"expected source-floor refs across 3 JSON priors, got {len(field_refs)}"
+    assert len(field_refs) == 4, (
+        f"expected declared refs across 3 JSON priors, got {len(field_refs)}"
     )
 
 
@@ -6083,16 +6087,20 @@ def test_auto_bind_targeted_underlag_caps_source_floor_refs() -> None:
 
     composer = result[-1]
     refs = composer.uses_previous_fields
-    assert len(refs) == 4
+    assert len(refs) == TARGETED_UNDERLAG_TOTAL_FIELD_CAP
     assert len(refs) <= TARGETED_UNDERLAG_TOTAL_FIELD_CAP
     per_prior = Counter(ref.from_step for ref in refs)
     assert set(per_prior) == {1, 2, 3, 4}
-    assert all(count == 1 for count in per_prior.values())
+    assert all(count == 2 for count in per_prior.values())
     assert [(ref.from_step, ref.field_path) for ref in refs] == [
         (1, "required_1_0"),
         (2, "required_2_0"),
         (3, "required_3_0"),
         (4, "required_4_0"),
+        (1, "required_1_1"),
+        (2, "required_2_1"),
+        (3, "required_3_1"),
+        (4, "required_4_1"),
     ]
 
     spec = _compile_create_steps(
@@ -7024,12 +7032,8 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
     assert metadata_step.input_type.value == "text"
     assert compiled.steps[2].input_bindings is not None
     metadata_question = _question_binding(compiled.steps[2].input_bindings)
-    assert (
-        "Fullständig transkription.: "
-        "{{ step_b.output.structured.transcription_text }}" in metadata_question
-    )
+    assert "{{ step_b.output.structured }}" in metadata_question
     assert "Källmaterial: {{ step_a.output.text }}" in metadata_question
-    assert "{{ step_b.output.structured }}" not in metadata_question
 
     body_step = compiled.steps[4]
     assert body_step.name == "Förbered DOCX-innehåll"
@@ -7039,13 +7043,8 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
     compiled_body_step = compiled.steps[4]
     assert compiled_body_step.input_bindings is not None
     protocol_question = _question_binding(compiled_body_step.input_bindings)
-    assert (
-        "Fullständig transkription.: {{ step_b.output.structured.transcription_text }}"
-        in protocol_question
-    )
-    assert (
-        "Mötestitel.: {{ step_c.output.structured.meeting_title }}" in protocol_question
-    )
+    assert "{{ step_b.output.structured }}" in protocol_question
+    assert "{{ step_c.output.structured }}" in protocol_question
     assert (
         "Innehåll per rubrik.: {{ step_d.output.structured.protocol_sections }}"
         in protocol_question
@@ -7862,8 +7861,6 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
             {
                 "step_ref": "step_b",
                 "output": "structured",
-                "field_path": "source_facts",
-                "label": "Important source facts extracted from the input material.",
             },
             {
                 "step_ref": "step_a",
@@ -7873,9 +7870,7 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
         ]
     }
     assert _question_binding(compiled.steps[2].input_bindings) == (
-        "Important source facts extracted from the input material.: "
-        "{{ step_b.output.structured.source_facts }}\n\n"
-        "Källmaterial: {{ step_a.output.text }}"
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
     assert validation.valid
 

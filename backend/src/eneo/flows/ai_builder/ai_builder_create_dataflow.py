@@ -695,17 +695,18 @@ def _select_targeted_underlag_field_refs(
         for predecessor_index, predecessor in json_priors
     ]
     ordered_priors = [(index, fields) for index, fields in ordered_priors if fields]
-    return _select_source_floor_underlag_field_refs(ordered_priors)
-
-
-def _select_source_floor_underlag_field_refs(
-    ordered_priors: list[tuple[int, list[StructuredFieldDraft]]],
-) -> list[PreviousFieldRef]:
-    return [
-        _field_ref_from_draft_field(predecessor_index, fields[0])
-        for predecessor_index, fields in ordered_priors
-        if fields
-    ][:TARGETED_UNDERLAG_TOTAL_FIELD_CAP]
+    selected_refs: list[PreviousFieldRef] = []
+    max_field_count = max((len(fields) for _, fields in ordered_priors), default=0)
+    for field_index in range(max_field_count):
+        # Interleave so the cap preserves breadth across source steps first.
+        for predecessor_index, fields in ordered_priors:
+            if field_index >= len(fields):
+                continue
+            field = fields[field_index]
+            selected_refs.append(_field_ref_from_draft_field(predecessor_index, field))
+            if len(selected_refs) == TARGETED_UNDERLAG_TOTAL_FIELD_CAP:
+                return selected_refs
+    return selected_refs
 
 
 def _ordered_targeted_underlag_fields(

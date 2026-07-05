@@ -486,7 +486,9 @@ def test_normalize_create_step_mechanics_detects_source_after_input_source_norma
     ] == [(2, "finding")]
 
 
-def test_omitted_previous_refs_use_source_floor_not_swedish_semantic_match() -> None:
+def test_omitted_previous_refs_use_declared_structured_fields_not_semantic_guess() -> (
+    None
+):
     normalized = _normalize_steps(
         flow_name="No implicit semantic match",
         steps=[
@@ -528,7 +530,105 @@ def test_omitted_previous_refs_use_source_floor_not_swedish_semantic_match() -> 
 
     assert [
         (ref.from_step, ref.field_path) for ref in normalized[2].uses_previous_fields
-    ] == [(2, "sammanfattning_av_underlag")]
+    ] == [(2, "sammanfattning_av_underlag"), (2, "tidplan")]
+
+
+def test_normalize_create_step_mechanics_keeps_non_adjacent_json_source() -> None:
+    normalized = _normalize_steps(
+        flow_name="Dokumentrapport",
+        steps=[
+            {
+                "name": "Läs underlag",
+                "instructions": "Läs dokumentet.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "text",
+                "runtime_required": True,
+            },
+            {
+                "name": "Extrahera metadata",
+                "instructions": "Extrahera återanvändbara metadata.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("titel"), _field("datum")],
+            },
+            {
+                "name": "Extrahera slutsatser",
+                "instructions": "Extrahera slutsatser.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("slutsatser")],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv rapporttexten.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+        ],
+    )
+
+    writer = normalized[3]
+    assert {(ref.from_step, ref.field_path) for ref in writer.uses_previous_fields} == {
+        (2, "titel"),
+        (2, "datum"),
+        (3, "slutsatser"),
+    }
+
+    spec = compile_create_steps_to_spec(flow_name="Dokumentrapport", steps=normalized)
+    question = effective_question_binding(spec.steps[3].input_bindings) or ""
+
+    assert "{{ step_b.output.structured }}" in question
+    assert "slutsatser field.: {{ step_c.output.structured.slutsatser }}" in question
+
+
+def test_targeted_underlag_cap_preserves_breadth_across_wide_priors() -> None:
+    def fields(prefix: str) -> list[StructuredFieldDraft]:
+        return [_field(f"{prefix}_{index}") for index in range(10)]
+
+    normalized = _normalize_steps(
+        flow_name="Bred sammanställning",
+        steps=[
+            {
+                "name": "Extrahera första område",
+                "instructions": "Extrahera första området.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": fields("first"),
+            },
+            {
+                "name": "Extrahera andra område",
+                "instructions": "Extrahera andra området.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": fields("second"),
+            },
+            {
+                "name": "Skriv sammanställning",
+                "instructions": "Skriv sammanställningen.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+        ],
+    )
+
+    writer = normalized[2]
+    assert [(ref.from_step, ref.field_path) for ref in writer.uses_previous_fields] == [
+        (1, "first_0"),
+        (2, "second_0"),
+        (1, "first_1"),
+        (2, "second_1"),
+        (1, "first_2"),
+        (2, "second_2"),
+        (1, "first_3"),
+        (2, "second_3"),
+    ]
 
 
 def test_normalize_create_step_mechanics_and_critic_share_targeted_underlag_policy() -> (

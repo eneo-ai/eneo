@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import string
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
@@ -331,13 +332,17 @@ def compile_step_input_bindings(
     sections, source_refs = _render_deduped_input_sections(section_parts)
     if not sections:
         return None
-    if not uses_form_fields and len(source_refs) == len(sections):
-        source_ref_payloads = _source_ref_payloads_if_equivalent(
-            source_refs,
-            expected_question="\n\n".join(sections),
-        )
-        if source_ref_payloads is not None:
+    source_ref_payloads = _source_ref_payloads_if_valid(source_refs)
+    if source_ref_payloads is not None:
+        string_sections = [
+            part for part in section_parts if not isinstance(part, SourceRefBinding)
+        ]
+        if not string_sections:
             return {"source_refs": source_ref_payloads}
+        return {
+            "question": "\n\n".join(string_sections),
+            "source_refs": source_ref_payloads,
+        }
     return {"question": "\n\n".join(sections)}
 
 
@@ -601,10 +606,25 @@ def _compile_previous_field_source_refs(
     prior_steps: list[StepSpec],
 ) -> list[SourceRefBinding]:
     refs: list[SourceRefBinding] = []
+    collapsed_steps = _collapsible_previous_field_ref_steps(
+        uses_previous_fields,
+        prior_steps,
+    )
+    emitted_collapsed_steps: set[int] = set()
     for field_ref in uses_previous_fields:
         if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
             continue
         source_step = prior_steps[field_ref.from_step - 1]
+        if field_ref.from_step in collapsed_steps:
+            if field_ref.from_step not in emitted_collapsed_steps:
+                refs.append(
+                    SourceRefBinding(
+                        step_ref=source_step.plan_step_ref,
+                        output="structured",
+                    )
+                )
+                emitted_collapsed_steps.add(field_ref.from_step)
+            continue
         label = field_ref.label or default_previous_field_label(field_ref.field_path)
         refs.append(
             SourceRefBinding(
@@ -615,6 +635,49 @@ def _compile_previous_field_source_refs(
             )
         )
     return refs
+
+
+def _collapsible_previous_field_ref_steps(
+    uses_previous_fields: list[PreviousFieldRef],
+    prior_steps: list[StepSpec],
+) -> set[int]:
+    fields_by_step: dict[int, set[str]] = {}
+    for field_ref in uses_previous_fields:
+        if "." in field_ref.field_path:
+            continue
+        if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
+            continue
+        fields_by_step.setdefault(field_ref.from_step, set()).add(field_ref.field_path)
+
+    collapsed_steps: set[int] = set()
+    for from_step, field_names in fields_by_step.items():
+        source_step = prior_steps[from_step - 1]
+        if source_step.output_type != OutputType.JSON:
+            continue
+        property_names = _output_contract_top_level_property_names(source_step)
+        if not property_names:
+            continue
+        if not field_names.issubset(property_names):
+            continue
+        # Broad coverage is cheaper and clearer as one typed structured ref.
+        if (
+            len(field_names) > 1
+            and len(property_names) > 1
+            and (len(field_names) * 2 >= len(property_names))
+        ):
+            collapsed_steps.add(from_step)
+    return collapsed_steps
+
+
+def _output_contract_top_level_property_names(step: StepSpec) -> set[str]:
+    output_contract = step.output_contract
+    if not isinstance(output_contract, Mapping):
+        return set()
+    properties = output_contract.get("properties")
+    if not isinstance(properties, Mapping):
+        return set()
+    typed_properties = cast(Mapping[object, object], properties)
+    return {key for key in typed_properties if isinstance(key, str)}
 
 
 def _compile_previous_output_source_refs(
@@ -637,17 +700,15 @@ def _compile_previous_output_source_refs(
     return refs
 
 
-def _source_ref_payloads_if_equivalent(
+def _source_ref_payloads_if_valid(
     source_refs: list[SourceRefBinding],
-    *,
-    expected_question: str,
 ) -> list[dict[str, object]] | None:
+    if not source_refs:
+        return None
     payloads = [ref.binding_payload() for ref in source_refs]
     try:
-        lowered = lower_source_refs_to_question_binding({"source_refs": payloads})
+        lower_source_refs_to_question_binding({"source_refs": payloads})
     except InputBindingContractError:
-        return None
-    if lowered is None or lowered.get("question") != expected_question:
         return None
     return payloads
 
