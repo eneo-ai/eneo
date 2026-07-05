@@ -421,7 +421,7 @@ def test_shared_compile_compiles_generic_edit_changeset_shape() -> None:
     assert len(shared.assistants_to_delete) == 1
 
 
-def test_shared_compile_lowers_authoring_source_refs_to_runtime_question() -> None:
+def test_shared_compile_preserves_source_refs_with_runtime_step_refs() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Source material flow",
         steps=[
@@ -453,11 +453,42 @@ def test_shared_compile_lowers_authoring_source_refs_to_runtime_question() -> No
     shared = compile_flow_draft_changeset(spec, current_flow=None)
 
     assert shared.compiled_steps[1].input_bindings == {
-        "question": (
-            "Write the final memo.\n\n"
-            "Transcript: {{ step_1.output.text }}\n\n"
-            "Decisions: {{ step_1.output.structured.decisions }}"
-        )
+        "question": "Write the final memo.",
+        "source_refs": [
+            {
+                "step_ref": "step_1",
+                "output": "text",
+                "label": "Transcript",
+            },
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "decisions",
+                "label": "Decisions",
+            },
+        ],
+    }
+
+
+def test_shared_compile_leaves_unmapped_source_ref_unchanged() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Source material flow",
+        steps=[
+            _step_spec(
+                plan_step_ref="step_b",
+                name="Summarize",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_bindings={
+                    "source_refs": [{"step_ref": "existing_step_1", "output": "text"}],
+                },
+            ),
+        ],
+    )
+
+    shared = compile_flow_draft_changeset(spec, current_flow=None)
+
+    assert shared.compiled_steps[0].input_bindings == {
+        "source_refs": [{"step_ref": "existing_step_1", "output": "text"}]
     }
 
 

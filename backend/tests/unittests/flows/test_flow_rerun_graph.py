@@ -92,6 +92,14 @@ def test_all_previous_steps_invalidates_consumers_without_unrelated_steps():
         ),
         (
             {
+                "input_bindings": {
+                    "source_refs": [{"step_ref": "step_1", "output": "text"}]
+                }
+            },
+            RerunDependencyKind.INPUT_BINDINGS_QUESTION,
+        ),
+        (
+            {
                 "input_config": {
                     "url": "https://example.test/{{ step_1.output.id }}",
                     "auth": {"mode": "none"},

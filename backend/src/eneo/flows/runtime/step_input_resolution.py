@@ -10,6 +10,7 @@ from eneo.flows.domain.flow import FlowRun, FlowStepResult
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.models import (
@@ -167,8 +168,8 @@ async def resolve_step_input(
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is not None:
-        question_template = bindings.get("question")
-        if isinstance(question_template, str):
+        question_template = effective_question_binding(bindings)
+        if question_template is not None:
             interpolation_context = deps.variable_resolver.build_context(
                 run.input_payload_json,
                 prior_results,

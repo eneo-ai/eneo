@@ -8,6 +8,7 @@ from uuid import UUID
 
 from eneo.flows.enums import FlowInputSource, RerunDependencyKind
 from eneo.flows.http_transport import HttpAuthMode, HttpBodyMode, is_authored_config
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.step_lineage import build_step_ref_mapping
 from eneo.flows.template_reference_analyzer import (
@@ -166,8 +167,8 @@ def _template_dependency_orders(
     references: list[tuple[str, RerunDependencyKind]] = []
     input_bindings = _mapping(step.input_bindings)
     if input_bindings is not None:
-        question = input_bindings.get("question")
-        if isinstance(question, str):
+        question = effective_question_binding(input_bindings)
+        if question is not None:
             references.append((question, RerunDependencyKind.INPUT_BINDINGS_QUESTION))
 
     references.extend(

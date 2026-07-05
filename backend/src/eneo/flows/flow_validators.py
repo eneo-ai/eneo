@@ -49,8 +49,12 @@ from eneo.flows.flow_validators_template import (
 )
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+    InputBindingContractError,
+    effective_question_binding,
     input_contract_conflicts_with_question_binding,
+    lower_source_refs_to_question_binding,
     unsupported_input_binding_key,
+    validate_source_refs_binding,
 )
 from eneo.flows.output_modes import transcribe_only_violation
 from eneo.flows.output_processing import (
@@ -652,15 +656,23 @@ def _validate_input_contract_binding_compatibility(
 
 def _validate_supported_input_binding_keys(*, step: FlowStepValidationView) -> None:
     unsupported_key = unsupported_input_binding_key(step.input_bindings)
-    if unsupported_key is None:
-        return
-    raise FlowStepValidationError(
-        f"Step {step.step_order}: unsupported input_bindings key '{unsupported_key}'. "
-        "Only input_bindings.question is supported.",
-        code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-        context={"field": "input_bindings", "key": unsupported_key},
-        step_order=step.step_order,
-    )
+    if unsupported_key is not None:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported input_bindings key '{unsupported_key}'. "
+            "Only input_bindings.question and input_bindings.source_refs are supported.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": unsupported_key},
+            step_order=step.step_order,
+        )
+    try:
+        validate_source_refs_binding(step.input_bindings)
+    except InputBindingContractError as exc:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: {exc}",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": exc.key},
+            step_order=step.step_order,
+        ) from exc
 
 
 def _schema_type_hint(schema: dict[str, Any]) -> str:
@@ -738,7 +750,16 @@ def _validate_binding_references(
     current_step_order: int,
     available_orders: set[int],
 ) -> None:
-    binding_payload = json.dumps(input_bindings)
+    try:
+        reference_payload = lower_source_refs_to_question_binding(input_bindings)
+    except InputBindingContractError as exc:
+        raise FlowStepValidationError(
+            f"Step {current_step_order}: {exc}",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": exc.key},
+            step_order=current_step_order,
+        ) from exc
+    binding_payload = json.dumps(reference_payload or input_bindings)
     for expression in iter_template_expressions(binding_payload):
         if expression.startswith("step_input"):
             continue
@@ -783,8 +804,8 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
     if bindings is None:
         return
 
-    question_binding = bindings.get("question")
-    if isinstance(question_binding, str) and question_binding.strip():
+    question_binding = effective_question_binding(bindings)
+    if question_binding is not None:
         references = analyze_template(
             question_binding,
             step_refs={},

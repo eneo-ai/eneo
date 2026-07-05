@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResult
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     resolve_reference_step_orders,
@@ -234,9 +235,9 @@ def _binding_upstream_orders(
     bindings = step.get("input_bindings")
     if not isinstance(bindings, dict):
         return []
-    bindings_dict = cast(dict[str, object], bindings)
-    question = bindings_dict.get("question")
-    if not isinstance(question, str) or not question.strip():
+    bindings_dict = cast(FlowPersistedJsonObject, bindings)
+    question = effective_question_binding(bindings_dict)
+    if question is None:
         return []
 
     step_order = int(step["step_order"])

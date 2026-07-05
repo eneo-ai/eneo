@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from eneo.flows.flow_run_provenance import normalize_rag_payload
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 from eneo.flows.source_display import (
     format_source_container_display_name,
@@ -22,11 +23,7 @@ def collect_inherited_citation_context(
     step: RuntimeStep,
     state: RunExecutionState,
 ) -> dict[str, Any]:
-    question_template = None
-    if isinstance(step.input_bindings, dict):
-        raw_question = step.input_bindings.get("question")
-        if isinstance(raw_question, str) and raw_question.strip():
-            question_template = raw_question
+    question_template = effective_question_binding(step.input_bindings)
     references = (
         analyze_template(
             question_template,

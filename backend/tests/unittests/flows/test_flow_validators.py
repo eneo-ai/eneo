@@ -397,6 +397,30 @@ def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
     )
 
 
+def test_validate_steps_source_refs_do_not_satisfy_runtime_input_consumption() -> None:
+    with pytest.raises(
+        BadRequestException,
+        match="explicit question bindings must reference step_input",
+    ):
+        validate_steps(
+            [
+                _step(1),
+                _step(
+                    2,
+                    input_config={
+                        "runtime_input": {
+                            "enabled": True,
+                            "input_format": "document",
+                        }
+                    },
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_1", "output": "text"}]
+                    },
+                ),
+            ]
+        )
+
+
 def test_validate_steps_rejects_unsupported_binding_keys_only_when_publish_strict():
     step = _step(input_bindings={"text": "{{ flow_input.text }}"})
 

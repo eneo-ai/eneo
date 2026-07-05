@@ -3059,6 +3059,42 @@ async def test_resolve_step_input_question_binding_overrides_source_text(user):
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_source_refs_match_lowered_question(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="HELLO WORLD",
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_bindings={
+            "question": "Summarize:",
+            "source_refs": [
+                {"step_ref": "step_1", "output": "text", "label": "Source"}
+            ],
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == "Summarize:\n\nSource: HELLO WORLD"
+    assert resolved.used_question_binding is True
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_explicit_question_binding_is_resolved(
     user,
 ):

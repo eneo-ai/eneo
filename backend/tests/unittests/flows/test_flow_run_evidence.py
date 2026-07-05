@@ -2529,7 +2529,14 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
                     "input_type": "text",
                     "output_type": "json",
                     "input_bindings": {
-                        "question": "Analysera {{ step_1.output.text }} med fokus på {{ step_input.text }}"
+                        "question": "Analysera med fokus på {{ step_input.text }}",
+                        "source_refs": [
+                            {
+                                "step_ref": "step_1",
+                                "output": "text",
+                                "label": "Underlag",
+                            }
+                        ],
                     },
                 },
             ]
@@ -2678,8 +2685,8 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
     assert lineage["upstream_step_labels"] == ["Extrahera text"]
     assert lineage["question_binding_references_runtime_input"] is True
     assert lineage["question_binding_expressions"] == [
-        "step_1.output.text",
         "step_input.text",
+        "step_1.output.text",
     ]
 
 

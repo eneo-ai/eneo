@@ -13,7 +13,8 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_authoring_spec import AssistantSpec, StepSpec
 from eneo.flows.input_binding_contract_rules import (
-    lower_source_refs_to_question_binding,
+    SOURCE_REFS_BINDING_KEY,
+    source_ref_bindings,
 )
 
 _TEMPLATE_EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -46,8 +47,12 @@ def rewrite_step_spec_variables(
         )
 
     if step_spec.input_bindings:
-        input_bindings = lower_source_refs_to_question_binding(step_spec.input_bindings)
-        rewritten_bindings = rewrite_variable_value(input_bindings, ref_to_order)
+        rewritten_bindings = rewrite_variable_value(
+            step_spec.input_bindings, ref_to_order
+        )
+        rewritten_bindings = rewrite_source_ref_step_refs(
+            rewritten_bindings, ref_to_order
+        )
         if rewritten_bindings != step_spec.input_bindings:
             updates["input_bindings"] = rewritten_bindings
 
@@ -131,3 +136,33 @@ def rewrite_variable_value(
             for item in cast(list[Any], value)
         ]
     return value
+
+
+def rewrite_source_ref_step_refs(
+    input_bindings: Any,
+    ref_to_order: dict[str, int],
+) -> Any:
+    if not isinstance(input_bindings, dict):
+        return input_bindings
+    bindings = cast(dict[str, Any], input_bindings)
+    if SOURCE_REFS_BINDING_KEY not in bindings:
+        return bindings
+
+    refs = source_ref_bindings(bindings)
+    rewritten_refs: list[dict[str, object]] = []
+    changed = False
+    for ref in refs:
+        payload = ref.binding_payload()
+        runtime_order = ref_to_order.get(ref.step_ref)
+        if runtime_order is not None:
+            payload["step_ref"] = f"step_{runtime_order}"
+            changed = True
+        rewritten_refs.append(payload)
+
+    if not changed:
+        return bindings
+    rewritten_bindings: dict[str, Any] = {
+        **bindings,
+        SOURCE_REFS_BINDING_KEY: rewritten_refs,
+    }
+    return rewritten_bindings

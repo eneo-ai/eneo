@@ -454,6 +454,41 @@ def test_build_graph_includes_explicit_underlag_dependencies() -> None:
     )
 
 
+def test_build_graph_includes_source_ref_underlag_dependencies() -> None:
+    steps = [
+        _step(step_order=1, input_source="flow_input"),
+        _step(step_order=2, input_source="previous_step", output_type="json"),
+        _step(step_order=3, input_source="previous_step"),
+        {
+            **_step(step_order=4, input_source="previous_step"),
+            "input_bindings": {
+                "question": "Rapport:",
+                "source_refs": [
+                    {
+                        "step_ref": "step_2",
+                        "output": "structured",
+                        "field_path": "summary",
+                    },
+                    {
+                        "step_ref": "step_1",
+                        "output": "text",
+                        "label": "Transkribering",
+                    },
+                ],
+            },
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+    source_orders = {
+        edge.source_step_order
+        for edge in edges
+        if edge.target_step_order == 4 and edge.kind == "input_bindings.question"
+    }
+
+    assert source_orders == {1, 2}
+
+
 def test_validate_steps_and_graph_accept_same_explicit_underlag_dependency() -> None:
     flow_steps = [
         _flow_step(1),

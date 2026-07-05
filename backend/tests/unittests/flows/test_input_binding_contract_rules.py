@@ -59,6 +59,12 @@ def test_input_contract_conflicts_only_when_question_binding_supplies_input() ->
         input_bindings={"question": "{{ step_a.output.structured }}"},
         input_contract=None,
     )
+    assert input_contract_conflicts_with_question_binding(
+        input_bindings={
+            "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+        },
+        input_contract=contract,
+    )
 
 
 def test_source_refs_lower_to_question_binding() -> None:
@@ -137,9 +143,9 @@ def test_source_refs_reject_invalid_shape(input_bindings: object) -> None:
         source_ref_bindings(input_bindings)
 
 
-def test_runtime_binding_key_validation_still_rejects_authoring_source_refs() -> None:
+def test_runtime_binding_key_validation_accepts_typed_source_refs() -> None:
     assert (
         unsupported_input_binding_key({"question": "{{ step_a.output.text }}"}) is None
     )
-    assert unsupported_input_binding_key({"source_refs": []}) == "source_refs"
+    assert unsupported_input_binding_key({"source_refs": []}) is None
     assert unsupported_input_binding_key({1: "bad"}) == "1"

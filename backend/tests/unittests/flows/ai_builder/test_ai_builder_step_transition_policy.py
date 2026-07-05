@@ -1427,7 +1427,9 @@ def test_normalize_ai_builder_spec_preserves_source_refs_complete_underlag() -> 
     )
 
 
-def test_compiler_source_refs_complete_once_after_normalization_and_lowering() -> None:
+def test_compiler_source_refs_complete_once_after_normalization_and_materialization() -> (
+    None
+):
     spec = _text_report_source_material_spec()
     compiled_bindings = compile_step_input_bindings(
         input_source=InputSource.PREVIOUS_STEP,
@@ -1448,11 +1450,18 @@ def test_compiler_source_refs_complete_once_after_normalization_and_lowering() -
         for step, change in changes
     )
     assert shared.compiled_steps[3].input_bindings == {
-        "question": (
-            "{{ step_3.output.structured }}\n\n"
-            "Source material: {{ step_1.output.text }}"
-        )
+        "source_refs": [
+            {"step_ref": "step_3", "output": "structured"},
+            {
+                "step_ref": "step_1",
+                "output": "text",
+                "label": "Source material",
+            },
+        ]
     }
+    assert effective_question_binding(shared.compiled_steps[3].input_bindings) == (
+        "{{ step_3.output.structured }}\n\nSource material: {{ step_1.output.text }}"
+    )
 
 
 def test_normalize_ai_builder_spec_treats_source_only_underlag_as_intentional_partial() -> (

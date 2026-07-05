@@ -6,7 +6,7 @@ from typing import Literal, cast
 
 FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
 SOURCE_REFS_BINDING_KEY = "source_refs"
-SUPPORTED_INPUT_BINDING_KEYS = frozenset({"question"})
+SUPPORTED_INPUT_BINDING_KEYS = frozenset({"question", SOURCE_REFS_BINDING_KEY})
 SourceRefOutput = Literal["text", "structured"]
 _SOURCE_REF_OUTPUTS: frozenset[SourceRefOutput] = frozenset(("text", "structured"))
 _SOURCE_REF_KEYS = frozenset({"step_ref", "output", "field_path", "label"})
@@ -71,7 +71,10 @@ def input_contract_conflicts_with_question_binding(
     input_bindings: object,
     input_contract: object,
 ) -> bool:
-    return input_contract is not None and question_binding(input_bindings) is not None
+    return (
+        input_contract is not None
+        and effective_question_binding(input_bindings) is not None
+    )
 
 
 def source_ref_bindings(input_bindings: object) -> tuple[SourceRefBinding, ...]:

@@ -53,6 +53,7 @@ from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFileAvailability,
     FlowRunStepResultFileSource,
 )
+from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -1083,12 +1084,10 @@ def _build_input_lineage(
     runtime_input = _as_json_object_or_empty(input_payload.get("runtime_input"))
     runtime_files = _as_json_object_list(runtime_input.get("files"))
     runtime_file_ids = _as_string_list(result.get("runtime_input_file_ids"))
-    question_template = None
     bindings = _as_json_object(step.get("input_bindings"))
-    if bindings is not None:
-        raw_question = bindings.get("question")
-        if isinstance(raw_question, str) and raw_question.strip():
-            question_template = raw_question
+    question_template = (
+        effective_question_binding(bindings) if bindings is not None else None
+    )
     references = (
         analyze_template(
             question_template, step_refs=step_ref_mapping, form_field_names=set()
