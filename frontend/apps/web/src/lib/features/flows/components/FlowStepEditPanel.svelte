@@ -54,6 +54,11 @@
     getInputTemplateSourceConflictStepOrders
   } from "$lib/features/flows/flowVariableTokens";
   import {
+    getFlowStepEffectiveInputSources,
+    getInputBindingQuestion,
+    hasInputBindingSourceRefs
+  } from "$lib/features/flows/flowInputBindings";
+  import {
     applyInputSourceChange,
     applyInputTypeChange,
     applyOutputModeChange,
@@ -679,17 +684,21 @@
     activeStep ? getChapterAdvancedStatus(activeStep) : m.flow_chapter_advanced_default()
   );
   const inputTemplateText = $derived(
-    activeStep && activeStep.input_bindings && typeof activeStep.input_bindings === "object"
-      ? ((activeStep.input_bindings.question as string) ?? "")
-      : ""
+    activeStep ? getInputBindingQuestion(activeStep.input_bindings) : ""
   );
   const hasInputTemplateOverride = $derived(inputTemplateText.trim().length > 0);
+  const hasTypedInputSources = $derived(
+    activeStep ? hasInputBindingSourceRefs(activeStep.input_bindings) : false
+  );
+  const effectiveInputSources = $derived(
+    activeStep ? getFlowStepEffectiveInputSources(activeStep, steps) : []
+  );
   const stepSummaryModel = $derived(
     activeStep
       ? getStepSummaryModel({
           step: activeStep,
           previousStep,
-          hasInputTemplateOverride,
+          hasInputTemplateOverride: hasInputTemplateOverride || hasTypedInputSources,
           hasKnowledge: hasKnowledgeSelections,
           hasAttachments: hasAttachmentSelections
         })
@@ -1040,8 +1049,10 @@
                 {isAdvancedMode}
                 isPowerUser={$mode === "power_user"}
                 {hasInputTemplateOverride}
+                {hasTypedInputSources}
                 {showInputTemplate}
                 {inputTemplateText}
+                {effectiveInputSources}
                 {templateSourceConflict}
                 {templateStepRefs}
                 {steps}

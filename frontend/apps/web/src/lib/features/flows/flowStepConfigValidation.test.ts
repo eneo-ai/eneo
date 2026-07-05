@@ -56,6 +56,13 @@ describe("hasDeletedStepReferences", () => {
     expect(hasDeletedStepReferences([step], noCache)).toBe(true);
   });
 
+  it("detects a deleted typed source ref in input_bindings.source_refs", () => {
+    const step = makeStep({
+      input_bindings: { source_refs: [{ step_ref: "step_2_deleted", output: "text" }] }
+    });
+    expect(hasDeletedStepReferences([step], noCache)).toBe(true);
+  });
+
   it("detects a deleted-step token in the cached prompt text", () => {
     const step = makeStep({ assistant_id: "a9" });
     expect(

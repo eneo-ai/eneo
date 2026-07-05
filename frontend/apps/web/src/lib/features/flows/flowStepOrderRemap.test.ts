@@ -58,6 +58,81 @@ describe("computeStepOrderRemap", () => {
     expect(question(c)).toContain("step_2_deleted");
   });
 
+  it("rewrites typed source_refs that point at moved step orders", () => {
+    const prev = [
+      makeStep({ id: "A", step_order: 1 }),
+      makeStep({
+        id: "C",
+        step_order: 2,
+        input_bindings: {
+          source_refs: [
+            {
+              step_ref: "step_1",
+              output: "structured",
+              field_path: "facts.date",
+              label: "Document date"
+            }
+          ]
+        }
+      })
+    ];
+    const next = [
+      makeStep({ id: "A", step_order: 2 }),
+      makeStep({
+        id: "C",
+        step_order: 1,
+        input_bindings: {
+          source_refs: [
+            {
+              step_ref: "step_1",
+              output: "structured",
+              field_path: "facts.date",
+              label: "Document date"
+            }
+          ]
+        }
+      })
+    ];
+
+    const result = computeStepOrderRemap(prev, next);
+    const c = result.rewrittenSteps.find((s) => s.id === "C")!;
+    expect((c.input_bindings as { source_refs: Array<{ step_ref: string }> }).source_refs).toEqual([
+      {
+        step_ref: "step_2",
+        output: "structured",
+        field_path: "facts.date",
+        label: "Document date"
+      }
+    ]);
+  });
+
+  it("marks typed source_refs that point at a deleted step order", () => {
+    const prev = [
+      makeStep({ id: "A", step_order: 1 }),
+      makeStep({ id: "B", step_order: 2 }),
+      makeStep({
+        id: "C",
+        step_order: 3,
+        input_bindings: { source_refs: [{ step_ref: "step_2", output: "text" }] }
+      })
+    ];
+    const next = [
+      makeStep({ id: "A", step_order: 1 }),
+      makeStep({
+        id: "C",
+        step_order: 2,
+        input_bindings: { source_refs: [{ step_ref: "step_2", output: "text" }] }
+      })
+    ];
+
+    const result = computeStepOrderRemap(prev, next);
+    const c = result.rewrittenSteps.find((s) => s.id === "C")!;
+    expect([...result.impactedDeletedBindingOrders]).toEqual([2]);
+    expect((c.input_bindings as { source_refs: Array<{ step_ref: string }> }).source_refs).toEqual([
+      { step_ref: "step_2_deleted", output: "text" }
+    ]);
+  });
+
   it("leaves steps without binding questions untouched", () => {
     const prev = [makeStep({ id: "A", step_order: 1 })];
     const next = [makeStep({ id: "A", step_order: 1 })];

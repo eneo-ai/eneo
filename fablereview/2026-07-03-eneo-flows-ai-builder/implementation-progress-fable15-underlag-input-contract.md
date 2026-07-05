@@ -3,7 +3,7 @@
 ## TL;DR
 
 - Goal: make Flow AI Builder's `underlag till text`, input fields, prompts, and typed `source_refs` coherent without dumping unnecessary context.
-- Current slice: preserve downstream structured-field needs in raw source-reader prompts without dumping the full downstream context.
+- Current slice: make effective underlag honest in the frontend and keep typed source refs safe during manual step reorder/delete.
 - Do not treat this as a UI-only bug; the root owner is the Builder compiler/normalizer and authoring validation contract.
 - The source-reader capture contract is bounded to the nearest downstream JSON extraction and emitted by the existing instruction compiler, not by a second prompt writer.
 - Preserve unrelated frontend/devcontainer/fablereview dirty files from other agents.
@@ -22,7 +22,7 @@
 | Slice | Status | Canonical owner | Acceptance criteria |
 |---|---|---|---|
 | 1. Duplicate `source_refs` | Implemented, peer-reviewed green, ready to commit | Builder compiler/normalizer for emission; `input_binding_contract_rules.py` for structural uniqueness; AI Builder validator for strict authoring gate | Duplicate refs by `(step_ref, output, field_path)` are collapsed before authoring validation, labeled refs win over unlabeled refs, runtime lowering still accepts duplicates, stale duplicate-pinning tests are flipped. |
-| 2. Effective underlag visibility and reorder safety | Pending | Frontend editor projection/rendering; `flowStepOrderRemap.ts`; backend snapshot only if a read-only projection is needed | Typed refs and implicit previous-step underlag are visible; reorder remaps bare `source_refs[].step_ref`; deleting a referenced step shows stale/deleted source instead of silent rebinding. |
+| 2. Effective underlag visibility and reorder safety | Implemented, validation green, peer-reviewed green | Frontend `flowInputBindings.ts`; editor projection/rendering; `flowStepOrderRemap.ts` | Typed refs and implicit previous-step underlag are visible; reorder remaps `source_refs[].step_ref`; deleting a referenced step shows an explicit deleted-source state instead of silent rebinding or raw sentinel leakage. |
 | 3. Upstream capture contract | Implemented, validation green, final peer verification pending | Create compiler collects downstream needs; schema-path helper owns terminal schema leaves; new-step instruction compiler renders bounded guidance | Raw source-reader steps preserve fields required by the nearest downstream JSON extraction or terminal schema; guidance is capped, deterministic, localized, and not duplicated when the instruction already names the field. |
 | 4. Implicit-underlag diagnostics | Implemented, validation green, peer commit-gate pending | Runtime input-resolution diagnostics | Bindings-less previous/all-previous input gets `flow_underlag_summary` evidence for substantive implicit underlag without changing prompt text or emitting redundant refs. |
 | 5. Source-ref writer consolidation / repair narrowing | Pending | Builder compiler/edit compiler and source-material normalizer | After create/edit compilers guarantee refs, delete or narrow repair that only compensates for invalid Builder output. |
@@ -83,6 +83,57 @@ Forbidden in slice 1:
 |---|---|---|
 | Claude peer loop iteration 1 | `.codex/artifacts/claude-peer-loop-fable-15-slice-1-source-refs-plan-20260705T102939Z.md` | `changes_required`; required shared dedupe owner across compiler and source-material producers, structured validation, and runtime tolerance. |
 | Claude peer loop iteration 2 | `.codex/artifacts/claude-peer-loop-fable-15-slice-1-source-refs-implementation-20260705T104413Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; safe to commit. |
+
+## Slice 2 Boundaries
+
+Allowed:
+
+- `frontend/apps/web/src/lib/features/flows/flowInputBindings.ts`
+- `frontend/apps/web/src/lib/features/flows/flowStepOrderRemap.ts`
+- `frontend/apps/web/src/lib/features/flows/flowStepConfigValidation.ts`
+- `frontend/apps/web/src/lib/features/flows/components/FlowStepEditPanel.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowStepInputTemplateSection.svelte`
+- Focused frontend tests and i18n source JSON.
+
+Forbidden in slice 2:
+
+- No persisted `effective_underlag` field.
+- No backend runtime lowering changes.
+- No AI Builder compiler/source-ref emission changes.
+- No broad Flow editor rewrite.
+
+## Slice 2 Implementation Notes
+
+- Added `flowInputBindings.ts` as the frontend owner for reading typed
+  `input_bindings.source_refs`, deriving effective input sources, detecting
+  deleted typed refs, and remapping typed refs during reorder.
+- `FlowStepEditPanel.svelte` now reads `input_bindings.question` through the
+  shared owner and treats typed source refs as explicit underlag in the step
+  summary model.
+- `FlowStepInputTemplateSection.svelte` now renders a read-only effective
+  underlag list for typed refs and implicit previous/all-previous input, with a
+  third "source-based material" status for source-ref-only bindings.
+- Deleted typed refs are represented as an explicit `deleted_source` lifecycle
+  state and localized as a user-facing repair message, so the UI does not leak
+  raw `step_N_deleted` sentinels.
+- `computeStepOrderRemap()` now rewrites `source_refs[].step_ref` alongside
+  `input_bindings.question` tokens and reuses the existing
+  `impactedDeletedBindingOrders` manual-repair gate.
+
+## Slice 2 Validation
+
+| Command | Result |
+|---|---|
+| `bun run test:unit src/lib/features/flows/flowInputBindings.test.ts src/lib/features/flows/flowStepOrderRemap.test.ts src/lib/features/flows/flowStepConfigValidation.test.ts src/lib/features/flows/components/FlowStepInputTemplateSection.test.ts` | 23 passed |
+| `bun run check` | `svelte-check found 0 errors and 0 warnings` |
+| `bunx eslint src/lib/features/flows/flowInputBindings.ts src/lib/features/flows/flowInputBindings.test.ts src/lib/features/flows/flowStepOrderRemap.ts src/lib/features/flows/flowStepOrderRemap.test.ts src/lib/features/flows/flowStepConfigValidation.ts src/lib/features/flows/flowStepConfigValidation.test.ts src/lib/features/flows/components/FlowStepEditPanel.svelte src/lib/features/flows/components/FlowStepInputTemplateSection.svelte src/lib/features/flows/components/FlowStepInputTemplateSection.test.ts` | passed |
+
+## Slice 2 Peer Review
+
+| Reviewer | Artifact | Result |
+|---|---|---|
+| Claude peer loop iteration 1 | `.codex/artifacts/claude-peer-loop-flow-input-binding-ui-reorder-implementation-review-20260705T143911Z.md` | `changes_required`; required explicit deleted-source lifecycle state, deleted projection test, and comment cleanup. |
+| Claude peer loop iteration 2 | `.codex/artifacts/claude-peer-loop-flow-input-binding-ui-reorder-implementation-review-iteration-2-20260705T144638Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; safe to commit after local validation. |
 
 ## Slice 3 Boundaries
 

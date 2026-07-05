@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { remapInputBindingSourceRefs } from "./flowInputBindings";
 import { getStableStepKey } from "./flowStepPayloadShaping";
 import { remapStepOrderTemplateTokens } from "./flowVariableTokens";
 
@@ -9,15 +10,16 @@ export interface StepOrderRemapResult {
   remapByOldOrder: Map<number, number>;
   /** step_orders present before the change but gone after it. */
   deletedOrders: Set<number>;
-  /** Deleted orders that were still referenced by a step's binding question. */
+  /** Deleted orders that were still referenced by a step's input bindings. */
   impactedDeletedBindingOrders: Set<number>;
 }
 
 /**
  * Pure computation behind a safe step reorder/removal: match steps by stable
  * identity to learn how orders moved, find which orders disappeared, and rewrite
- * the step-order tokens inside each step's `input_bindings.question`. The caller
- * owns applying the result to the store and remapping the assistant prompts.
+ * step-order references inside each step's `input_bindings.question` and
+ * `input_bindings.source_refs`. The caller owns applying the result to the store
+ * and remapping the assistant prompts.
  */
 export function computeStepOrderRemap(
   previousSteps: FlowStep[],
@@ -53,16 +55,31 @@ export function computeStepOrderRemap(
     const step = rewrittenSteps[i];
     const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
     const question = typeof bindings?.question === "string" ? bindings.question : null;
-    if (!question) continue;
+    if (question) {
+      const remapped = remapStepOrderTemplateTokens(question, remapByOldOrder, deletedOrders);
+      if (remapped.changed) {
+        rewrittenSteps[i] = {
+          ...step,
+          input_bindings: { ...(bindings ?? {}), question: remapped.text }
+        };
+      }
+      for (const deletedReference of remapped.rewrittenDeletedReferences) {
+        impactedDeletedBindingOrders.add(deletedReference);
+      }
+    }
 
-    const remapped = remapStepOrderTemplateTokens(question, remapByOldOrder, deletedOrders);
-    if (remapped.changed) {
+    const sourceRefsRemap = remapInputBindingSourceRefs(
+      rewrittenSteps[i].input_bindings,
+      remapByOldOrder,
+      deletedOrders
+    );
+    if (sourceRefsRemap.changed) {
       rewrittenSteps[i] = {
-        ...step,
-        input_bindings: { ...(bindings ?? {}), question: remapped.text }
+        ...rewrittenSteps[i],
+        input_bindings: sourceRefsRemap.inputBindings
       };
     }
-    for (const deletedReference of remapped.rewrittenDeletedReferences) {
+    for (const deletedReference of sourceRefsRemap.rewrittenDeletedReferences) {
       impactedDeletedBindingOrders.add(deletedReference);
     }
   }

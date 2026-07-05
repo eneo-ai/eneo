@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { hasDeletedInputBindingSourceRefs, getInputBindingQuestion } from "./flowInputBindings";
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
@@ -57,10 +58,10 @@ export function hasDeletedStepReferences(
   cachedPromptTextByAssistantId: Map<string, string>
 ): boolean {
   for (const step of steps) {
-    const bindings = step.input_bindings as { question?: string } | null | undefined;
-    if (typeof bindings?.question === "string" && DELETED_STEP_TOKEN.test(bindings.question)) {
+    if (DELETED_STEP_TOKEN.test(getInputBindingQuestion(step.input_bindings))) {
       return true;
     }
+    if (hasDeletedInputBindingSourceRefs(step.input_bindings)) return true;
     const text = cachedPromptTextByAssistantId.get(step.assistant_id) ?? "";
     if (DELETED_STEP_TOKEN.test(text)) return true;
   }
