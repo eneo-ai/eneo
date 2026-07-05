@@ -326,7 +326,7 @@ def _build_slot_classification_prompt(
         "If the final deliverable is a DOCX, Word, PDF, or document artifact, choose "
         "that artifact as terminal_output even when the document contains a readable "
         "report, memo, or summary. Treat structured JSON mentioned as helpful "
-        "intermediate/API context as structured_analysis_need, not terminal_output, "
+        "intermediate/API context as output-field guidance, not terminal_output, "
         "unless the user says the final response/output itself must be JSON. "
         "Readable summaries, memos, and reports are structured_text terminal output; "
         "machine-readable records or downstream integration payloads are "

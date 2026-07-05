@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-PATTERN_REGISTRY_VERSION: int = 8
+PATTERN_REGISTRY_VERSION: int = 9
 
 PatternId = str
 ChainStepToken = str
@@ -47,8 +47,6 @@ FLOW_INPUT_AUDIO_TRANSCRIPTION = "flow_input_audio_transcription"
 FLOW_INPUT_DOCUMENT_UPLOAD = "flow_input_document_upload"
 FLOW_INPUT_SECTIONED_FORM_FIELDS = "flow_input_sectioned_form_fields"
 EXTRACT_TEMPLATE_VARIABLES_STEP = "extract_template_variables_step"
-STRUCTURED_EXTRACTION_STEP = "structured_extraction_step"
-ANALYSIS_OR_QUALITY_REVIEW_STEP = "analysis_or_quality_review_step"
 COMPOSE_SECTIONS_STEP = "compose_sections_step"
 TEMPLATE_FILL_DOCX_STEP = "template_fill_docx_step"
 TERMINAL_ARTIFACT_STEP = "terminal_artifact_step"
@@ -89,14 +87,6 @@ CHAIN_STEP_DESCRIPTORS: Mapping[str, ChainStepDescriptor] = MappingProxyType(
         EXTRACT_TEMPLATE_VARIABLES_STEP: ChainStepDescriptor(
             token=EXTRACT_TEMPLATE_VARIABLES_STEP,
             label="extract template variables",
-        ),
-        STRUCTURED_EXTRACTION_STEP: ChainStepDescriptor(
-            token=STRUCTURED_EXTRACTION_STEP,
-            label="extract structured foundation",
-        ),
-        ANALYSIS_OR_QUALITY_REVIEW_STEP: ChainStepDescriptor(
-            token=ANALYSIS_OR_QUALITY_REVIEW_STEP,
-            label="analyze and review quality",
         ),
         COMPOSE_SECTIONS_STEP: ChainStepDescriptor(
             token=COMPOSE_SECTIONS_STEP,
@@ -428,39 +418,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
-    ),
-    # These structural hints are intentionally not coupled to prompt recipes.
-    # The server-owned create intent compiler and Flow capability manifest own
-    # low-level realization.
-    _pattern(
-        id="multi_step_quality_chain",
-        examples=(
-            "multi-step pipeline with structured intermediate + quality polish",
-            "document analysis chained into editorial quality pass",
-        ),
-        retrieval_hints=(
-            "rich document workflow quality polish review chain multi step",
-            "structured intermediate previous_step",
-        ),
-        required_architectural_slots=(
-            "primary_runtime_input",
-            "terminal_output",
-            "document_material_scope",
-            "structured_analysis_need",
-        ),
-        question_template_ids=(
-            "primary_runtime_input",
-            "terminal_output",
-            "document_material_scope",
-            "structured_analysis_need",
-        ),
-        chain_steps=(
-            FLOW_INPUT_DOCUMENT_UPLOAD,
-            STRUCTURED_EXTRACTION_STEP,
-            ANALYSIS_OR_QUALITY_REVIEW_STEP,
-            TERMINAL_ARTIFACT_STEP,
-        ),
-        chain_kind="compiled",
     ),
     _pattern(
         id="comparison",

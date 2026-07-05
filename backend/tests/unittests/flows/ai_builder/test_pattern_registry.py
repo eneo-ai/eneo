@@ -61,7 +61,6 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "audio_transcription",
         "audio_to_artifact_report",
         "text_to_artifact_report",
-        "multi_step_quality_chain",
         "comparison",
         "sectioned_form_intake",
         "form_field_runtime_inputs",
@@ -114,8 +113,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_eight(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 8
+    def test_pattern_version_is_nine(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 9
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -337,7 +336,6 @@ class TestPositivePatternContract:
         multi_step_seed: frozenset[str] = frozenset(
             {
                 "audio_to_artifact_report",
-                "multi_step_quality_chain",
                 "sectioned_form_intake",
                 "document_to_docx_template",
             }
@@ -506,7 +504,7 @@ class TestPatternRegistryPublicApi:
     def test_find_pattern_candidates_does_not_match_on_substrings(self) -> None:
         """Word-boundary matching regression guard. A hint token like
         `form` (from `extract_structured_fields`) must not match inside
-        `information`; `step` (from `multi_step_quality_chain`) must not
+        `information`; `step` (from chain-bearing patterns) must not
         match inside `stepwise`; `document` (from document-family
         patterns) must not match inside `documentation`. A substring
         match would silently score noise patterns against unrelated
@@ -518,7 +516,7 @@ class TestPatternRegistryPublicApi:
         assert "extract_structured_fields" not in matched_ids, (
             f"`form` substring-matched inside `information`: {matched_ids}"
         )
-        assert "multi_step_quality_chain" not in matched_ids, (
+        assert "sectioned_form_intake" not in matched_ids, (
             f"`step` substring-matched inside `stepwise`: {matched_ids}"
         )
         for doc_pattern_id in (

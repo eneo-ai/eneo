@@ -244,11 +244,6 @@ def _summary_text(
         _resolved_value(resolved, "terminal_output"),
         locale,
     )
-    analysis_need = _slot_value_for_slot(
-        "structured_analysis_need",
-        _resolved_value(resolved, "structured_analysis_need"),
-        locale,
-    )
     post_processing_goal = _slot_value_for_slot(
         "post_processing_goal",
         _resolved_value(resolved, "post_processing_goal"),
@@ -262,8 +257,6 @@ def _summary_text(
             )
             if post_processing_goal:
                 summary += f" Resultatet ska hjälpa till med: {post_processing_goal}."
-            if analysis_need:
-                summary += f" Analysen ska stödja: {analysis_need}."
             return summary
         summary = (
             f"The flow should accept {runtime_input or 'runtime input'} "
@@ -271,8 +264,6 @@ def _summary_text(
         )
         if post_processing_goal:
             summary += f" The result should help with: {post_processing_goal}."
-        if analysis_need:
-            summary += f" The analysis should support: {analysis_need}."
         return summary
 
     if locale == "sv":
@@ -412,7 +403,6 @@ def _slot_label(slot_name: str, locale: Locale) -> str:
         "docx_output_mode": "DOCX-resultat",
         "pdf_generation_mode": "PDF-resultat",
         "post_processing_goal": "Syfte med bearbetningen",
-        "structured_analysis_need": "Strukturerad analys",
     }
     labels_en = {
         "primary_runtime_input": "Runtime input",
@@ -422,7 +412,6 @@ def _slot_label(slot_name: str, locale: Locale) -> str:
         "docx_output_mode": "DOCX output",
         "pdf_generation_mode": "PDF output",
         "post_processing_goal": "Processing purpose",
-        "structured_analysis_need": "Structured analysis",
     }
     labels = labels_sv if locale == "sv" else labels_en
     return labels.get(slot_name, slot_name.replace("_", " ").title())

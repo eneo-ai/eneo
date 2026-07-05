@@ -28,7 +28,6 @@ _EXPECTED_BUILDER_NAMES: tuple[str, ...] = (
     "_build_output_reader_issue",
     "_build_final_output_scope_issue",
     "_build_final_pdf_type_issue",
-    "_build_structured_analysis_need_issue",
     "_build_runtime_metadata_fields_issue",
 )
 
@@ -49,7 +48,6 @@ _EXPECTED_ISSUE_ID_BY_BUILDER: dict[str, str] = {
     "_build_output_reader_issue": "output_reader",
     "_build_final_output_scope_issue": "final_output_scope",
     "_build_final_pdf_type_issue": "final_pdf_type",
-    "_build_structured_analysis_need_issue": "structured_analysis_need",
     "_build_runtime_metadata_fields_issue": "runtime_metadata_fields",
 }
 

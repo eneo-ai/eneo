@@ -226,57 +226,6 @@ def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
     assert slot.is_commit_grade is expected
 
 
-def test_policy_filters_planner_internal_selected_question_targets() -> None:
-    policy = build_planner_action_policy(
-        session_state=_state_with_resolved_slots(
-            "primary_runtime_input",
-            "terminal_output",
-        ),
-        unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=(
-            "structured_analysis_need",
-            "document_material_scope",
-        ),
-    )
-
-    assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("document_material_scope",)
-
-
-def test_policy_ignores_planner_internal_derived_commit_blockers() -> None:
-    state = _state_with_resolved_slots(
-        "primary_runtime_input",
-        "terminal_output",
-        "document_material_scope",
-    )
-    state.resolved_slots["terminal_output"] = _slot(
-        "terminal_output",
-        "pdf_document",
-    )
-    state.resolved_slots["pdf_generation_mode"] = _slot(
-        "pdf_generation_mode",
-        "generated_pdf",
-    )
-    state.resolved_slots["structured_analysis_need"] = _slot(
-        "structured_analysis_need",
-        "use_structured_analysis",
-        source="model",
-        confidence="medium",
-    )
-
-    policy = build_planner_action_policy(
-        session_state=state,
-        unresolved_architectural_choices=compute_unresolved_core_slots(state),
-        selected_discovery_question_ids=(),
-    )
-
-    assert policy.allowed_action_kinds == ("commit_architecture",)
-    assert policy.allowed_ask_question_targets == ()
-    assert "structured_analysis_need" not in " ".join(
-        policy.blocked_action_reasons.values()
-    )
-
-
 def test_policy_appends_missing_core_slots_after_selected_discovery_targets() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),

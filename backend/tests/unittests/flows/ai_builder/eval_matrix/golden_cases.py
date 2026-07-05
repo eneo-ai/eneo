@@ -265,48 +265,6 @@ def _document_to_docx_create() -> BuildableGoldenCase:
     )
 
 
-def _multi_step_quality_chain() -> BuildableGoldenCase:
-    spec = FlowDraftSpecCore(
-        flow_name="Granskningskedja",
-        steps=[
-            _step(
-                "step_a",
-                "Extrahera underlag",
-                "Extrahera strukturerade fynd från det uppladdade dokumentet.",
-                input_type=InputType.DOCUMENT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                "step_b",
-                "Analysera kvalitet",
-                "Granska och förbättra resonemanget utifrån "
-                "{{step_a.output.structured.findings}}.",
-                input_source=InputSource.PREVIOUS_STEP,
-            ),
-            _step(
-                "step_c",
-                "Skapa slutrapport",
-                "Skapa ett DOCX-dokument från {{step_b.output.text}}.",
-                input_source=InputSource.PREVIOUS_STEP,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-    )
-    return BuildableGoldenCase(
-        case_id="multi_step_quality_chain__advanced_edit",
-        capability_row=CapabilityRow.MULTI_STEP_QUALITY_CHAIN,
-        spec=spec,
-        declared_columns=frozenset(
-            {
-                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
-                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
-                CompositionColumn.EDIT_PATH,
-            }
-        ),
-        via_edit=True,
-    )
-
-
 def _structured_report_basic() -> BuildableGoldenCase:
     spec = FlowDraftSpecCore(
         flow_name="Avtalets risköversikt",
@@ -402,6 +360,54 @@ def _pdf_report_basic() -> BuildableGoldenCase:
                 CompositionColumn.FORM_FIELDS_DECLARE_ONLY,
             }
         ),
+    )
+
+
+def _pdf_report_advanced_edit() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera dokumentdata",
+                "Extrahera titel, datum, författare, kategori, slutsatser och "
+                "sammanfattning ur det uppladdade dokumentet.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Skriv rapporttext",
+                "Skriv rapporttexten från {{step_a.output.structured.title}}, "
+                "{{step_a.output.structured.category}} och "
+                "{{step_a.output.structured.summary}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_c",
+                "Skapa PDF",
+                "Skapa PDF-filen från {{step_b.output.text}} och stäm av mot "
+                "{{step_a.output.structured.conclusions}} med fokus på "
+                "{{review_focus}}.",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                output_type=OutputType.PDF,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="review_focus", type="text", label="Fokus")],
+    )
+    return BuildableGoldenCase(
+        case_id="document_to_pdf_report__advanced_edit",
+        capability_row=CapabilityRow.DOCUMENT_TO_PDF_REPORT,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.ALL_STEPS_MULTI_REFERENCE,
+                CompositionColumn.EDIT_PATH,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+            }
+        ),
+        via_edit=True,
     )
 
 
@@ -753,52 +759,6 @@ def _form_intake_to_docx_template_advanced() -> BuildableGoldenCase:
     )
 
 
-def _multi_step_quality_chain_form_fields() -> BuildableGoldenCase:
-    spec = FlowDraftSpecCore(
-        flow_name="Tonanpassad granskningskedja",
-        steps=[
-            _step(
-                "step_a",
-                "Strukturera utkast",
-                "Extrahera utkastets struktur ur det uppladdade dokumentet med "
-                "ton {{tone}}.",
-                input_type=InputType.DOCUMENT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                "step_b",
-                "Kritisera",
-                "Kritisera och förbättra utkastet utifrån "
-                "{{step_a.output.structured.draft}}.",
-                input_source=InputSource.PREVIOUS_STEP,
-            ),
-            _step(
-                "step_c",
-                "Revidera",
-                "Revidera texten genom att väga {{step_a.output.structured.draft}} "
-                "mot {{step_b.output.text}} och anpassa tonen {{tone}}.",
-                input_source=InputSource.PREVIOUS_STEP,
-            ),
-        ],
-        form_fields=[FormFieldSpec(name="tone", type="text", label="Ton")],
-    )
-    return BuildableGoldenCase(
-        case_id="multi_step_quality_chain__form_fields",
-        capability_row=CapabilityRow.MULTI_STEP_QUALITY_CHAIN,
-        spec=spec,
-        declared_columns=frozenset(
-            {
-                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
-                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
-                CompositionColumn.FORM_FIELDS_CHAIN,
-                CompositionColumn.ALL_STEPS_MULTI_REFERENCE,
-                CompositionColumn.EDIT_PATH,
-            }
-        ),
-        via_edit=True,
-    )
-
-
 def _underlag_till_text_pipe() -> BuildableGoldenCase:
     spec = FlowDraftSpecCore(
         flow_name="Strukturerad data till text",
@@ -834,10 +794,10 @@ GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _sectioned_form_intake(),
     _document_to_docx_template(),
     _document_to_docx_create(),
-    _multi_step_quality_chain(),
     _structured_report_basic(),
     _structured_report_advanced(),
     _pdf_report_basic(),
+    _pdf_report_advanced_edit(),
     _audio_transcription_basic(),
     _audio_to_docx_template_advanced(),
     _audio_to_structured_text_advanced(),
@@ -847,7 +807,6 @@ GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _sectioned_form_intake_basic(),
     _sectioned_form_intake_advanced(),
     _form_intake_to_docx_template_advanced(),
-    _multi_step_quality_chain_form_fields(),
     _underlag_till_text_pipe(),
 )
 

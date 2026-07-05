@@ -27,7 +27,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 
 
 class TestSlotVocabularyShape:
-    def test_frozenset_contains_exactly_nine_canonical_slot_names(self) -> None:
+    def test_frozenset_contains_exactly_eight_canonical_slot_names(self) -> None:
         assert KNOWN_REQUIREMENT_SLOT_NAMES == frozenset(
             {
                 "primary_runtime_input",
@@ -37,7 +37,6 @@ class TestSlotVocabularyShape:
                 "document_material_scope",
                 "post_processing_goal",
                 "structured_io_contract",
-                "structured_analysis_need",
                 "runtime_metadata_fields",
             }
         )
@@ -45,7 +44,7 @@ class TestSlotVocabularyShape:
     def test_frozenset_is_truly_frozen(self) -> None:
         assert isinstance(KNOWN_REQUIREMENT_SLOT_NAMES, frozenset)
 
-    def test_non_llm_resolvable_slots_are_document_generation_modes(self) -> None:
+    def test_non_llm_resolvable_slots_are_policy_slots(self) -> None:
         assert NON_LLM_RESOLVABLE_SLOT_NAMES == frozenset(
             {
                 "docx_output_mode",
@@ -70,7 +69,6 @@ class TestSlotVocabularyShape:
                 "output_artifact",
                 "workflow_outcome",
                 "output_style",
-                "structured_reuse",
                 "runtime_metadata",
             }
         )

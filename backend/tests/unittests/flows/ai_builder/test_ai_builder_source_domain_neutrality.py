@@ -41,7 +41,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     primary_runtime_input_question,
     processing_scope_question,
     runtime_metadata_fields_question,
-    structured_analysis_need_question,
     terminal_output_question,
 )
 
@@ -106,7 +105,6 @@ class TestDiscoveryQuestionsRenderNeutrality:
             ("output_reader", output_reader_question),
             ("final_output_scope", final_output_scope_question),
             ("runtime_metadata_fields", runtime_metadata_fields_question),
-            ("structured_analysis_need", structured_analysis_need_question),
             ("final_pdf_type", final_pdf_type_question),
             ("pdf_generation_mode", pdf_generation_mode_question),
         )

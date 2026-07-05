@@ -32,11 +32,17 @@ def test_create_dataflow_does_not_import_critic_invariants() -> None:
     assert "ai_builder_critic_invariants" not in source
 
 
-def _field(name: str) -> StructuredFieldDraft:
+def _field(
+    name: str,
+    field_type: str = "string",
+    *,
+    item_fields: list[StructuredFieldDraft] | None = None,
+) -> StructuredFieldDraft:
     return StructuredFieldDraft(
         name=name,
-        field_type="string",
+        field_type=field_type,
         description=f"{name} field.",
+        item_fields=item_fields,
     )
 
 
@@ -583,6 +589,170 @@ def test_normalize_create_step_mechanics_keeps_non_adjacent_json_source() -> Non
 
     assert "{{ step_b.output.structured }}" in question
     assert "slutsatser field.: {{ step_c.output.structured.slutsatser }}" in question
+
+
+def test_normalize_create_step_mechanics_folds_adjacent_source_json_refinement() -> (
+    None
+):
+    normalized = _normalize_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            {
+                "name": "Läs dokument",
+                "instructions": "Identifiera dokumentets titel.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [_field("titel")],
+                "runtime_required": True,
+            },
+            {
+                "name": "Analysera dokumentets innehåll",
+                "instructions": "Extrahera kategori och slutsats.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "uses_previous_fields": [
+                    {"from_step": 1, "field_path": "titel"},
+                ],
+                "output_fields": [_field("kategori"), _field("slutsats")],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv rapporten.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 2, "field_path": "kategori"},
+                ],
+            },
+            {
+                "name": "Skapa PDF",
+                "instructions": "Skapa PDF från rapporten.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    assert [step.name for step in normalized] == [
+        "Läs dokument",
+        "Skriv rapport",
+        "Skapa PDF",
+    ]
+    assert [field.name for field in normalized[0].output_fields or []] == [
+        "titel",
+        "kategori",
+        "slutsats",
+    ]
+    assert [
+        (ref.from_step, ref.field_path) for ref in normalized[1].uses_previous_fields
+    ] == [
+        (1, "kategori"),
+    ]
+
+    spec = compile_create_steps_to_spec(
+        flow_name="Dokumentanalys till PDF",
+        steps=normalized,
+    )
+    assert len(spec.steps) == 3
+    question = effective_question_binding(spec.steps[1].input_bindings) or ""
+    assert "{{ step_a.output.structured.kategori }}" in question
+    assert validate_spec(spec).valid
+
+
+def test_normalize_create_step_mechanics_keeps_json_refinement_with_external_context() -> (
+    None
+):
+    normalized = _normalize_steps(
+        flow_name="Dokumentanalys med regelverk",
+        steps=[
+            {
+                "name": "Läs dokument",
+                "instructions": "Identifiera dokumentets titel.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [_field("titel")],
+                "runtime_required": True,
+            },
+            {
+                "name": "Jämför mot regelverk",
+                "instructions": "Jämför dokumentet mot kunskapsunderlaget.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "knowledge_refs": ["kb:lagstod"],
+                "output_fields": [_field("regelavvikelse")],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv rapporten.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+            },
+        ],
+    )
+
+    assert [step.name for step in normalized] == [
+        "Läs dokument",
+        "Jämför mot regelverk",
+        "Skriv rapport",
+    ]
+    assert [field.name for field in normalized[0].output_fields or []] == ["titel"]
+
+
+def test_normalize_create_step_mechanics_preserves_model_declared_document_summary() -> (
+    None
+):
+    normalized = _normalize_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            {
+                "name": "Läs dokument",
+                "instructions": "Identifiera dokumentets titel.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [
+                    _field("documents", "array", item_fields=[_field("title")])
+                ],
+                "runtime_required": True,
+            },
+            {
+                "name": "Analysera dokumentets innehåll",
+                "instructions": "Extrahera kategori.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [
+                    _field(
+                        "documents",
+                        "array",
+                        item_fields=[_field("category"), _field("summary")],
+                    )
+                ],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv en koncis sammanfattning per dokument.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+            },
+        ],
+    )
+
+    documents_field = (normalized[0].output_fields or [])[0]
+    assert [field.name for field in documents_field.item_fields or []] == [
+        "title",
+        "category",
+        "summary",
+    ]
 
 
 def test_targeted_underlag_cap_preserves_breadth_across_wide_priors() -> None:

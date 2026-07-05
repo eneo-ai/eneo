@@ -232,9 +232,7 @@ def test_metadata_fields_do_not_create_architecture_without_primary_pattern(
     )
 
 
-def test_prefers_multi_step_quality_pattern_when_structured_analysis_is_resolved() -> (
-    None
-):
+def test_structured_analysis_slot_does_not_force_quality_chain() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(
             primary_runtime_input="documents",
@@ -252,8 +250,30 @@ def test_prefers_multi_step_quality_pattern_when_structured_analysis_is_resolved
             "output_mode": "pass_through",
         }
     ]
-    assert draft.chosen_patterns == ["multi_step_quality_chain"]
+    assert draft.chosen_patterns == ["document_to_structured_report"]
     assert draft.aggregation_intent == "linear"
+
+
+def test_document_pdf_ignores_structured_analysis_slot() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="documents",
+            terminal_output="pdf_document",
+            document_material_scope="multiple_documents_case",
+            structured_analysis_need="use_structured_analysis",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "document",
+            "output_type": "pdf",
+            "output_mode": "pass_through",
+        }
+    ]
+    assert draft.chosen_patterns == ["document_to_pdf_report"]
+    assert draft.aggregation_intent == "aggregate"
 
 
 def test_json_terminal_schema_extraction_does_not_select_quality_chain() -> None:

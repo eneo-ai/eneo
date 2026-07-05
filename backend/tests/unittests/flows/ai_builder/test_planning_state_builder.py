@@ -899,7 +899,7 @@ class TestPolicyDefaults:
 
         assert "terminal_output" not in state.resolved_slots
 
-    def test_meeting_followup_goal_resolves_and_derives_structured_analysis(
+    def test_meeting_followup_goal_resolves_without_structured_analysis_default(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -919,12 +919,9 @@ class TestPolicyDefaults:
         assert goal.value == "action_followup"
         assert goal.source == "heuristic"
         assert goal.confidence == "high"
-        structured = state.resolved_slots["structured_analysis_need"]
-        assert structured.value == "use_structured_analysis"
-        assert structured.source == "heuristic"
-        assert structured.confidence == "high"
+        assert "structured_analysis_need" not in state.resolved_slots
 
-    def test_medium_model_goal_derives_non_commit_grade_structured_analysis(
+    def test_medium_model_goal_does_not_create_structured_analysis_default(
         self,
     ) -> None:
         state = PlanningState.empty()
@@ -954,11 +951,7 @@ class TestPolicyDefaults:
 
         apply_policy_defaults_from_resolved_slots(state, freeform_text="")
 
-        structured = state.resolved_slots["structured_analysis_need"]
-        assert structured.value == "use_structured_analysis"
-        assert structured.source == "heuristic"
-        assert structured.confidence == "medium"
-        assert "model:post_processing_goal" in structured.evidence
+        assert "structured_analysis_need" not in state.resolved_slots
 
         policy = build_planner_action_policy(
             session_state=state,
@@ -966,12 +959,8 @@ class TestPolicyDefaults:
             selected_discovery_question_ids=(),
         )
 
-        assert policy.allowed_action_kinds == ("ask_question",)
-        assert policy.allowed_ask_question_targets == ("structured_analysis_need",)
-        assert (
-            "structured_analysis_need"
-            in policy.blocked_action_reasons["commit_architecture"]
-        )
+        assert policy.allowed_action_kinds == ("commit_architecture",)
+        assert policy.allowed_ask_question_targets == ()
 
     def test_transcript_only_goal_does_not_derive_structured_analysis(self) -> None:
         state = build_planning_state_from_conversation(
@@ -1068,7 +1057,7 @@ class TestRuntimeMetadataClassificationBoundaries:
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
 
-    def test_classifier_cannot_override_source_derived_report_fields(
+    def test_classifier_source_derived_report_fields_are_left_to_compile_filtering(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1103,11 +1092,11 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "heuristic"
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "model"
         assert slot.confidence == "high"
 
-    def test_classifier_cannot_override_source_derived_document_sections(
+    def test_classifier_source_derived_document_sections_are_left_to_compile_filtering(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1146,8 +1135,8 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "heuristic"
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "model"
         assert slot.confidence == "high"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"

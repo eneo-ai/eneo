@@ -146,7 +146,6 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
         terminal_output="docx_document",
         docx_output_mode="generated_docx",
         post_processing_goal="action_followup",
-        structured_analysis_need="use_structured_analysis",
         runtime_metadata_fields="no_extra_metadata",
     )
     state.architecture_commit = _finalized_commit_for_state(state)
@@ -157,11 +156,9 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
     assert "Resultatet ska hjälpa till med: Beslut, nästa steg" in payload.summary
     assert {decision.topic for decision in payload.key_decisions} >= {
         "Syfte med bearbetningen",
-        "Strukturerad analys",
     }
     assert {decision.decision for decision in payload.key_decisions} >= {
         "Beslut, nästa steg och uppföljning",
-        "Ja, använd strukturerad analys där det förbättrar kvaliteten",
     }
 
 
@@ -170,7 +167,6 @@ def test_server_confirmation_names_json_to_json_architecture() -> None:
         primary_runtime_input="json",
         terminal_output="structured_json",
         post_processing_goal="extract_key_information",
-        structured_analysis_need="use_structured_analysis",
         runtime_metadata_fields="no_extra_metadata",
     )
     state.architecture_commit = _finalized_commit_for_state(state)
@@ -293,7 +289,7 @@ def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
         "flow_default": ("docx_output_mode", "generated_docx"),
         "policy_default": ("runtime_metadata_fields", "no_extra_metadata"),
         "heuristic": ("post_processing_goal", "summarize_or_overview"),
-        "model": ("structured_analysis_need", "use_structured_analysis"),
+        "model": ("document_material_scope", "single_uploaded_document"),
     }
     state = PlanningState.empty()
     state.resolved_slots = {
@@ -320,8 +316,8 @@ def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
         "DOCX-resultat",
     }
     assert assumption_topics == {
+        "Dokumentunderlag",
         "Metadata vid körning",
         "Syfte med bearbetningen",
-        "Strukturerad analys",
     }
     assert decision_topics.isdisjoint(assumption_topics)

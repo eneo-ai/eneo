@@ -558,16 +558,8 @@ class TestQuestionExposure:
                 f"planner_internal, got {template.exposure!r}"
             )
 
-    def test_structured_analysis_need_is_planner_internal(self) -> None:
-        template = QUESTION_CATALOG["structured_analysis_need"]
-        assert template.exposure == "planner_internal", (
-            "structured_analysis_need is a planner-internal follow-up; "
-            "it must not surface as a user-visible requirement"
-        )
-
     def test_user_facing_slots_default_to_user_requirement(self) -> None:
-        user_facing_slots = KNOWN_REQUIREMENT_SLOT_NAMES - {"structured_analysis_need"}
-        for slot in user_facing_slots:
+        for slot in KNOWN_REQUIREMENT_SLOT_NAMES:
             template = QUESTION_CATALOG[slot]
             assert template.exposure == "user_requirement", (
                 f"{slot}: expected user_requirement exposure, got {template.exposure!r}"
@@ -1296,50 +1288,6 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
         "selection_mode": "single",
         "allow_custom": True,
         "exposure": "user_requirement",
-    },
-    ("structured_analysis_need", "sv"): {
-        "question_id": "structured_analysis_need",
-        "question": (
-            "Ska flödet också ta fram strukturerad analys som kan återanvändas i senare steg?"
-        ),
-        "options": (
-            (
-                "use_structured_analysis",
-                "Ja, använd strukturerad analys där det förbättrar kvaliteten",
-                "Extrahera viktiga fält som JSON innan slutrapporten skrivs.",
-                "use_structured_analysis",
-            ),
-            (
-                "text_only_analysis",
-                "Nej, håll analysen som vanlig text",
-                "Undvik extra struktur om den inte behövs.",
-                "text_only_analysis",
-            ),
-        ),
-        "selection_mode": "single",
-        "allow_custom": True,
-        "exposure": "planner_internal",
-    },
-    ("structured_analysis_need", "en"): {
-        "question_id": "structured_analysis_need",
-        "question": "Should the flow also produce structured analysis that later steps can reuse?",
-        "options": (
-            (
-                "use_structured_analysis",
-                "Yes, use structured analysis where it improves quality",
-                "Extract important fields as JSON before writing the final report.",
-                "use_structured_analysis",
-            ),
-            (
-                "text_only_analysis",
-                "No, keep the analysis as plain text",
-                "Avoid extra structure if it is not needed.",
-                "text_only_analysis",
-            ),
-        ),
-        "selection_mode": "single",
-        "allow_custom": True,
-        "exposure": "planner_internal",
     },
     ("runtime_metadata_fields", "sv"): {
         "question_id": "runtime_metadata_fields",

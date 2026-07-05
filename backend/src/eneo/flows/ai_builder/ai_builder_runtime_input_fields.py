@@ -261,92 +261,6 @@ _POST_TRIGGER_NEGATABLE_ABSENCE_PREDICATE_TOKENS = frozenset(
         "needed",
     }
 )
-_SOURCE_DERIVED_FIELD_MARKERS: tuple[str, ...] = (
-    "avsnitt",
-    "dokumentavsnitt",
-    "dokumentsektioner",
-    "dokumentets avsnitt",
-    "dokumentets rubriker",
-    "rapportfält",
-    "rapportfalt",
-    "rapportavsnitt",
-    "rapportens avsnitt",
-    "rapportens fält",
-    "rapportens falt",
-    "rapportens rubriker",
-    "rapportsektioner",
-    "rubrik",
-    "rubriker",
-    "sektion",
-    "sektioner",
-    "fält i rapporten",
-    "falt i rapporten",
-    "metadatafält i rapporten",
-    "metadatafalt i rapporten",
-    "metadata fields in the report",
-    "report fields",
-    "report sections",
-)
-_SOURCE_DERIVED_ACTION_MARKERS: tuple[str, ...] = (
-    "ska hämtas från",
-    "ska hamtas fran",
-    "hämtas från",
-    "hamtas fran",
-    "ska extraheras från",
-    "ska extraheras fran",
-    "extraheras från",
-    "extraheras fran",
-    "extraheras ur",
-    "utifrån",
-    "utifran",
-    "baserat på",
-    "baserat pa",
-    "tas från",
-    "tas fran",
-    "tas ur",
-    "kommer från",
-    "kommer fran",
-    "kommer ur",
-    "dras ut ur",
-    "läses från",
-    "lases fran",
-    "läses ur",
-    "lases ur",
-    "derived from",
-    "extracted from",
-    "pulled from",
-    "taken from",
-)
-_SOURCE_MATERIAL_MARKERS: tuple[str, ...] = (
-    "ljudet",
-    "ljudfilen",
-    "inspelningen",
-    "inspelning",
-    "inspelningsfilen",
-    "ljudinspelningen",
-    "ljudinspelning",
-    "transkriptet",
-    "transkript",
-    "transkriberingen",
-    "transkriptionen",
-    "underlaget",
-    "dokumentet",
-    "dokument",
-    "worddokumentet",
-    "worddokument",
-    "word document",
-    "uploaded document",
-    "uploaded documents",
-    "source document",
-    "source documents",
-    "filen",
-    "file",
-    "audio",
-    "recording",
-    "source material",
-    "transcript",
-    "transcription",
-)
 _ABSENCE_AUXILIARY_TOKENS = frozenset(
     {
         "are",
@@ -401,10 +315,6 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
 
 def runtime_input_fields_requested(text: str) -> bool:
     if runtime_input_fields_declared_absent(text):
-        return False
-    if _source_derived_report_fields_requested(
-        text
-    ) and not _has_user_provided_runtime_field_clause(text):
         return False
     normalized = normalize_discovery_text(text)
     return contains_any_phrase(
@@ -467,10 +377,6 @@ def runtime_metadata_disables_declared_input_fields(
 
 def infer_runtime_metadata_slot(text: str) -> RuntimeMetadataState | None:
     if runtime_input_fields_declared_absent(text):
-        return NO_EXTRA_RUNTIME_METADATA
-    if _source_derived_report_fields_requested(
-        text
-    ) and not _has_user_provided_runtime_field_clause(text):
         return NO_EXTRA_RUNTIME_METADATA
     if extract_runtime_input_field_hints(text):
         return DETAILED_CASE_METADATA
@@ -543,17 +449,6 @@ def _last_clause_boundary_end(text: str, end_char: int) -> int:
     indexes = [prefix.rfind(boundary) for boundary in (".", "\n", ";", "!", "?")]
     latest = max(indexes)
     return 0 if latest < 0 else latest + 1
-
-
-def _source_derived_report_fields_requested(text: str) -> bool:
-    normalized = normalize_discovery_text(text)
-    if not normalized:
-        return False
-    return (
-        contains_any_phrase(normalized, _SOURCE_DERIVED_FIELD_MARKERS)
-        and contains_any_phrase(normalized, _SOURCE_DERIVED_ACTION_MARKERS)
-        and contains_any_phrase(normalized, _SOURCE_MATERIAL_MARKERS)
-    )
 
 
 def _post_trigger_clause_has_absence_polarity(after: list[str]) -> bool:

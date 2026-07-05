@@ -93,6 +93,7 @@ def build_plan_proposal_system_prompt(
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, form fields, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",
+        "- For source-material reports, include every final-report fact or per-item short summary that must come from the source in the source-reading JSON output_fields; later text or document steps should consume those fields instead of introducing new source-derived facts only in prose.",
         *([section_rule] if section_rule is not None else []),
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",

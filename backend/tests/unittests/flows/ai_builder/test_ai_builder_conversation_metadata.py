@@ -224,7 +224,6 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         "document_material_scope": "flexible_document_case",
         "post_processing_goal": "summarize_or_overview",
         "structured_io_contract": "extract_or_compute_fields",
-        "structured_analysis_need": "use_structured_analysis",
         "runtime_metadata_fields": "detailed_case_metadata",
     }
     result = SlotClassificationResult(

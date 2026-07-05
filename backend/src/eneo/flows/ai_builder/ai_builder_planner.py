@@ -50,7 +50,6 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionTelemetry,
     dispatch_server_decision,
 )
-from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
@@ -66,6 +65,7 @@ from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
     from eneo.flows.domain.flow import Flow
     from eneo.users.user import UserInDB
 
@@ -114,7 +114,7 @@ class AIBuilderPlanner:
     async def _stream_proposal_events(
         self,
         *,
-        turn: SessionSendTurn,
+        turn: "SessionSendTurn",
         conversation: list[ConversationMessage],
         new_messages_start: int,
         proposal_request: ProposalPrepared,

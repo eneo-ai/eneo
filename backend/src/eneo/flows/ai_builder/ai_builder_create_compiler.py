@@ -90,6 +90,30 @@ _COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
 _SOURCE_CAPTURE_INPUT_TYPES = frozenset(
     {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
 )
+# Broader than the document/file dataflow fold: source text can still expose a
+# JSON contract, even when there is no source-reader refinement chain to fold.
+_SOURCE_CONTRACT_INPUT_TYPES = frozenset(
+    {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
+)
+_SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS = frozenset(
+    {
+        "manual",
+        "manuell",
+        "manuella",
+        "provided",
+        "runtime",
+        "user",
+    }
+)
+# Deliberately not a general synonym registry. This only collapses the common
+# source-document date/year slot so "manual_year" does not survive beside an
+# extracted "document_date". Broader semantic matching belongs upstream in the
+# slot classifier or model guidance, not in the compiler.
+_SOURCE_CONTRACT_TOKEN_ALIASES = {
+    "år": "date",
+    "ar": "date",
+    "year": "date",
+}
 ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
 
 
@@ -407,6 +431,7 @@ def compile_create_steps_to_spec(
     terminal_output_schema: JsonObject | None = None,
     ui_language: str | None = None,
 ) -> FlowDraftSpecCore:
+    form_fields = list(form_fields or [])
     steps = _clear_terminal_schema_output_fields(
         steps=steps,
         terminal_output_schema=terminal_output_schema,
@@ -417,6 +442,15 @@ def compile_create_steps_to_spec(
         flow_name=flow_name,
         flow_description=flow_description,
         aggregation_intent=aggregation_intent,
+    )
+    normalized_steps, form_fields, dropped_source_contract_field_names = (
+        _drop_source_contract_shadow_form_fields(
+            steps=normalized_steps,
+            form_fields=form_fields,
+        )
+    )
+    _log_dropped_source_contract_shadow_fields(
+        field_names=dropped_source_contract_field_names
     )
     source_capture_fields_by_index = _source_capture_fields_by_step_index(
         steps=normalized_steps,
@@ -442,13 +476,135 @@ def compile_create_steps_to_spec(
         flow_name=normalize_flow_name(flow_name),
         flow_description=flow_description or "",
         steps=compiled_steps,
-        form_fields=list(form_fields or []) or None,
+        form_fields=form_fields or None,
         document_body_writer_step_refs=_document_body_writer_step_refs(
             compiled_steps=compiled_steps,
             step_indexes=document_body_writer_step_indexes,
         ),
     )
     return compiled
+
+
+def _drop_source_contract_shadow_form_fields(
+    *,
+    steps: list[NewStepDraft],
+    form_fields: list[FormFieldSpec],
+) -> tuple[list[NewStepDraft], list[FormFieldSpec], list[str]]:
+    if not form_fields:
+        return steps, form_fields, []
+    source_contract_token_sets = _source_contract_field_token_sets(steps)
+    if not source_contract_token_sets:
+        return steps, form_fields, []
+
+    kept_fields: list[FormFieldSpec] = []
+    dropped_names: set[str] = set()
+    for field in form_fields:
+        if _form_field_shadows_source_contract(
+            field,
+            source_contract_token_sets=source_contract_token_sets,
+        ):
+            dropped_names.add(field.name)
+            continue
+        kept_fields.append(field)
+
+    if not dropped_names:
+        return steps, form_fields, []
+    return (
+        [_without_form_field_refs(step, dropped_names=dropped_names) for step in steps],
+        kept_fields,
+        sorted(dropped_names),
+    )
+
+
+def _source_contract_field_token_sets(
+    steps: list[NewStepDraft],
+) -> frozenset[frozenset[str]]:
+    token_sets: set[frozenset[str]] = set()
+    for step in steps:
+        if not _is_source_json_contract_step(step):
+            continue
+        token_sets.update(_structured_field_token_sets(step.output_fields))
+    return frozenset(token_sets)
+
+
+def _is_source_json_contract_step(step: NewStepDraft) -> bool:
+    return (
+        step.input_source == InputSource.FLOW_INPUT
+        and step.input_type in _SOURCE_CONTRACT_INPUT_TYPES
+        and step.output_type == OutputType.JSON
+        and bool(step.output_fields)
+    )
+
+
+def _structured_field_token_sets(
+    fields: list[StructuredFieldDraft] | None,
+) -> set[frozenset[str]]:
+    token_sets: set[frozenset[str]] = set()
+    for field in fields or []:
+        tokens = _source_contract_name_tokens(field.name)
+        if tokens:
+            token_sets.add(frozenset(tokens))
+        token_sets.update(_structured_field_token_sets(field.fields))
+        token_sets.update(_structured_field_token_sets(field.item_fields))
+    return token_sets
+
+
+def _form_field_shadows_source_contract(
+    field: FormFieldSpec,
+    *,
+    source_contract_token_sets: frozenset[frozenset[str]],
+) -> bool:
+    candidates = (
+        _source_contract_name_tokens(field.name),
+        _source_contract_name_tokens(field.label),
+    )
+    return any(
+        candidate
+        and any(
+            candidate.issubset(source_tokens)
+            for source_tokens in source_contract_token_sets
+        )
+        for candidate in candidates
+    )
+
+
+def _source_contract_name_tokens(value: str) -> frozenset[str]:
+    normalized = normalize_discovery_text(value.replace("_", " ").replace("-", " "))
+    tokens = tuple(
+        _SOURCE_CONTRACT_TOKEN_ALIASES.get(token, token) for token in normalized.split()
+    )
+    while tokens and tokens[0] in _SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS:
+        tokens = tokens[1:]
+    return frozenset(tokens)
+
+
+def _without_form_field_refs(
+    step: NewStepDraft,
+    *,
+    dropped_names: set[str],
+) -> NewStepDraft:
+    if not step.uses_form_fields:
+        return step
+    uses_form_fields = [
+        field_name
+        for field_name in step.uses_form_fields
+        if field_name not in dropped_names
+    ]
+    if uses_form_fields == step.uses_form_fields:
+        return step
+    return step.model_copy(update={"uses_form_fields": uses_form_fields})
+
+
+def _log_dropped_source_contract_shadow_fields(
+    *,
+    field_names: list[str],
+) -> None:
+    if not field_names:
+        return
+    logger.info(
+        "ai_builder_source_contract_shadow_input_fields_dropped",
+        extra={"field_names": field_names},
+    )
 
 
 def _source_capture_fields_by_step_index(

@@ -69,7 +69,6 @@ LLMResolvableSlotName: TypeAlias = Literal[
     "document_material_scope",
     "post_processing_goal",
     "structured_io_contract",
-    "structured_analysis_need",
     "runtime_metadata_fields",
 ]
 

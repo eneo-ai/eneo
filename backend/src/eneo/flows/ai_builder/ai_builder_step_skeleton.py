@@ -16,11 +16,9 @@ from eneo.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
 )
 from eneo.flows.ai_builder.pattern_registry import (
-    ANALYSIS_OR_QUALITY_REVIEW_STEP,
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
     PATTERN_REGISTRY,
-    STRUCTURED_EXTRACTION_STEP,
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
     ChainStepToken,
@@ -50,13 +48,11 @@ SemanticOutputPolicy = Literal["final_output_on_last_semantic", "text_for_all_se
 SemanticFanInPolicy = Literal["none", "last_semantic"]
 
 _DOCX_TEMPLATE_PATTERN_ID = "document_to_docx_template"
-_STRUCTURED_QUALITY_PATTERN_ID = "multi_step_quality_chain"
 _AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
 _COMPARISON_PATTERN_ID = "comparison"
 _COMPILED_PATTERN_MATERIALIZER_IDS = frozenset(
     {
         _DOCX_TEMPLATE_PATTERN_ID,
-        _STRUCTURED_QUALITY_PATTERN_ID,
         _AUDIO_ARTIFACT_PATTERN_ID,
     }
 )
@@ -137,21 +133,6 @@ _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
                 "filling the DOCX template."
             ),
         ),
-        STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
-            name="Extract structured foundation",
-            instructions=(
-                "Extract source facts, key points, and uncertainties needed "
-                "for the downstream analysis."
-            ),
-        ),
-        ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
-            name="Review and finalize",
-            instructions=(
-                "Review the analysis for missing information, uncertainty, "
-                "and quality issues, then write the revised final version "
-                "for the final output."
-            ),
-        ),
         TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
             name="Fill DOCX template",
             instructions=(
@@ -183,21 +164,6 @@ _SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
             instructions=(
                 "Extrahera stabila fält och källfakta som behövs innan "
                 "DOCX-mallen fylls."
-            ),
-        ),
-        STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
-            name="Extrahera strukturerad grund",
-            instructions=(
-                "Extrahera källfakta, huvudpunkter och osäkerheter som behövs "
-                "för den fortsatta analysen."
-            ),
-        ),
-        ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
-            name="Granska och färdigställ",
-            instructions=(
-                "Granska analysen för saknad information, osäkerhet och "
-                "kvalitetsproblem och skriv sedan en reviderad slutversion "
-                "för slutresultatet."
             ),
         ),
         TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
@@ -559,15 +525,6 @@ def materialize_step_skeleton(
             aggregation_intent=aggregation_intent,
             ui_language=ui_language,
         )
-    if _STRUCTURED_QUALITY_PATTERN_ID in compiled_pattern_ids:
-        return _materialize_structured_quality_skeleton(
-            runtime_input_type=runtime_input_type,
-            final_output_type=final_output_type,
-            runtime_required=runtime_required,
-            runtime_max_files=runtime_max_files,
-            aggregation_intent=aggregation_intent,
-            ui_language=ui_language,
-        )
     if _AUDIO_ARTIFACT_PATTERN_ID in compiled_pattern_ids:
         return _materialize_audio_artifact_skeleton(
             final_output_type=final_output_type,
@@ -614,8 +571,6 @@ def materialized_compiled_pattern_ids() -> frozenset[str]:
 
 
 def _slot_writes_document_body(slot: StepSkeleton) -> bool:
-    if slot.chain_token == ANALYSIS_OR_QUALITY_REVIEW_STEP:
-        return True
     return (
         slot.chain_token == TERMINAL_ARTIFACT_STEP
         and slot.output_type == OutputType.TEXT
@@ -765,9 +720,6 @@ def _compose_output_fields(
         return list(slot.output_fields) or None
     if content.output_fields:
         return list(content.output_fields)
-    if content.requested_output_type == OutputType.JSON:
-        # Keep the critic strict when the model asks for JSON but omits a schema.
-        return default_structured_output_fields()
     return list(slot.output_fields) or None
 
 
@@ -1154,91 +1106,6 @@ def _materialize_docx_template_skeleton(
             if aggregation_intent in {"aggregate", "compare"}
             else "none"
         ),
-        runtime_required=runtime_required,
-        runtime_max_files=runtime_max_files,
-        ui_language=ui_language,
-    )
-
-
-def _materialize_structured_quality_skeleton(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    runtime_required: bool,
-    runtime_max_files: int | None,
-    aggregation_intent: AggregationIntent,
-    ui_language: str | None,
-) -> StepSkeletonPlan:
-    if runtime_input_type not in {InputType.DOCUMENT, InputType.FILE}:
-        raise ValueError("Structured quality skeleton requires document or file input")
-    compare_or_aggregate = aggregation_intent in {"aggregate", "compare"}
-    # Text terminals can use the reviewed output; document terminals compose sections.
-    terminal_input_source = (
-        InputSource.ALL_PREVIOUS_STEPS
-        if compare_or_aggregate and final_output_type in _DOCUMENT_OUTPUT_TYPES
-        else InputSource.PREVIOUS_STEP
-    )
-    quality_review_input_source = (
-        InputSource.ALL_PREVIOUS_STEPS
-        if compare_or_aggregate
-        else InputSource.PREVIOUS_STEP
-    )
-    return _skeleton_plan(
-        prefix_slots=(
-            _backend_fixed_slot(
-                slot_ordinal=0,
-                chain_token=STRUCTURED_EXTRACTION_STEP,
-                input_source=InputSource.FLOW_INPUT,
-                input_type=runtime_input_type,
-                output_type=OutputType.JSON,
-                output_mode=OutputMode.PASS_THROUGH,
-                document_delivery_mode="not_applicable",
-                runtime_required=runtime_required,
-                runtime_max_files=runtime_max_files,
-                output_fields=tuple(default_structured_output_fields()),
-                ui_language=ui_language,
-            ),
-        ),
-        semantic_slot=_semantic_required_slot(
-            slot_ordinal=1,
-            slot_id="structured_analysis",
-            input_source=InputSource.PREVIOUS_STEP,
-            input_type=InputType.JSON,
-            output_type=OutputType.TEXT,
-            output_mode=OutputMode.PASS_THROUGH,
-            document_delivery_mode="not_applicable",
-            default_name=_semantic_default_name(
-                slot_id="structured_analysis",
-                ui_language=ui_language,
-            ),
-            default_instructions=_semantic_default_instructions(
-                slot_id="structured_analysis",
-                ui_language=ui_language,
-            ),
-            ui_language=ui_language,
-        ),
-        suffix_slots=(
-            _backend_fixed_slot(
-                slot_ordinal=2,
-                chain_token=ANALYSIS_OR_QUALITY_REVIEW_STEP,
-                input_source=quality_review_input_source,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                document_delivery_mode="not_applicable",
-                ui_language=ui_language,
-            ),
-            _terminal_artifact_slot(
-                slot_ordinal=3,
-                input_source=terminal_input_source,
-                final_output_type=final_output_type,
-                final_output_mode=None,
-                ui_language=ui_language,
-            ),
-        ),
-        final_output_type=final_output_type,
-        final_output_mode=None,
-        semantic_output_policy="text_for_all_semantic",
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,

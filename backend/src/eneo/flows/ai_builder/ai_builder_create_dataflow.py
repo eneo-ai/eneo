@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from eneo.flows.ai_builder.planning_state import AggregationIntent
 
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
+_SOURCE_READER_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 TARGETED_UNDERLAG_TOTAL_FIELD_CAP = 8
 _TargetedUnderlagBindingMode = Literal["skip", "with_text_priors"]
 _PreviousRefKind = Literal["uses_previous_fields", "uses_previous_outputs"]
@@ -77,6 +78,10 @@ def normalize_create_step_mechanics(
     normalized_steps = _normalize_create_step_refs(
         steps,
         form_fields=form_fields,
+    )
+    normalized_steps = _fold_adjacent_source_json_refinements(
+        normalized_steps,
+        aggregation_intent=aggregation_intent,
     )
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
         normalized_steps,
@@ -187,6 +192,204 @@ def _normalize_step_mechanics(
         updates["citations_requested"] = False
 
     return step.model_copy(update=updates) if updates else step
+
+
+def _fold_adjacent_source_json_refinements(
+    steps: list[NewStepDraft],
+    *,
+    aggregation_intent: "AggregationIntent",
+) -> list[NewStepDraft]:
+    if aggregation_intent != "linear":
+        return steps
+
+    folded_steps: list[NewStepDraft] = []
+    original_to_current_step: dict[int, int] = {}
+    changed = False
+    index = 0
+    while index < len(steps):
+        step = steps[index]
+        if _is_source_json_reader(step):
+            current_step_number = len(folded_steps) + 1
+            merged_step = step
+            next_index = index + 1
+            while next_index < len(steps) and _is_foldable_json_refinement(
+                steps[next_index],
+                source_step_number=current_step_number,
+            ):
+                merged_step = merged_step.model_copy(
+                    update={
+                        "output_fields": _merge_structured_field_lists(
+                            merged_step.output_fields or [],
+                            steps[next_index].output_fields or [],
+                        )
+                    }
+                )
+                original_to_current_step[next_index + 1] = current_step_number
+                next_index += 1
+                changed = True
+            folded_steps.append(merged_step)
+            original_to_current_step[index + 1] = current_step_number
+            index = next_index
+            continue
+
+        current_step_number = len(folded_steps) + 1
+        folded_steps.append(
+            _remap_previous_refs(
+                step,
+                original_to_current_step=original_to_current_step,
+                current_step_number=current_step_number,
+            )
+        )
+        original_to_current_step[index + 1] = current_step_number
+        index += 1
+
+    return folded_steps if changed else steps
+
+
+def _is_source_json_reader(step: NewStepDraft) -> bool:
+    return (
+        step.input_source == InputSource.FLOW_INPUT
+        and step.input_type in _SOURCE_READER_INPUT_TYPES
+        and step.output_type == OutputType.JSON
+    )
+
+
+def _is_foldable_json_refinement(
+    step: NewStepDraft,
+    *,
+    source_step_number: int,
+) -> bool:
+    return (
+        step.input_source == InputSource.PREVIOUS_STEP
+        and step.input_type == InputType.JSON
+        and step.output_type == OutputType.JSON
+        and bool(step.output_fields)
+        and not step.uses_form_fields
+        and _previous_field_refs_only_source_reader(
+            step.uses_previous_fields,
+            source_step_number=source_step_number,
+        )
+        and not step.uses_previous_outputs
+        and not step.knowledge_refs
+        and not step.mcp_server_refs
+        and not step.mcp_tool_refs
+        and not step.citations_requested
+        and step.review_mode is None
+    )
+
+
+def _previous_field_refs_only_source_reader(
+    refs: list[PreviousFieldRef],
+    *,
+    source_step_number: int,
+) -> bool:
+    return all(ref.from_step == source_step_number for ref in refs)
+
+
+def _remap_previous_refs(
+    step: NewStepDraft,
+    *,
+    original_to_current_step: dict[int, int],
+    current_step_number: int,
+) -> NewStepDraft:
+    if not step.uses_previous_fields and not step.uses_previous_outputs:
+        return step
+    field_refs = _remap_previous_field_refs(
+        step.uses_previous_fields,
+        original_to_current_step=original_to_current_step,
+        current_step_number=current_step_number,
+    )
+    output_refs = _remap_previous_output_refs(
+        step.uses_previous_outputs,
+        original_to_current_step=original_to_current_step,
+        current_step_number=current_step_number,
+    )
+    if (
+        field_refs == step.uses_previous_fields
+        and output_refs == step.uses_previous_outputs
+    ):
+        return step
+    return step.model_copy(
+        update={
+            "uses_previous_fields": field_refs,
+            "uses_previous_outputs": output_refs,
+        }
+    )
+
+
+def _remap_previous_field_refs(
+    refs: list[PreviousFieldRef],
+    *,
+    original_to_current_step: dict[int, int],
+    current_step_number: int,
+) -> list[PreviousFieldRef]:
+    remapped: list[PreviousFieldRef] = []
+    for ref in refs:
+        source_step = original_to_current_step.get(ref.from_step)
+        if source_step is None or source_step >= current_step_number:
+            continue
+        remapped.append(ref.model_copy(update={"from_step": source_step}))
+    return remapped
+
+
+def _remap_previous_output_refs(
+    refs: list[PreviousOutputRef],
+    *,
+    original_to_current_step: dict[int, int],
+    current_step_number: int,
+) -> list[PreviousOutputRef]:
+    remapped: list[PreviousOutputRef] = []
+    for ref in refs:
+        source_step = original_to_current_step.get(ref.from_step)
+        if source_step is None or source_step >= current_step_number:
+            continue
+        remapped.append(ref.model_copy(update={"from_step": source_step}))
+    return remapped
+
+
+def _merge_structured_field_lists(
+    base_fields: list[StructuredFieldDraft],
+    incoming_fields: list[StructuredFieldDraft],
+) -> list[StructuredFieldDraft]:
+    merged = list(base_fields)
+    indexes_by_name = {
+        field.name.casefold(): index for index, field in enumerate(merged)
+    }
+    for incoming in incoming_fields:
+        index = indexes_by_name.get(incoming.name.casefold())
+        if index is None:
+            indexes_by_name[incoming.name.casefold()] = len(merged)
+            merged.append(incoming)
+            continue
+        merged[index] = _merge_structured_field(merged[index], incoming)
+    return merged
+
+
+def _merge_structured_field(
+    base: StructuredFieldDraft,
+    incoming: StructuredFieldDraft,
+) -> StructuredFieldDraft:
+    if base.field_type != incoming.field_type:
+        return base
+    if base.field_type == "object":
+        return base.model_copy(
+            update={
+                "fields": _merge_structured_field_lists(
+                    base.fields or [],
+                    incoming.fields or [],
+                )
+            }
+        )
+    if base.field_type == "array":
+        return base.model_copy(
+            update={
+                "item_fields": _merge_structured_field_lists(
+                    base.item_fields or [],
+                    incoming.item_fields or [],
+                )
+            }
+        )
+    return base
 
 
 def _require_valid_previous_field_refs(

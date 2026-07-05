@@ -639,54 +639,6 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
 )
 
 
-_STRUCTURED_ANALYSIS_NEED = QuestionTemplate(
-    id="structured_analysis_need",
-    question_sv=(
-        "Ska flödet också ta fram strukturerad analys som kan återanvändas "
-        "i senare steg?"
-    ),
-    question_en="Should the flow also produce structured analysis that later steps can reuse?",
-    help_sv=(
-        "Strukturerad analys betyder att flödet extraherar nyckelfält som "
-        "JSON innan slutrapporten, så senare steg kan bygga vidare på dem."
-    ),
-    help_en=(
-        "Structured analysis means the flow extracts key fields as JSON "
-        "before the final report, so later steps can build on them."
-    ),
-    options=(
-        _option(
-            id="use_structured_analysis",
-            label_sv="Ja, använd strukturerad analys där det förbättrar kvaliteten",
-            label_en="Yes, use structured analysis where it improves quality",
-            description_sv="Extrahera viktiga fält som JSON innan slutrapporten skrivs.",
-            description_en="Extract important fields as JSON before writing the final report.",
-            value="use_structured_analysis",
-        ),
-        _option(
-            id="text_only_analysis",
-            label_sv="Nej, håll analysen som vanlig text",
-            label_en="No, keep the analysis as plain text",
-            description_sv="Undvik extra struktur om den inte behövs.",
-            description_en="Avoid extra structure if it is not needed.",
-            value="text_only_analysis",
-        ),
-    ),
-    worked_examples_sv=(
-        "Extrahera part, datum och belopp innan slutrapporten.",
-        "Skriv analysen direkt som löptext utan mellansteg.",
-    ),
-    worked_examples_en=(
-        "Extract party, date, and amount before the final report.",
-        "Write the analysis directly as prose without an intermediate step.",
-    ),
-    family="structured_reuse",
-    priority_base=95,
-    impact="quality",
-    exposure="planner_internal",
-)
-
-
 _RUNTIME_METADATA_FIELDS = QuestionTemplate(
     id="runtime_metadata_fields",
     question_sv="Ska användaren också ange metadata vid körning?",
@@ -755,7 +707,6 @@ _ALL_TEMPLATES: tuple[QuestionTemplate, ...] = (
     _DOCUMENT_MATERIAL_SCOPE,
     _POST_PROCESSING_GOAL,
     _STRUCTURED_IO_CONTRACT,
-    _STRUCTURED_ANALYSIS_NEED,
     _RUNTIME_METADATA_FIELDS,
 )
 

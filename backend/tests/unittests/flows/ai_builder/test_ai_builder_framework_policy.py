@@ -1132,7 +1132,7 @@ def test_extract_answer_signals_infers_swedish_flexible_pdf_answers() -> None:
     assert "documents" in signals["primary_runtime_input"]
 
 
-def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() -> None:
+def test_extract_answer_signals_infers_metadata_needs_without_structured_slot() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1145,13 +1145,11 @@ def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() 
         ]
     )
 
-    assert "use_structured_analysis" in signals["structured_analysis_need"]
+    assert "structured_analysis_need" not in signals
     assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
 
 
-def test_extract_answer_signals_infers_structured_analysis_from_rich_docx_workflow() -> (
-    None
-):
+def test_extract_answer_signals_does_not_emit_structured_analysis_slot() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1166,7 +1164,7 @@ def test_extract_answer_signals_infers_structured_analysis_from_rich_docx_workfl
     )
 
     assert "documents" in signals["primary_runtime_input"]
-    assert "use_structured_analysis" in signals["structured_analysis_need"]
+    assert "structured_analysis_need" not in signals
 
 
 @pytest.mark.parametrize(
@@ -1381,7 +1379,7 @@ def test_extract_answer_signals_treats_negated_swedish_runtime_fields_as_absent(
     assert signals["runtime_metadata_fields"] == {"no_extra_metadata"}
 
 
-def test_extract_answer_signals_treats_source_derived_report_fields_as_absent() -> None:
+def test_extract_answer_signals_ignores_source_derived_report_fields() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1396,7 +1394,7 @@ def test_extract_answer_signals_treats_source_derived_report_fields_as_absent() 
         ]
     )
 
-    assert signals["runtime_metadata_fields"] == {"no_extra_metadata"}
+    assert "runtime_metadata_fields" not in signals
 
 
 @pytest.mark.parametrize(
@@ -2202,7 +2200,6 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
         "output_reader",
         "final_output_scope",
         "structured_io_contract",
-        "structured_analysis_need",
     ],
 )
 def test_accepts_supported_structured_question_ids(question_id: str) -> None:

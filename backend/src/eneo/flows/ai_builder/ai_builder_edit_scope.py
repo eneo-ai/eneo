@@ -107,16 +107,6 @@ _OUTPUT_STYLE_HINTS: tuple[str, ...] = (
     "bara sammanfattning",
 )
 
-_STRUCTURED_REUSE_HINTS: tuple[str, ...] = (
-    "json",
-    "structured data",
-    "strukturerad data",
-    "contract",
-    "kontrakt",
-    "risker",
-    "rekommendationer",
-)
-
 
 @dataclass(frozen=True, slots=True)
 class ActiveRequestWindow:
@@ -249,12 +239,6 @@ def resolve_edit_scope(
     ):
         active_families.add("output_style")
 
-    if _mentions_structured_reuse_change(
-        normalized_text,
-        active_explicit_question_ids or set(),
-    ):
-        active_families.add("structured_reuse")
-
     if _mentions_case_scope_change(
         normalized_text,
         active_explicit_question_ids or set(),
@@ -386,14 +370,3 @@ def _mentions_output_style_change(
     ):
         return True
     return has_change_semantics(text) and contains_any_phrase(text, _OUTPUT_STYLE_HINTS)
-
-
-def _mentions_structured_reuse_change(
-    text: str,
-    active_explicit_question_ids: set[str],
-) -> bool:
-    if "structured_analysis_need" in active_explicit_question_ids:
-        return True
-    return has_change_semantics(text) and contains_any_phrase(
-        text, _STRUCTURED_REUSE_HINTS
-    )

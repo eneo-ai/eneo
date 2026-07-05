@@ -35,7 +35,6 @@ _EXPECTED_QUESTION_LEVELS: dict[str, str] = {
     "output_reader": "nice_to_have",
     "final_output_scope": "nice_to_have",
     "final_pdf_type": "high_value",
-    "structured_analysis_need": "high_value",
     "runtime_metadata_fields": "high_value",
 }
 
@@ -273,7 +272,6 @@ class TestQuestionBudget:
         assert {
             "document_kind",
             "document_material_scope",
-            "structured_analysis_need",
             "runtime_metadata_fields",
         }.isdisjoint(set(analysis.selected_question_ids))
 

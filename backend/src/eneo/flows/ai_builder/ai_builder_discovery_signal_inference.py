@@ -18,9 +18,6 @@ from eneo.flows.ai_builder.ai_builder_keywords import (
     DOCX_CONTEXT_MARKERS,
     PDF_OUTPUT_CONTEXT_MARKERS,
 )
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    detect_planner_pattern_signals,
-)
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
 )
@@ -58,11 +55,6 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
         signals,
         "structured_io_contract",
         infer_structured_io_contract(normalized),
-    )
-    _add_signal(
-        signals,
-        "structured_analysis_need",
-        _infer_structured_analysis_need(normalized),
     )
     _add_signal(
         signals,
@@ -704,50 +696,6 @@ def _looks_like_transcript_into_document_goal(text: str) -> bool:
             "validate",
         ),
     )
-
-
-def _infer_structured_analysis_need(text: str) -> str | None:
-    pattern = detect_planner_pattern_signals(text)
-    input_intent = resolve_input_intent(text, {})
-    if (
-        pattern.rich_document_workflow
-        and pattern.prefers_structured_intermediate
-        # Audio can mean transcript-only or transcript-plus-extraction; ask the
-        # user instead of silently forcing a hidden JSON step.
-        and not input_intent.audio_requested
-    ):
-        return "use_structured_analysis"
-    if "strukturerad data" in text and "förbättrar kvaliteten" in text:
-        return "use_structured_analysis"
-    if "structured data" in text and "improves quality" in text:
-        return "use_structured_analysis"
-    if _contains_any(
-        text,
-        (
-            "strukturerad data används där det förbättrar kvaliteten",
-            "structured data where it improves quality",
-            "use structured analysis",
-            "structured analysis",
-            "analysmodul",
-            "analysis module",
-            "output contract",
-            "output_contract",
-            "json innan slutrapporten",
-            "json before writing the final report",
-        ),
-    ):
-        return "use_structured_analysis"
-    if _contains_any(
-        text,
-        (
-            "håll analysen som vanlig text",
-            "keep the analysis as plain text",
-            "undvik extra struktur",
-            "avoid extra structure",
-        ),
-    ):
-        return "text_only_analysis"
-    return None
 
 
 def _infer_pdf_generation_mode(text: str) -> str | None:

@@ -336,11 +336,11 @@ def test_no_golden_derives_a_not_applicable_column() -> None:
 
 
 def test_not_applicable_violation_is_detected() -> None:
-    # A single-step golden on an inherently-multi-step row derives
-    # basic_single_step, which its policy marks NOT_APPLICABLE.
+    # A single-step golden on an underlag pipe derives basic_single_step,
+    # which its policy marks NOT_APPLICABLE.
     degenerate = BuildableGoldenCase(
-        case_id="degenerate_quality_chain",
-        capability_row=CapabilityRow.MULTI_STEP_QUALITY_CHAIN,
+        case_id="degenerate_underlag_pipe",
+        capability_row=CapabilityRow.UNDERLAG_TILL_TEXT,
         spec=FlowDraftSpecCore(
             flow_name="probe",
             steps=[_probe_step("step_a", "Gör allt i ett steg.")],
@@ -349,7 +349,7 @@ def test_not_applicable_violation_is_detected() -> None:
     )
     violations = not_applicable_violations([degenerate])
     assert (
-        "degenerate_quality_chain",
+        "degenerate_underlag_pipe",
         CompositionColumn.BASIC_SINGLE_STEP,
     ) in violations
 

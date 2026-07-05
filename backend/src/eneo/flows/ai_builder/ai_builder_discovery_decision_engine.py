@@ -30,9 +30,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     mentions_runtime_metadata,
 )
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    detect_planner_pattern_signals,
-)
 from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     ScoredSignal,
     score_conversation_signals,
@@ -93,7 +90,6 @@ def apply_discovery_decision_engine(
     scored_signals = score_conversation_signals(
         conversation, freeform_text=profile.text
     )
-    planner_patterns = detect_planner_pattern_signals(profile.text)
     max_questions = compute_question_budget(profile.text)
     spent_user_questions = _answered_user_requirement_question_count(conversation)
     assumptions: list[str] = list(
@@ -117,10 +113,6 @@ def apply_discovery_decision_engine(
         if (
             question_id is not None
             and question_exposure_for_id(question_id) != "user_requirement"
-            and not (
-                question_id == "structured_analysis_need"
-                and planner_patterns.rich_document_workflow
-            )
         ):
             suppressed.append(
                 suppressed_candidate(candidate, reason="planner_internal_question")
@@ -358,8 +350,6 @@ def candidate_assumption_safe(issue_id: str, profile: DiscoveryProfile) -> bool:
         return looks_like_case_document_family(profile.text)
     if issue_id == "runtime_metadata_fields":
         return mentions_runtime_metadata(profile.text)
-    if issue_id == "structured_analysis_need":
-        return explicit_structured_reuse_preference(profile.text)
     return True
 
 
@@ -400,15 +390,6 @@ def assumption_for_candidate(
             language,
             "Antar att flödet främst ska arbeta med rapporter, beslut och formella dokument.",
             "Assuming the flow primarily handles reports, decisions, and formal documents.",
-        )
-    if (
-        candidate.issue_id == "structured_analysis_need"
-        and explicit_structured_reuse_preference(profile.text)
-    ):
-        return localized_text(
-            language,
-            "Antar att strukturerad data ska användas i mellanliggande steg där det förbättrar kvalitet och återanvändning.",
-            "Assuming structured data should be used in intermediate steps where it improves quality and reuse.",
         )
     return None
 
@@ -566,29 +547,6 @@ def looks_like_case_document_family(text: str) -> bool:
             "municipal case",
             "tjänsteskrivelse",
             "remiss",
-        ),
-    )
-
-
-def explicit_structured_reuse_preference(text: str) -> bool:
-    return mentions_any(
-        text,
-        (
-            "strukturerad data används där det förbättrar kvaliteten",
-            "strukturerad data ska användas",
-            "mellanliggande strukturerad data",
-            "structured data where it improves quality",
-            "structured data should be used",
-            "intermediate structured data",
-            "strukturerad analys",
-            "structured analysis",
-            "json",
-            "output contract",
-            "output_contract",
-            "strukturerad pdf-rapport",
-            "strukturerad docx-rapport",
-            "structured pdf report",
-            "structured docx report",
         ),
     )
 

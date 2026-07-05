@@ -57,10 +57,6 @@ def _resolved_state() -> PlanningState:
                 "post_processing_goal",
                 "summarize_or_overview",
             ),
-            "structured_analysis_need": _slot(
-                "structured_analysis_need",
-                "text_only_analysis",
-            ),
             "runtime_metadata_fields": _slot(
                 "runtime_metadata_fields",
                 "no_extra_metadata",

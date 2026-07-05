@@ -17,11 +17,9 @@ from eneo.flows.ai_builder.ai_builder_step_skeleton import (
     materialize_step_skeleton,
 )
 from eneo.flows.ai_builder.pattern_registry import (
-    ANALYSIS_OR_QUALITY_REVIEW_STEP,
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
     PATTERN_REGISTRY,
-    STRUCTURED_EXTRACTION_STEP,
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
@@ -183,102 +181,6 @@ def test_materialize_template_fill_mode_without_pattern_uses_docx_chain() -> Non
     assert skeleton[0].output_fields
     assert skeleton[1].output_fields == ()
     assert skeleton[2].document_delivery_mode == "template_fill"
-
-
-def test_materialize_structured_quality_skeleton() -> None:
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.PDF,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("multi_step_quality_chain",),
-        chain_steps=_chain_steps("multi_step_quality_chain"),
-    )
-    skeleton = plan.minimum_slots
-
-    assert [slot.chain_token for slot in skeleton] == [
-        STRUCTURED_EXTRACTION_STEP,
-        None,
-        ANALYSIS_OR_QUALITY_REVIEW_STEP,
-        TERMINAL_ARTIFACT_STEP,
-    ]
-    assert _skeleton_type_modes(skeleton) == [
-        ("document", "json", "pass_through"),
-        ("json", "text", "pass_through"),
-        ("text", "text", "pass_through"),
-        ("text", "pdf", "pass_through"),
-    ]
-    assert skeleton[0].output_fields
-    assert skeleton[3].document_delivery_mode == "generated"
-
-
-def test_materialize_structured_quality_skeleton_text_terminal_reads_previous_step() -> (
-    None
-):
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.TEXT,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("multi_step_quality_chain",),
-        chain_steps=_chain_steps("multi_step_quality_chain"),
-        aggregation_intent="compare",
-    )
-    skeleton = plan.minimum_slots
-
-    assert [slot.chain_token for slot in skeleton] == [
-        STRUCTURED_EXTRACTION_STEP,
-        None,
-        ANALYSIS_OR_QUALITY_REVIEW_STEP,
-        TERMINAL_ARTIFACT_STEP,
-    ]
-    assert _skeleton_type_modes(skeleton) == [
-        ("document", "json", "pass_through"),
-        ("json", "text", "pass_through"),
-        ("text", "text", "pass_through"),
-        ("text", "text", "pass_through"),
-    ]
-    assert skeleton[2].input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert skeleton[-1].input_source == InputSource.PREVIOUS_STEP
-
-
-@pytest.mark.parametrize("final_output_type", [OutputType.DOCX, OutputType.PDF])
-@pytest.mark.parametrize("aggregation_intent", ["aggregate", "compare"])
-def test_materialize_structured_quality_skeleton_document_terminal_keeps_fan_in(
-    final_output_type: OutputType, aggregation_intent: str
-) -> None:
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=final_output_type,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("multi_step_quality_chain",),
-        chain_steps=_chain_steps("multi_step_quality_chain"),
-        aggregation_intent=aggregation_intent,
-    )
-    skeleton = plan.minimum_slots
-
-    assert skeleton[-1].chain_token == TERMINAL_ARTIFACT_STEP
-    assert skeleton[-1].input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert skeleton[-1].output_type == final_output_type
-
-
-def test_materialize_structured_quality_skeleton_uses_swedish_fixed_step_names() -> (
-    None
-):
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.PDF,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("multi_step_quality_chain",),
-        chain_steps=_chain_steps("multi_step_quality_chain"),
-        ui_language="sv",
-    )
-    skeleton = plan.minimum_slots
-
-    assert [slot.default_name for slot in skeleton] == [
-        "Extrahera strukturerad grund",
-        "Analysera strukturerat underlag",
-        "Granska och färdigställ",
-        "Skapa PDF",
-    ]
 
 
 def test_materialize_text_to_json_skeleton() -> None:
@@ -500,15 +402,15 @@ def test_docx_template_skeleton_keeps_template_body_text_when_fields_requested()
     assert drift.dropped_output_fields is True
 
 
-def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics() -> (
+def test_document_artifact_terminal_keeps_locked_input_type_after_json_semantics() -> (
     None
 ):
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.PDF,
         final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("multi_step_quality_chain",),
-        chain_steps=_chain_steps("multi_step_quality_chain"),
+        pattern_ids=("document_to_pdf_report",),
+        chain_steps=(),
     )
 
     composition = plan.compose(
@@ -527,19 +429,17 @@ def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics()
     )
 
     assert [step.name for step in composition.steps] == [
-        "Extract structured foundation",
         "Extract section data",
         "Extract risk data",
-        "Review and finalize",
         "Create PDF",
     ]
-    assert composition.document_body_writer_step_indexes == (3,)
-    assert composition.steps[2].output_type == OutputType.TEXT
-    assert composition.steps[2].output_fields is None
-    assert composition.steps[3].input_type == InputType.TEXT
+    assert composition.document_body_writer_step_indexes == ()
+    assert composition.steps[1].output_type == OutputType.TEXT
+    assert composition.steps[1].output_fields is None
+    assert composition.steps[2].input_type == InputType.TEXT
     assert len(composition.output_type_drifts) == 1
     drift = composition.output_type_drifts[0]
-    assert drift.slot_ordinal == 2
+    assert drift.slot_ordinal == 1
     assert drift.requested_output_type == OutputType.JSON
     assert drift.enforced_output_type == OutputType.TEXT
     assert drift.dropped_output_fields is True

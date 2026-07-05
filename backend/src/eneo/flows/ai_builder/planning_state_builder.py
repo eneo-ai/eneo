@@ -119,7 +119,6 @@ _MODEL_VALUE_ACCEPTANCE_POLICIES: dict[tuple[str, str], _ModelValueAcceptancePol
         "stop_after_primary_operation",
     ): _ModelValueAcceptancePolicy(
         requires_text_evidence=_text_evidences_stop_after_primary_operation,
-        dependent_model_values=(("structured_analysis_need", "text_only_analysis"),),
     ),
     (
         "post_processing_goal",
@@ -148,17 +147,6 @@ _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
         has_explicit_text=has_explicit_pdf_mode_text,
     ),
 }
-
-_STRUCTURE_PROMOTING_POST_PROCESSING_GOALS: frozenset[str] = frozenset(
-    {
-        "action_followup",
-        "compare_or_validate",
-        "decision_support",
-        "extract_key_information",
-        "risk_or_issue_review",
-        "structure_key_information",
-    }
-)
 
 _FENCED_JSON_BLOCK_RE = re.compile(
     r"```(?:json|jsonschema|schema)?\s*(.*?)```",
@@ -636,21 +624,6 @@ def apply_policy_defaults_from_resolved_slots(
                 confidence="medium",
             )
 
-    _apply_structured_analysis_default_from_post_processing_goal(state)
-
-
-def _apply_structured_analysis_default_from_post_processing_goal(
-    state: PlanningState,
-) -> None:
-    if "structured_analysis_need" in state.resolved_slots:
-        return
-    default_slot = _structured_analysis_default_slot_from_post_processing_goal(
-        state.resolved_slots.get("post_processing_goal")
-    )
-    if default_slot is None:
-        return
-    state.resolved_slots["structured_analysis_need"] = default_slot
-
 
 def llm_resolvable_slot_values_for_state(
     state: PlanningState,
@@ -705,17 +678,10 @@ def _model_slot_can_replace(
     if existing_slot.source == "requirements_summary":
         return model_confidence == "high"
     if existing_slot.source == "policy_default":
-        if existing_slot.name == "structured_analysis_need":
-            return False
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
         if (
             existing_slot.name == "primary_runtime_input"
-            and existing_slot.confidence == "high"
-        ):
-            return False
-        if (
-            existing_slot.name == "structured_analysis_need"
             and existing_slot.confidence == "high"
         ):
             return False
@@ -884,32 +850,6 @@ def _resolve_slots(
             slot_value=structured_io_contract,
         )
 
-    structured_analysis_need = _single_slot_value(
-        answer_signals=answer_signals,
-        flow_defaults=flow_defaults,
-        question_id="structured_analysis_need",
-    )
-    if structured_analysis_need is not None:
-        slots["structured_analysis_need"] = _build_slot(
-            name="structured_analysis_need",
-            value=structured_analysis_need,
-            question_id="structured_analysis_need",
-            conversation=conversation,
-            flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
-            freeform_text=freeform_text,
-            summary_field=None,
-            slot_value=structured_analysis_need,
-        )
-    else:
-        structured_analysis_default_slot = (
-            _structured_analysis_default_slot_from_post_processing_goal(
-                slots.get("post_processing_goal")
-            )
-        )
-        if structured_analysis_default_slot is not None:
-            slots["structured_analysis_need"] = structured_analysis_default_slot
-
     runtime_metadata_fields = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
@@ -1072,37 +1012,6 @@ def _requirements_summary_supports_slot(
     if question_id == "pdf_generation_mode":
         return output_intent.pdf_generation_mode == slot_value
     return False
-
-
-def _structured_analysis_default_for_post_processing_goal(
-    post_processing_goal: str | None,
-) -> str | None:
-    if post_processing_goal in _STRUCTURE_PROMOTING_POST_PROCESSING_GOALS:
-        return "use_structured_analysis"
-    return None
-
-
-def _structured_analysis_default_slot_from_post_processing_goal(
-    post_processing_goal: ResolvedSlot | None,
-) -> ResolvedSlot | None:
-    if post_processing_goal is None:
-        return None
-    value = _structured_analysis_default_for_post_processing_goal(
-        post_processing_goal.value
-    )
-    if value is None:
-        return None
-    return ResolvedSlot(
-        name="structured_analysis_need",
-        value=value,
-        source="heuristic",
-        evidence=[
-            "heuristic:structured_analysis_need=post_processing_goal:"
-            f"{post_processing_goal.value}",
-            *post_processing_goal.evidence,
-        ],
-        confidence=post_processing_goal.confidence,
-    )
 
 
 def _heuristic_slot_confidence(

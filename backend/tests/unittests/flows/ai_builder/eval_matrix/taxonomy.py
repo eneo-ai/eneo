@@ -33,7 +33,6 @@ class CapabilityRow(str, Enum):
     DOCUMENT_TO_DOCX_CREATE = "document_to_docx_create"
     DOCUMENT_TO_PDF_REPORT = "document_to_pdf_report"
     AUDIO_TRANSCRIPTION = "audio_transcription"
-    MULTI_STEP_QUALITY_CHAIN = "multi_step_quality_chain"
     COMPARISON = "comparison"
     SECTIONED_FORM_INTAKE = "sectioned_form_intake"
     HTTP_POST_CALL = "http_post_call"
@@ -59,7 +58,6 @@ _EXPECTED_MATRIX_STATE: dict[CapabilityRow, MatrixRowState] = {
     CapabilityRow.DOCUMENT_TO_DOCX_CREATE: "buildable",
     CapabilityRow.DOCUMENT_TO_PDF_REPORT: "buildable",
     CapabilityRow.AUDIO_TRANSCRIPTION: "buildable",
-    CapabilityRow.MULTI_STEP_QUALITY_CHAIN: "buildable",
     CapabilityRow.COMPARISON: "buildable",
     CapabilityRow.SECTIONED_FORM_INTAKE: "buildable",
     CapabilityRow.UNDERLAG_TILL_TEXT: "buildable",
@@ -80,8 +78,7 @@ class CoverageRequirement(str, Enum):
     - ALLOWED: a golden may cover it (and it still counts toward the global
       column total) but the row does not have to.
     - NOT_APPLICABLE: the column is structurally impossible for this row, so a
-      golden that derives it is a hard error (e.g. a single-step
-      `multi_step_quality_chain`, which is a contradiction).
+      golden that derives it is a hard error.
     """
 
     REQUIRED = "required"
@@ -134,7 +131,6 @@ _ROW_COMPLEXITY_POLICIES: dict[CapabilityRow, RowComplexityPolicy] = {
     CapabilityRow.DOCUMENT_TO_DOCX_CREATE: RowComplexityPolicy(_REQ, _OPT),
     CapabilityRow.DOCUMENT_TO_PDF_REPORT: RowComplexityPolicy(_REQ, _OPT),
     CapabilityRow.AUDIO_TRANSCRIPTION: RowComplexityPolicy(_REQ, _OPT),
-    CapabilityRow.MULTI_STEP_QUALITY_CHAIN: RowComplexityPolicy(_NA, _REQ),
     CapabilityRow.COMPARISON: RowComplexityPolicy(_REQ, _REQ),
     CapabilityRow.SECTIONED_FORM_INTAKE: RowComplexityPolicy(_REQ, _REQ),
     CapabilityRow.UNDERLAG_TILL_TEXT: RowComplexityPolicy(

@@ -271,12 +271,9 @@ def test_build_discovery_profile_exposes_runtime_metadata_and_structured_analysi
     runtime_metadata = profile.planning_state.resolved_slots.get(
         "runtime_metadata_fields"
     )
-    structured_analysis = profile.planning_state.resolved_slots.get(
-        "structured_analysis_need"
-    )
 
     assert runtime_metadata is not None
-    assert structured_analysis is not None
+    assert "structured_analysis_need" not in profile.planning_state.resolved_slots
 
 
 def test_has_change_semantics_recognizes_substitution_phrase() -> None:

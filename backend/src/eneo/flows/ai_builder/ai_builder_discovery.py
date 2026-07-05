@@ -58,9 +58,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     runtime_metadata_is_vague as _runtime_metadata_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    structured_analysis_need_is_vague as _structured_analysis_need_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     structured_io_contract_is_vague as _structured_io_contract_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -109,10 +106,8 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     post_processing_goal_question,
     primary_runtime_input_question,
     processing_scope_question,
-    question_exposure_for_id,
     question_suggestion_for_id,
     runtime_metadata_fields_question,
-    structured_analysis_need_question,
     structured_io_contract_question,
     terminal_output_question,
 )
@@ -127,9 +122,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     has_explicit_structured_answer,
     question_is_already_resolved,
-)
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    detect_planner_pattern_signals,
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     has_low_confidence_signals,
@@ -584,32 +576,6 @@ def _build_final_pdf_type_issue(
     )
 
 
-def _build_structured_analysis_need_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _structured_analysis_need_is_vague(profile):
-        return None
-    if question_exposure_for_id(
-        "structured_analysis_need"
-    ) != "user_requirement" and not _should_surface_structured_analysis_question(
-        profile
-    ):
-        return None
-    return DiscoveryIssue(
-        issue_id="structured_analysis_need",
-        category="automation",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart om flödet ska ta fram strukturerad analys som återanvänds i senare steg.",
-            "It is still unclear whether the flow should produce structured analysis that later steps can reuse.",
-        ),
-        suggestion=structured_analysis_need_question(profile.language),
-        question_level="high_value",
-    )
-
-
 def _build_runtime_metadata_fields_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
@@ -647,7 +613,6 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_output_reader_issue,
     _build_final_output_scope_issue,
     _build_final_pdf_type_issue,
-    _build_structured_analysis_need_issue,
     _build_runtime_metadata_fields_issue,
 )
 
@@ -1021,16 +986,6 @@ def _has_mvs_purpose(profile: DiscoveryProfile) -> bool:
         profile.case_like_flow
         or profile.comparison_requested
         or _expresses_task_intent(profile.text)
-    )
-
-
-def _should_surface_structured_analysis_question(profile: DiscoveryProfile) -> bool:
-    pattern = detect_planner_pattern_signals(profile.text)
-    return (
-        pattern.rich_document_workflow
-        and not profile.edit_mode
-        and profile.resolved_slot("structured_analysis_need") is None
-        and "structured_analysis_need" not in profile.answers
     )
 
 

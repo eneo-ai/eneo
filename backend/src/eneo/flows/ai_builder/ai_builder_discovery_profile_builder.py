@@ -272,7 +272,6 @@ def build_discovery_profile(
             "final_pdf_type",
             "output_reader",
             "final_output_scope",
-            "structured_analysis_need",
             "runtime_metadata_fields",
         )
         if has_explicit_structured_answer(active_conversation, question_id)
@@ -509,13 +508,9 @@ def default_discovery_assumptions(
                 "Assuming one primary document per run unless you later say a document package must be supported.",
             )
         )
-    if (
-        profile.prefer_structured_intermediate
-        and "structured_analysis_need" not in selected_question_ids
-        and not any(
-            "mellanliggande strukturerad data" in assumption.casefold()
-            for assumption in existing_assumptions
-        )
+    if profile.prefer_structured_intermediate and not any(
+        "mellanliggande strukturerad data" in assumption.casefold()
+        for assumption in existing_assumptions
     ):
         assumptions.append(
             localized_text(
@@ -560,11 +555,6 @@ def should_prefer_structured_intermediate(
     flow_defaults: dict[str, set[str]],
     answers: dict[str, set[str]],
 ) -> bool:
-    structured_answer = answers.get("structured_analysis_need", set())
-    if "text_only_analysis" in structured_answer:
-        return False
-    if "use_structured_analysis" in structured_answer:
-        return True
     if mentions_any(text, _STRUCTURED_INTERMEDIATE_OPTOUT_HINTS):
         return False
     if mentions_any(text, _STRUCTURED_INTERMEDIATE_FORCE_HINTS):

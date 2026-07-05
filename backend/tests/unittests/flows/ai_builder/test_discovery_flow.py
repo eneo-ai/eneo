@@ -1312,7 +1312,7 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "docx_output_mode" not in question_ids
 
-    def test_structured_analysis_is_derived_for_audio_docx_extraction(
+    def test_audio_docx_extraction_does_not_create_structured_analysis_slot(
         self,
     ) -> None:
         conversation = [
@@ -1333,9 +1333,7 @@ class TestExtendedClarificationHints:
         assert state.resolved_slots["post_processing_goal"].value == (
             "extract_key_information"
         )
-        assert state.resolved_slots["structured_analysis_need"].value == (
-            "use_structured_analysis"
-        )
+        assert "structured_analysis_need" not in state.resolved_slots
 
     def test_structured_analysis_plain_text_optout_wins_for_audio_docx_extraction(
         self,
@@ -1936,9 +1934,7 @@ class TestExtendedClarificationHints:
 
         assert "structured_analysis_need" not in captured_allowed_values
         assert "runtime_metadata_fields" in captured_allowed_values
-        assert context.planning_state.resolved_slots[
-            "structured_analysis_need"
-        ].value == ("use_structured_analysis")
+        assert "structured_analysis_need" not in context.planning_state.resolved_slots
 
     @pytest.mark.asyncio
     async def test_classifier_resolved_outcome_still_asks_input_for_unknown_input(
@@ -2989,12 +2985,8 @@ class TestPlannerDiscoveryQuestionDispatch:
             )
         )
 
-        assert [event.event for event in result.events] == ["text"]
-        repo.commit_turn.assert_awaited_once()
-        commit_kwargs = repo.commit_turn.await_args.kwargs
-        assert commit_kwargs["new_messages"][0].role == "user"
-        assert commit_kwargs["new_messages"][-1].role == "assistant"
-        assert commit_kwargs["new_messages"][-1].content == decision.prompt
+        assert [event.event for event in result.events] == ["error"]
+        repo.commit_turn.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_uses_backend_followup_after_llm_slot_classification_for_blocking_discovery(

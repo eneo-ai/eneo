@@ -419,12 +419,6 @@ def runtime_metadata_fields_question(
     return _catalog_question("runtime_metadata_fields", language=language)
 
 
-def structured_analysis_need_question(
-    language: DiscoveryLanguage,
-) -> DiscoveryQuestionSuggestion:
-    return _catalog_question("structured_analysis_need", language=language)
-
-
 def final_pdf_type_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="final_pdf_type",
@@ -490,7 +484,6 @@ def question_suggestion_for_id(
         "output_reader": output_reader_question,
         "final_output_scope": final_output_scope_question,
         "runtime_metadata_fields": runtime_metadata_fields_question,
-        "structured_analysis_need": structured_analysis_need_question,
         "final_pdf_type": final_pdf_type_question,
         "pdf_generation_mode": pdf_generation_mode_question,
     }

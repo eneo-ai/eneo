@@ -724,7 +724,8 @@ async def test_ordered_step_shadow_reference_is_filtered_with_advisory() -> None
 
     assert result.compiled_proposal is not None
     assert result.compiled_proposal.content.spec.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
+        "question": "case_id: {{ flow_input.case_id }}",
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}],
     }
     assert result.compiled_proposal.content.edit is not None
     assert any(

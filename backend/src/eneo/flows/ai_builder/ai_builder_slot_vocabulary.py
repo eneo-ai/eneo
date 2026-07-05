@@ -18,7 +18,6 @@ DiscoveryFamily = Literal[
     "output_artifact",
     "workflow_outcome",
     "output_style",
-    "structured_reuse",
     "runtime_metadata",
 ]
 
@@ -33,7 +32,6 @@ KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
         "document_material_scope",
         "post_processing_goal",
         "structured_io_contract",
-        "structured_analysis_need",
         "runtime_metadata_fields",
     }
 )

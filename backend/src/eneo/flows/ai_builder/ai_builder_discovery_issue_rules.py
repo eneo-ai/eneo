@@ -28,9 +28,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     mentions_output_change,
     mentions_runtime_metadata,
 )
-from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    detect_planner_pattern_signals,
-)
 from eneo.flows.ai_builder.planning_state import ResolvedSlot
 
 EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
@@ -568,7 +565,6 @@ def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
             "output_style",
             "detail_level",
             "final_pdf_type",
-            "structured_analysis_need",
         )
     ):
         return False
@@ -647,50 +643,6 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
     ):
         return False
     return True
-
-
-def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
-    if profile.resolved_slot("structured_analysis_need") is not None:
-        return False
-    answers = profile.answers
-    text = profile.text
-    planner_patterns = detect_planner_pattern_signals(text)
-    if "structured_analysis_need" in answers:
-        return False
-    if "structured_json" in answers.get("terminal_output", set()):
-        return False
-    post_processing_goal = profile.resolved_slot("post_processing_goal")
-    if post_processing_goal is not None and post_processing_goal.value in {
-        "action_followup",
-        "compare_or_validate",
-        "decision_support",
-        "extract_key_information",
-        "risk_or_issue_review",
-        "structure_key_information",
-    }:
-        return False
-    if mentions_any(
-        text,
-        (
-            "strukturerad data används",
-            "structured data",
-            "json",
-            "kontrakt",
-            "contract",
-            "extrahera",
-            "risker",
-            "möjligheter",
-            "rekommendationer",
-        ),
-    ):
-        return True
-    if planner_patterns.rich_document_workflow and (
-        planner_patterns.needs_form_fields
-        or planner_patterns.prefers_structured_intermediate
-        or planner_patterns.prefers_quality_step
-    ):
-        return True
-    return False
 
 
 def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:

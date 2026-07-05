@@ -81,13 +81,13 @@ def test_finalize_normalizes_naive_clock_to_utc() -> None:
     assert commit.committed_at.tzinfo == timezone.utc
 
 
-def test_architecture_commit_allows_one_compiler_chain_plus_semantic_patterns() -> None:
+def test_architecture_commit_allows_structural_plus_semantic_patterns() -> None:
     draft = _draft(
-        chosen_patterns=["multi_step_quality_chain", "form_field_runtime_inputs"]
+        chosen_patterns=["document_to_pdf_report", "form_field_runtime_inputs"]
     )
 
     assert draft.chosen_patterns == [
-        "multi_step_quality_chain",
+        "document_to_pdf_report",
         "form_field_runtime_inputs",
     ]
 
@@ -96,7 +96,7 @@ def test_architecture_commit_rejects_multiple_compiler_chain_patterns() -> None:
     with pytest.raises(ValueError, match="at most one compiler-backed"):
         _draft(
             chosen_patterns=[
-                "multi_step_quality_chain",
+                "document_to_docx_template",
                 "audio_to_artifact_report",
             ]
         )

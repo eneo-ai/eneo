@@ -67,7 +67,6 @@ from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.pattern_registry import (
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
     PATTERN_REGISTRY,
-    STRUCTURED_EXTRACTION_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -761,48 +760,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
             ),
         ),
         expected_output_modes=("pass_through",),
-    ),
-    _case(
-        pattern_id="multi_step_quality_chain",
-        steps=(
-            NewStepDraft(
-                name="Extrahera struktur",
-                instructions="Extrahera strukturerade fält från dokumentet.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.DOCUMENT,
-                output_type=OutputType.JSON,
-                output_fields=(
-                    _field("topic", "string", description="Huvudämnet i dokumentet."),
-                ),
-            ),
-            NewStepDraft(
-                name="Skriv utkast",
-                instructions="Skapa ett första utkast baserat på extraktionen.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.TEXT,
-            ),
-            NewStepDraft(
-                name="Granska kvalitet",
-                instructions="Granska utkastet och föreslå förbättringar.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-            NewStepDraft(
-                name="Slutresultat",
-                instructions="Producera den slutgiltiga texten.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-        ),
-        expected_output_modes=(
-            "pass_through",
-            "pass_through",
-            "pass_through",
-            "pass_through",
-        ),
     ),
     _case(
         pattern_id="comparison",
@@ -2111,7 +2068,7 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
         input_type="document",
         output_type="pdf",
         output_mode="pass_through",
-        chosen_patterns=["multi_step_quality_chain"],
+        chosen_patterns=["document_to_pdf_report"],
         required_capabilities=["input_document", "output_mode_pass_through"],
         aggregation_intent="aggregate",
     )
@@ -2125,55 +2082,22 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
         flow_name="Aggregate documents",
         steps=[
             _create_step_snapshot(
-                name="Extract structured foundation",
-                instructions=(
-                    "Extract source facts, key points, and uncertainties needed "
-                    "for the downstream analysis."
-                ),
-                input_source="flow_input",
-                input_type="document",
-                output_type="json",
-                runtime_required=True,
-                output_fields=_source_facts_fields_snapshot(),
-            ),
-            _create_step_snapshot(
                 name="Extract themes",
                 instructions="Extract themes from the material.",
-                input_source="previous_step",
-                input_type="json",
+                input_source="flow_input",
+                input_type="document",
                 output_type="text",
+                runtime_required=True,
             ),
             _create_step_snapshot(
                 name="Synthesize",
                 instructions="Synthesize all themes.",
-                input_source="previous_step",
-                input_type="text",
-                output_type="text",
-            ),
-            _create_step_snapshot(
-                name="Review and finalize",
-                instructions=(
-                    "Review the analysis for missing information, uncertainty, "
-                    "and quality issues, then write the revised final version "
-                    "for the final output."
-                ),
-                input_source="all_previous_steps",
-                input_type="text",
-                output_type="text",
-            ),
-            _create_step_snapshot(
-                name="Create PDF",
-                instructions=(
-                    "Create the final output from the previous structured work. "
-                    "Preserve the user's requested scope, ordering, and constraints."
-                ),
                 input_source="all_previous_steps",
                 input_type="text",
                 output_type="pdf",
                 document_delivery_mode="generated",
             ),
         ],
-        document_body_writer_step_indexes=(3,),
     )
 
 
@@ -4086,6 +4010,194 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
     assert validation.valid
 
 
+def test_compile_outline_flow_drops_form_fields_shadowing_source_reader_contract(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys till PDF",
+            "plan_rationale": "Extract document facts and write a PDF report.",
+            "input_fields": [
+                {
+                    "variable_name": "manual_title",
+                    "label": "Titel",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "manual_year",
+                    "label": "År",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "manual_category",
+                    "label": "Kategori",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "manual_author",
+                    "label": "Författare",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "audience",
+                    "label": "Målgrupp",
+                    "field_type": "text",
+                    "required": False,
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Analysera dokument",
+                    "instructions": "Läs dokumentet och extrahera rapportfakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Analyzed documents.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Document title.",
+                                },
+                                {
+                                    "name": "document_date",
+                                    "field_type": "string",
+                                    "description": "Document date or year.",
+                                },
+                                {
+                                    "name": "category",
+                                    "field_type": "string",
+                                    "description": "Document category.",
+                                },
+                                {
+                                    "name": "author",
+                                    "field_type": "string",
+                                    "description": "Document author.",
+                                },
+                            ],
+                        }
+                    ],
+                    "uses_form_fields": [
+                        "manual_title",
+                        "manual_year",
+                        "manual_category",
+                        "manual_author",
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapporten för målgruppen.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "documents",
+                            "label": "Dokumentfakta",
+                        }
+                    ],
+                    "uses_form_fields": ["audience", "manual_title"],
+                },
+            ],
+        }
+    )
+    context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        runtime_metadata_state=DETAILED_CASE_METADATA,
+    )
+
+    with caplog.at_level(logging.INFO, logger=CREATE_COMPILER_LOGGER):
+        draft = compile_create_intent_to_spec(outline, context=context)
+    validation = validate_spec(draft)
+
+    assert [field.name for field in (draft.form_fields or [])] == ["audience"]
+    assert getattr(
+        next(
+            record
+            for record in caplog.records
+            if record.message
+            == "ai_builder_source_contract_shadow_input_fields_dropped"
+        ),
+        "field_names",
+    ) == [
+        "manual_author",
+        "manual_category",
+        "manual_title",
+        "manual_year",
+    ]
+    serialized_steps = "\n".join(
+        "\n".join(
+            [
+                step.assistant_spec.instructions,
+                str(step.input_bindings or {}),
+            ]
+        )
+        for step in draft.steps
+    )
+    assert "flow_input.manual_" not in serialized_steps
+    assert "{{ flow_input.audience }}" in serialized_steps
+    assert validation.valid
+
+
+def test_compile_outline_flow_preserves_distinct_form_field_with_shared_token() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentrapport",
+            "plan_rationale": "Extract document facts and write a report.",
+            "input_fields": [
+                {
+                    "variable_name": "report_date",
+                    "label": "Rapportdatum",
+                    "field_type": "text",
+                    "required": False,
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Analysera dokument",
+                    "instructions": "Extrahera publiceringsdatum från dokumentet.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "publication_date",
+                            "field_type": "string",
+                            "description": "Date found in the document.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv rapporten med rapportdatum.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "publication_date",
+                            "label": "Publiceringsdatum",
+                        }
+                    ],
+                    "uses_form_fields": ["report_date"],
+                },
+            ],
+        }
+    )
+
+    draft = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(runtime_input_type=InputType.DOCUMENT),
+    )
+    validation = validate_spec(draft)
+
+    assert [field.name for field in (draft.form_fields or [])] == ["report_date"]
+    assert "{{ flow_input.report_date }}" in str(draft.steps[1].input_bindings)
+    assert validation.valid
+
+
 def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -5116,9 +5228,7 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
     assert validation.valid
 
 
-def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction() -> (
-    None
-):
+def test_compile_outline_audio_pdf_does_not_fabricate_untyped_json_contract() -> None:
     from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
         build_conversation_aware_quality_feedback,
     )
@@ -5176,13 +5286,12 @@ def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction
 
     extraction_step = draft.steps[1]
     assert extraction_step.output_type == OutputType.JSON
-    assert extraction_step.output_contract is not None
-    assert set(extraction_step.output_contract["properties"]) == {
-        "source_facts",
-        "uncertainties",
-    }
+    assert extraction_step.output_contract is None
     assert validation.valid
-    assert feedback is None
+    assert any(
+        warning.code == "json_output_no_contract" for warning in validation.warnings
+    )
+    assert feedback is not None
 
 
 @pytest.mark.parametrize("final_output_type", ["docx", "pdf"])
@@ -7494,6 +7603,121 @@ def test_compile_create_steps_to_spec_uses_terminal_schema_for_source_capture() 
     assert validate_spec(compiled).valid
 
 
+def test_compile_create_steps_to_spec_retains_downstream_json_fields_in_source_reader() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Läs och identifiera dokument",
+                instructions="Identifiera dokumentets titel och ämne.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                output_fields=[
+                    _field(
+                        "documents",
+                        "array",
+                        description="Analyserade dokument.",
+                        item_fields=[
+                            _field("title", "string", description="Dokumentets titel."),
+                            _field("topic", "string", description="Dokumentets ämne."),
+                        ],
+                    )
+                ],
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Bedöm slutsatser",
+                instructions="Bedöm dokumentets slutsatser.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[
+                    _field(
+                        "documents",
+                        "array",
+                        description="Dokument med slutsatser.",
+                        item_fields=[
+                            _field(
+                                "conclusions",
+                                "array",
+                                description="Slutsatser från dokumentet.",
+                                item_fields=[
+                                    _field(
+                                        "conclusion",
+                                        "string",
+                                        description="En slutsats.",
+                                    )
+                                ],
+                            ),
+                        ],
+                    )
+                ],
+            ),
+            NewStepDraft(
+                name="Skriv rapporttext",
+                instructions="Skriv rapporten från dokumentfälten.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+        ],
+    )
+
+    first_contract = compiled.steps[0].output_contract
+    assert first_contract is not None
+    document_item_properties = first_contract["properties"]["documents"]["items"][
+        "properties"
+    ]
+    assert set(document_item_properties) == {"title", "topic", "conclusions"}
+    assert SOURCE_CAPTURE_HEADING not in compiled.steps[0].assistant_spec.instructions
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_limits_source_reader_retention_to_json_chain() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Läs dokument",
+                instructions="Identifiera dokumentets titel.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                output_fields=[_field("title", "string", description="Titel.")],
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Skriv sammanfattning",
+                instructions="Skriv en sammanfattning.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+            NewStepDraft(
+                name="Extrahera granskningsnoteringar",
+                instructions="Extrahera noteringar från sammanfattningen.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field("review_notes", "array", description="Senare noteringar.")
+                ],
+            ),
+        ],
+    )
+
+    first_contract = compiled.steps[0].output_contract
+    assert first_contract is not None
+    assert set(first_contract["properties"]) == {"title"}
+    assert "review_notes" not in first_contract["properties"]
+    assert validate_spec(compiled).valid
+
+
 def test_compile_create_steps_to_spec_uses_nested_terminal_schema_leaves_for_source_capture() -> (
     None
 ):
@@ -7856,21 +8080,9 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
         and step.output_type == OutputType.JSON
         for step in compiled.steps
     )
-    assert compiled.steps[2].input_bindings == {
-        "source_refs": [
-            {
-                "step_ref": "step_b",
-                "output": "structured",
-            },
-            {
-                "step_ref": "step_a",
-                "output": "text",
-                "label": "Källmaterial",
-            },
-        ]
-    }
-    assert _question_binding(compiled.steps[2].input_bindings) == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    assert compiled.steps[2].input_bindings is None
+    assert any(
+        warning.code == "json_output_no_contract" for warning in validation.warnings
     )
     assert validation.valid
 
@@ -8048,10 +8260,7 @@ def test_outline_compile_context_preserves_compiled_chain_and_semantic_patterns(
                     output_mode="pass_through",
                 )
             ],
-            chosen_patterns=[
-                "multi_step_quality_chain",
-                "form_field_runtime_inputs",
-            ],
+            chosen_patterns=["document_to_pdf_report", "form_field_runtime_inputs"],
             required_capabilities=["input_document", "output_mode_pass_through"],
         )
     )
@@ -8060,11 +8269,10 @@ def test_outline_compile_context_preserves_compiled_chain_and_semantic_patterns(
 
     assert context is not None
     assert set(context.pattern_ids) == {
+        "document_to_pdf_report",
         "form_field_runtime_inputs",
-        "multi_step_quality_chain",
     }
-    assert STRUCTURED_EXTRACTION_STEP in context.pattern_chain_steps
-    assert TERMINAL_ARTIFACT_STEP in context.pattern_chain_steps
+    assert context.pattern_chain_steps == ()
 
 
 def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> None:
@@ -8319,7 +8527,9 @@ def test_compile_outline_flow_uses_committed_template_fill_mode_without_pattern(
     assert validation.valid
 
 
-def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -> None:
+def test_compile_outline_flow_realizes_document_pdf_report_without_quality_chain() -> (
+    None
+):
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured report",
@@ -8342,7 +8552,7 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
                     output_mode="pass_through",
                 )
             ],
-            chosen_patterns=["multi_step_quality_chain"],
+            chosen_patterns=["document_to_pdf_report"],
             required_capabilities=["input_document", "output_mode_pass_through"],
         )
     )
@@ -8355,75 +8565,18 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
-        "Extract structured foundation",
         "Analyze material",
-        "Review and finalize",
         "Create PDF",
     ]
     assert [step.output_type.value for step in draft.steps] == [
-        "json",
-        "text",
         "text",
         "pdf",
     ]
-    assert draft.steps[0].output_contract is not None
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
-    assert compiled.steps[1].input_type.value == "json"
-    assert compiled.steps[3].output_type.value == "pdf"
+    assert compiled.steps[1].input_type.value == "text"
+    assert compiled.steps[1].output_type.value == "pdf"
     assert validation.valid
     assert_create_spec_prepares_through_authoring_command(compiled)
-
-
-def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_output() -> (
-    None
-):
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Jämför dokument",
-            "plan_rationale": "Extrahera fakta, identifiera motsägelser och skriv svar.",
-            "steps": [
-                {
-                    "name": "Identifiera motsägelser",
-                    "instructions": "Identifiera motsägelser mellan källorna.",
-                }
-            ],
-        }
-    )
-    state = PlanningState.empty()
-    state.architecture_commit = finalize_architecture_commit(
-        ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="document",
-                    output_type="text",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=["multi_step_quality_chain"],
-            required_capabilities=["input_document", "output_mode_pass_through"],
-            aggregation_intent="compare",
-        )
-    )
-
-    draft = compile_create_intent_to_spec(
-        outline,
-        context=create_compile_context_from_planning_state(
-            state,
-            ui_language="sv",
-        ),
-    )
-    compiled = draft
-    validation = validate_spec(compiled)
-
-    assert [step.name for step in draft.steps] == [
-        "Extrahera strukturerad grund",
-        "Identifiera motsägelser",
-        "Granska och färdigställ",
-        "Skapa slutresultat",
-    ]
-    assert draft.steps[-1].input_source == InputSource.PREVIOUS_STEP
-    assert compiled.steps[-1].input_source == InputSource.PREVIOUS_STEP
-    assert validation.valid
 
 
 def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
@@ -8469,18 +8622,7 @@ def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
     )
 
 
-def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> None:
-    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-        CriticContext,
-        evaluate_critic_invariants,
-    )
-    from eneo.flows.ai_builder.ai_builder_framework_policy import (
-        OutputIntentResolution,
-    )
-    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-        PlannerPatternSignals,
-    )
-
+def test_compile_outline_flow_document_pdf_preserves_authored_semantic_steps() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured report",
@@ -8507,7 +8649,7 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
                     output_mode="pass_through",
                 )
             ],
-            chosen_patterns=["multi_step_quality_chain"],
+            chosen_patterns=["document_to_pdf_report"],
             required_capabilities=["input_document", "output_mode_pass_through"],
         )
     )
@@ -8520,33 +8662,16 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
-        "Extract structured foundation",
         "Analyze material",
         "Draft report",
-        "Review and finalize",
         "Create PDF",
     ]
-    assert compiled.document_body_writer_step_refs == ("step_d",)
+    assert compiled.document_body_writer_step_refs is None
     assert compiled.steps[-1].output_type.value == "pdf"
     assert validation.valid
 
-    context = CriticContext(
-        spec=compiled,
-        flow=None,
-        answer_signals={},
-        text="",
-        requirements_text="",
-        signal_text="",
-        planner_patterns=PlannerPatternSignals(),
-        output_intent=OutputIntentResolution(terminal_output="pdf_document"),
-        mixed_audio_doc_input=False,
-        requested_output_sections=RequestedOutputSections.empty(),
-    )
-    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
-    assert "terminal_renderer_must_not_consume_review_only_step" not in issue_ids
 
-
-def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() -> None:
+def test_compile_outline_flow_document_pdf_wraps_rich_outline_with_renderer() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Detailed report",
@@ -8570,7 +8695,7 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
                     output_mode="pass_through",
                 )
             ],
-            chosen_patterns=["multi_step_quality_chain"],
+            chosen_patterns=["document_to_pdf_report"],
             required_capabilities=["input_document", "output_mode_pass_through"],
         )
     )
@@ -8583,12 +8708,10 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
-        "Extract structured foundation",
         "Phase 1",
         "Phase 2",
         "Phase 3",
         "Phase 4",
-        "Review and finalize",
         "Create PDF",
     ]
     assert draft.steps[-1].output_type.value == "pdf"

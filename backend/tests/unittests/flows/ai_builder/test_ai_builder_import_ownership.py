@@ -312,6 +312,7 @@ SERVER_DECISION_DISPATCH_PUBLIC_NAMES = frozenset(
     {
         "ServerDecisionDispatchRequest",
         "ServerDecisionDispatchResult",
+        "ServerDecisionProposalContinuation",
         "ServerDecisionTelemetry",
         "build_requirements_summary_payload",
         "dispatch_server_decision",
@@ -323,6 +324,7 @@ PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
         "PreparedPromptMessages",
         "ProposalPrepared",
         "ServerOutputPrepared",
+        "build_proposal_prepared",
         "conversation_message_to_llm_message",
         "prepare_planner_request",
     }

@@ -10,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
     normalize_runtime_metadata_state,
     runtime_input_fields_declared_absent,
+    runtime_input_fields_requested,
     runtime_metadata_allows_input_fields,
     runtime_metadata_disables_declared_input_fields,
 )
@@ -146,7 +147,7 @@ def test_runtime_input_field_extraction_understands_negated_swedish_runtime_fiel
     assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
-def test_runtime_input_field_extraction_treats_source_derived_report_fields_as_no_extra_metadata() -> (
+def test_runtime_input_field_extraction_ignores_source_derived_report_field_lists() -> (
     None
 ):
     text = (
@@ -158,22 +159,38 @@ def test_runtime_input_field_extraction_treats_source_derived_report_fields_as_n
 
     assert not runtime_input_fields_declared_absent(text)
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+    assert infer_runtime_metadata_slot(text) is None
 
 
-def test_runtime_input_field_extraction_accepts_swedish_source_derived_paraphrases() -> (
-    None
-):
+def test_runtime_input_field_extraction_ignores_source_derived_paraphrases() -> None:
     text = (
         "Rapportfält kommer ur transkriptet och tas från ljudinspelningen: "
         "datum, källa, namn, kontaktuppgifter, risker och osäkerheter."
     )
 
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+    assert infer_runtime_metadata_slot(text) is None
 
 
-def test_runtime_input_field_extraction_treats_document_headings_as_source_derived() -> (
+def test_runtime_input_field_extraction_ignores_document_analysis_output_fields() -> (
+    None
+):
+    text = (
+        "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera "
+        "filer, vilket du kommer läsa innehållet och vad filen handlar om och "
+        "baserat på det så kommer du att dokumentera ner vilken typ av dokument "
+        "det är, vad den handlar om, kategori av dokument och vad slutsatserna "
+        "innebär samt datumet som dokumentet är skrivet och om möjligt av vem "
+        "det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas "
+        "titel på dokumentet, år, kategori och en koncis sammanfattning."
+    )
+
+    assert not runtime_input_fields_requested(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
+def test_runtime_input_field_extraction_ignores_document_heading_output_fields() -> (
     None
 ):
     text = (
@@ -182,7 +199,7 @@ def test_runtime_input_field_extraction_treats_document_headings_as_source_deriv
     )
 
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+    assert infer_runtime_metadata_slot(text) is None
 
 
 def test_runtime_input_field_extraction_ignores_swedish_document_section_template() -> (
@@ -202,7 +219,7 @@ def test_runtime_input_field_extraction_ignores_swedish_document_section_templat
     )
 
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+    assert infer_runtime_metadata_slot(text) is None
 
 
 @pytest.mark.parametrize(

@@ -178,14 +178,6 @@ def _primary_pattern_id(
         FlowOutputType.PDF,
     }:
         return "text_to_artifact_report"
-    structured_analysis = state.resolved_slots.get("structured_analysis_need")
-    if (
-        input_type in {FlowInputType.DOCUMENT, FlowInputType.FILE}
-        and output_type is not FlowOutputType.JSON
-        and structured_analysis is not None
-        and structured_analysis.value == "use_structured_analysis"
-    ):
-        return "multi_step_quality_chain"
     if output_type is FlowOutputType.PDF:
         return "document_to_pdf_report"
     if input_type in {FlowInputType.DOCUMENT, FlowInputType.FILE}:
