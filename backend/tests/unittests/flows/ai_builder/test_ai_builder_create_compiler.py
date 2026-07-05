@@ -99,6 +99,7 @@ from tests.unittests.flows.ai_builder.authoring_command_assertions import (
 
 PROPOSAL_INTENT_LOGGER = "eneo.flows.ai_builder.ai_builder_proposal_intent"
 CREATE_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_create_compiler"
+SOURCE_CAPTURE_HEADING = "Bevara följande uppgifter eftersom senare steg behöver dem:"
 
 
 def _question_binding(input_bindings: dict[str, object] | None) -> str:
@@ -240,6 +241,13 @@ def _field(
         fields=fields,
         item_fields=item_fields,
     )
+
+
+def _source_capture_lines(instructions: str) -> list[str]:
+    if SOURCE_CAPTURE_HEADING not in instructions:
+        return []
+    block = instructions.split(SOURCE_CAPTURE_HEADING, maxsplit=1)[1]
+    return [line for line in block.splitlines() if line.startswith("- ")]
 
 
 def _committed_architecture_state(
@@ -7346,6 +7354,255 @@ def test_compile_create_steps_to_spec_dedupes_overlapping_previous_output_refs()
     assert _question_binding(compiled.steps[1].input_bindings) == (
         "Document text: {{ step_a.output.text }}"
     )
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_tells_source_reader_downstream_json_needs() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera nyckelfakta",
+                instructions="Extrahera nyckelfakta från dokumentunderlaget.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field("titel", "string", description="Dokumentets titel."),
+                    _field(
+                        "datum_eller_ar",
+                        "string",
+                        description="Datum eller år som framgår.",
+                    ),
+                    _field(
+                        "forfattare_eller_avsandare",
+                        "string",
+                        description="Författare eller avsändare.",
+                    ),
+                    _field(
+                        "slutsatser",
+                        "array",
+                        description="Viktiga slutsatser.",
+                    ),
+                ],
+            ),
+            NewStepDraft(
+                name="Skriv rapporttexten",
+                instructions="Skriv en rapport från nyckelfakta.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+        ],
+    )
+
+    source_instructions = compiled.steps[0].assistant_spec.instructions
+    assert SOURCE_CAPTURE_HEADING in source_instructions
+    assert "- titel: Dokumentets titel." in source_instructions
+    assert "- datum_eller_ar: Datum eller år som framgår." in source_instructions
+    assert "- forfattare_eller_avsandare: Författare eller avsändare." in (
+        source_instructions
+    )
+    assert "- slutsatser: Viktiga slutsatser." in source_instructions
+    assert "inte framgår" in source_instructions
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_does_not_add_source_capture_without_downstream_json() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Skriv rapporttexten",
+                instructions="Skriv en rapport från dokumentunderlaget.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+        ],
+    )
+
+    assert (
+        compiled.steps[0].assistant_spec.instructions
+        == "Identifiera dokumenttyp och huvudsakligt innehåll."
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_uses_terminal_schema_for_source_capture() -> None:
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till JSON",
+        terminal_output_schema={
+            "type": "object",
+            "properties": {
+                "document_title": {"type": "string"},
+                "document_date": {"type": "string"},
+            },
+            "required": ["document_title"],
+        },
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera dokumentdata",
+                instructions="Extrahera slutlig dokumentdata.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("stale_model_field", "string")],
+            ),
+        ],
+    )
+
+    source_instructions = compiled.steps[0].assistant_spec.instructions
+    assert "- document_title" in source_instructions
+    assert "- document_date" in source_instructions
+    assert "stale_model_field" not in source_instructions
+    assert compiled.steps[-1].output_contract == {
+        "type": "object",
+        "properties": {
+            "document_title": {"type": "string"},
+            "document_date": {"type": "string"},
+        },
+        "required": ["document_title"],
+    }
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_uses_nested_terminal_schema_leaves_for_source_capture() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till JSON",
+        terminal_output_schema={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "document_date": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        },
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera dokumentlista",
+                instructions="Extrahera slutlig dokumentlista.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+            ),
+        ],
+    )
+
+    source_instructions = compiled.steps[0].assistant_spec.instructions
+    assert "- title" in source_instructions
+    assert "- document_date" in source_instructions
+    assert "- documents" not in source_instructions
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_does_not_repeat_already_named_source_capture_field() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumentets titel.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera titel",
+                instructions="Extrahera titeln.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("titel", "string")],
+            ),
+        ],
+    )
+
+    assert SOURCE_CAPTURE_HEADING not in compiled.steps[0].assistant_spec.instructions
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_caps_source_capture_fields() -> None:
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera många fält",
+                instructions="Extrahera strukturerade fält.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field(f"field_{index}", "string", description=f"Field {index}.")
+                    for index in range(12)
+                ],
+            ),
+        ],
+    )
+
+    source_instructions = compiled.steps[0].assistant_spec.instructions
+    capture_lines = _source_capture_lines(source_instructions)
+    assert len(capture_lines) == 8
+    assert "- field_0: Field 0." in capture_lines
+    assert "- field_7: Field 7." in capture_lines
+    assert all("field_8" not in line for line in capture_lines)
+    assert len(source_instructions.split(SOURCE_CAPTURE_HEADING, maxsplit=1)[1]) < 900
     assert validate_spec(compiled).valid
 
 

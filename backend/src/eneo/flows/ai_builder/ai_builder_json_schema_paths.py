@@ -74,6 +74,30 @@ def top_level_schema_property_names(schema: dict[str, Any]) -> list[str]:
     return names
 
 
+def schema_leaf_property_names(schema: dict[str, Any]) -> list[str]:
+    """Return leaf property names in schema order, descending objects and arrays."""
+
+    if schema.get("type") == "array":
+        items = _dict_or_none(schema.get("items"))
+        return schema_leaf_property_names(items) if items is not None else []
+
+    properties = resolve_schema_properties(schema)
+    if not properties:
+        return []
+
+    names: list[str] = []
+    for raw_name, raw_schema in properties.items():
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        child_schema = _dict_or_none(raw_schema)
+        child_names = (
+            schema_leaf_property_names(child_schema) if child_schema is not None else []
+        )
+        names.extend(child_names or [name])
+    return names
+
+
 def resolve_schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
     properties: dict[str, Any] = {}
     _merge_schema_properties(properties, [schema])

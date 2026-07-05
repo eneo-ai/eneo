@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import string
+from dataclasses import dataclass
 from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
@@ -33,6 +34,15 @@ from eneo.flows.input_binding_contract_rules import (
 
 logger = logging.getLogger(__name__)
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
+MAX_SOURCE_CAPTURE_FIELDS = 8
+MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS = 96
+MAX_SOURCE_CAPTURE_BLOCK_CHARS = 900
+
+
+@dataclass(frozen=True, slots=True)
+class SourceCaptureField:
+    name: str
+    description: str | None = None
 
 
 def derive_position_input_source(step_index: int) -> InputSource:
@@ -82,6 +92,8 @@ def compile_new_step_draft(
     step_draft: NewStepDraft,
     plan_step_ref: str,
     prior_steps: list[StepSpec],
+    source_capture_fields: tuple[SourceCaptureField, ...] = (),
+    ui_language: str | None = None,
 ) -> StepSpec:
     step_draft = normalize_new_step_input_shape(
         step_draft,
@@ -101,6 +113,8 @@ def compile_new_step_draft(
     assistant_instructions = compile_assistant_instructions(
         step_draft=step_draft,
         input_bindings=input_bindings,
+        source_capture_fields=source_capture_fields,
+        ui_language=ui_language,
     )
     output_config = compile_output_config(step_draft)
 
@@ -401,6 +415,8 @@ def compile_assistant_instructions(
     *,
     step_draft: NewStepDraft,
     input_bindings: dict[str, Any] | None,
+    source_capture_fields: tuple[SourceCaptureField, ...] = (),
+    ui_language: str | None = None,
 ) -> str:
     instructions = step_draft.instructions
     if input_bindings is None:
@@ -411,8 +427,13 @@ def compile_assistant_instructions(
         if hint:
             instructions = f"{instructions}\n\n{hint}"
 
-    return _append_output_field_guidance(
+    instructions = _append_source_capture_guidance(
         instructions=instructions or "",
+        source_capture_fields=source_capture_fields,
+        ui_language=ui_language,
+    )
+    return _append_output_field_guidance(
+        instructions=instructions,
         output_fields=step_draft.output_fields,
     )
 
@@ -441,6 +462,60 @@ def compile_input_reference_instruction_hint(
             f"Beakta också följande formulärfält vid analysen:\n{form_lines}"
         )
     return "\n\n".join(sections)
+
+
+def _append_source_capture_guidance(
+    *,
+    instructions: str,
+    source_capture_fields: tuple[SourceCaptureField, ...],
+    ui_language: str | None,
+) -> str:
+    if not source_capture_fields:
+        return instructions
+
+    heading, absence_instruction = _source_capture_copy(ui_language)
+    normalized_instructions = instructions.casefold()
+    field_lines: list[str] = []
+    for field in source_capture_fields[:MAX_SOURCE_CAPTURE_FIELDS]:
+        name = field.name.strip()
+        if not name or name.casefold() in normalized_instructions:
+            continue
+        description = _truncate_source_capture_description(field.description)
+        line = f"- {name}: {description}" if description else f"- {name}"
+        candidate_lines = [*field_lines, line]
+        candidate_block = "\n".join([heading, *candidate_lines, absence_instruction])
+        if len(candidate_block) > MAX_SOURCE_CAPTURE_BLOCK_CHARS:
+            break
+        field_lines.append(line)
+
+    if not field_lines:
+        return instructions
+
+    block = "\n".join([heading, *field_lines, absence_instruction])
+    return f"{instructions}\n\n{block}" if instructions else block
+
+
+def _source_capture_copy(ui_language: str | None) -> tuple[str, str]:
+    if ui_language is None or ui_language.casefold().startswith("sv"):
+        return (
+            "Bevara följande uppgifter eftersom senare steg behöver dem:",
+            "Om en uppgift saknas i källmaterialet, skriv att den inte framgår "
+            "istället för att utelämna den.",
+        )
+    return (
+        "Preserve these facts because later steps need them:",
+        "If a fact is missing from the source material, state that it is not "
+        "present instead of omitting it.",
+    )
+
+
+def _truncate_source_capture_description(description: str | None) -> str:
+    if not description:
+        return ""
+    normalized = " ".join(description.split())
+    if len(normalized) <= MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS:
+        return normalized
+    return f"{normalized[: MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS - 3].rstrip()}..."
 
 
 def compile_output_contract(

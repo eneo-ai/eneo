@@ -3,9 +3,9 @@
 ## TL;DR
 
 - Goal: make Flow AI Builder's `underlag till text`, input fields, prompts, and typed `source_refs` coherent without dumping unnecessary context.
-- Current slice: remove duplicate semantic `source_refs` in the Builder authoring path while keeping runtime tolerant for old duplicate-bearing flows.
+- Current slice: preserve downstream structured-field needs in raw source-reader prompts without dumping the full downstream context.
 - Do not treat this as a UI-only bug; the root owner is the Builder compiler/normalizer and authoring validation contract.
-- Do not implement upstream capture-contract prompt changes until a golden proves current source-reader detail loss.
+- The source-reader capture contract is bounded to the nearest downstream JSON extraction and emitted by the existing instruction compiler, not by a second prompt writer.
 - Preserve unrelated frontend/devcontainer/fablereview dirty files from other agents.
 
 ## Source Artifacts
@@ -23,7 +23,7 @@
 |---|---|---|---|
 | 1. Duplicate `source_refs` | Implemented, peer-reviewed green, ready to commit | Builder compiler/normalizer for emission; `input_binding_contract_rules.py` for structural uniqueness; AI Builder validator for strict authoring gate | Duplicate refs by `(step_ref, output, field_path)` are collapsed before authoring validation, labeled refs win over unlabeled refs, runtime lowering still accepts duplicates, stale duplicate-pinning tests are flipped. |
 | 2. Effective underlag visibility and reorder safety | Pending | Frontend editor projection/rendering; `flowStepOrderRemap.ts`; backend snapshot only if a read-only projection is needed | Typed refs and implicit previous-step underlag are visible; reorder remaps bare `source_refs[].step_ref`; deleting a referenced step shows stale/deleted source instead of silent rebinding. |
-| 3. Upstream capture contract | Pending, gated | Derived downstream-needs contract near Builder compiler/planning state | A golden first proves current source-reader detail loss. Only then add bounded downstream needs to the raw-source-reading step; no broad prompt stuffing. |
+| 3. Upstream capture contract | Implemented, validation green, final peer verification pending | Create compiler collects downstream needs; schema-path helper owns terminal schema leaves; new-step instruction compiler renders bounded guidance | Raw source-reader steps preserve fields required by the nearest downstream JSON extraction or terminal schema; guidance is capped, deterministic, localized, and not duplicated when the instruction already names the field. |
 | 4. Implicit-underlag diagnostics | Pending | Runtime input-resolution diagnostics | Bindings-less previous-step input gets diagnostic parity with explicit underlag for evidence/debug transparency. |
 | 5. Source-ref writer consolidation / repair narrowing | Pending | Builder compiler/edit compiler and source-material normalizer | After create/edit compilers guarantee refs, delete or narrow repair that only compensates for invalid Builder output. |
 
@@ -83,6 +83,49 @@ Forbidden in slice 1:
 |---|---|---|
 | Claude peer loop iteration 1 | `.codex/artifacts/claude-peer-loop-fable-15-slice-1-source-refs-plan-20260705T102939Z.md` | `changes_required`; required shared dedupe owner across compiler and source-material producers, structured validation, and runtime tolerance. |
 | Claude peer loop iteration 2 | `.codex/artifacts/claude-peer-loop-fable-15-slice-1-source-refs-implementation-20260705T104413Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; safe to commit. |
+
+## Slice 3 Boundaries
+
+Allowed:
+
+- `backend/src/eneo/flows/ai_builder/ai_builder_create_compiler.py`
+- `backend/src/eneo/flows/ai_builder/ai_builder_new_step_compiler.py`
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py`
+
+Forbidden in slice 3:
+
+- No frontend underlag visibility or reorder UI work.
+- No runtime `input_bindings` semantics change.
+- No full downstream prompt dump.
+- No edit-path rewrite.
+- No Fable/LLM eval golden yet; this slice adds the deterministic compiler contract that such a golden can later exercise.
+
+## Slice 3 Implementation Notes
+
+- `compile_create_steps_to_spec()` now collects capture fields for lossy source-reader steps after create-step mechanics are normalized.
+- A source-reader step qualifies only when it reads flow input as `document`, `file`, or `text` and produces `text`.
+- The collector uses only the nearest downstream JSON step with typed fields. If the JSON step is terminal and its model fields were cleared for an exact `terminal_output_schema`, the collector reuses `schema_leaf_property_names()` so nested object/array schemas preserve leaf facts rather than only container names.
+- `compile_assistant_instructions()` remains the single prompt writer. It renders a bounded source-capture block through `SourceCaptureField` values.
+- The source-capture block is capped at 8 fields, 96 description characters per field, and 900 rendered characters. It skips fields already named in the source-reader instruction.
+
+## Slice 3 Validation
+
+| Command | Result |
+|---|---|
+| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_json_schema_paths.py::test_schema_leaf_property_names_descends_objects_and_array_items tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_create_steps_to_spec_tells_source_reader_downstream_json_needs tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_create_steps_to_spec_does_not_add_source_capture_without_downstream_json tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_create_steps_to_spec_uses_terminal_schema_for_source_capture tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_create_steps_to_spec_uses_nested_terminal_schema_leaves_for_source_capture tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_create_steps_to_spec_does_not_repeat_already_named_source_capture_field tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_create_steps_to_spec_caps_source_capture_fields` | 7 passed |
+| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_json_schema_paths.py` | 203 passed |
+| `uv run pytest tests/unittests/flows/ai_builder` | 2524 passed |
+| `uv run ruff check src/eneo/flows/ai_builder/ai_builder_create_compiler.py src/eneo/flows/ai_builder/ai_builder_new_step_compiler.py src/eneo/flows/ai_builder/ai_builder_json_schema_paths.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_json_schema_paths.py` | passed |
+| `uv run pyright src/eneo/flows/ai_builder/ai_builder_create_compiler.py src/eneo/flows/ai_builder/ai_builder_new_step_compiler.py src/eneo/flows/ai_builder/ai_builder_json_schema_paths.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_json_schema_paths.py` | 0 errors |
+
+## Slice 3 Peer Review
+
+| Reviewer | Artifact | Result |
+|---|---|---|
+| Claude peer loop iteration 1 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-plan-20260705T105549Z.md` | `changes_required`; required one instruction writer, explicit token caps, terminal schema support, `ui_language` reuse, and idempotency/bound tests. |
+| Claude peer loop iteration 2 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-plan-revised-20260705T110227Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; plan approved for implementation. |
+| Claude peer loop iteration 3 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-implementation-20260705T111634Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; found a non-blocking nested terminal-schema gap, now fixed before commit. |
+| Claude peer loop iteration 4 | `.codex/artifacts/claude-peer-loop-fable-15-capture-contract-final-verification-20260705T112248Z.md` | `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; nested terminal-schema fix is commit-ready. |
 
 ## Notes
 

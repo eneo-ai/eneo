@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     derive_aggregation_intent_from_slots,
@@ -23,7 +23,12 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    schema_leaf_property_names,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
+    MAX_SOURCE_CAPTURE_FIELDS,
+    SourceCaptureField,
     compile_new_step_draft,
     make_plan_step_ref,
 )
@@ -31,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
     PreviousOutputRef,
+    StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -81,6 +87,9 @@ from eneo.json_types import JsonObject
 logger = logging.getLogger(__name__)
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
+_SOURCE_CAPTURE_INPUT_TYPES = frozenset(
+    {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
+)
 ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
 
 
@@ -273,6 +282,7 @@ def compile_create_intent_to_spec(
         document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
         aggregation_intent=aggregation_intent,
         terminal_output_schema=terminal_output_schema,
+        ui_language=context.ui_language if context is not None else None,
     )
 
 
@@ -395,6 +405,7 @@ def compile_create_steps_to_spec(
     document_body_writer_step_indexes: tuple[int, ...] = (),
     aggregation_intent: AggregationIntent = "linear",
     terminal_output_schema: JsonObject | None = None,
+    ui_language: str | None = None,
 ) -> FlowDraftSpecCore:
     steps = _clear_terminal_schema_output_fields(
         steps=steps,
@@ -407,6 +418,10 @@ def compile_create_steps_to_spec(
         flow_description=flow_description,
         aggregation_intent=aggregation_intent,
     )
+    source_capture_fields_by_index = _source_capture_fields_by_step_index(
+        steps=normalized_steps,
+        terminal_output_schema=terminal_output_schema,
+    )
     compiled_steps: list[StepSpec] = []
     for index, step_draft in enumerate(normalized_steps):
         compiled_steps.append(
@@ -414,6 +429,8 @@ def compile_create_steps_to_spec(
                 step_draft=step_draft,
                 plan_step_ref=make_plan_step_ref(index),
                 prior_steps=compiled_steps,
+                source_capture_fields=source_capture_fields_by_index.get(index, ()),
+                ui_language=ui_language,
             )
         )
     compiled_steps = _apply_terminal_output_schema(
@@ -432,6 +449,109 @@ def compile_create_steps_to_spec(
         ),
     )
     return compiled
+
+
+def _source_capture_fields_by_step_index(
+    *,
+    steps: list[NewStepDraft],
+    terminal_output_schema: JsonObject | None,
+) -> dict[int, tuple[SourceCaptureField, ...]]:
+    fields_by_index: dict[int, tuple[SourceCaptureField, ...]] = {}
+    for index, step in enumerate(steps):
+        if not _is_source_capture_step(step):
+            continue
+        fields = _nearest_downstream_capture_fields(
+            steps=steps,
+            source_index=index,
+            terminal_output_schema=terminal_output_schema,
+        )
+        if fields:
+            fields_by_index[index] = fields
+    return fields_by_index
+
+
+def _is_source_capture_step(step: NewStepDraft) -> bool:
+    return (
+        step.input_source == InputSource.FLOW_INPUT
+        and step.input_type in _SOURCE_CAPTURE_INPUT_TYPES
+        and step.output_type == OutputType.TEXT
+    )
+
+
+def _nearest_downstream_capture_fields(
+    *,
+    steps: list[NewStepDraft],
+    source_index: int,
+    terminal_output_schema: JsonObject | None,
+) -> tuple[SourceCaptureField, ...]:
+    for downstream_index in range(source_index + 1, len(steps)):
+        step = steps[downstream_index]
+        if step.output_type != OutputType.JSON:
+            continue
+        fields = _capture_fields_from_output_fields(step.output_fields)
+        if (
+            not fields
+            and terminal_output_schema is not None
+            and downstream_index == len(steps) - 1
+        ):
+            fields = _capture_fields_from_terminal_schema(terminal_output_schema)
+        if fields:
+            return fields
+    return ()
+
+
+def _capture_fields_from_output_fields(
+    output_fields: list[StructuredFieldDraft] | None,
+) -> tuple[SourceCaptureField, ...]:
+    if not output_fields:
+        return ()
+    return _dedupe_capture_fields(_iter_output_capture_fields(output_fields))
+
+
+def _iter_output_capture_fields(
+    output_fields: list[StructuredFieldDraft],
+) -> list[SourceCaptureField]:
+    fields: list[SourceCaptureField] = []
+    for field in output_fields:
+        object_fields = field.fields if field.field_type == "object" else None
+        item_fields = field.item_fields if field.field_type == "array" else None
+        if object_fields:
+            fields.extend(_iter_output_capture_fields(object_fields))
+        elif item_fields:
+            fields.extend(_iter_output_capture_fields(item_fields))
+        elif field.name:
+            fields.append(
+                SourceCaptureField(name=field.name, description=field.description)
+            )
+    return fields
+
+
+def _capture_fields_from_terminal_schema(
+    terminal_output_schema: JsonObject,
+) -> tuple[SourceCaptureField, ...]:
+    names = schema_leaf_property_names(cast(dict[str, Any], terminal_output_schema))
+    return _dedupe_capture_fields(
+        [SourceCaptureField(name=name, description=None) for name in names]
+    )
+
+
+def _dedupe_capture_fields(
+    fields: list[SourceCaptureField],
+) -> tuple[SourceCaptureField, ...]:
+    deduped: list[SourceCaptureField] = []
+    seen: set[str] = set()
+    for field in fields:
+        name = field.name.strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(SourceCaptureField(name=name, description=field.description))
+        if len(deduped) == MAX_SOURCE_CAPTURE_FIELDS:
+            break
+    return tuple(deduped)
 
 
 def _clear_terminal_schema_output_fields(
