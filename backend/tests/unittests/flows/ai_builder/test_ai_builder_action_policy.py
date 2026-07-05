@@ -307,6 +307,19 @@ def test_policy_never_exposes_resolved_slots_as_question_targets() -> None:
     assert policy.allowed_action_kinds == ("ask_question",)
 
 
+def test_policy_filters_commit_grade_terminal_output_discovery_target() -> None:
+    policy = build_planner_action_policy(
+        session_state=_state_with_resolved_slots(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=("final_output_mode",),
+    )
+
+    assert "terminal_output" not in policy.allowed_ask_question_targets
+
+
 def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> None:
     state = PlanningState.empty()
     state.resolved_slots["primary_runtime_input"] = ResolvedSlot(

@@ -415,7 +415,7 @@ def _source_facts_fields_snapshot() -> list[dict[str, object]]:
     ]
 
 
-def test_compile_context_carries_output_schema_for_terminal_json_only() -> None:
+def test_compile_context_rejects_schema_evidence_for_terminal_non_json() -> None:
     schema: dict[str, object] = {
         "type": "object",
         "properties": {"status": {"type": "string"}},
@@ -439,12 +439,11 @@ def test_compile_context_carries_output_schema_for_terminal_json_only() -> None:
     text_state.output_schema_evidence = _output_schema_evidence(schema)
 
     json_context = create_compile_context_from_planning_state(json_state)
-    text_context = create_compile_context_from_planning_state(text_state)
 
     assert json_context is not None
     assert json_context.terminal_output_schema == schema
-    assert text_context is not None
-    assert text_context.terminal_output_schema is None
+    with pytest.raises(AIBuilderArchitectureError):
+        create_compile_context_from_planning_state(text_state)
 
 
 def test_compile_create_intent_applies_exact_terminal_output_schema_evidence() -> None:

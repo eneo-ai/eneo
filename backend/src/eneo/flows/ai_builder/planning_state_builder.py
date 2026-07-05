@@ -14,7 +14,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from eneo.flows.ai_builder.ai_builder_canonicalization import (
+    canonical_option_id,
+    canonical_question_id,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    question_answer_from_metadata,
+    question_answer_question_id,
+    question_answer_values,
     slot_classification_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
@@ -183,6 +190,15 @@ _OUTPUT_SCHEMA_LABELS = (
     "output-schemat",
     "utdata-schemat",
 )
+_OUTPUT_SCHEMA_PROMOTABLE_TERMINAL_OUTPUT_SOURCES: frozenset[SlotSource] = frozenset(
+    {
+        "requirements_summary",
+        "flow_default",
+        "policy_default",
+        "heuristic",
+        "model",
+    }
+)
 
 
 def build_planning_state_from_conversation(
@@ -196,15 +212,21 @@ def build_planning_state_from_conversation(
     this function seeds the deterministic slot surface from the compacted
     conversation that was actually persisted.
     """
-    resolved_slots = _resolve_slots(conversation, flow=flow)
+    output_schema_evidence = _derive_output_schema_evidence(conversation)
+    resolved_slots = _resolve_slots(
+        conversation,
+        flow=flow,
+        output_schema_evidence_present=output_schema_evidence is not None,
+    )
     state = PlanningState(
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         resolved_slots=resolved_slots,
-        output_schema_evidence=_derive_output_schema_evidence(conversation),
+        output_schema_evidence=output_schema_evidence,
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
+    _reconcile_output_schema_evidence(state, conversation)
     return state
 
 
@@ -296,6 +318,101 @@ def _derive_output_schema_evidence(
                 evidence=[f"message:{message.message_id}", "fenced_json_schema"],
             )
     return evidence
+
+
+def _reconcile_output_schema_evidence(
+    state: PlanningState,
+    conversation: list[ConversationMessage],
+) -> None:
+    evidence = state.output_schema_evidence
+    if evidence is None:
+        return
+
+    terminal_output = state.resolved_slots.get("terminal_output")
+    if terminal_output is not None and terminal_output.value == "structured_json":
+        if terminal_output.source != "structured_answer":
+            state.resolved_slots["terminal_output"] = (
+                _output_schema_evidence_terminal_output_slot(evidence)
+            )
+        return
+
+    schema_message_index = _latest_output_schema_evidence_message_index(conversation)
+    if (
+        terminal_output is not None
+        and terminal_output.source == "structured_answer"
+        and terminal_output.value != "structured_json"
+    ):
+        if _latest_non_json_output_answer_index(conversation) > schema_message_index:
+            state.output_schema_evidence = None
+        else:
+            state.resolved_slots.pop("terminal_output", None)
+        return
+
+    if terminal_output is not None and (
+        terminal_output.source not in _OUTPUT_SCHEMA_PROMOTABLE_TERMINAL_OUTPUT_SOURCES
+    ):
+        return
+    if terminal_output is not None and terminal_output.value != "structured_text":
+        state.resolved_slots.pop("terminal_output", None)
+        return
+
+    state.resolved_slots["terminal_output"] = (
+        _output_schema_evidence_terminal_output_slot(evidence)
+    )
+
+
+def _output_schema_evidence_terminal_output_slot(
+    evidence: OutputSchemaEvidence,
+) -> ResolvedSlot:
+    return ResolvedSlot(
+        name="terminal_output",
+        value="structured_json",
+        source="heuristic",
+        evidence=[
+            "output_schema_evidence:fenced_json_schema",
+            *evidence.evidence,
+        ],
+        confidence="high",
+    )
+
+
+def _latest_output_schema_evidence_message_index(
+    conversation: list[ConversationMessage],
+) -> int:
+    index = -1
+    for message_index, message in enumerate(conversation):
+        if message.role != "user" or not message.content:
+            continue
+        for match in _FENCED_JSON_BLOCK_RE.finditer(message.content):
+            if not _mentions_output_schema_near_fence(message.content, match):
+                continue
+            if _parse_output_schema_candidate(match.group(1)) is not None:
+                index = message_index
+    return index
+
+
+def _latest_non_json_output_answer_index(
+    conversation: list[ConversationMessage],
+) -> int:
+    index = -1
+    for message_index, message in enumerate(conversation):
+        if message.role != "user":
+            continue
+        answer = question_answer_from_metadata(message.metadata)
+        if answer is None:
+            continue
+        question_id = question_answer_question_id(answer)
+        if question_id is None:
+            continue
+        if canonical_question_id(question_id) != "final_output_mode":
+            continue
+        values = {
+            canonical_option_id("final_output_mode", value)
+            for value in question_answer_values(answer)
+        }
+        if values and "structured_json" not in values:
+            index = message_index
+    return index
 
 
 def _mentions_output_schema_near_fence(
@@ -616,6 +733,7 @@ def _resolve_slots(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None,
+    output_schema_evidence_present: bool,
 ) -> dict[str, ResolvedSlot]:
     answer_signals = extract_answer_signals(conversation)
     requirements_state = resolve_requirements_state(conversation)
@@ -630,6 +748,7 @@ def _resolve_slots(
         answer_signals,
         flow_defaults=flow_defaults,
         conversation=conversation,
+        output_schema_evidence_present=output_schema_evidence_present,
     )
 
     slots: dict[str, ResolvedSlot] = {}

@@ -429,6 +429,113 @@ class TestOutputSchemaEvidenceDerivation:
         assert list(properties) == ["new_field"]
         assert evidence.evidence == ["message:msg_new_schema", "fenced_json_schema"]
 
+    def test_output_schema_evidence_promotes_implicit_text_output_to_json(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_schema",
+                    role="user",
+                    content=(
+                        "Skapa ett flöde som tar emot text och skriver en "
+                        "strukturerad rapport.\n"
+                        "Output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {"summary": {"type": "string"}},\n'
+                        '  "required": ["summary"]\n'
+                        "}\n"
+                        "```"
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["terminal_output"]
+        assert state.output_schema_evidence is not None
+        assert slot.value == "structured_json"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+        assert "output_schema_evidence:fenced_json_schema" in slot.evidence
+
+    def test_output_schema_evidence_reopens_older_structured_text_answer(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_text_answer",
+                    role="user",
+                    content="Ta emot text och ge ett strukturerat textresultat.",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "final_output_mode",
+                            "selected_option_id": "structured_text",
+                            "selected_value": "structured_text",
+                        }
+                    },
+                ),
+                ConversationMessage(
+                    message_id="msg_schema",
+                    role="user",
+                    content=(
+                        "Använd detta output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {"decision": {"type": "string"}},\n'
+                        '  "required": ["decision"]\n'
+                        "}\n"
+                        "```"
+                    ),
+                ),
+            ]
+        )
+
+        assert state.output_schema_evidence is not None
+        assert "terminal_output" not in state.resolved_slots
+
+    def test_later_structured_text_answer_declines_output_schema_contract(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="msg_schema",
+                    role="user",
+                    content=(
+                        "Använd detta output JSON schema:\n"
+                        "```json\n"
+                        "{\n"
+                        '  "type": "object",\n'
+                        '  "properties": {"decision": {"type": "string"}},\n'
+                        '  "required": ["decision"]\n'
+                        "}\n"
+                        "```"
+                    ),
+                ),
+                ConversationMessage(
+                    message_id="msg_text_answer",
+                    role="user",
+                    content="Jag vill ändå ha ett strukturerat textresultat.",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "final_output_mode",
+                            "selected_option_id": "structured_text",
+                            "selected_value": "structured_text",
+                        }
+                    },
+                ),
+            ]
+        )
+
+        slot = state.resolved_slots["terminal_output"]
+        assert state.output_schema_evidence is None
+        assert slot.value == "structured_text"
+        assert slot.source == "structured_answer"
+
 
 class TestReturnValue:
     def test_returns_none_and_mutates_in_place(self) -> None:

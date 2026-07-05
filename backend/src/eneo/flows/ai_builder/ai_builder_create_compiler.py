@@ -637,11 +637,25 @@ def _terminal_output_schema_from_planning_state(
     *,
     final_output_type: OutputType | None,
 ) -> JsonObject | None:
-    if final_output_type != OutputType.JSON:
-        return None
     evidence = state.output_schema_evidence
     if evidence is None:
         return None
+    if final_output_type != OutputType.JSON:
+        slot = state.resolved_slots.get("terminal_output")
+        raise AIBuilderArchitectureError(
+            public_code="architecture_critic_invariant_failed",
+            detail=(
+                "output_schema_evidence requires a JSON terminal output before "
+                "create-mode compilation"
+            ),
+            log_context={
+                "final_output_type": (
+                    final_output_type.value if final_output_type is not None else None
+                ),
+                "terminal_output_slot": slot.value if slot is not None else None,
+                "terminal_output_source": slot.source if slot is not None else None,
+            },
+        )
     return evidence.json_schema
 
 
