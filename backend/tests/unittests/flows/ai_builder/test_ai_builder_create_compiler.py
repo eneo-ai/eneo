@@ -6510,7 +6510,7 @@ def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() 
     )
 
 
-def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
+def test_targeted_underlag_predicate_completes_partial_prebound_composer() -> None:
     from eneo.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
     )
@@ -6540,7 +6540,7 @@ def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
             input_type="json",
             output_type="text",
             uses_previous_fields=[
-                PreviousFieldRef(from_step=1, field_path="a", label="A")
+                PreviousFieldRef(from_step=2, field_path="b", label="B")
             ],
         ),
     ]
@@ -6554,7 +6554,7 @@ def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
             returns_material_report=True,
             aggregation_intent="linear",
         )
-        == "skip"
+        != "skip"
     )
 
 

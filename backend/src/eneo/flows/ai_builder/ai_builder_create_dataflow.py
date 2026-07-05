@@ -359,6 +359,10 @@ def auto_bind_targeted_underlag_for_text_composer(
                 composer_index=composer_index,
             )
             if updated_steps is not rewritten_steps:
+                updated_steps = _bind_final_assembler_structured_fields(
+                    updated_steps,
+                    composer_index=composer_index,
+                )
                 rewritten_steps = updated_steps
                 changed = True
                 continue
@@ -485,7 +489,12 @@ def _targeted_underlag_binding_mode(
     json_priors = _targeted_underlag_json_priors(priors)
     if not json_priors:
         return "skip"
-    if composer.uses_previous_fields:
+    if _previous_field_refs_cover_required_json_priors(
+        steps=steps,
+        composer_index=composer_index,
+        refs=composer.uses_previous_fields,
+        json_priors=json_priors,
+    ):
         return "skip"
 
     if composer.input_source == InputSource.ALL_PREVIOUS_STEPS:
@@ -573,6 +582,34 @@ def _bind_final_assembler_prior_outputs(
             "uses_previous_outputs": output_refs,
         }
     )
+    new_steps = list(steps)
+    new_steps[composer_index] = rewritten
+    return new_steps
+
+
+def _bind_final_assembler_structured_fields(
+    steps: list[NewStepDraft],
+    *,
+    composer_index: int,
+) -> list[NewStepDraft]:
+    composer = steps[composer_index]
+    priors = _targeted_underlag_prior_steps(steps, composer_index=composer_index)
+    json_priors = _targeted_underlag_json_priors(priors)
+    if len(json_priors) < 2:
+        return steps
+    new_field_refs = _select_targeted_underlag_field_refs(
+        json_priors=json_priors,
+    )
+    if not new_field_refs:
+        return steps
+    new_field_refs = _merge_previous_field_refs(
+        composer.uses_previous_fields,
+        new_field_refs,
+    )
+    if new_field_refs == composer.uses_previous_fields:
+        return steps
+
+    rewritten = composer.model_copy(update={"uses_previous_fields": new_field_refs})
     new_steps = list(steps)
     new_steps[composer_index] = rewritten
     return new_steps
@@ -681,6 +718,56 @@ def _targeted_underlag_json_priors(
         for index, step in priors
         if step.output_type == OutputType.JSON and step.output_fields
     ]
+
+
+def _previous_field_refs_cover_required_json_priors(
+    *,
+    steps: list[NewStepDraft],
+    composer_index: int,
+    refs: list[PreviousFieldRef],
+    json_priors: list[tuple[int, NewStepDraft]],
+) -> bool:
+    if not refs:
+        return False
+    required_distinct_steps = min(2, len(json_priors))
+    json_prior_step_numbers = {index + 1 for index, _ in json_priors}
+    referenced_json_steps = {
+        ref.from_step for ref in refs if ref.from_step in json_prior_step_numbers
+    }
+    # The compiler keeps an implicit whole-structured ref to the immediate
+    # previous JSON step unless an explicit field ref to that same step
+    # suppresses it. Count that ref so dataflow does not duplicate it.
+    implicit_previous_step = _implicit_previous_json_source_step_number(
+        steps=steps,
+        composer_index=composer_index,
+        refs=refs,
+        json_prior_step_numbers=json_prior_step_numbers,
+    )
+    if implicit_previous_step is not None:
+        referenced_json_steps.add(implicit_previous_step)
+    return len(referenced_json_steps) >= required_distinct_steps
+
+
+def _implicit_previous_json_source_step_number(
+    *,
+    steps: list[NewStepDraft],
+    composer_index: int,
+    refs: list[PreviousFieldRef],
+    json_prior_step_numbers: set[int],
+) -> int | None:
+    # Keep this aligned with compile_step_input_bindings: previous_step over a
+    # JSON predecessor emits {{ step_x.output.structured }} as source material.
+    composer = steps[composer_index]
+    if composer.input_source != InputSource.PREVIOUS_STEP or composer_index == 0:
+        return None
+    immediate_step_number = composer_index
+    if immediate_step_number not in json_prior_step_numbers:
+        return None
+    if steps[composer_index - 1].output_type != OutputType.JSON:
+        return None
+    if any(ref.from_step == immediate_step_number for ref in refs):
+        return None
+    return immediate_step_number
 
 
 def _select_targeted_underlag_field_refs(

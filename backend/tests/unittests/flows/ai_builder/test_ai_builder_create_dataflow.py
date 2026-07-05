@@ -803,6 +803,334 @@ def test_normalize_create_step_mechanics_rewrites_final_assembler_to_section_out
         assert f"{{{{ {step_ref}.output.text }}}}" in question
 
 
+def test_final_assembler_references_section_text_and_structured_json_priors() -> None:
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+        CRITIC_INVARIANTS,
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    normalized = _normalize_steps(
+        flow_name="Document analysis report",
+        steps=[
+            {
+                "name": "Read source material",
+                "instructions": "Read the uploaded material.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "text",
+                "runtime_required": True,
+            },
+            {
+                "name": "Extract document identity",
+                "instructions": "Extract title and year.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("title"), _field("year")],
+            },
+            {
+                "name": "Extract document meaning",
+                "instructions": "Extract category and conclusion.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("category"), _field("conclusion")],
+            },
+            {
+                "name": "Draft summary section",
+                "instructions": "Draft the concise summary section.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 2, "field_path": "title"},
+                    {"from_step": 3, "field_path": "category"},
+                ],
+            },
+            {
+                "name": "Draft conclusion section",
+                "instructions": "Draft the conclusion section.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 2, "field_path": "year"},
+                    {"from_step": 3, "field_path": "conclusion"},
+                ],
+            },
+            {
+                "name": "Assemble PDF body",
+                "instructions": "Assemble the final report body.",
+                "input_source": "all_previous_steps",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Render PDF",
+                "instructions": "Create the PDF report.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    assembler = normalized[-2]
+
+    assert assembler.input_source == "previous_step"
+    assert [ref.from_step for ref in assembler.uses_previous_outputs] == [4, 5]
+    assert {
+        (ref.from_step, ref.field_path) for ref in assembler.uses_previous_fields
+    } == {
+        (2, "title"),
+        (2, "year"),
+        (3, "category"),
+        (3, "conclusion"),
+    }
+
+    spec = compile_create_steps_to_spec(
+        flow_name="Document analysis report",
+        steps=normalized,
+    )
+    question = effective_question_binding(spec.steps[-2].input_bindings) or ""
+
+    assert "{{ step_a.output.text }}" not in question
+    assert "{{ step_d.output.text }}" in question
+    assert "{{ step_e.output.text }}" in question
+    assert "{{ step_b.output.structured }}" in question
+    assert "{{ step_c.output.structured }}" in question
+
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            CriticContext(
+                spec=spec,
+                flow=None,
+                answer_signals={},
+                text="",
+                requirements_text="",
+                signal_text="",
+                planner_patterns=PlannerPatternSignals(),
+                output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+                mixed_audio_doc_input=False,
+                requested_output_sections=RequestedOutputSections.empty(),
+            ),
+            invariants=CRITIC_INVARIANTS,
+        )
+    }
+
+    assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
+
+
+def test_previous_step_composer_completes_partial_structured_json_refs() -> None:
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+        CRITIC_INVARIANTS,
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    normalized = _normalize_steps(
+        flow_name="Document metadata report",
+        steps=[
+            {
+                "name": "Read source material",
+                "instructions": "Read the uploaded material.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "text",
+                "runtime_required": True,
+            },
+            {
+                "name": "Extract document identity",
+                "instructions": "Extract title and year.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("title"), _field("year")],
+            },
+            {
+                "name": "Extract document classification",
+                "instructions": "Extract category and conclusion.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("category"), _field("conclusion")],
+            },
+            {
+                "name": "Write report body",
+                "instructions": "Write the final report body.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [{"from_step": 3, "field_path": "conclusion"}],
+            },
+            {
+                "name": "Render PDF",
+                "instructions": "Create the PDF report.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    composer = normalized[-2]
+
+    assert {
+        (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+    } == {
+        (2, "title"),
+        (2, "year"),
+        (3, "category"),
+        (3, "conclusion"),
+    }
+    assert [ref.from_step for ref in composer.uses_previous_outputs] == [1]
+
+    spec = compile_create_steps_to_spec(
+        flow_name="Document metadata report",
+        steps=normalized,
+    )
+    question = effective_question_binding(spec.steps[-2].input_bindings) or ""
+
+    assert "{{ step_b.output.structured }}" in question
+    assert "{{ step_c.output.structured }}" in question
+
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            CriticContext(
+                spec=spec,
+                flow=None,
+                answer_signals={},
+                text="",
+                requirements_text="",
+                signal_text="",
+                planner_patterns=PlannerPatternSignals(),
+                output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+                mixed_audio_doc_input=False,
+                requested_output_sections=RequestedOutputSections.empty(),
+            ),
+            invariants=CRITIC_INVARIANTS,
+        )
+    }
+
+    assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
+
+
+def test_previous_step_composer_keeps_non_adjacent_ref_when_previous_json_is_implicit() -> (
+    None
+):
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+        CRITIC_INVARIANTS,
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    normalized = _normalize_steps(
+        flow_name="Document metadata report",
+        steps=[
+            {
+                "name": "Read source material",
+                "instructions": "Read the uploaded material.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "text",
+                "runtime_required": True,
+            },
+            {
+                "name": "Extract document identity",
+                "instructions": "Extract title and year.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("title"), _field("year")],
+            },
+            {
+                "name": "Extract document classification",
+                "instructions": "Extract category and conclusion.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("category"), _field("conclusion")],
+            },
+            {
+                "name": "Write report body",
+                "instructions": "Write the final report body.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [{"from_step": 2, "field_path": "title"}],
+            },
+            {
+                "name": "Render PDF",
+                "instructions": "Create the PDF report.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    composer = normalized[-2]
+
+    assert [
+        (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+    ] == [(2, "title")]
+    assert composer.uses_previous_outputs == []
+
+    spec = compile_create_steps_to_spec(
+        flow_name="Document metadata report",
+        steps=normalized,
+    )
+    question = effective_question_binding(spec.steps[-2].input_bindings) or ""
+
+    assert "{{ step_b.output.structured.title }}" in question
+    assert "{{ step_c.output.structured }}" in question
+
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            CriticContext(
+                spec=spec,
+                flow=None,
+                answer_signals={},
+                text="",
+                requirements_text="",
+                signal_text="",
+                planner_patterns=PlannerPatternSignals(),
+                output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+                mixed_audio_doc_input=False,
+                requested_output_sections=RequestedOutputSections.empty(),
+            ),
+            invariants=CRITIC_INVARIANTS,
+        )
+    }
+
+    assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
+
+
 def test_normalize_create_step_mechanics_preserves_final_assembler_field_refs() -> None:
     normalized = _normalize_steps(
         flow_name="Document report with audit facts",

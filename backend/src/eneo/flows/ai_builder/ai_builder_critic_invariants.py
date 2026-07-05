@@ -73,6 +73,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import (
+    TemplateReference,
     TemplateReferenceKind,
     analyze_template,
 )
@@ -1010,13 +1011,14 @@ def _composer_question_targets_prior_structured_field(
     *, spec: FlowDraftSpecCore, composer_index: int
 ) -> bool:
     """True when the composer's `input_bindings.question` resolves to a
-    structured field on a step that runs before it.
+    structured output on a step that runs before it.
 
     Uses the canonical `analyze_template` parser so the predicate stays
     aligned with how the runtime actually resolves `{{ ... }}`
     expressions — including JSON-escaped quoting and arbitrarily deep
-    `output.structured.<a>.<b>...` paths. Future or current-step
-    references and parse errors do not count as targeted underlag.
+    `output.structured` / `output.structured.<a>.<b>...` paths. Future
+    or current-step references and parse errors do not count as targeted
+    underlag.
     """
     return any(
         _composer_question_targets_prior_structured_step(
@@ -1051,7 +1053,7 @@ def _composer_question_targets_prior_structured_step(
         reference.kind is TemplateReferenceKind.STEP
         and reference.path_error_code is None
         and reference.step_order == structured_step_index
-        and bool(reference.structured_path)
+        and _reference_targets_structured_output(reference)
         for reference in references
     )
 
@@ -1380,10 +1382,14 @@ def _composer_question_distinct_prior_structured_step_count(
             continue
         if reference.step_order is None or reference.step_order >= composer_index:
             continue
-        if not reference.structured_path:
+        if not _reference_targets_structured_output(reference):
             continue
         distinct.add(reference.step_order)
     return len(distinct)
+
+
+def _reference_targets_structured_output(reference: TemplateReference) -> bool:
+    return reference.tail == "output.structured" or bool(reference.structured_path)
 
 
 def _previous_text_step_already_composes_structured_underlag(
