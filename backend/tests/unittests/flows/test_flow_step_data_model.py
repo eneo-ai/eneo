@@ -3,9 +3,14 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import CheckConstraint
 from sqlalchemy.sql.schema import Column
 
-from eneo.database.tables.flow_tables import FlowStepAttempts, FlowStepResults
+from eneo.database.tables.flow_tables import (
+    FlowStepAttempts,
+    FlowStepResults,
+    FlowSteps,
+)
 from eneo.flows.domain.flow import FlowStepAttempt, FlowStepResult
 from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 
@@ -127,3 +132,16 @@ def test_flow_step_attempt_requires_snapshot_step_id(step_id_shape):
 
     with pytest.raises(ValidationError):
         FlowStepAttempt(**payload)
+
+
+def test_flow_steps_reject_legacy_text_document_pass_through_tuple() -> None:
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in FlowSteps.__table__.constraints
+        if isinstance(constraint, CheckConstraint) and constraint.name is not None
+    }
+
+    constraint_sql = constraints["ck_flow_steps_no_text_document_pass_through"]
+    assert "input_type = 'text'" in constraint_sql
+    assert "output_mode = 'pass_through'" in constraint_sql
+    assert "output_type IN ('pdf','docx')" in constraint_sql

@@ -91,6 +91,7 @@ def test_accepts_document_output_contract_with_structured_schema(
     service = _service(user)
     steps = [
         _step(
+            input_type="json",
             output_type=output_type,
             output_contract={
                 "type": "object",
@@ -104,7 +105,13 @@ def test_accepts_document_output_contract_with_structured_schema(
 @pytest.mark.parametrize("output_type", ["pdf", "docx"])
 def test_rejects_document_output_contract_with_scalar_schema(user, output_type: str):
     service = _service(user)
-    steps = [_step(output_type=output_type, output_contract={"type": "string"})]
+    steps = [
+        _step(
+            input_type="json",
+            output_type=output_type,
+            output_contract={"type": "string"},
+        )
+    ]
     with pytest.raises(BadRequestException, match="must declare schema type"):
         service._validate_steps(steps)
 
@@ -114,7 +121,7 @@ def test_rejects_document_output_contract_without_declared_shape(
     user, output_type: str
 ):
     service = _service(user)
-    steps = [_step(output_type=output_type, output_contract={})]
+    steps = [_step(input_type="json", output_type=output_type, output_contract={})]
     with pytest.raises(BadRequestException, match="must declare schema type"):
         service._validate_steps(steps)
 
@@ -177,8 +184,15 @@ def test_accepts_previous_step_compatible_coercions_matrix(
 ):
     """Allowed previous_step coercions should pass publish validation."""
     service = _service(user)
+    previous_output_mode = (
+        "render_verbatim" if previous_output_type in {"pdf", "docx"} else "pass_through"
+    )
     steps = [
-        _step(step_order=1, output_type=previous_output_type),
+        _step(
+            step_order=1,
+            output_mode=previous_output_mode,
+            output_type=previous_output_type,
+        ),
         _step(
             step_order=2, input_source="previous_step", input_type=current_input_type
         ),
@@ -201,7 +215,11 @@ def test_rejects_previous_step_incompatible_coercions_matrix(
     """Unsupported previous_step coercions should fail with deterministic chain error."""
     service = _service(user)
     steps = [
-        _step(step_order=1, output_type=previous_output_type),
+        _step(
+            step_order=1,
+            output_mode="render_verbatim",
+            output_type=previous_output_type,
+        ),
         _step(
             step_order=2, input_source="previous_step", input_type=current_input_type
         ),
@@ -224,12 +242,14 @@ def test_accepts_five_step_mixed_chain(user):
             step_order=2,
             input_source="previous_step",
             input_type="text",
+            output_mode="render_verbatim",
             output_type="pdf",
         ),
         _step(
             step_order=3,
             input_source="previous_step",
             input_type="text",
+            output_mode="render_verbatim",
             output_type="docx",
         ),
         _step(

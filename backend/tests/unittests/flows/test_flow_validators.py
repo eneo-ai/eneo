@@ -208,6 +208,14 @@ def test_validate_steps_fail_fast_prefers_global_chain_violation_before_type_pai
             ),
             "template_fill requires output_type 'docx'",
         ),
+        (
+            _step(output_mode="pass_through", input_type="text", output_type="pdf"),
+            "output_mode 'pass_through' is not supported for text-to-pdf document steps",
+        ),
+        (
+            _step(output_mode="pass_through", input_type="text", output_type="docx"),
+            "output_mode 'pass_through' is not supported for text-to-docx document steps",
+        ),
     ],
 )
 def test_validate_steps_fail_fast_preserves_output_mode_validation(
@@ -257,6 +265,7 @@ def test_validate_steps_fail_fast_preserves_output_mode_validation(
         (
             _step(
                 1,
+                input_type="json",
                 output_type="pdf",
                 output_contract={"type": "not-a-json-schema-type"},
             ),
@@ -515,6 +524,7 @@ def test_validate_steps_rejects_audio_document_flow_without_transcript_step():
                     2,
                     input_source="previous_step",
                     input_type="text",
+                    output_mode="render_verbatim",
                     output_type="pdf",
                 ),
             ],
@@ -536,6 +546,7 @@ def test_validate_steps_allows_audio_document_flow_with_transcript_step():
                 2,
                 input_source="previous_step",
                 input_type="text",
+                output_mode="render_verbatim",
                 output_type="pdf",
             ),
         ],

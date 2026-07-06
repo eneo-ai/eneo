@@ -75,6 +75,25 @@ def test_parse_runtime_steps_accepts_transcribe_only_output_mode():
     assert parsed[0].output_mode == "transcribe_only"
 
 
+@pytest.mark.parametrize("output_type", ["pdf", "docx"])
+def test_parse_runtime_steps_rejects_text_document_pass_through(
+    output_type: str,
+) -> None:
+    with pytest.raises(
+        BadRequestException,
+        match=f"text-to-{output_type} document steps",
+    ):
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type=output_type,
+                )
+            )
+        )
+
+
 def test_parse_runtime_steps_accepts_step_timeout():
     parsed = parse_runtime_steps(_definition(_step_snapshot(timeout_seconds=1800)))
 
@@ -167,6 +186,7 @@ def test_parse_runtime_steps_rejects_incompatible_previous_step_chain():
                 _step_snapshot(
                     step_order=1,
                     input_type="text",
+                    output_mode="render_verbatim",
                     output_type="docx",
                 ),
                 _step_snapshot(

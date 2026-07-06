@@ -39,7 +39,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 3
+FCM_VERSION: int = 4
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -243,9 +243,19 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
             (
                 "Default output pathway; the step's raw LLM output is forwarded "
                 "to the next step or persisted as the flow's final artefact. "
-                "No additional runtime constraints beyond the step chain."
+                "Text input rendered directly to PDF or DOCX must use "
+                "`render_verbatim` instead."
             ),
-            (),
+            (
+                InvariantSpec(
+                    id="forbids_text_document_render_path",
+                    description=(
+                        "Steps with `input_type=TEXT` and `output_type=PDF` or "
+                        "`DOCX` cannot use `pass_through`; direct text-to-document "
+                        "rendering is owned by `render_verbatim`."
+                    ),
+                ),
+            ),
         ),
         FlowOutputMode.HTTP_POST: (
             "HTTP POST output",
@@ -564,6 +574,8 @@ def supports_step_io_tuple(
 
     - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
     - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
+    - `PASS_THROUGH` is not legal for `TEXT` input → `PDF`/`DOCX` output;
+      direct text document rendering must use `RENDER_VERBATIM`.
     - Every other combination is legal (the runtime pass-through default).
 
     `input_type` is optional because `TEMPLATE_FILL` and the pass-through
@@ -593,6 +605,12 @@ def supports_step_io_tuple(
             FlowOutputType.PDF,
             FlowOutputType.DOCX,
         }
+    if (
+        output_mode is FlowOutputMode.PASS_THROUGH
+        and input_type is FlowInputType.TEXT
+        and output_type in {FlowOutputType.PDF, FlowOutputType.DOCX}
+    ):
+        return False
     return True
 
 

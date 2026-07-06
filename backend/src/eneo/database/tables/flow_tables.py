@@ -297,6 +297,11 @@ class FlowSteps(BasePublic):
             name="ck_flow_steps_output_type",
         ),
         CheckConstraint(
+            "NOT (input_type = 'text' AND output_mode = 'pass_through' "
+            "AND output_type IN ('pdf','docx'))",
+            name="ck_flow_steps_no_text_document_pass_through",
+        ),
+        CheckConstraint(
             "mcp_policy IN ('inherit','restricted')", name="ck_flow_steps_mcp_policy"
         ),
         CheckConstraint(

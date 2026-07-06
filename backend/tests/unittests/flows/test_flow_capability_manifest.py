@@ -59,8 +59,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_three() -> None:
-    assert FCM_VERSION == 3
+def test_fcm_version_is_four() -> None:
+    assert FCM_VERSION == 4
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -428,6 +428,26 @@ def test_supports_step_io_tuple_rejects_render_verbatim_for_non_text_document() 
             assert legal is expected
 
 
+def test_supports_step_io_tuple_rejects_text_document_pass_through() -> None:
+    for output_type in (FlowOutputType.PDF, FlowOutputType.DOCX):
+        assert (
+            supports_step_io_tuple(
+                input_type=FlowInputType.TEXT,
+                output_type=output_type,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+            )
+            is False
+        )
+        assert (
+            supports_step_io_tuple(
+                input_type=FlowInputType.JSON,
+                output_type=output_type,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+            )
+            is True
+        )
+
+
 def test_is_citation_capable_step_requires_inline_inref_sidecar_mode() -> None:
     """Explicit rule guardrail: only `inline_inref_sidecar` citation mode
     unlocks citation capability. Any other recognisable mode (including the
@@ -651,7 +671,10 @@ def test_resolve_capability_for_tuple_rejects_string_output_mode() -> None:
 
 
 _EXPECTED_OUTPUT_MODE_CAPABILITIES: dict[FlowOutputMode, tuple[str, frozenset[str]]] = {
-    FlowOutputMode.PASS_THROUGH: ("output_mode_pass_through", frozenset()),
+    FlowOutputMode.PASS_THROUGH: (
+        "output_mode_pass_through",
+        frozenset({"forbids_text_document_render_path"}),
+    ),
     FlowOutputMode.HTTP_POST: (
         "output_mode_http_post",
         frozenset({"requires_http_output_config"}),
@@ -1034,7 +1057,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V3: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V4: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1231,7 +1254,21 @@ _FCM_SURFACE_FINGERPRINT_V3: tuple[object, ...] = (
             ),
             (),
         ),
-        ("builder", None, None, (), (), ()),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "forbids_text_document_render_path",
+                    "Steps with `input_type=TEXT` and `output_type=PDF` or "
+                    "`DOCX` cannot use `pass_through`; direct text-to-document "
+                    "rendering is owned by `render_verbatim`.",
+                ),
+            ),
+            (),
+        ),
         (
             "builder",
             None,
@@ -1342,11 +1379,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V3, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V4, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V3}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V4}\n\n"
         f"Actual:   {actual}"
     )
 
@@ -1395,6 +1432,17 @@ class TestResolveCapabilityForTuple:
                 input_type=FlowInputType.TEXT,
                 output_type=FlowOutputType.TEXT,
                 output_mode=FlowOutputMode.TEMPLATE_FILL,
+            )
+            is None
+        )
+
+    def test_text_document_pass_through_tuple_returns_none(self) -> None:
+        assert (
+            resolve_capability_for_tuple(
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.PDF,
+                output_mode=FlowOutputMode.PASS_THROUGH,
             )
             is None
         )

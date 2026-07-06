@@ -24,6 +24,7 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.output_modes import (
     ALLOWED_OUTPUT_MODES,
     render_verbatim_violation,
+    text_document_pass_through_violation,
     transcribe_only_violation,
 )
 from eneo.flows.runtime.models import RuntimeStep
@@ -509,6 +510,14 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
             )
             if render_verbatim_error is not None:
                 raise BadRequestException(render_verbatim_error)
+            text_document_pass_through_error = text_document_pass_through_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if text_document_pass_through_error is not None:
+                raise BadRequestException(text_document_pass_through_error)
             runtime_input = build_runtime_input_config(input_fields.input_config)
             if (
                 output_fields.output_mode == "transcribe_only"
