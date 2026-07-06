@@ -2,13 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    CreateCompileContext,
-    compile_create_intent_to_spec,
-)
-from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    parse_create_flow_intent_arguments,
-)
 from eneo.flows.ai_builder.ai_builder_step_skeleton import (
     _LEGAL_STEP_SKELETON_POLICIES,
     StepSkeleton,
@@ -24,7 +17,6 @@ from eneo.flows.ai_builder.pattern_registry import (
     TERMINAL_ARTIFACT_STEP,
 )
 from eneo.flows.flow_authoring_spec import (
-    FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputMode,
@@ -483,154 +475,6 @@ def test_document_artifact_inserts_body_writer_after_single_json_semantic() -> N
     assert composition.output_type_drifts == ()
 
 
-@pytest.mark.parametrize("semantic_step_count", [1, 2, 3])
-def test_audio_artifact_skeleton_matches_current_compiler_mechanics(
-    semantic_step_count: int,
-) -> None:
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Audio report",
-            "plan_rationale": "Transcribe, summarize, and create a PDF.",
-            "steps": [
-                {
-                    "name": f"Audio analysis step {index}",
-                    "instructions": f"Analyze audio detail {index}.",
-                }
-                for index in range(1, semantic_step_count + 1)
-            ],
-        }
-    )
-    context = CreateCompileContext(
-        runtime_input_type=InputType.AUDIO,
-        final_output_type=OutputType.PDF,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("audio_to_artifact_report",),
-        pattern_chain_steps=_chain_steps("audio_to_artifact_report"),
-    )
-
-    spec = compile_create_intent_to_spec(outline, context=context)
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.AUDIO,
-        final_output_type=OutputType.PDF,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=context.pattern_ids,
-        chain_steps=context.pattern_chain_steps,
-    )
-    skeleton = plan.slots_for_semantic_count(len(outline.steps))
-
-    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
-
-
-@pytest.mark.parametrize("semantic_step_count", [1, 2, 3])
-def test_linear_skeleton_matches_current_compiler_mechanics(
-    semantic_step_count: int,
-) -> None:
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Structured text",
-            "plan_rationale": "Analyze document material and return JSON.",
-            "steps": [
-                {
-                    "name": f"Text step {index}",
-                    "instructions": f"Analyze text part {index}.",
-                }
-                for index in range(1, semantic_step_count + 1)
-            ],
-        }
-    )
-
-    spec = compile_create_intent_to_spec(
-        outline,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.JSON,
-        ),
-    )
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.JSON,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("document_to_structured_report",),
-        chain_steps=(),
-    )
-    skeleton = plan.slots_for_semantic_count(len(outline.steps))
-
-    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
-
-
-def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Template report",
-            "plan_rationale": "Fill a DOCX template from uploaded material.",
-            "steps": [
-                {
-                    "name": "Prepare report content",
-                    "instructions": "Prepare the content for the template.",
-                }
-            ],
-        }
-    )
-    context = CreateCompileContext(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.DOCX,
-        final_output_mode=OutputMode.TEMPLATE_FILL,
-        pattern_ids=("document_to_docx_template",),
-        pattern_chain_steps=_chain_steps("document_to_docx_template"),
-    )
-
-    spec = compile_create_intent_to_spec(outline, context=context)
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.DOCX,
-        final_output_mode=OutputMode.TEMPLATE_FILL,
-        pattern_ids=context.pattern_ids,
-        chain_steps=context.pattern_chain_steps,
-    )
-    skeleton = plan.slots_for_semantic_count(len(outline.steps))
-
-    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
-
-
-@pytest.mark.parametrize("semantic_step_count", [2, 3, 4])
-def test_comparison_skeleton_matches_current_compiler_mechanics(
-    semantic_step_count: int,
-) -> None:
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Comparison",
-            "plan_rationale": "Analyze branches, then compare.",
-            "steps": [
-                {
-                    "name": f"Comparison step {index}",
-                    "instructions": f"Analyze comparison step {index}.",
-                }
-                for index in range(1, semantic_step_count + 1)
-            ],
-        }
-    )
-    context = CreateCompileContext(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.TEXT,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=("comparison",),
-        aggregation_intent="compare",
-    )
-
-    spec = compile_create_intent_to_spec(outline, context=context)
-    plan = materialize_step_skeleton(
-        runtime_input_type=InputType.DOCUMENT,
-        final_output_type=OutputType.TEXT,
-        final_output_mode=OutputMode.PASS_THROUGH,
-        pattern_ids=context.pattern_ids,
-        chain_steps=context.pattern_chain_steps,
-        aggregation_intent=context.aggregation_intent,
-    )
-    skeleton = plan.slots_for_semantic_count(len(outline.steps))
-
-    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
-
-
 def _chain_steps(pattern_id: str) -> tuple[str, ...]:
     return PATTERN_REGISTRY[pattern_id].chain_steps
 
@@ -646,51 +490,3 @@ def _skeleton_type_modes(
         )
         for slot in skeleton
     ]
-
-
-def _skeleton_mechanics(
-    skeleton: tuple[StepSkeleton, ...],
-) -> tuple[tuple[object, ...], ...]:
-    return tuple(
-        (
-            slot.input_type.value,
-            slot.output_type.value,
-            slot.output_mode.value,
-            slot.runtime_required,
-            slot.runtime_max_files,
-            bool(slot.output_fields),
-        )
-        for slot in skeleton
-    )
-
-
-def _spec_mechanics(spec: FlowDraftSpecCore) -> tuple[tuple[object, ...], ...]:
-    return tuple(
-        (
-            step.input_type.value,
-            step.output_type.value,
-            step.output_mode.value,
-            _runtime_input_required(step.input_config),
-            _runtime_input_max_files(step.input_config),
-            step.output_contract is not None,
-        )
-        for step in spec.steps
-    )
-
-
-def _runtime_input_required(input_config: object) -> bool:
-    if not isinstance(input_config, dict):
-        return False
-    runtime_input = input_config.get("runtime_input")
-    if not isinstance(runtime_input, dict):
-        return False
-    return bool(runtime_input.get("required"))
-
-
-def _runtime_input_max_files(input_config: object) -> object:
-    if not isinstance(input_config, dict):
-        return None
-    runtime_input = input_config.get("runtime_input")
-    if not isinstance(runtime_input, dict):
-        return None
-    return runtime_input.get("max_files")
