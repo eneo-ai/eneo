@@ -18,6 +18,7 @@
 type McpRefLike = {
   id: string;
   uri: string;
+  content?: string | null;
   meta?: Record<string, unknown> | null;
 };
 
@@ -29,17 +30,27 @@ export function canonicalDocKey(ref: McpRefLike): string {
   return [base || ref.id, meta.section ?? "", meta.pageRange ?? ""].join("|");
 }
 
-/** First reference per document, in original order. */
+/**
+ * One reference per document, in first-occurrence order.
+ *
+ * Of a document's references, the one with the most content wins: a search
+ * hit carries a single passage while a full-document read carries pages, and
+ * the snippet modal opened from the chip should show the richest capture.
+ */
 export function dedupeByDocument<T extends McpRefLike>(refs: T[]): T[] {
-  const seen = new Set<string>();
-  const result: T[] = [];
+  const byKey = new Map<string, T>();
+  const order: string[] = [];
   for (const ref of refs) {
     const key = canonicalDocKey(ref);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(ref);
+    const existing = byKey.get(key);
+    if (!existing) {
+      order.push(key);
+      byKey.set(key, ref);
+    } else if ((ref.content ?? "").length > (existing.content ?? "").length) {
+      byKey.set(key, ref);
+    }
   }
-  return result;
+  return order.map((key) => byKey.get(key) as T);
 }
 
 /** 1-based display number of a reference's document within the deduped list. */
