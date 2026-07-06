@@ -3,8 +3,7 @@
 Declares the `FlowCapability` shape, seeds one entry per key in
 `INPUT_TYPE_POLICIES`, absorbs chain-compatibility / citation /
 transcription-wizard rules, and exposes the public API
-(`resolve_capability_for_tuple`, `render_critic_invariants`,
-`coverage_report`).
+(`resolve_capability_for_tuple`, `coverage_report`).
 
 Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
 Planner-facing copy and strategy live on the Pattern Registry and
@@ -823,8 +822,6 @@ def resolve_capability_for_tuple(
 
     `citation_sidecar` and `mcp_policy` capabilities are intentionally
     NOT included — neither is conditioned on the 4-tuple alone.
-    `render_critic_invariants` gives the flat "all invariants across all
-    caps" view for the critic.
     """
     if not isinstance(input_source, FlowInputSource):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(
@@ -850,28 +847,6 @@ def resolve_capability_for_tuple(
     input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
     mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
     return (input_cap, mode_cap)
-
-
-def render_critic_invariants() -> tuple[tuple[CapabilityId, InvariantSpec], ...]:
-    """Flat view of every capability-owned invariant, for the critic.
-
-    Each entry is ``(capability_id, invariant)``. Ownership is returned
-    explicitly because invariant IDs are not globally unique — e.g.
-    `input_contract_forbidden` is emitted by every input capability that
-    disallows contracts, and `requires_non_empty_extraction` by every
-    capability that requires extraction. Consumers need the owning
-    capability ID to disambiguate.
-
-    Order: sorted by `(capability_id, invariant.id)` ascending so
-    consumer iteration is deterministic across process restarts and
-    across capability additions.
-    """
-    result: list[tuple[CapabilityId, InvariantSpec]] = []
-    for cap_id in sorted(CAPABILITY_REGISTRY):
-        cap = CAPABILITY_REGISTRY[cap_id]
-        for inv in sorted(cap.invariants, key=lambda i: i.id):
-            result.append((cap_id, inv))
-    return tuple(result)
 
 
 def coverage_report() -> CoverageReport:

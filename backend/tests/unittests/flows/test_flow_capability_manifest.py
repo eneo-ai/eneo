@@ -3,8 +3,7 @@
 Covers: version constant, dataclass shape (engine-truth fields only),
 registry seeding from `INPUT_TYPE_POLICIES`, `not_exposed_reason`
 invariant, tuple-matrix coverage guard, FCM_VERSION bump-discipline, and
-the public API (`resolve_capability_for_tuple`, `render_critic_invariants`,
-`coverage_report`).
+the public API (`resolve_capability_for_tuple`, `coverage_report`).
 """
 
 from __future__ import annotations
@@ -42,7 +41,6 @@ from eneo.flows.flow_capability_manifest import (
     coverage_report,
     is_chain_compatible,
     is_citation_capable_step,
-    render_critic_invariants,
     requires_completion_model,
     resolve_capability_for_tuple,
     resolve_document_generation_mode,
@@ -1356,8 +1354,8 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
 # ---------------------------------------------------------------------
 # FCM public API tests.
 #
-# Public fns: resolve_capability_for_tuple, render_critic_invariants,
-# coverage_report. Public shape: CoverageReport.
+# Public fns: resolve_capability_for_tuple, coverage_report.
+# Public shape: CoverageReport.
 # ---------------------------------------------------------------------
 
 
@@ -1468,67 +1466,6 @@ class TestResolveCapabilityForTuple:
         assert caps is not None
         ids = [cap.id for cap in caps]
         assert ids == ["input_text", "output_mode_render_verbatim"]
-
-
-class TestRenderCriticInvariants:
-    """Flat view over all capability-owned invariants for the critic."""
-
-    def test_returns_tuple_of_capability_invariant_pairs(self) -> None:
-        result = render_critic_invariants()
-        assert isinstance(result, tuple)
-        assert all(
-            isinstance(entry, tuple)
-            and len(entry) == 2
-            and isinstance(entry[0], str)
-            and isinstance(entry[1], InvariantSpec)
-            for entry in result
-        )
-
-    def test_includes_every_registry_invariant(self) -> None:
-        result = render_critic_invariants()
-        expected_pairs: list[tuple[str, InvariantSpec]] = []
-        for cap_id, cap in CAPABILITY_REGISTRY.items():
-            for inv in cap.invariants:
-                expected_pairs.append((cap_id, inv))
-        assert sorted(result, key=lambda e: (e[0], e[1].id)) == sorted(
-            expected_pairs, key=lambda e: (e[0], e[1].id)
-        )
-
-    def test_stable_deterministic_order(self) -> None:
-        """Two calls must return the same order. Order is
-        `(capability_id, invariant.id)` ascending."""
-        first = render_critic_invariants()
-        second = render_critic_invariants()
-        assert first == second
-
-    def test_order_is_by_capability_then_invariant_id(self) -> None:
-        result = render_critic_invariants()
-        expected_pairs: list[tuple[str, InvariantSpec]] = []
-        for cap_id in sorted(CAPABILITY_REGISTRY):
-            cap = CAPABILITY_REGISTRY[cap_id]
-            for inv in sorted(cap.invariants, key=lambda i: i.id):
-                expected_pairs.append((cap_id, inv))
-        assert list(result) == expected_pairs
-
-    def test_preserves_ownership_for_colliding_invariant_ids(self) -> None:
-        """Some invariant IDs (e.g. `input_contract_forbidden`) are emitted
-        by multiple capabilities. The flat view must keep every owner-copy
-        so the critic can disambiguate."""
-        result = render_critic_invariants()
-        by_id: dict[str, list[str]] = {}
-        for cap_id, inv in result:
-            by_id.setdefault(inv.id, []).append(cap_id)
-        # At least one invariant ID is emitted by multiple capabilities
-        # in the current registry; those duplicates must be preserved.
-        duplicates = {
-            inv_id: owners for inv_id, owners in by_id.items() if len(owners) > 1
-        }
-        assert duplicates, (
-            "expected at least one invariant ID shared across capabilities "
-            "(input_contract_forbidden / requires_non_empty_extraction)"
-        )
-        for owners in duplicates.values():
-            assert len(set(owners)) == len(owners)
 
 
 class TestCoverageReport:
