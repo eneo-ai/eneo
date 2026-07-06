@@ -15,6 +15,7 @@
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { dedupeByDocument } from "../../mcpReferenceDocs";
+  import type { InfoBlob } from "@eneo/eneo-js";
 
   const { settings } = getAppContext();
   const { current, isLast } = getMessageContext();
@@ -41,6 +42,7 @@
     title?: string;
     pageRange?: string;
     section?: string;
+    info_blob_id?: string;
   };
 
   function readMeta(ref: (typeof mcpRefs)[number]) {
@@ -55,8 +57,15 @@
       sourceType: meta.sourceType ?? null,
       title: meta.title ?? host,
       pageRange: meta.pageRange ?? null,
-      section: meta.section ?? null
+      section: meta.section ?? null,
+      infoBlobId: typeof meta.info_blob_id === "string" ? meta.info_blob_id : null
     };
+  }
+
+  // A reference that points at an eneo document can open the full document
+  // viewer (lazy fetch by id) instead of the stored snippet capture.
+  function blobForRef(infoBlobId: string, title: string): InfoBlob {
+    return { id: infoBlobId, metadata: { title } } as unknown as InfoBlob;
   }
 
   const totalRefs = $derived(
@@ -157,7 +166,17 @@
 
       {#each mcpRefDocs as ref (ref.id)}
         {@const info = readMeta(ref)}
-        {#if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
+        {#if info.infoBlobId}
+          <BlobPreview blob={blobForRef(info.infoBlobId, info.title)} let:showBlob>
+            <button
+              type="button"
+              class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
+              onclick={showBlob}
+            >
+              {info.title}
+            </button>
+          </BlobPreview>
+        {:else if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
           <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
           <a class="hover:bg-hover-default flex items-center gap-2" href={ref.uri}>
             <span
