@@ -10,8 +10,6 @@ to classify free-form answers perfectly.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
@@ -29,52 +27,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class AskedQuestionState:
-    asked_question_ids: frozenset[str]
-    question_ids_with_new_evidence: frozenset[str]
-    has_new_evidence: bool
-    question_id_counts: Mapping[str, int]
-
-
-def derive_asked_question_state(
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-) -> AskedQuestionState:
-    """Derive duplicate-question guard inputs from conversation order.
-
-    `question_ids_with_new_evidence` is question-specific: a question ID
-    is included only when a user evidence turn appears after the latest
-    assistant ask for that same ID. If the same question is asked again,
-    it must receive another user turn before a further repeat is allowed.
-    """
-    asked: set[str] = set()
-    awaiting_evidence: set[str] = set()
-    with_new_evidence: set[str] = set()
-    counts: dict[str, int] = {}
-
-    for message in conversation:
-        question_id = assistant_question_id(message)
-        if question_id is not None:
-            asked.add(question_id)
-            counts[question_id] = counts.get(question_id, 0) + 1
-            awaiting_evidence.add(question_id)
-            with_new_evidence.discard(question_id)
-            continue
-
-        if not _is_user_evidence(message):
-            continue
-        if awaiting_evidence:
-            with_new_evidence.update(awaiting_evidence)
-            awaiting_evidence.clear()
-
-    return AskedQuestionState(
-        asked_question_ids=frozenset(asked),
-        question_ids_with_new_evidence=frozenset(with_new_evidence),
-        has_new_evidence=bool(with_new_evidence),
-        question_id_counts=MappingProxyType(counts),
-    )
 
 
 def assistant_question_id(
@@ -181,8 +133,6 @@ def last_answered_question(
 
 
 __all__ = [
-    "AskedQuestionState",
     "assistant_question_id",
-    "derive_asked_question_state",
     "last_answered_question",
 ]

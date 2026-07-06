@@ -13,13 +13,6 @@ the CI-enforced dangling-reference guard is
 `test_every_question_template_id_resolves_in_catalog` in
 `tests/unittests/flows/ai_builder/test_question_catalog.py`.
 
-`QUESTION_CATALOG_VERSION` is a monotonic integer reserved for future
-plan/digest persistence — no consumer reads it yet. The value only
-advances when a catalog-surface change requires downstream invalidation,
-and today that requirement is not live. Incrementing with no consumer
-wires a stamp to a value nothing checks, so the integer intentionally
-lags until a persisted artefact actually depends on it.
-
 Copy is transcribed verbatim from the canonical factory functions in
 `ai_builder_discovery_questions.py`. Option ids and values are preserved so
 downstream answer-matching code is untouched.
@@ -42,8 +35,6 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     DiscoveryFamily,
     DiscoveryImpact,
 )
-
-QUESTION_CATALOG_VERSION: int = 1
 
 Locale = Literal["sv", "en"]
 
@@ -816,17 +807,3 @@ def render_question(template_id: str, locale: Locale) -> RenderedQuestion:
         options=tuple(_project_option(option, locale) for option in template.options),
         worked_examples=worked_examples,
     )
-
-
-def question_ids_for_slot(slot: str) -> tuple[str, ...]:
-    """Return every question-template id registered against `slot`.
-
-    Today's catalog is one-template-per-slot, so the returned tuple has
-    zero or one element. The plural return shape keeps the read API stable
-    if catalog ownership later allows multiple questions per slot. Unknown
-    slot -> `()` (the `"has this slot any copy?"` read is valid and must
-    not raise).
-    """
-    if slot not in QUESTION_CATALOG:
-        return ()
-    return (slot,)

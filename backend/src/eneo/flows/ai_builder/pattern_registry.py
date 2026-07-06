@@ -33,7 +33,6 @@ prompt-safe labels. Concrete compiler step text lives with the compiler.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -613,91 +612,6 @@ def compiled_chain_pattern_ids(pattern_ids: Iterable[str]) -> frozenset[str]:
         for pattern_id in pattern_ids
         if pattern_id in COMPILED_CHAIN_PATTERN_IDS
     )
-
-
-@dataclass(frozen=True, slots=True)
-class PatternMatch:
-    """Scored match from `find_pattern_candidates`.
-
-    `score` is an integer token-hit count — higher means more
-    retrieval-hint tokens from the pattern were found in the prompt. It
-    is deliberately not a probability: patterns do not have a prior and
-    the hint vocabulary is sparse, so a float would imply calibration
-    that does not exist.
-    """
-
-    pattern: Pattern
-    score: int
-
-
-_WORD_PATTERN: re.Pattern[str] = re.compile(r"\w+", re.UNICODE)
-
-
-def _tokenize_hints(retrieval_hints: tuple[str, ...]) -> frozenset[str]:
-    """Collect distinct case-folded Unicode word tokens from the hints.
-
-    Uses the same `_WORD_PATTERN` regex the input side uses in
-    `_word_tokens`, so structural hints like ``"input_type=document"`` and
-    ``"output_mode=template_fill"`` contribute their component word
-    tokens (`input_type`, `document`, `output_mode`, `template_fill`) to
-    the scorer instead of staying locked as single tokens that an input
-    text could never match. Duplicates across hint lines collapse because
-    the scorer counts *distinct* overlap — authoring style should not
-    drive ranking. Returning a frozenset keeps scoring invariant to how
-    authors split their hint vocabulary across lines.
-    """
-    tokens: set[str] = set()
-    for hint in retrieval_hints:
-        for match in _WORD_PATTERN.finditer(hint.casefold()):
-            tokens.add(match.group(0))
-    return frozenset(tokens)
-
-
-def _word_tokens(text: str) -> frozenset[str]:
-    """Case-folded Unicode word tokens extracted from `text`.
-
-    Used as the membership set for hint matching so that a hint token
-    `form` cannot spuriously match inside `information`, `step` inside
-    `stepwise`, or `document` inside `documentation`. Unicode word chars
-    preserve Swedish `å`, `ä`, `ö`.
-    """
-    return frozenset(
-        match.group(0) for match in _WORD_PATTERN.finditer(text.casefold())
-    )
-
-
-def find_pattern_candidates(text: str) -> tuple[PatternMatch, ...]:
-    """Score every positive pattern against `text` via retrieval-hint
-    word-token overlap.
-
-    Matching is on whole-word boundaries: a hint token like `form` only
-    scores when `form` appears as a standalone word in `text`, never as
-    a substring of `information`. Scoring counts *distinct* hint tokens
-    that also appear in the input text, so a pattern that repeats a
-    token across several hint phrases earns one point for it, not one
-    per phrase — the number of distinct retrieval signals is the ranking
-    signal, not authoring redundancy. Returns descending by score, ties
-    broken by ascending pattern id for deterministic ordering across
-    process restarts. Zero-score patterns are omitted so a no-signal
-    prompt returns `()`. Negative patterns are never scored — they
-    describe shapes to avoid, not candidates to propose; the knowledge
-    pack surfaces them separately.
-    """
-    text_tokens = _word_tokens(text)
-    if not text_tokens:
-        return ()
-
-    matches: list[PatternMatch] = []
-    for pattern in PATTERN_REGISTRY.values():
-        if pattern.polarity != "positive":
-            continue
-        hint_tokens = _tokenize_hints(pattern.retrieval_hints)
-        score = len(hint_tokens & text_tokens)
-        if score > 0:
-            matches.append(PatternMatch(pattern=pattern, score=score))
-
-    matches.sort(key=lambda match: (-match.score, match.pattern.id))
-    return tuple(matches)
 
 
 def question_template_ids_for_slot(pattern_id: str, slot: str) -> tuple[str, ...]:

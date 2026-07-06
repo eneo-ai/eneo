@@ -34,13 +34,11 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
-    QUESTION_CATALOG_VERSION,
     QuestionOption,
     QuestionTemplate,
     RenderedOption,
     RenderedQuestion,
     legal_slot_values,
-    question_ids_for_slot,
     render_question,
 )
 
@@ -386,9 +384,6 @@ class TestQuestionTemplate:
 
 
 class TestCatalogInvariants:
-    def test_catalog_version_is_one(self) -> None:
-        assert QUESTION_CATALOG_VERSION == 1
-
     def test_catalog_is_immutable(self) -> None:
         """`QUESTION_CATALOG` must be a `MappingProxyType`; mutation at
         runtime fails. Same contract as FCM and Pattern Registry."""
@@ -725,30 +720,6 @@ class TestQuestionCatalogPublicApi:
         en = render_question("terminal_output", "en")
         assert sv.worked_examples == template.worked_examples_sv
         assert en.worked_examples == template.worked_examples_en
-
-    def test_question_ids_for_slot_returns_id_tuple_when_slot_has_template(
-        self,
-    ) -> None:
-        """Current catalog shape is one template per slot; the returned
-        tuple has exactly one entry for every seeded slot."""
-        ids = question_ids_for_slot("primary_runtime_input")
-        assert ids == ("primary_runtime_input",)
-
-    def test_question_ids_for_slot_returns_empty_for_unknown_slot(
-        self,
-    ) -> None:
-        """Unknown slot → empty tuple. Callers use this as the
-        'is there copy for this slot?' read, so raising would force
-        every caller to wrap with try/except."""
-        assert question_ids_for_slot("no_such_slot") == ()
-
-    def test_question_ids_for_slot_covers_every_known_slot(self) -> None:
-        """Contract: every slot name in the live vocabulary resolves to
-        at least one id today. Catches drift if a future catalog change
-        drops a template but leaves the slot in the vocabulary."""
-        for slot in KNOWN_REQUIREMENT_SLOT_NAMES:
-            ids = question_ids_for_slot(slot)
-            assert ids, f"slot {slot!r} has no question ids in the catalog"
 
 
 class TestDomainNeutrality:
