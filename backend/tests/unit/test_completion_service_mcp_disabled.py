@@ -109,6 +109,7 @@ def _session() -> SimpleNamespace:
         id=uuid4(),
         user_id=uuid4(),
         assistant=SimpleNamespace(id=uuid4()),
+        questions=[],
     )
 
 
