@@ -14,6 +14,7 @@
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
+  import { dedupeByDocument } from "../../mcpReferenceDocs";
 
   const { settings } = getAppContext();
   const { current, isLast } = getMessageContext();
@@ -31,6 +32,9 @@
   const mcpRefs = $derived(
     (message.mcp_tool_references ?? []).filter((ref) => !(ref.mime_type ?? "").startsWith("image/"))
   );
+  // One chip per document: several passages from the same document (chunk
+  // fragments of one uri) collapse to a single reference entry.
+  const mcpRefDocs = $derived(dedupeByDocument(mcpRefs));
 
   type MetaBag = Record<string, unknown> & {
     sourceType?: string;
@@ -56,7 +60,7 @@
   }
 
   const totalRefs = $derived(
-    message.references.length + message.web_search_references.length + mcpRefs.length
+    message.references.length + message.web_search_references.length + mcpRefDocs.length
   );
 
   async function handleCopy(format: AssistantCopyFormat = preferredCopyFormat) {
@@ -151,7 +155,7 @@
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/each}
 
-      {#each mcpRefs as ref (ref.id)}
+      {#each mcpRefDocs as ref (ref.id)}
         {@const info = readMeta(ref)}
         {#if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
           <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
