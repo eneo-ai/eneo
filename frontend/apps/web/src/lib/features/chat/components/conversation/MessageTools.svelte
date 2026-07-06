@@ -141,6 +141,16 @@
       {/if}
     </div>
   </div>
+  {#snippet docBadge(number: number)}
+    <!-- Mirrors the inline citation pill so a pill's number visibly maps to
+         its chip; same look as the numbered legacy reference chips. -->
+    <span
+      class="border-default bg-secondary min-h-6 min-w-6 rounded-md border border-b-2 text-center font-mono text-xs leading-6 font-normal"
+      aria-hidden="true"
+    >
+      {number}
+    </span>
+  {/snippet}
   {#if referencesExpanded}
     <div class="mb-2 flex w-full flex-wrap gap-2 pt-2 md:pb-6">
       {#each message.references as reference, index (reference.id)}
@@ -164,21 +174,24 @@
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/each}
 
-      {#each mcpRefDocs as ref (ref.id)}
+      {#each mcpRefDocs as ref, docIndex (ref.id)}
         {@const info = readMeta(ref)}
+        {@const docNumber = docIndex + 1}
         {#if info.infoBlobId}
           <BlobPreview blob={blobForRef(info.infoBlobId, info.title)} let:showBlob>
             <button
               type="button"
-              class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
+              class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border py-1 pr-2 pl-1 text-sm"
               onclick={showBlob}
             >
+              {@render docBadge(docNumber)}
               {info.title}
             </button>
           </BlobPreview>
         {:else if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
           <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
           <a class="hover:bg-hover-default flex items-center gap-2" href={ref.uri}>
+            {@render docBadge(docNumber)}
             <span
               class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
               style:background-image="url({faviconService.getFavicon(ref.uri)})"
@@ -198,9 +211,10 @@
             {#snippet children({ showSnippet }: { showSnippet: () => void })}
               <button
                 type="button"
-                class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
+                class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border py-1 pr-2 pl-1 text-sm"
                 onclick={showSnippet}
               >
+                {@render docBadge(docNumber)}
                 {info.title}{info.section ? ` → ${info.section}` : ""}
               </button>
             {/snippet}
