@@ -8009,6 +8009,43 @@ def test_compile_create_steps_to_spec_caps_source_capture_fields() -> None:
     assert validate_spec(compiled).valid
 
 
+def test_compile_create_steps_to_spec_keeps_all_required_source_reader_fields() -> None:
+    required_properties = {f"field_{index}": {"type": "string"} for index in range(10)}
+
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till JSON",
+        terminal_output_schema={
+            "type": "object",
+            "properties": required_properties,
+        },
+        steps=[
+            NewStepDraft(
+                name="Läs källdokument",
+                instructions="Extrahera källdata.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                output_fields=[_field("field_0", "string")],
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Sammanställ resultat",
+                instructions="Sammanställ slutlig JSON.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+        ],
+    )
+
+    source_contract = compiled.steps[0].output_contract
+    assert source_contract is not None
+    assert sorted(source_contract["properties"]) == [
+        f"field_{index}" for index in range(10)
+    ]
+    assert validate_spec(compiled).valid
+
+
 def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag() -> (
     None
 ):

@@ -28,7 +28,6 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
-    MAX_SOURCE_CAPTURE_FIELDS,
     SourceCaptureField,
     compile_new_step_draft,
     make_plan_step_ref,
@@ -895,8 +894,6 @@ def _dedupe_capture_fields(
             continue
         seen.add(key)
         deduped.append(SourceCaptureField(name=name, description=field.description))
-        if len(deduped) == MAX_SOURCE_CAPTURE_FIELDS:
-            break
     return tuple(deduped)
 
 
