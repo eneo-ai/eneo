@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "description": "Focused Flow AI Builder evidence cases for source-context balance, runtime fields, structured questions, and under/over-building. These are review/evidence cases, not golden outputs.",
+  "cases": [
+    {
+      "id": "document_pdf_source_retention_balance",
+      "complexity": "medium",
+      "domain": "municipality_records",
+      "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+      "expected": {
+        "terminal_output_type": "pdf",
+        "min_steps": 2,
+        "min_json_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "expected_leaf_output_field_groups": [
+          ["document_type", "dokumenttyp", "typ"],
+          ["title", "titel"],
+          ["date_or_year", "year", "datum", "år"],
+          ["author_or_sender", "författare", "avsändare"],
+          ["category", "kategori"],
+          ["conclusions", "slutsatser"],
+          ["summary", "sammanfattning"]
+        ]
+      }
+    },
+    {
+      "id": "runtime_fields_explicit_case_metadata",
+      "complexity": "medium",
+      "domain": "municipality_permits",
+      "prompt": "Jag vill bygga ett flöde för bygglov. Vid körning laddar användaren upp ansökan och användaren ska också fylla i ärendenummer, kommun, handläggare och sista svarsdatum. Flödet ska läsa ansökan, sammanfatta ärendet, markera saknade uppgifter och skapa en kort handläggarrapport i text.",
+      "expected": {
+        "terminal_output_type": "text",
+        "min_steps": 2,
+        "min_json_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          ["ärendenummer", "arendenummer", "case_number"],
+          ["kommun", "municipality"],
+          ["handläggare", "handlaggare", "case_worker"],
+          ["sista_svarsdatum", "svarsdatum", "deadline", "due_date"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["summary", "sammanfattning"],
+          ["missing_information", "saknade_uppgifter"],
+          ["case_number", "ärendenummer", "arendenummer"]
+        ]
+      }
+    },
+    {
+      "id": "source_derived_report_fields_not_runtime_fields",
+      "complexity": "simple",
+      "domain": "municipality_records",
+      "prompt": "Jag laddar upp ett dokument och vill att rapporten ska innehålla titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning. Användaren ska inte fylla i extra metadata; allt ska hämtas från dokumentet om det framgår.",
+      "expected": {
+        "terminal_output_type": "text",
+        "min_steps": 1,
+        "min_json_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "forbidden_form_field_groups": [
+          ["titel", "title"],
+          ["år", "year"],
+          ["dokumenttyp", "document_type"],
+          ["kategori", "category"],
+          ["avsändare", "sender"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["title", "titel"],
+          ["year", "år"],
+          ["document_type", "dokumenttyp"],
+          ["category", "kategori"],
+          ["summary", "sammanfattning"]
+        ]
+      }
+    },
+    {
+      "id": "vague_transcription_should_interview",
+      "complexity": "simple",
+      "domain": "municipality_meetings",
+      "prompt": "Jag vill bygga ett transkriberingsflöde.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "min_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true
+      }
+    },
+    {
+      "id": "exact_detail_legal_traceability",
+      "complexity": "complex",
+      "domain": "municipality_legal_transparency",
+      "prompt": "Jag vill skapa ett flöde där jag laddar upp beslut, underlag och bilagor. Flödet ska ta fram en rapport som går att använda vid granskning: exakta centrala uppgifter ska bevaras, viktiga citat eller källhänvisningar ska tas med när de finns, osäkra uppgifter ska markeras, och det ska tydligt framgå vilken del av underlaget varje slutsats bygger på. Slutresultatet ska vara en PDF.",
+      "expected": {
+        "terminal_output_type": "pdf",
+        "min_steps": 3,
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "expected_leaf_output_field_groups": [
+          ["claim", "uppgift", "fact"],
+          ["source", "källa", "kalla", "reference"],
+          ["quote", "citat"],
+          ["uncertainty", "osäkerhet", "osakerhet"],
+          ["conclusion", "slutsats"]
+        ]
+      }
+    },
+    {
+      "id": "underbuild_control_procurement_comparison",
+      "complexity": "complex",
+      "domain": "municipality_procurement",
+      "prompt": "Jag vill bygga ett flöde för upphandlingsgranskning där jag laddar upp flera dokument: kravspecifikation, leverantörens anbudsutkast och kommunens inköpspolicy. Flödet måste jämföra dokumenten mot varandra, extrahera krav, leverantörslöften, avvikelser, risker, sekretesskänsliga delar och frågor till leverantören. Det ska skapa en strukturerad jämförelsematris och därefter en handläggarrapport i text.",
+      "expected": {
+        "terminal_output_type": "text",
+        "min_steps": 4,
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "forbid_generic_primary_reader_envelope": true,
+        "expected_leaf_output_field_groups": [
+          ["requirements", "krav"],
+          ["supplier_promises", "leverantörslöften", "leverantorsloften"],
+          ["deviations", "avvikelser"],
+          ["risks", "risker"],
+          ["confidentiality", "sekretess"],
+          ["questions", "frågor", "fragor"]
+        ]
+      }
+    },
+    {
+      "id": "checklist_runtime_rule_field_or_question",
+      "complexity": "medium",
+      "domain": "municipality_permits",
+      "prompt": "Jag vill bygga ett flöde för bygglovshandläggning. Vid körning laddar jag upp en ansökan och kan också ange vilken checklista eller regel som ska användas. Flödet ska läsa ansökan, jämföra mot checklistan, markera vilka krav som uppfylls, vilka som saknas, osäkra punkter och rekommenderad nästa åtgärd. Slutresultatet ska vara en tydlig rapport i text.",
+      "expected": {
+        "terminal_output_type": "text",
+        "min_steps": 2,
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          ["checklista", "checklist"],
+          ["regel", "rule"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["requirements", "krav"],
+          ["status", "uppfylls"],
+          ["missing", "saknas"],
+          ["uncertainty", "osäkerhet", "osakerhet"],
+          ["recommended_action", "rekommenderad_atgard", "nästa_åtgärd"]
+        ]
+      }
+    }
+  ]
+}

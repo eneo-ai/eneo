@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "description": "Municipality-oriented Flow AI Builder API battle-test prompts. These cases are not golden outputs; they are pressure prompts for plan shape, source-context logic, schemas, runtime input fields, and token-efficient dataflow.",
+  "cases": [
+    {
+      "id": "simple_document_metadata_json",
+      "complexity": "simple",
+      "domain": "municipality_records",
+      "prompt": "Jag vill skapa ett flöde för kommunen där jag laddar upp ett dokument och får tillbaka JSON med dokumenttyp, titel, datum, avsändare, mottagare, ärendenummer om det finns, en kort sammanfattning och vilka uppgifter som saknas eller är osäkra.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["dokumenttyp", "document_type", "type"],
+          ["titel", "title"],
+          ["datum", "date", "date_or_year"],
+          ["avsandare", "sender", "author_or_sender"],
+          ["mottagare", "recipient", "receiver"],
+          ["arendenummer", "case_number", "reference_number"],
+          ["sammanfattning", "summary"]
+        ]
+      }
+    },
+    {
+      "id": "simple_audio_minutes_actions",
+      "complexity": "simple",
+      "domain": "municipality_meetings",
+      "prompt": "Jag vill bygga ett flöde där jag laddar upp en ljudfil från ett kort internt möte. Flödet ska transkribera ljudet och sedan ta fram beslut, åtgärder, ansvarig, deadline och öppna frågor som strukturerad JSON. Saknas ansvarig eller deadline ska det stå ospecificerat.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 0,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["beslut", "decision", "decisions"],
+          ["atgarder", "actions", "next_steps"],
+          ["ansvarig", "owner", "responsible"],
+          ["deadline", "due_date"],
+          ["oppna_fragor", "open_questions"]
+        ]
+      }
+    },
+    {
+      "id": "medium_document_analysis_pdf",
+      "complexity": "medium",
+      "domain": "municipality_records",
+      "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer. Flödet ska läsa innehållet och avgöra vad filen handlar om. För varje dokument ska det dokumentera dokumenttyp, titel, datum eller år, eventuell författare eller avsändare, kategori som sociologi, psykologi, IT, ekonomi eller juridik, centrala slutsatser och en koncis sammanfattning. Slutrapporten ska vara en PDF.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 7,
+        "terminal_output_type": "pdf",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["dokumenttyp", "document_type", "type"],
+          ["titel", "title"],
+          ["datum", "date", "date_or_year", "year"],
+          ["forfattare", "author", "author_or_sender"],
+          ["kategori", "category"],
+          ["slutsatser", "conclusion", "conclusions", "key_conclusions"],
+          ["sammanfattning", "summary"]
+        ]
+      }
+    },
+    {
+      "id": "medium_citizen_request_triage",
+      "complexity": "medium",
+      "domain": "municipality_service_center",
+      "prompt": "Jag vill skapa ett flöde för inkomna medborgarärenden. Jag klistrar in texten från ett mejl eller meddelande och flödet ska identifiera ärendekategori, brådskandegrad, berörd förvaltning, vilka fakta som behövs för handläggning, om personuppgifter verkar förekomma och ett förslag på kort svar till medborgaren. Output ska vara både strukturerad JSON och en kort text för handläggaren.",
+      "scripted_question_answers": {
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        }
+      },
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["arendekategori", "case_category", "category"],
+          ["bradskandegrad", "urgency", "priority"],
+          ["forvaltning", "department", "administration"],
+          ["saknade_fakta", "missing_facts", "missing_information"],
+          ["personuppgifter", "personal_data", "pii"]
+        ]
+      }
+    },
+    {
+      "id": "medium_permit_checklist_validation",
+      "complexity": "medium",
+      "domain": "municipality_permits",
+      "prompt": "Jag vill bygga ett flöde för bygglovshandläggning. Vid körning laddar jag upp en ansökan och kan även fylla i vilken checklista eller regel som ska användas. Flödet ska läsa ansökan, jämföra mot checklistan, markera vilka krav som uppfylls, vilka som saknas, osäkra punkter och rekommenderad nästa åtgärd. Slutresultatet ska vara en tydlig rapport i text.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 6,
+        "terminal_output_type": "text",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["krav", "requirement", "requirements"],
+          ["status", "result"],
+          ["saknas", "missing", "gap"],
+          ["osakerhet", "uncertainty", "uncertain"],
+          ["rekommenderad_atgard", "recommended_action", "next_action"]
+        ]
+      }
+    },
+    {
+      "id": "complex_meeting_audio_policy_pdf",
+      "complexity": "complex",
+      "domain": "municipality_governance",
+      "prompt": "Jag vill skapa ett flöde för nämndmöten. Jag laddar upp mötesljud och ibland ett dokument med kommunens riktlinjer. Flödet ska transkribera mötet, identifiera beslut, yrkanden, reservationer, ansvariga, deadlines och öppna frågor. Sedan ska det kontrollera om beslut eller åtgärder verkar strida mot riktlinjerna eller behöver juridisk uppföljning. Innan slutrapporten skapas vill jag kunna granska de strukturerade beslutspunkterna. Slutrapporten ska vara PDF med protokollsliknande struktur.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 8,
+        "terminal_output_type": "pdf",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["beslut", "decision", "decisions"],
+          ["yrkanden", "motion", "proposal"],
+          ["reservationer", "reservation", "dissent"],
+          ["ansvariga", "owner", "responsible"],
+          ["deadlines", "deadline", "due_date"],
+          ["oppna_fragor", "open_questions"],
+          ["uppfoljning", "follow_up", "legal_follow_up"]
+        ]
+      }
+    },
+    {
+      "id": "complex_procurement_multi_document_matrix",
+      "complexity": "complex",
+      "domain": "municipality_procurement",
+      "prompt": "Jag vill bygga ett flöde som granskar upphandlingsunderlag. Jag laddar upp flera dokument: kravspecifikation, anbudsutkast och eventuellt kommunens inköpspolicy. Flödet ska extrahera krav, leverantörslöften, risker, avvikelser, sekretesskänsliga delar och frågor som behöver skickas tillbaka till leverantören. Det ska jämföra dokumenten mot varandra och skapa både en strukturerad JSON-matris och en sammanfattande rapport för upphandlaren.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 8,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["krav", "requirement", "requirements"],
+          ["leverantorsloften", "supplier_commitment", "supplier_promises"],
+          ["risker", "risk", "risks"],
+          ["avvikelser", "deviation", "deviations", "gap"],
+          ["sekretess", "confidentiality", "secrecy"],
+          ["fragor", "questions", "supplier_questions"]
+        ]
+      }
+    },
+    {
+      "id": "complex_social_case_timeline_redaction",
+      "complexity": "complex",
+      "domain": "municipality_social_services",
+      "prompt": "Jag vill skapa ett flöde för intern beredning av ett socialt ärende. Jag laddar upp flera dokument och vill att flödet tar fram en tidslinje, parter, viktiga händelser, beslut, rättslig grund om den nämns, saknade uppgifter, risker och rekommenderade nästa steg. Personuppgifter ska flaggas tydligt och slutrapporten ska ha en separat version där känsliga personuppgifter maskeras. Jag vill kunna granska innan slutrapporten skapas.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["tidslinje", "timeline"],
+          ["parter", "parties"],
+          ["handelser", "events"],
+          ["beslut", "decision", "decisions"],
+          ["rattslig_grund", "legal_basis"],
+          ["personuppgifter", "personal_data", "pii"],
+          ["risker", "risk", "risks"]
+        ]
+      }
+    }
+  ]
+}
