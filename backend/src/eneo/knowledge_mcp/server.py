@@ -309,10 +309,16 @@ async def search_knowledge(
     document_id; pass it to read_source to read that full document.
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
+    logger.debug("[RAG] search_knowledge query=%r", query[:120])
     async with _knowledge_context(ctx) as (container, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         embedding_model = _pick_embedding_model(assistant)
         if embedding_model is None:
+            logger.warning(
+                "[RAG] search_knowledge called but assistant %s has no "
+                "knowledge sources",
+                assistant_id,
+            )
             return [
                 TextContent(
                     type="text",
@@ -330,10 +336,21 @@ async def search_knowledge(
             autocut_cutoff=autocut_cutoff,
         )
 
+    fetched = len(chunks)
     if mode == "overview":
         chunks = _diversify(chunks, per_doc=OVERVIEW_CHUNKS_PER_DOC, cap=cap)
     else:
         chunks = chunks[:cap]
+    logger.info(
+        "[RAG] search_knowledge assistant=%s mode=%s fetch=%d fetched=%d "
+        "returned=%d top_score=%s",
+        assistant_id,
+        mode,
+        fetch,
+        fetched,
+        len(chunks),
+        f"{chunks[0].score:.3f}" if chunks else "n/a",
+    )
 
     return _search_result_content(query, chunks)
 
@@ -368,11 +385,28 @@ async def read_source(
         except Exception:
             # The repo raises on a missing row; out-of-scope and missing must
             # be indistinguishable to the caller (no existence oracle).
+            logger.info(
+                "[RAG] read_source assistant=%s document=%s -> not found",
+                assistant_id,
+                blob_id,
+            )
             return [not_found]
         if not _blob_in_scope(blob, assistant):
+            logger.info(
+                "[RAG] read_source assistant=%s document=%s -> out of scope",
+                assistant_id,
+                blob_id,
+            )
             return [not_found]
 
     page_cap = min(20_000, get_settings().mcp_tool_output_max_chars // 2)
+    logger.info(
+        "[RAG] read_source assistant=%s document=%s offset=%d size=%d",
+        assistant_id,
+        blob_id,
+        offset,
+        len(blob.text),
+    )
     return _document_page_content(blob, offset=offset, page_cap=page_cap)
 
 

@@ -9,6 +9,7 @@
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
   import ChatModelSelect from "../switcher/ChatModelSelect.svelte";
+  import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
@@ -274,6 +275,35 @@
   // Check if the assistant has MCP servers/tools
   const hasMcpTools = $derived(mcpServers.length > 0);
 
+  // Knowledge sources attached to the partner (read-only indicator; knowledge
+  // cannot be toggled per conversation the way MCP servers can).
+  type NamedSource = { id: string; name: string };
+  const knowledgeSources = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    const named = (value: unknown, fallbackKey?: string): NamedSource[] =>
+      Array.isArray(value)
+        ? value.map((source) => ({
+            id: String(source.id),
+            name: String(source.name ?? (fallbackKey ? (source[fallbackKey] ?? "") : ""))
+          }))
+        : [];
+    return {
+      collections: named(partner?.groups),
+      websites: named(partner?.websites, "url"),
+      integrations: named(partner?.integration_knowledge_list)
+    };
+  });
+  const hasKnowledge = $derived(
+    knowledgeSources.collections.length +
+      knowledgeSources.websites.length +
+      knowledgeSources.integrations.length >
+      0
+  );
+  const partnerKnowledgeMode = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
+  });
+
   const showWebSearch = $derived(
     chat.partner.type === "default-assistant" && featureFlags.showWebSearch
   );
@@ -393,6 +423,15 @@
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
         <MentionButton></MentionButton>
+      {/if}
+
+      {#if hasKnowledge}
+        <ChatKnowledge
+          collections={knowledgeSources.collections}
+          websites={knowledgeSources.websites}
+          integrations={knowledgeSources.integrations}
+          knowledgeMode={partnerKnowledgeMode}
+        />
       {/if}
 
       {#if hasMcpTools}

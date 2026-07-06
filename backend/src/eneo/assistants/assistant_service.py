@@ -1867,6 +1867,24 @@ class AssistantService:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=scoped_token, tenant_id=self.user.tenant_id
             )
+        logger.info(
+            "[RAG] assistant=%s knowledge_mode=%s "
+            "collections=%d websites=%d integrations=%d "
+            "model_supports_tools=%s -> %s",
+            assistant_to_ask.id,
+            assistant_to_ask.knowledge_mode.value,
+            len(assistant_to_ask.collections),
+            len(assistant_to_ask.websites),
+            len(assistant_to_ask.integration_knowledge_list),
+            effective_completion_model.supports_tool_calling,
+            "knowledge tool attached"
+            if knowledge_mcp_server is not None
+            else (
+                "legacy inject retrieval"
+                if assistant_to_ask.has_knowledge()
+                else "no knowledge"
+            ),
+        )
 
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
