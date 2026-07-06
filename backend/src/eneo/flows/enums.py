@@ -66,6 +66,7 @@ class FlowOutputMode(str, Enum):
     HTTP_POST = "http_post"
     TRANSCRIBE_ONLY = "transcribe_only"
     TEMPLATE_FILL = "template_fill"
+    RENDER_VERBATIM = "render_verbatim"
 
 
 def flow_output_mode_has_outbound_delivery(mode: FlowOutputMode) -> bool:
@@ -76,6 +77,7 @@ class AIBuilderOutputMode(str, Enum):
     PASS_THROUGH = FlowOutputMode.PASS_THROUGH.value
     TRANSCRIBE_ONLY = FlowOutputMode.TRANSCRIBE_ONLY.value
     TEMPLATE_FILL = FlowOutputMode.TEMPLATE_FILL.value
+    RENDER_VERBATIM = FlowOutputMode.RENDER_VERBATIM.value
 
 
 class FlowMcpPolicy(str, Enum):

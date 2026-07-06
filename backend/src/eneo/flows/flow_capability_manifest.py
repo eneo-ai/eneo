@@ -40,7 +40,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 2
+FCM_VERSION: int = 3
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -340,6 +340,32 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
                 ),
             ),
         ),
+        FlowOutputMode.RENDER_VERBATIM: (
+            "Verbatim document render",
+            (
+                "Non-LLM document rendering pathway: text input is rendered "
+                "directly into a PDF or DOCX artifact. The step must be "
+                "`TEXT` input -> `PDF` or `DOCX` output and must not declare "
+                "an output contract."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_text_input_document_output",
+                    description=(
+                        "Steps using `render_verbatim` must have `input_type=TEXT` "
+                        "and `output_type=PDF` or `DOCX`; any other IO pair is "
+                        "rejected by `supports_step_io_tuple`."
+                    ),
+                ),
+                InvariantSpec(
+                    id="forbids_output_contract",
+                    description=(
+                        "Steps using `render_verbatim` render resolved text "
+                        "directly and must not declare an `output_contract`."
+                    ),
+                ),
+            ),
+        ),
     }
 )
 
@@ -430,8 +456,9 @@ def _seed_citation_sidecar_capability() -> FlowCapability:
                 description=(
                     "Citation capability is disabled when `output_mode` is "
                     "`template_fill` (a docx-artefact pathway) or "
-                    "`transcribe_only` (a non-LLM pathway). Any other "
-                    "output_mode preserves capability when the rest holds."
+                    "`transcribe_only` or `render_verbatim` (non-LLM "
+                    "pathways). Any other output_mode preserves capability "
+                    "when the rest holds."
                 ),
             ),
             InvariantSpec(
@@ -562,16 +589,24 @@ def supports_step_io_tuple(
         return output_type is FlowOutputType.DOCX
     if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
         return input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
+    if output_mode is FlowOutputMode.RENDER_VERBATIM:
+        return input_type is FlowInputType.TEXT and output_type in {
+            FlowOutputType.PDF,
+            FlowOutputType.DOCX,
+        }
     return True
 
 
 def requires_completion_model(output_mode: FlowOutputMode) -> bool:
     """True when this output mode runs a completion model at runtime.
 
-    Transcription-only steps route through the flow-scoped transcription
-    configuration instead of an assistant completion model.
+    Non-LLM modes route through dedicated runtime handlers instead of an
+    assistant completion model.
     """
-    return output_mode is not FlowOutputMode.TRANSCRIBE_ONLY
+    return output_mode not in {
+        FlowOutputMode.TRANSCRIBE_ONLY,
+        FlowOutputMode.RENDER_VERBATIM,
+    }
 
 
 def resolve_document_generation_mode(
@@ -645,6 +680,7 @@ def is_citation_capable_step(
     return output_mode not in {
         FlowOutputMode.TEMPLATE_FILL,
         FlowOutputMode.TRANSCRIBE_ONLY,
+        FlowOutputMode.RENDER_VERBATIM,
     }
 
 

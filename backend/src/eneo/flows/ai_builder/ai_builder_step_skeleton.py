@@ -1628,6 +1628,8 @@ def _final_output_mode(
         and final_output_mode == OutputMode.TEMPLATE_FILL
     ):
         return OutputMode.TEMPLATE_FILL
+    if input_type == InputType.TEXT and final_output_type in _DOCUMENT_OUTPUT_TYPES:
+        return OutputMode.RENDER_VERBATIM
     return OutputMode.PASS_THROUGH
 
 

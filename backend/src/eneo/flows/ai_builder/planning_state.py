@@ -85,6 +85,7 @@ StepOutputMode = Literal[
     "http_post",
     "transcribe_only",
     "template_fill",
+    "render_verbatim",
 ]
 AggregationIntent = Literal["linear", "aggregate", "compare"]
 

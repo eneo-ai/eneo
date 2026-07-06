@@ -21,7 +21,11 @@ from eneo.flows.input_binding_contract_rules import (
     unsupported_input_binding_key,
     validate_source_refs_binding,
 )
-from eneo.flows.output_modes import ALLOWED_OUTPUT_MODES, transcribe_only_violation
+from eneo.flows.output_modes import (
+    ALLOWED_OUTPUT_MODES,
+    render_verbatim_violation,
+    transcribe_only_violation,
+)
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_chain_rules import find_first_step_chain_violation
@@ -497,6 +501,14 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
             )
             if transcribe_only_error is not None:
                 raise BadRequestException(transcribe_only_error)
+            render_verbatim_error = render_verbatim_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if render_verbatim_error is not None:
+                raise BadRequestException(render_verbatim_error)
             runtime_input = build_runtime_input_config(input_fields.input_config)
             if (
                 output_fields.output_mode == "transcribe_only"

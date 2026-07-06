@@ -342,7 +342,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         ),
         retrieval_hints=(
             "pdf report generate document",
-            "output_type=pdf output_mode=pass_through",
+            "output_type=pdf output_mode=render_verbatim",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -408,7 +408,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         ),
         retrieval_hints=(
             "text report artifact pdf docx generated",
-            "input_type=text output_type=pdf docx output_mode=pass_through",
+            "input_type=text output_type=pdf docx output_mode=render_verbatim",
         ),
         required_architectural_slots=(
             "primary_runtime_input",

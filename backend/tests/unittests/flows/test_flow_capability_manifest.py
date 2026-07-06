@@ -61,8 +61,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_two() -> None:
-    assert FCM_VERSION == 2
+def test_fcm_version_is_three() -> None:
+    assert FCM_VERSION == 3
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -273,7 +273,10 @@ def test_input_capability_rejects_missing_channel() -> None:
 def test_requires_completion_model_rejects_transcribe_only(
     output_mode: FlowOutputMode,
 ) -> None:
-    expected = output_mode is not FlowOutputMode.TRANSCRIBE_ONLY
+    expected = output_mode not in {
+        FlowOutputMode.TRANSCRIBE_ONLY,
+        FlowOutputMode.RENDER_VERBATIM,
+    }
 
     assert requires_completion_model(output_mode) is expected
 
@@ -412,6 +415,21 @@ def test_supports_step_io_tuple_rejects_transcribe_only_for_non_audio_text() -> 
             assert legal is expected
 
 
+def test_supports_step_io_tuple_rejects_render_verbatim_for_non_text_document() -> None:
+    for input_type in FlowInputType:
+        for output_type in FlowOutputType:
+            legal = supports_step_io_tuple(
+                input_type=input_type,
+                output_type=output_type,
+                output_mode=FlowOutputMode.RENDER_VERBATIM,
+            )
+            expected = input_type is FlowInputType.TEXT and output_type in {
+                FlowOutputType.PDF,
+                FlowOutputType.DOCX,
+            }
+            assert legal is expected
+
+
 def test_is_citation_capable_step_requires_inline_inref_sidecar_mode() -> None:
     """Explicit rule guardrail: only `inline_inref_sidecar` citation mode
     unlocks citation capability. Any other recognisable mode (including the
@@ -463,9 +481,9 @@ def test_is_citation_capable_step_requires_text_output() -> None:
 
 def test_is_citation_capable_step_rejects_template_fill_and_transcribe_only() -> None:
     """Explicit rule guardrail: even on TEXT output with sidecar enabled, the
-    `TEMPLATE_FILL` and `TRANSCRIBE_ONLY` output modes must reject citation
-    capability — template-fill is a docx-artefact mode and transcription is
-    citation-naive at the wizard level."""
+    `TEMPLATE_FILL`, `TRANSCRIBE_ONLY`, and `RENDER_VERBATIM` output modes
+    must reject citation capability — none of them produces a citation-aware
+    LLM text response."""
     enabled_config = {"citation_mode": CITATION_MODE_INLINE_INREF_SIDECAR}
     for output_mode in FlowOutputMode:
         result = is_citation_capable_step(
@@ -476,6 +494,7 @@ def test_is_citation_capable_step_rejects_template_fill_and_transcribe_only() ->
         expected = output_mode not in {
             FlowOutputMode.TEMPLATE_FILL,
             FlowOutputMode.TRANSCRIBE_ONLY,
+            FlowOutputMode.RENDER_VERBATIM,
         }
         assert result is expected, (
             f"citation capability for TEXT + {output_mode} must be {expected}; got {result}"
@@ -657,6 +676,10 @@ _EXPECTED_OUTPUT_MODE_CAPABILITIES: dict[FlowOutputMode, tuple[str, frozenset[st
                 "requires_template_fill_output_config",
             }
         ),
+    ),
+    FlowOutputMode.RENDER_VERBATIM: (
+        "output_mode_render_verbatim",
+        frozenset({"requires_text_input_document_output", "forbids_output_contract"}),
     ),
 }
 
@@ -1013,7 +1036,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V2: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V3: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1040,6 +1063,7 @@ _FCM_SURFACE_FINGERPRINT_V2: tuple[object, ...] = (
         "mcp_policy",
         "output_mode_http_post",
         "output_mode_pass_through",
+        "output_mode_render_verbatim",
         "output_mode_template_fill",
         "output_mode_transcribe_only",
     ),
@@ -1053,9 +1077,9 @@ _FCM_SURFACE_FINGERPRINT_V2: tuple[object, ...] = (
                 (
                     "forbids_template_fill_or_transcribe_only",
                     "Citation capability is disabled when `output_mode` is "
-                    "`template_fill` (a docx-artefact pathway) or `transcribe_only` "
-                    "(a non-LLM pathway). Any other output_mode preserves capability "
-                    "when the rest holds.",
+                    "`template_fill` (a docx-artefact pathway) or "
+                    "`transcribe_only` or `render_verbatim` (non-LLM pathways). "
+                    "Any other output_mode preserves capability when the rest holds.",
                 ),
                 (
                     "requires_citation_capable_output_config",
@@ -1218,6 +1242,26 @@ _FCM_SURFACE_FINGERPRINT_V2: tuple[object, ...] = (
             (
                 (
                     "forbids_output_contract",
+                    "Steps using `render_verbatim` render resolved text directly "
+                    "and must not declare an `output_contract`.",
+                ),
+                (
+                    "requires_text_input_document_output",
+                    "Steps using `render_verbatim` must have `input_type=TEXT` "
+                    "and `output_type=PDF` or `DOCX`; any other IO pair is "
+                    "rejected by `supports_step_io_tuple`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "forbids_output_contract",
                     "Steps using `template_fill` must not declare an "
                     "`output_contract`; `_validate_output_contract_compatibility` "
                     "raises when the mode and contract coexist.",
@@ -1300,11 +1344,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V2, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V3, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V2}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V3}\n\n"
         f"Actual:   {actual}"
     )
 
@@ -1413,6 +1457,17 @@ class TestResolveCapabilityForTuple:
         assert caps is not None
         ids = [cap.id for cap in caps]
         assert ids == ["input_text", "output_mode_template_fill"]
+
+    def test_render_verbatim_pdf_legal_tuple_returns_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.PREVIOUS_STEP,
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.PDF,
+            output_mode=FlowOutputMode.RENDER_VERBATIM,
+        )
+        assert caps is not None
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_text", "output_mode_render_verbatim"]
 
 
 class TestRenderCriticInvariants:

@@ -113,6 +113,30 @@ class TestSaveLoadRoundTrip:
         loaded = PlanningState.model_validate(values["planning_state_jsonb"])
         assert loaded == state.validated_snapshot()
 
+    def test_render_verbatim_output_mode_round_trips(self) -> None:
+        state = PlanningState(
+            fcm_version=FCM_VERSION,
+            planner_contract_version=PLANNER_CONTRACT_VERSION,
+            builder_schema_version=BUILDER_SCHEMA_VERSION,
+            architecture_commit=ArchitectureCommit(
+                tuples_chain=[
+                    StepTriple(
+                        input_type="text",
+                        output_type="pdf",
+                        output_mode="render_verbatim",
+                    )
+                ],
+                chosen_patterns=["text_to_artifact_report"],
+                committed_at=datetime(2026, 4, 23, 12, 0, 0, tzinfo=timezone.utc),
+                architecture_hash=_VALID_HASH,
+            ),
+        )
+
+        values = _planning_state_for_storage(state)
+        loaded = PlanningState.model_validate(values["planning_state_jsonb"])
+
+        assert loaded == state.validated_snapshot()
+
     def test_strict_validator_rejects_drifted_jsonb(self) -> None:
         """Strict `extra="forbid"` on `_PlanningModel` rejects any
         drifted JSONB at load time rather than silently falling back

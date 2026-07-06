@@ -289,7 +289,7 @@ class FlowSteps(BasePublic):
             name="ck_flow_steps_input_type",
         ),
         CheckConstraint(
-            "output_mode IN ('pass_through','http_post','transcribe_only','template_fill')",
+            "output_mode IN ('pass_through','http_post','transcribe_only','template_fill','render_verbatim')",
             name="ck_flow_steps_output_mode",
         ),
         CheckConstraint(

@@ -125,7 +125,7 @@ def test_materialize_audio_artifact_skeleton() -> None:
     assert _skeleton_type_modes(skeleton) == [
         ("audio", "text", "transcribe_only"),
         ("text", "text", "pass_through"),
-        ("text", "pdf", "pass_through"),
+        ("text", "pdf", "render_verbatim"),
     ]
     assert skeleton[0].runtime_required is True
     assert skeleton[2].document_delivery_mode == "generated"
@@ -154,7 +154,7 @@ def test_materialize_audio_document_without_pattern_infers_transcript_chain() ->
     assert _skeleton_type_modes(skeleton) == [
         ("audio", "text", "transcribe_only"),
         ("text", "text", "pass_through"),
-        ("text", "pdf", "pass_through"),
+        ("text", "pdf", "render_verbatim"),
     ]
 
 
@@ -244,7 +244,7 @@ def test_linear_artifact_skeleton_keeps_backend_terminal_artifact_slot() -> None
     assert _skeleton_type_modes(skeleton) == [
         ("document", "text", "pass_through"),
         ("text", "text", "pass_through"),
-        ("text", "docx", "pass_through"),
+        ("text", "docx", "render_verbatim"),
     ]
     assert skeleton[-1].document_delivery_mode == "generated"
 

@@ -56,7 +56,7 @@ from eneo.flows.input_binding_contract_rules import (
     unsupported_input_binding_key,
     validate_source_refs_binding,
 )
-from eneo.flows.output_modes import transcribe_only_violation
+from eneo.flows.output_modes import render_verbatim_violation, transcribe_only_violation
 from eneo.flows.output_processing import (
     schema_expects_structured,
     validate_schema_syntax,
@@ -248,6 +248,20 @@ def collect_step_graph_issues(
                 _flow_step_issue(
                     code=FlowGraphIssueCode.TRANSCRIBE_ONLY_VIOLATION,
                     message=transcribe_only_error,
+                    step_order=step.step_order,
+                )
+            )
+        render_verbatim_error = render_verbatim_violation(
+            step_order=step.step_order,
+            input_type=step.input_type,
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+        )
+        if render_verbatim_error is not None:
+            issues.append(
+                _flow_step_issue(
+                    code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                    message=render_verbatim_error,
                     step_order=step.step_order,
                 )
             )
@@ -594,6 +608,11 @@ def _validate_output_contract_compatibility(*, step: FlowStepValidationView) -> 
     if step.output_mode == "template_fill":
         raise FlowStepValidationError(
             f"Step {step.step_order}: output_contract is not supported for output_mode 'template_fill'.",
+            step_order=step.step_order,
+        )
+    if step.output_mode == "render_verbatim":
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_contract is not supported for output_mode 'render_verbatim'.",
             step_order=step.step_order,
         )
     if step.output_type == "text":

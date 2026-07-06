@@ -120,6 +120,11 @@ def _output_mode_from_state(
         docx_mode = state.resolved_slots.get("docx_output_mode")
         if docx_mode is not None and docx_mode.value == "template_fill_docx":
             return FlowOutputMode.TEMPLATE_FILL
+    if input_type is FlowInputType.TEXT and output_type in {
+        FlowOutputType.DOCX,
+        FlowOutputType.PDF,
+    }:
+        return FlowOutputMode.RENDER_VERBATIM
     return FlowOutputMode.PASS_THROUGH
 
 

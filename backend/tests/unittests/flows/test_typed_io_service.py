@@ -521,6 +521,46 @@ def test_transcribe_only_accepts_audio_text_combination(user):
     service._validate_steps(steps, metadata_json=metadata)
 
 
+def test_render_verbatim_requires_text_input(user):
+    service = _service(user)
+    steps = [
+        _step(
+            input_type="json",
+            output_mode="render_verbatim",
+            output_type="pdf",
+        ),
+    ]
+    with pytest.raises(BadRequestException, match="render_verbatim.*input_type 'text'"):
+        service._validate_steps(steps)
+
+
+def test_render_verbatim_requires_document_output(user):
+    service = _service(user)
+    steps = [
+        _step(
+            input_type="text",
+            output_mode="render_verbatim",
+            output_type="text",
+        ),
+    ]
+    with pytest.raises(
+        BadRequestException, match="render_verbatim.*output_type 'pdf' or 'docx'"
+    ):
+        service._validate_steps(steps)
+
+
+def test_render_verbatim_accepts_text_to_pdf(user):
+    service = _service(user)
+    steps = [
+        _step(
+            input_type="text",
+            output_mode="render_verbatim",
+            output_type="pdf",
+        ),
+    ]
+    service._validate_steps(steps)
+
+
 def test_image_input_blocked_publish(user):
     """image input type should be blocked at publish."""
     service = _service(user)

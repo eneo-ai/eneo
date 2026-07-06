@@ -163,6 +163,7 @@ from eneo.flows.runtime.step_handlers import resolve_handler_mode
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep, StepHandler
 from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from eneo.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
+from eneo.flows.runtime.step_handlers.render_verbatim import RenderVerbatimStepHandler
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from eneo.flows.runtime.step_input_resolution import (
@@ -1238,6 +1239,10 @@ class FlowRunExecutor:
                 )
             case FlowOutputMode.TEMPLATE_FILL:
                 return TemplateFillStepHandler(deps=self._template_fill_runtime_deps())
+            case FlowOutputMode.RENDER_VERBATIM:
+                return RenderVerbatimStepHandler(
+                    prepare_assistant_step=self._prepare_assistant_step
+                )
         assert_never(mode)
 
     def _template_fill_runtime_deps(self) -> TemplateFillRuntimeDeps:

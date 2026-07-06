@@ -899,7 +899,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 output_type=OutputType.PDF,
             ),
         ),
-        expected_output_modes=("transcribe_only", "pass_through"),
+        expected_output_modes=("transcribe_only", "render_verbatim"),
     ),
     _case(
         pattern_id="text_to_artifact_report",
@@ -912,7 +912,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 output_type=OutputType.DOCX,
             ),
         ),
-        expected_output_modes=("pass_through",),
+        expected_output_modes=("render_verbatim",),
     ),
     _case(
         pattern_id="comparison",
@@ -2367,7 +2367,7 @@ def test_normalize_create_step_mechanics_strips_template_fill_from_non_docx() ->
     validation = validate_spec(compiled)
 
     assert normalized[0].document_delivery_mode == "generated"
-    assert compiled.steps[0].output_mode == OutputMode.PASS_THROUGH
+    assert compiled.steps[0].output_mode == OutputMode.RENDER_VERBATIM
     assert validation.valid
 
 
@@ -3436,7 +3436,7 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     assert draft.steps[1].input_source.value == "previous_step"
     assert draft.steps[1].input_type.value == "text"
     assert draft.steps[2].output_type.value == "docx"
-    assert draft.steps[2].output_mode == OutputMode.PASS_THROUGH
+    assert draft.steps[2].output_mode == OutputMode.RENDER_VERBATIM
 
     assert compiled.form_fields is not None
     assert compiled.form_fields[0].name == "case_id"
@@ -4877,7 +4877,7 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
         "pdf",
     ]
     assert draft.steps[0].input_type.value == "audio"
-    assert draft.steps[2].output_mode == OutputMode.PASS_THROUGH
+    assert draft.steps[2].output_mode == OutputMode.RENDER_VERBATIM
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "audio"
     assert compiled.steps[2].output_type.value == "pdf"
     assert validation.valid

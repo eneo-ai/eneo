@@ -72,11 +72,14 @@ def build_graph_from_steps(
         step_id = str(step.get("step_id") or step.get("id"))
         label = step.get("user_description") or f"Steg {step['step_order']}"
         output_mode = step.get("output_mode")
+        node_type = (
+            "assembly" if output_mode in {"template_fill", "render_verbatim"} else "llm"
+        )
         nodes.append(
             GraphNode(
                 id=step_id,
                 label=label,
-                type="assembly" if output_mode == "template_fill" else "llm",
+                type=node_type,
                 step_order=int(step["step_order"]),
                 input_source=step.get("input_source"),
                 input_type=step.get("input_type"),

@@ -1727,6 +1727,59 @@ async def test_audio_transcribe_only_skips_llm_and_rag(user):
 
 
 @pytest.mark.asyncio
+async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.document_render_service = SimpleNamespace(
+        render_document=lambda text, output_type, step_order: (
+            f"{output_type}:{text}".encode("utf-8"),
+            "application/pdf",
+            f"flow-step-{step_order}.pdf",
+        ),
+        render_structured_document=MagicMock(
+            side_effect=AssertionError("structured rendering is not used here")
+        ),
+        limits=DocumentRenderLimits(),
+    )
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    step = _runtime_step(
+        input_type="text",
+        output_type="pdf",
+        output_mode="render_verbatim",
+    )
+    assistant = _mock_assistant_for_execute_step(response_text="should_not_be_used")
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Final report body",
+            source_text="Final report body",
+            input_source="previous_step",
+        )
+    )
+    executor._retrieve_rag_chunks = AsyncMock(
+        return_value=([], {"status": "should_not_run"}, [])
+    )
+    stored_file = SimpleNamespace(id=uuid4())
+    executor.file_repo.add = AsyncMock(return_value=stored_file)
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assistant.get_response.assert_not_awaited()
+    executor._retrieve_rag_chunks.assert_not_awaited()
+    assert output.full_text == "Final report body"
+    assert output.persisted_text == "Final report body"
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+    assert output.model_parameters_json == {"mode": "render_verbatim"}
+    assert output.artifacts is not None
+    assert output.artifacts[0]["file_id"] == str(stored_file.id)
+    assert any(d.code == "render_verbatim_used" for d in output.diagnostics)
+
+
+@pytest.mark.asyncio
 async def test_json_input_contract_rejects_unparseable_json(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(

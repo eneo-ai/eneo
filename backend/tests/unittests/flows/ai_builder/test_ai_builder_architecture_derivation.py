@@ -159,11 +159,11 @@ def test_derives_text_to_docx_architecture_with_non_empty_pattern() -> None:
         {
             "input_type": "text",
             "output_type": "docx",
-            "output_mode": "pass_through",
+            "output_mode": "render_verbatim",
         }
     ]
     assert draft.chosen_patterns == ["text_to_artifact_report"]
-    assert draft.required_capabilities == ["input_text", "output_mode_pass_through"]
+    assert draft.required_capabilities == ["input_text", "output_mode_render_verbatim"]
 
 
 def test_derives_text_to_pdf_architecture_without_document_pattern() -> None:
@@ -179,7 +179,7 @@ def test_derives_text_to_pdf_architecture_without_document_pattern() -> None:
         {
             "input_type": "text",
             "output_type": "pdf",
-            "output_mode": "pass_through",
+            "output_mode": "render_verbatim",
         }
     ]
     assert draft.chosen_patterns == ["text_to_artifact_report"]

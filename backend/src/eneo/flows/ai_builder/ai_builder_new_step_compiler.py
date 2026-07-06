@@ -190,6 +190,11 @@ def derive_output_mode(
         return OutputMode.TRANSCRIBE_ONLY
     if output_type == OutputType.DOCX and document_delivery_mode == "template_fill":
         return OutputMode.TEMPLATE_FILL
+    if input_type == InputType.TEXT and output_type in {
+        OutputType.PDF,
+        OutputType.DOCX,
+    }:
+        return OutputMode.RENDER_VERBATIM
     return OutputMode.PASS_THROUGH
 
 

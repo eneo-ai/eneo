@@ -802,7 +802,7 @@ def test_edit_overlay_modify_step_uses_document_delivery_mode_derivation() -> No
         ),
     )
 
-    assert result.steps[0].output_mode == OutputMode.PASS_THROUGH
+    assert result.steps[0].output_mode == OutputMode.RENDER_VERBATIM
 
 
 def test_edit_overlay_drops_document_body_writer_ref_when_writer_step_is_removed() -> (
