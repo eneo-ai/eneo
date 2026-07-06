@@ -37,16 +37,6 @@ DiscoveryResolvedBy = Literal[
     "flow_default",
     "heuristic_assumption",
 ]
-ClarificationAction = Literal["ask", "assume", "confirm", "plan"]
-ClarificationReason = Literal[
-    "model_slot_not_sufficient",
-    "missing_architecture_requirement",
-    "missing_outcome_requirement",
-    "missing_reference_source",
-    "missing_structured_payload_contract",
-    "build_intent_and_sufficient",
-    "all_blockers_resolved",
-]
 ReferenceSourceStatus = Literal[
     "not_requested",
     "missing",
@@ -105,19 +95,6 @@ class DiscoveryCandidate:
     suppressed_reason: str | None = None
 
 
-@dataclass(frozen=True)
-class ClarificationDecisionTrace:
-    mvs_met: bool
-    selected_action: ClarificationAction
-    selected_question_id: str | None
-    selected_slot: str | None
-    selected_reason: ClarificationReason
-    selected_candidate: DiscoveryCandidate | None
-    candidates: tuple[DiscoveryCandidate, ...]
-    suppressed_candidates: tuple[DiscoveryCandidate, ...]
-    assumptions: tuple[str, ...]
-
-
 @dataclass(frozen=True, slots=True)
 class ReferenceSourceResolution:
     status: ReferenceSourceStatus
@@ -132,7 +109,6 @@ class DiscoveryAnalysis:
     selected_question_ids: tuple[str, ...] = ()
     suppressed_candidates: tuple[DiscoveryCandidate, ...] = ()
     candidates: tuple[DiscoveryCandidate, ...] = ()
-    decision_trace: ClarificationDecisionTrace | None = None
 
     @property
     def blocking_issues(self) -> tuple[DiscoveryIssue, ...]:

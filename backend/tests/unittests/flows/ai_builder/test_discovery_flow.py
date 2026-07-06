@@ -1534,9 +1534,7 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.issue_id == "post_processing_goal"
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
-        assert analysis.decision_trace is not None
-        assert analysis.decision_trace.selected_action == "ask"
-        assert analysis.decision_trace.selected_question_id == "post_processing_goal"
+        assert analysis.selected_question_ids[0] == "post_processing_goal"
 
     @pytest.mark.asyncio
     async def test_model_owned_goal_does_not_suppress_vague_outcome_question(
@@ -1591,10 +1589,7 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.issue_id == "post_processing_goal"
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
-        assert analysis.decision_trace is not None
-        assert analysis.decision_trace.selected_action == "ask"
-        assert analysis.decision_trace.selected_question_id == "post_processing_goal"
-        assert analysis.decision_trace.selected_reason == "model_slot_not_sufficient"
+        assert analysis.selected_question_ids[0] == "post_processing_goal"
 
     @pytest.mark.asyncio
     async def test_vague_transcription_asks_output_or_outcome_before_confirmation(
@@ -1643,9 +1638,7 @@ class TestExtendedClarificationHints:
             "terminal_output",
             "post_processing_goal",
         }
-        assert analysis.decision_trace is not None
-        assert analysis.decision_trace.selected_action == "ask"
-        assert analysis.decision_trace.selected_question_id in {
+        assert analysis.selected_question_ids[0] in {
             "terminal_output",
             "post_processing_goal",
         }
@@ -1690,10 +1683,6 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.issue_id == "structured_io_contract"
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "structured_io_contract"
-        assert (
-            analysis.decision_trace.selected_reason
-            == "missing_structured_payload_contract"
-        )
         assert "input-JSON" in analysis.next_issue.suggestion.question
 
     def test_exact_json_schema_prompt_skips_human_document_purpose_question(
@@ -2134,8 +2123,8 @@ class TestExtendedClarificationHints:
 
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "comparison_scope"
-        assert analysis.decision_trace is not None
-        assert analysis.decision_trace.selected_reason == "missing_reference_source"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "comparison_scope"
 
     def test_comparison_with_two_runtime_documents_does_not_ask_reference_source(
         self,

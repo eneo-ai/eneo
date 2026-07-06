@@ -68,9 +68,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
-    ClarificationAction,
-    ClarificationDecisionTrace,
-    ClarificationReason,
     DiscoveryAnalysis,
     DiscoveryCandidate,
     DiscoveryIssue,
@@ -128,7 +125,7 @@ from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     score_conversation_signals,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationResult
-from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.domain.flow import Flow
 
 DiscoveryIssueBuilder = Callable[
@@ -206,15 +203,6 @@ def analyze_discovery(
         selected_question_ids=tuple(selected_question_ids),
         suppressed_candidates=tuple(suppressed_candidates),
         candidates=tuple(candidates),
-        decision_trace=_build_decision_trace(
-            mvs_met=mvs_met,
-            selected_issues=selected_issues,
-            selected_question_ids=selected_question_ids,
-            candidates=candidates,
-            suppressed_candidates=suppressed_candidates,
-            assumptions=assumptions,
-            profile=profile,
-        ),
     )
 
 
@@ -615,115 +603,6 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_final_pdf_type_issue,
     _build_runtime_metadata_fields_issue,
 )
-
-
-def _build_decision_trace(
-    *,
-    mvs_met: bool,
-    selected_issues: list[DiscoveryIssue],
-    selected_question_ids: list[str],
-    candidates: list[DiscoveryCandidate],
-    suppressed_candidates: list[DiscoveryCandidate],
-    assumptions: list[str],
-    profile: DiscoveryProfile,
-) -> ClarificationDecisionTrace:
-    selected_issue = selected_issues[0] if selected_issues else None
-    selected_candidate = (
-        _candidate_for_issue(candidates, selected_issue.issue_id)
-        if selected_issue is not None
-        else None
-    )
-    selected_question_id = (
-        selected_question_ids[0]
-        if selected_question_ids
-        else (
-            selected_issue.suggestion.question_id
-            if selected_issue is not None and selected_issue.suggestion is not None
-            else None
-        )
-    )
-    return ClarificationDecisionTrace(
-        mvs_met=mvs_met,
-        selected_action=_trace_action(
-            mvs_met=mvs_met,
-            selected_issue=selected_issue,
-            assumptions=assumptions,
-        ),
-        selected_question_id=selected_question_id,
-        selected_slot=selected_question_id,
-        selected_reason=_trace_reason(
-            selected_issue=selected_issue,
-            profile=profile,
-        ),
-        selected_candidate=selected_candidate,
-        candidates=tuple(candidates),
-        suppressed_candidates=tuple(suppressed_candidates),
-        assumptions=tuple(dict.fromkeys(assumptions)),
-    )
-
-
-def _candidate_for_issue(
-    candidates: list[DiscoveryCandidate],
-    issue_id: str,
-) -> DiscoveryCandidate | None:
-    for candidate in candidates:
-        if candidate.issue_id == issue_id:
-            return candidate
-    return None
-
-
-def _trace_action(
-    *,
-    mvs_met: bool,
-    selected_issue: DiscoveryIssue | None,
-    assumptions: list[str],
-) -> ClarificationAction:
-    if selected_issue is not None:
-        return "ask"
-    if mvs_met:
-        return "confirm"
-    if assumptions:
-        return "assume"
-    return "ask"
-
-
-def _trace_reason(
-    *,
-    selected_issue: DiscoveryIssue | None,
-    profile: DiscoveryProfile,
-) -> ClarificationReason:
-    if selected_issue is None:
-        return (
-            "all_blockers_resolved" if profile.text else "build_intent_and_sufficient"
-        )
-    if selected_issue.issue_id == "post_processing_goal" and _model_owned_slot(
-        profile, "post_processing_goal"
-    ):
-        return "model_slot_not_sufficient"
-    if selected_issue.issue_id == "post_processing_goal":
-        return "missing_outcome_requirement"
-    if selected_issue.issue_id == "structured_io_contract":
-        return "missing_structured_payload_contract"
-    if selected_issue.issue_id == "comparison_scope":
-        return "missing_reference_source"
-    if selected_issue.issue_id in {
-        "primary_runtime_input",
-        "flow_input_architecture",
-        "terminal_output",
-        "docx_output_mode",
-        "pdf_generation_mode",
-    }:
-        return "missing_architecture_requirement"
-    return "missing_architecture_requirement"
-
-
-def _model_owned_slot(profile: DiscoveryProfile, slot_name: str) -> bool:
-    slot = _resolved_slot(profile, slot_name)
-    return slot is not None and slot.source == "model"
-
-
-def _resolved_slot(profile: DiscoveryProfile, slot_name: str) -> ResolvedSlot | None:
-    return profile.resolved_slot(slot_name)
 
 
 def _dedupe_issues(issues: list[DiscoveryIssue]) -> list[DiscoveryIssue]:
