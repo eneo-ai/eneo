@@ -153,11 +153,6 @@ class CreateCompileContext:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeInputFieldHintSource:
-    aggregated_conversation_text: str
-
-
-@dataclass(frozen=True, slots=True)
 class SemanticStepRewrite:
     steps: list[SemanticStepIntent]
     original_to_current_step: dict[int, int]
@@ -959,7 +954,7 @@ def create_compile_context_from_planning_state(
     planning_state: PlanningState | None,
     *,
     ui_language: str | None = None,
-    runtime_input_hint_source: RuntimeInputFieldHintSource | None = None,
+    runtime_input_hint_text: str | None = None,
 ) -> CreateCompileContext | None:
     runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
     metadata_disables_declared_input_fields = (
@@ -969,7 +964,7 @@ def create_compile_context_from_planning_state(
     )
     runtime_input_field_hints = _runtime_input_field_hints_from_source(
         runtime_metadata_state=runtime_metadata_state,
-        runtime_input_hint_source=runtime_input_hint_source,
+        runtime_input_hint_text=runtime_input_hint_text,
     )
     if planning_state is None:
         if ui_language is None and not runtime_input_field_hints:
@@ -1076,11 +1071,11 @@ def _runtime_metadata_disables_declared_input_fields_from_planning_state(
 def _runtime_input_field_hints_from_source(
     *,
     runtime_metadata_state: RuntimeMetadataState | None,
-    runtime_input_hint_source: RuntimeInputFieldHintSource | None,
+    runtime_input_hint_text: str | None,
 ) -> tuple[RuntimeInputFieldHint, ...]:
-    if runtime_input_hint_source is None:
+    if runtime_input_hint_text is None:
         return ()
-    source_text = runtime_input_hint_source.aggregated_conversation_text.strip()
+    source_text = runtime_input_hint_text.strip()
     if not source_text:
         return ()
     if not runtime_metadata_allows_input_fields(runtime_metadata_state):

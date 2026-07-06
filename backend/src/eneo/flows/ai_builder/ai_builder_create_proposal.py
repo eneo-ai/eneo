@@ -9,7 +9,6 @@ from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    RuntimeInputFieldHintSource,
     compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
 )
@@ -91,11 +90,7 @@ async def process_create_intent_arguments(
         compile_context = create_compile_context_from_planning_state(
             planning_state,
             ui_language=resolve_ui_language(conversation),
-            runtime_input_hint_source=(
-                RuntimeInputFieldHintSource(aggregated_conversation_text=aggregate_text)
-                if aggregate_text
-                else None
-            ),
+            runtime_input_hint_text=aggregate_text or None,
         )
         spec = compile_create_intent_to_spec(
             intent,

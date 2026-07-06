@@ -15,7 +15,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
-    RuntimeInputFieldHintSource,
     compile_create_intent_to_spec,
     compile_create_steps_to_spec,
     create_compile_context_from_planning_state,
@@ -4710,10 +4709,8 @@ def test_outline_compile_context_extracts_runtime_hints_when_state_allows_source
 
     context = create_compile_context_from_planning_state(
         state,
-        runtime_input_hint_source=RuntimeInputFieldHintSource(
-            aggregated_conversation_text=(
-                "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
-            )
+        runtime_input_hint_text=(
+            "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
         ),
     )
 
@@ -4741,10 +4738,8 @@ def test_outline_compile_context_suppresses_runtime_hints_when_state_forbids_sou
 
     context = create_compile_context_from_planning_state(
         state,
-        runtime_input_hint_source=RuntimeInputFieldHintSource(
-            aggregated_conversation_text=(
-                "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
-            )
+        runtime_input_hint_text=(
+            "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
         ),
     )
 
@@ -4805,9 +4800,7 @@ def test_outline_compile_context_does_not_extract_runtime_hints_from_empty_sourc
 
     context = create_compile_context_from_planning_state(
         state,
-        runtime_input_hint_source=RuntimeInputFieldHintSource(
-            aggregated_conversation_text=""
-        ),
+        runtime_input_hint_text="",
     )
 
     assert context is not None
