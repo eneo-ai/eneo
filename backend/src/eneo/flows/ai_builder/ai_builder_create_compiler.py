@@ -46,6 +46,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
     SemanticStepIntent,
 )
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    derive_result_contract,
+)
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
     RuntimeMetadataState,
@@ -139,6 +142,7 @@ class CreateCompileContext:
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
     terminal_output_schema: JsonObject | None = None
+    source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
@@ -306,6 +310,9 @@ def compile_create_intent_to_spec(
         document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
         aggregation_intent=aggregation_intent,
         terminal_output_schema=terminal_output_schema,
+        source_reader_required_fields=(
+            context.source_reader_required_fields if context is not None else ()
+        ),
         ui_language=context.ui_language if context is not None else None,
     )
 
@@ -429,12 +436,18 @@ def compile_create_steps_to_spec(
     document_body_writer_step_indexes: tuple[int, ...] = (),
     aggregation_intent: AggregationIntent = "linear",
     terminal_output_schema: JsonObject | None = None,
+    source_reader_required_fields: tuple[SourceCaptureField, ...] = (),
     ui_language: str | None = None,
 ) -> FlowDraftSpecCore:
     form_fields = list(form_fields or [])
     steps = _clear_terminal_schema_output_fields(
         steps=steps,
         terminal_output_schema=terminal_output_schema,
+    )
+    steps = _complete_source_reader_contracts(
+        steps=steps,
+        terminal_output_schema=terminal_output_schema,
+        required_fields=source_reader_required_fields,
     )
     normalized_steps = normalize_create_step_mechanics(
         steps=steps,
@@ -483,6 +496,187 @@ def compile_create_steps_to_spec(
         ),
     )
     return compiled
+
+
+def _complete_source_reader_contracts(
+    *,
+    steps: list[NewStepDraft],
+    terminal_output_schema: JsonObject | None,
+    required_fields: tuple[SourceCaptureField, ...],
+) -> list[NewStepDraft]:
+    source_reader_indexes = tuple(
+        index for index, step in enumerate(steps) if _is_source_json_contract_step(step)
+    )
+    if not source_reader_indexes:
+        return steps
+
+    fields_by_index: dict[int, list[SourceCaptureField]] = {}
+    terminal_fields = (
+        _capture_fields_from_terminal_schema(terminal_output_schema)
+        if terminal_output_schema is not None
+        else ()
+    )
+    global_fields = _dedupe_capture_fields([*required_fields, *terminal_fields])
+    missing_global_fields = [
+        field
+        for field in global_fields
+        if not any(
+            _structured_fields_have_leaf(steps[index].output_fields or [], field.name)
+            for index in source_reader_indexes
+        )
+    ]
+    if missing_global_fields:
+        if len(source_reader_indexes) != 1:
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail=(
+                    "Source-reader contract completion found required fields "
+                    "but could not attribute them to exactly one reader."
+                ),
+                log_context={
+                    "source_reader_count": len(source_reader_indexes),
+                    "required_fields": ",".join(
+                        field.name for field in missing_global_fields
+                    ),
+                },
+            )
+        fields_by_index.setdefault(source_reader_indexes[0], []).extend(
+            missing_global_fields
+        )
+
+    for step in steps:
+        for ref in step.uses_previous_fields:
+            source_index = ref.from_step - 1
+            if source_index < 0 or source_index >= len(steps):
+                continue
+            source_step = steps[source_index]
+            if not _is_source_json_contract_step(source_step):
+                continue
+            field_name = _leaf_field_name(ref.field_path)
+            if not field_name or _structured_fields_have_leaf(
+                source_step.output_fields or [], field_name
+            ):
+                continue
+            fields_by_index.setdefault(source_index, []).append(
+                SourceCaptureField(name=field_name, description=ref.label)
+            )
+
+    if not fields_by_index:
+        return steps
+
+    updated_steps = list(steps)
+    for index, fields in fields_by_index.items():
+        step = steps[index]
+        output_fields = step.output_fields or []
+        completed_fields = _add_missing_source_reader_fields(
+            output_fields,
+            required_fields=_dedupe_capture_fields(fields),
+        )
+        if completed_fields == output_fields:
+            continue
+        updated_steps[index] = step.model_copy(
+            update={"output_fields": completed_fields}
+        )
+        logger.info(
+            "ai_builder_source_reader_contract_completed",
+            extra={
+                "step_index": index + 1,
+                "field_names": [field.name for field in fields],
+            },
+        )
+
+    return updated_steps
+
+
+def _add_missing_source_reader_fields(
+    fields: list[StructuredFieldDraft],
+    *,
+    required_fields: tuple[SourceCaptureField, ...],
+) -> list[StructuredFieldDraft]:
+    missing_fields = [
+        field
+        for field in required_fields
+        if not _structured_fields_have_leaf(fields, field.name)
+    ]
+    if not missing_fields:
+        return fields
+
+    if len(fields) == 1:
+        field = fields[0]
+        if field.field_type == "array" and field.item_fields:
+            return [
+                field.model_copy(
+                    update={
+                        "item_fields": _append_structured_leaf_fields(
+                            field.item_fields,
+                            missing_fields=missing_fields,
+                        )
+                    }
+                )
+            ]
+        if field.field_type == "object" and field.fields:
+            return [
+                field.model_copy(
+                    update={
+                        "fields": _append_structured_leaf_fields(
+                            field.fields,
+                            missing_fields=missing_fields,
+                        )
+                    }
+                )
+            ]
+
+    return _append_structured_leaf_fields(fields, missing_fields=missing_fields)
+
+
+def _append_structured_leaf_fields(
+    fields: list[StructuredFieldDraft],
+    *,
+    missing_fields: list[SourceCaptureField],
+) -> list[StructuredFieldDraft]:
+    return [
+        *fields,
+        *(
+            StructuredFieldDraft(
+                name=field.name,
+                field_type="string",
+                description=field.description
+                or f"Source-derived value for {field.name}.",
+            )
+            for field in missing_fields
+        ),
+    ]
+
+
+def _structured_fields_have_leaf(
+    fields: list[StructuredFieldDraft],
+    required_name: str,
+) -> bool:
+    return any(
+        _field_name_matches_required_leaf(field.name, required_name)
+        for field in _iter_output_capture_fields(fields)
+    )
+
+
+def _field_name_matches_required_leaf(field_name: str, required_name: str) -> bool:
+    field_key = _field_name_match_key(field_name)
+    required_key = _field_name_match_key(required_name)
+    return field_key == required_key or field_key.endswith(f"_{required_key}")
+
+
+def _field_name_match_key(value: str) -> str:
+    return value.strip().casefold().replace("-", "_").replace(" ", "_")
+
+
+def _leaf_field_name(field_path: str) -> str:
+    return next(
+        (
+            segment.strip()
+            for segment in reversed(field_path.split("."))
+            if segment.strip() and not segment.strip().isdigit()
+        ),
+        "",
+    )
 
 
 def _drop_source_contract_shadow_form_fields(
@@ -814,7 +1008,44 @@ def create_compile_context_from_planning_state(
             planning_state,
             final_output_type=final_output_type,
         ),
+        source_reader_required_fields=_source_reader_required_fields_from_planning_state(
+            planning_state,
+            ui_language=ui_language,
+        ),
     )
+
+
+def _source_reader_required_fields_from_planning_state(
+    planning_state: PlanningState,
+    *,
+    ui_language: str | None,
+) -> tuple[SourceCaptureField, ...]:
+    contract = derive_result_contract(planning_state)
+    if contract is None:
+        return ()
+    if (
+        contract.post_processing_goal != "summarize_or_overview"
+        and "summary" not in contract.secondary_obligations
+    ):
+        return ()
+    return (
+        SourceCaptureField(
+            name=_summary_source_reader_field_name(ui_language),
+            description=_summary_source_reader_field_description(ui_language),
+        ),
+    )
+
+
+def _summary_source_reader_field_name(ui_language: str | None) -> str:
+    if ui_language is None or ui_language.casefold().startswith("sv"):
+        return "sammanfattning"
+    return "summary"
+
+
+def _summary_source_reader_field_description(ui_language: str | None) -> str:
+    if ui_language is None or ui_language.casefold().startswith("sv"):
+        return "Kort sammanfattning grundad i källmaterialet."
+    return "Concise summary grounded in the source material."
 
 
 def _runtime_metadata_state_from_planning_state(

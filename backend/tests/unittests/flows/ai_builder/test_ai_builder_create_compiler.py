@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommitDraft,
     OutputSchemaEvidence,
+    PlanningSignal,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -518,7 +519,159 @@ def test_compile_create_intent_applies_exact_terminal_output_schema_evidence() -
         )
 
 
-def test_compile_create_steps_applies_schema_only_to_terminal_json_step() -> None:
+def test_compile_create_intent_completes_source_reader_from_summary_obligation() -> (
+    None
+):
+    state = _committed_architecture_state(
+        input_type="document",
+        output_type="pdf",
+        output_mode="pass_through",
+        chosen_patterns=["document_to_pdf_report"],
+        required_capabilities=["input_document", "output_mode_pass_through"],
+    )
+    state.signals.append(
+        PlanningSignal(
+            question_id="result_obligation",
+            value="summary",
+            confidence="high",
+            source="model",
+            provenance=["model:result_obligation:test"],
+        )
+    )
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentrapport",
+            "plan_rationale": "Läs dokumentet och skapa PDF.",
+            "steps": [
+                {
+                    "name": "Läs dokumentet",
+                    "instructions": "Extrahera dokumentfakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "dokument",
+                            "field_type": "array",
+                            "description": "Dokument i underlaget.",
+                            "item_fields": [
+                                {
+                                    "name": "titel",
+                                    "field_type": "string",
+                                    "description": "Titel.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv PDF-rapporten.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=create_compile_context_from_planning_state(state, ui_language="sv"),
+    )
+
+    reader_contract = compiled.steps[0].output_contract
+    assert reader_contract is not None
+    assert (
+        reader_contract["properties"]["dokument"]["items"]["properties"][
+            "sammanfattning"
+        ]["type"]
+        == "string"
+    )
+
+
+def test_compile_create_steps_completes_source_reader_from_terminal_schema() -> None:
+    terminal_schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "status": {"type": "string"},
+        },
+        "required": ["summary"],
+    }
+
+    compiled = _compile_create_steps(
+        flow_name="Structured terminal",
+        terminal_output_schema=terminal_schema,
+        steps=[
+            NewStepDraft(
+                name="Read source",
+                instructions="Extract source facts.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                output_fields=[_field("title", "string")],
+            ),
+            NewStepDraft(
+                name="Return structure",
+                instructions="Return the final JSON.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+            ),
+        ],
+    )
+
+    reader_contract = compiled.steps[0].output_contract
+    assert reader_contract is not None
+    assert set(reader_contract["properties"]) == {"title", "summary", "status"}
+    assert compiled.steps[-1].output_contract == terminal_schema
+
+
+def test_compile_create_steps_completes_source_reader_from_downstream_field_ref() -> (
+    None
+):
+    compiled = _compile_create_steps(
+        flow_name="Referenced field",
+        steps=[
+            NewStepDraft(
+                name="Read source",
+                instructions="Extract source facts.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                output_fields=[_field("title", "string")],
+            ),
+            NewStepDraft(
+                name="Write body",
+                instructions="Write from the selected field.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_fields=[
+                    {
+                        "from_step": 1,
+                        "field_path": "summary",
+                        "label": "Summary",
+                    }
+                ],
+            ),
+        ],
+    )
+
+    reader_contract = compiled.steps[0].output_contract
+    assert reader_contract is not None
+    assert set(reader_contract["properties"]) == {"title", "summary"}
+    assert compiled.steps[1].input_bindings == {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "summary",
+                "label": "Summary",
+            }
+        ]
+    }
+
+
+def test_compile_create_steps_completes_reader_but_applies_schema_to_terminal_json() -> (
+    None
+):
     terminal_schema: dict[str, object] = {
         "type": "object",
         "properties": {"final_status": {"type": "string", "enum": ["done"]}},
@@ -549,7 +702,7 @@ def test_compile_create_steps_applies_schema_only_to_terminal_json_step() -> Non
 
     first_step, terminal_step = compiled.steps
     assert first_step.output_contract is not None
-    assert set(first_step.output_contract["properties"]) == {"facts"}
+    assert set(first_step.output_contract["properties"]) == {"facts", "final_status"}
     assert terminal_step.input_contract == first_step.output_contract
     assert terminal_step.output_contract == terminal_schema
     assert "stale_final_field" not in terminal_step.assistant_spec.instructions
