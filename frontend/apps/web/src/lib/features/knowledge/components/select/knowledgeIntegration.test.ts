@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { IntegrationKnowledge } from "@intric/intric-js";
+import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import {
   getIntegrationKnowledgeOptions,
   getSelectedIntegrationDisplay,

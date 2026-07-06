@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec
+from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 
 
 # =============================================================================
@@ -246,12 +246,12 @@ class TestEmbeddingSemaphoreBehavior:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=semaphore,
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
@@ -304,12 +304,12 @@ class TestEmbeddingSemaphoreBehavior:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=semaphore,
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
@@ -385,12 +385,12 @@ class TestEmbeddingSemaphoreBehavior:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=semaphore,
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,
@@ -482,12 +482,12 @@ class TestMemoryCapsEnforcement:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
@@ -540,12 +540,12 @@ class TestPhase2SavepointBehavior:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
@@ -604,12 +604,12 @@ class TestPhase2SavepointBehavior:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
@@ -689,12 +689,12 @@ class TestSuccessfulUrlsTracking:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             success_count, failed_count, successful_urls, _ = await persist_batch(
                 page_buffer=page_buffer,
@@ -720,7 +720,7 @@ class TestSuccessfulUrlsTracking:
         """
         INVARIANT: Empty page_buffer should return (0, 0, [], {}).
         """
-        from intric.worker.crawl_tasks import persist_batch
+        from eneo.worker.crawl_tasks import persist_batch
 
         result = await persist_batch(
             page_buffer=[],
@@ -738,8 +738,8 @@ class TestSuccessfulUrlsTracking:
         """
         INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
         """
-        from intric.worker.crawl_tasks import persist_batch
-        from intric.worker.crawl_context import FailureReason
+        from eneo.worker.crawl_tasks import persist_batch
+        from eneo.worker.crawl_context import FailureReason
 
         page_buffer = [
             {"url": "https://example.com/page1", "content": "Content 1"},
@@ -770,7 +770,7 @@ class TestSuccessfulUrlsTracking:
 
         This is critical: rollback means the data was NOT persisted.
         """
-        from intric.worker.crawl_context import FailureReason
+        from eneo.worker.crawl_context import FailureReason
 
         page_buffer = [
             {"url": "https://example.com/will-rollback", "content": "Content"}
@@ -795,12 +795,12 @@ class TestSuccessfulUrlsTracking:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             success, failed, urls, failures_by_reason = await persist_batch(
                 page_buffer=page_buffer,
@@ -877,10 +877,10 @@ class TestPhaseIsolation:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager") as mock_sm,
+            patch("eneo.database.database.sessionmanager") as mock_sm,
         ):
             # CRITICAL: Use MagicMock for session (not AsyncMock) - see create_mock_session() docstring
             mock_session = MagicMock()
@@ -905,7 +905,7 @@ class TestPhaseIsolation:
             embedding_session_mock.close = AsyncMock()
             mock_sm.create_session = MagicMock(return_value=embedding_session_mock)
 
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             await persist_batch(
                 page_buffer=page_buffer,
@@ -979,12 +979,12 @@ class TestTransactionWallTimeGuard:
 
         with (
             patch(
-                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
                 return_value=asyncio.Semaphore(10),
             ),
-            patch("intric.database.database.sessionmanager", mock_sm),
+            patch("eneo.database.database.sessionmanager", mock_sm),
         ):
-            from intric.worker.crawl_tasks import persist_batch
+            from eneo.worker.crawl_tasks import persist_batch
 
             success, failed, urls, _ = await persist_batch(
                 page_buffer=page_buffer,

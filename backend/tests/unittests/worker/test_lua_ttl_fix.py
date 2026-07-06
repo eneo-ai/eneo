@@ -258,7 +258,7 @@ class TestLuaScriptConsistency:
     @pytest.mark.asyncio
     async def test_centralized_scripts_exist(self):
         """Verify LuaScripts contains all required centralized scripts."""
-        from intric.worker.redis.lua_scripts import LuaScripts
+        from eneo.worker.redis.lua_scripts import LuaScripts
 
         # All scripts should be defined as class attributes
         assert hasattr(LuaScripts, "ACQUIRE_SLOT"), "Missing ACQUIRE_SLOT script"
@@ -283,7 +283,7 @@ class TestLuaScriptConsistency:
     @pytest.mark.asyncio
     async def test_acquire_script_has_ttl_fix(self):
         """Verify centralized acquire script has the TTL fix (only refresh on success)."""
-        from intric.worker.redis.lua_scripts import LuaScripts
+        from eneo.worker.redis.lua_scripts import LuaScripts
 
         script = LuaScripts.ACQUIRE_SLOT
 

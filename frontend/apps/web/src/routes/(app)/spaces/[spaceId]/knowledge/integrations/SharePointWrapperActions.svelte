@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog, Dropdown, Input } from "@intric/ui";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
   import { untrack } from "svelte";
 
   interface Props {
@@ -19,7 +19,7 @@
 
   let { wrapperId, wrapperName, itemCount, canEdit, canDelete }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     refreshCurrentSpace,
     state: { currentSpace }
@@ -38,7 +38,7 @@
 
     isRenaming = true;
     try {
-      await intric.integrations.knowledge.renameWrapper({
+      await eneo.integrations.knowledge.renameWrapper({
         space: $currentSpace,
         wrapper_id: wrapperId,
         name: nextName
@@ -56,7 +56,7 @@
   async function deleteWrapper() {
     isDeleting = true;
     try {
-      await intric.integrations.knowledge.deleteWrapper({
+      await eneo.integrations.knowledge.deleteWrapper({
         space: $currentSpace,
         wrapper_id: wrapperId
       });

@@ -7,13 +7,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.api_key_resolver import (
+from eneo.authentication.api_key_resolver import (
     ApiKeyAuthResolver,
     ApiKeyValidationError,
 )
 from sqlalchemy.exc import IntegrityError
 
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
     ApiKeyPermission,
     ApiKeyScopeType,

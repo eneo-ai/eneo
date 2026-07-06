@@ -2,8 +2,8 @@ import { dev } from "$app/environment";
 import { getRequestEvent } from "$app/server";
 import { type RequestEvent } from "@sveltejs/kit";
 
-export const IntricIdTokenCookie = "auth";
-export const IntricAccessTokenCookie = "acc";
+export const EneoIdTokenCookie = "auth";
+export const EneoAccessTokenCookie = "acc";
 
 export const setFrontendAuthCookie = async (tokens: {
   id_token: string;
@@ -30,7 +30,7 @@ export const setFrontendAuthCookie = async (tokens: {
   // Calculate maxAge with 10-minute buffer (expires before server token)
   const maxAge = Math.max(0, expSec - nowSec - 600);
 
-  cookies.set(IntricIdTokenCookie, tokens.id_token, {
+  cookies.set(EneoIdTokenCookie, tokens.id_token, {
     path: "/",
     httpOnly: true,
     maxAge,
@@ -39,7 +39,7 @@ export const setFrontendAuthCookie = async (tokens: {
   });
 
   if (tokens.access_token) {
-    cookies.set(IntricAccessTokenCookie, tokens.access_token, {
+    cookies.set(EneoAccessTokenCookie, tokens.access_token, {
       path: "/",
       httpOnly: true,
       maxAge,
@@ -58,8 +58,8 @@ export function authenticateUser(event: RequestEvent): {
   access_token?: string;
 } {
   const { cookies } = event;
-  const id_token = cookies.get(IntricIdTokenCookie);
-  const access_token = cookies.get(IntricAccessTokenCookie);
+  const id_token = cookies.get(EneoIdTokenCookie);
+  const access_token = cookies.get(EneoAccessTokenCookie);
 
   return {
     id_token,

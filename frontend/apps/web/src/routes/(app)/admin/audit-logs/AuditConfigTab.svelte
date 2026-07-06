@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { Button, Input } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import * as m from "$lib/paraglide/messages";
-  import type { components } from "@intric/intric-js";
+  import type { components } from "@eneo/eneo-js";
   import { getActionLabel, getActionDescription } from "./audit-action-labels";
   import { getCategoryLabel, getCategoryDescription } from "./audit-category-labels";
   import { ChevronRight, Search, Check, X } from "lucide-svelte";
@@ -10,7 +10,7 @@
   import { slide, fly } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Display text is resolved from translation keys, not the API payload.
   type CategoryConfigItem = components["schemas"]["CategoryConfig"];
@@ -158,8 +158,8 @@
 
       // Load both category and action config in parallel
       const [catConfig, actConfig] = await Promise.all([
-        intric.audit.getConfig(),
-        intric.audit.getActionConfig()
+        eneo.audit.getConfig(),
+        eneo.audit.getActionConfig()
       ]);
 
       categoryConfig = catConfig.categories;
@@ -200,10 +200,10 @@
       // Update both in parallel if there are changes
       const updates = [];
       if (JSON.stringify(categoryConfig) !== JSON.stringify(originalCategoryConfig)) {
-        updates.push(intric.audit.updateConfig({ updates: categoryUpdates }));
+        updates.push(eneo.audit.updateConfig({ updates: categoryUpdates }));
       }
       if (actionUpdates.length > 0) {
-        updates.push(intric.audit.updateActionConfig({ updates: actionUpdates }));
+        updates.push(eneo.audit.updateActionConfig({ updates: actionUpdates }));
       }
 
       if (updates.length > 0) {

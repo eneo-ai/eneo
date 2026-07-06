@@ -24,15 +24,15 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from intric.main.observability import (
+from eneo.main.observability import (
     _aiohttp_request_hook,
     _httpx_request_hook,
     _server_request_hook,
     redact_url_query,
 )
-from intric.main.request_context import clear_request_context
-from intric.server.middleware.request_context import RequestContextMiddleware
-from intric.server.middleware.trace_id import (
+from eneo.main.request_context import clear_request_context
+from eneo.server.middleware.request_context import RequestContextMiddleware
+from eneo.server.middleware.trace_id import (
     TraceIdResponseMiddleware,
     current_trace_id,
 )
@@ -99,7 +99,7 @@ _FAKE_TRACE = "aabbccdd11223344aabbccdd11223344"
 
 def test_x_trace_id_set_in_response(monkeypatch):
     monkeypatch.setattr(
-        "intric.server.middleware.trace_id.current_trace_id",
+        "eneo.server.middleware.trace_id.current_trace_id",
         lambda: _FAKE_TRACE,
     )
     app = _build_app()
@@ -112,7 +112,7 @@ def test_x_trace_id_set_in_response(monkeypatch):
 
 def test_x_correlation_id_mirrors_trace_id(monkeypatch):
     monkeypatch.setattr(
-        "intric.server.middleware.trace_id.current_trace_id",
+        "eneo.server.middleware.trace_id.current_trace_id",
         lambda: _FAKE_TRACE,
     )
     app = _build_app()

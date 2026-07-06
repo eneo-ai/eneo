@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { Intric } from "@intric/intric-js";
+  import type { Eneo } from "@eneo/eneo-js";
   import dayjs from "dayjs";
 
   interface SharePointSubscription {
@@ -17,6 +17,10 @@
     created_at: string;
     is_expired: boolean;
     expires_in_hours: number;
+    consecutive_renewal_failures?: number;
+    last_renewal_failed_at?: string | null;
+    last_renewal_error?: string | null;
+    last_webhook_received_at?: string | null;
     owner_email?: string | null;
     owner_type: string;
   }
@@ -30,10 +34,10 @@
   }
 
   interface Props {
-    intric: Intric;
+    eneo: Eneo;
   }
 
-  const { intric }: Props = $props();
+  const { eneo }: Props = $props();
 
   let subscriptions = $state<SharePointSubscription[]>([]);
   let loading = $state(false);
@@ -44,7 +48,7 @@
   const loadSubscriptions = createAsyncState(async () => {
     loading = true;
     try {
-      const response = await intric.integrations.admin.sharepoint.listSubscriptions();
+      const response = await eneo.integrations.admin.sharepoint.listSubscriptions();
       // Backend returns array directly, not wrapped in object
       subscriptions = Array.isArray(response) ? response : [];
     } catch (error) {
@@ -66,7 +70,7 @@
     renewingAll = true;
     try {
       const result: SubscriptionRenewalResult =
-        await intric.integrations.admin.sharepoint.renewExpiredSubscriptions();
+        await eneo.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if ((result.recreated ?? 0) > 0 && (result.failed ?? 0) === 0) {
         toast.success(
@@ -101,7 +105,7 @@
     renewingSubscriptionIds = renewingSubscriptionIds; // Trigger reactivity
 
     try {
-      await intric.integrations.admin.sharepoint.recreateSubscription({ id: subscription.id });
+      await eneo.integrations.admin.sharepoint.recreateSubscription({ id: subscription.id });
       toast.success(m.sharepoint_subscription_renewed_success());
 
       // Reload subscriptions
@@ -137,10 +141,56 @@
     }
   }
 
+  function getRenewalFailureCount(subscription: SharePointSubscription): number {
+    return subscription.consecutive_renewal_failures ?? 0;
+  }
+
+  function hasRenewalFailures(subscription: SharePointSubscription): boolean {
+    return getRenewalFailureCount(subscription) > 0;
+  }
+
+  function getHealthBadgeClass(subscription: SharePointSubscription): string {
+    if (hasRenewalFailures(subscription)) {
+      return "bg-negative-dimmer text-negative-stronger";
+    } else if (!subscription.last_webhook_received_at) {
+      return "bg-warning-dimmer text-warning-stronger";
+    } else {
+      return "bg-positive-dimmer text-positive-stronger";
+    }
+  }
+
+  function getHealthLabel(subscription: SharePointSubscription): string {
+    if (hasRenewalFailures(subscription)) {
+      return m.sharepoint_subscription_health_failing({
+        count: getRenewalFailureCount(subscription)
+      });
+    } else if (!subscription.last_webhook_received_at) {
+      return m.sharepoint_subscription_health_waiting();
+    } else {
+      return m.sharepoint_subscription_health_ok();
+    }
+  }
+
+  function getHealthDetail(subscription: SharePointSubscription): string {
+    if (hasRenewalFailures(subscription)) {
+      return `${m.sharepoint_subscription_last_failure()}: ${formatOptionalDate(
+        subscription.last_renewal_failed_at
+      )}`;
+    }
+
+    return `${m.sharepoint_subscription_last_webhook()}: ${formatOptionalDate(
+      subscription.last_webhook_received_at
+    )}`;
+  }
+
   // Format date
   function formatDate(dateString: string): string {
     const d = dayjs(dateString);
     return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : dateString;
+  }
+
+  function formatOptionalDate(dateString?: string | null): string {
+    return dateString ? formatDate(dateString) : m.sharepoint_subscription_never();
   }
 
   // Format time duration
@@ -212,6 +262,12 @@
               scope="col"
               class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
             >
+              {m.sharepoint_subscription_health()}
+            </th>
+            <th
+              scope="col"
+              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
+            >
               {m.sharepoint_subscription_owner()}
             </th>
             <th
@@ -252,6 +308,31 @@
                   <span class="text-secondary text-xs">
                     ({formatTimeDuration(subscription.expires_in_hours)})
                   </span>
+                </div>
+              </td>
+              <td class="px-3 py-3">
+                <div class="flex max-w-[220px] flex-col gap-1">
+                  <span
+                    class="inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium {getHealthBadgeClass(
+                      subscription
+                    )}"
+                  >
+                    {getHealthLabel(subscription)}
+                  </span>
+                  <span
+                    class="text-secondary truncate text-xs"
+                    title={getHealthDetail(subscription)}
+                  >
+                    {getHealthDetail(subscription)}
+                  </span>
+                  {#if hasRenewalFailures(subscription) && subscription.last_renewal_error}
+                    <span
+                      class="text-negative-stronger truncate text-xs"
+                      title={subscription.last_renewal_error}
+                    >
+                      {subscription.last_renewal_error}
+                    </span>
+                  {/if}
                 </div>
               </td>
               <td class="px-3 py-3 whitespace-nowrap">

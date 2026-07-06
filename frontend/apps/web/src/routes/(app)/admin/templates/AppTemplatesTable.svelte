@@ -6,8 +6,8 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { components } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { components } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import TemplateActions from "./TemplateActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";

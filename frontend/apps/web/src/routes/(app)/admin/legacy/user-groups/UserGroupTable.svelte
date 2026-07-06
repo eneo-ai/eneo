@@ -5,11 +5,11 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import UserActions from "./UserGroupActions.svelte";
   import UserGroupMembersChips from "./UserGroupMembersChips.svelte";
   import { createRender } from "svelte-headless-table";
-  import type { UserGroup } from "@intric/intric-js";
+  import type { UserGroup } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   export let userGroups: UserGroup[];

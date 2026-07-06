@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { IconTrash } from "@intric/icons/trash";
-  import type { GroupChat } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { IconTrash } from "@eneo/icons/trash";
+  import type { GroupChat } from "@eneo/eneo-js";
+  import { Button } from "@eneo/ui";
   import GroupChatAssistantListAddDialog from "./GroupChatAssistantListAddDialog.svelte";
   import GroupChatAssistantListEditDialog from "./GroupChatAssistantListEditDialog.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -82,7 +82,7 @@
 ></GroupChatAssistantListAddDialog>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .item {
     @apply border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-2 border-b px-4;
   }

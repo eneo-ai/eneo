@@ -15,21 +15,21 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.assistants.api.assistant_models import (
+from eneo.assistants.api.assistant_models import (
     AskAssistant,
     AssistantResponse,
 )
-from intric.assistants.api.assistant_router import (
+from eneo.assistants.api.assistant_router import (
     ask_assistant,
     delete_assistant_session,
     get_assistant_session,
     get_assistant_sessions,
     leave_feedback,
 )
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.main.exceptions import UnauthorizedException
-from intric.sessions.session import SessionFeedback, SessionInDB
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.main.exceptions import UnauthorizedException
+from eneo.sessions.session import SessionFeedback, SessionInDB
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ class TestAskAssistant:
         # Mock assistant_protocol.to_response to avoid full response transformation
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
-            "intric.assistants.api.assistant_router.assistant_protocol.to_response",
+            "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
             mock_to_response,
         )
 
@@ -174,7 +174,7 @@ class TestAskAssistant:
         """Verify SESSION_STARTED is logged with correct action type and entity type."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
-            "intric.assistants.api.assistant_router.assistant_protocol.to_response",
+            "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
             mock_to_response,
         )
 
@@ -201,7 +201,7 @@ class TestAskAssistant:
         """Verify audit logging includes correct tenant_id and actor_id from user."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
-            "intric.assistants.api.assistant_router.assistant_protocol.to_response",
+            "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
             mock_to_response,
         )
 
@@ -225,12 +225,12 @@ class TestAskAssistant:
         """Verify file count is captured in audit metadata when files are provided."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
-            "intric.assistants.api.assistant_router.assistant_protocol.to_response",
+            "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
             mock_to_response,
         )
 
         # Create request with file (AskAssistant has max_length=1 by default)
-        from intric.main.models import ModelId
+        from eneo.main.models import ModelId
 
         file1 = ModelId(id=uuid.uuid4())
 
@@ -261,7 +261,7 @@ class TestAskAssistant:
         """Verify space_service is called to get space context when assistant has space_id."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
-            "intric.assistants.api.assistant_router.assistant_protocol.to_response",
+            "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
             mock_to_response,
         )
 
@@ -284,7 +284,7 @@ class TestAskAssistant:
         """Verify space_service exceptions don't break the endpoint."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
-            "intric.assistants.api.assistant_router.assistant_protocol.to_response",
+            "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
             mock_to_response,
         )
 

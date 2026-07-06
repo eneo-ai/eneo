@@ -10,8 +10,8 @@
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import SecurityClassificationCreateDialog from "./SecurityClassificationCreateDialog.svelte";
   import SecurityClassificationActions from "./SecurityClassificationActions.svelte";
-  import { IconLockClosed } from "@intric/icons/lock-closed";
-  import { IconLockOpen } from "@intric/icons/lock-open";
+  import { IconLockClosed } from "@eneo/icons/lock-closed";
+  import { IconLockOpen } from "@eneo/icons/lock-open";
   import { m } from "$lib/paraglide/messages";
 
   const security = getSecurityClassificationService();

@@ -2,10 +2,10 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { enhance } from "$app/forms";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
 
-  const MESSAGE_TYPE = "intric/integration-callback";
+  const MESSAGE_TYPE = "eneo/integration-callback";
   const SERVICE_ACCOUNT_STORAGE_KEY = "sharepoint_service_account_oauth";
 
   // Flow types
@@ -116,7 +116,7 @@
     sessionStorage.removeItem(SERVICE_ACCOUNT_STORAGE_KEY);
 
     // Complete OAuth flow via server action
-    // (This page is outside (app) layout, so Intric context is not available)
+    // (This page is outside (app) layout, so Eneo context is not available)
     // Store data for form submission
     serviceAccountFormData = {
       auth_code: code,

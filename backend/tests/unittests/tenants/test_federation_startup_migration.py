@@ -4,12 +4,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.settings.credential_resolver import CredentialResolver
-from intric.settings.encryption_service import EncryptionService
-from intric.tenants.federation_startup_migration import (
+from eneo.settings.credential_resolver import CredentialResolver
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.federation_startup_migration import (
     FederationStartupMigrationService,
 )
-from intric.tenants.tenant import TenantInDB
+from eneo.tenants.tenant import TenantInDB
 
 
 class MockSettings:
@@ -245,7 +245,7 @@ def test_credential_resolver_can_decrypt_migrated_federation_config():
 
 @pytest.mark.asyncio
 async def test_manual_runner_opens_explicit_transaction(monkeypatch):
-    import intric.tenants.federation_startup_migration as startup_migration
+    import eneo.tenants.federation_startup_migration as startup_migration
 
     fake_session = MagicMock()
 
@@ -289,7 +289,7 @@ async def test_manual_runner_opens_explicit_transaction(monkeypatch):
 async def test_manual_runner_skips_before_building_encryption_service(
     monkeypatch, settings
 ):
-    import intric.tenants.federation_startup_migration as startup_migration
+    import eneo.tenants.federation_startup_migration as startup_migration
 
     encryption_ctor = MagicMock(
         side_effect=AssertionError("EncryptionService should not be constructed")

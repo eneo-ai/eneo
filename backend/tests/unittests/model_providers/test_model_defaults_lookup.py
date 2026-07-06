@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.model_providers.domain.model_defaults_lookup import (
+from eneo.model_providers.domain.model_defaults_lookup import (
     is_ambiguous,
     resolve_model_defaults,
 )

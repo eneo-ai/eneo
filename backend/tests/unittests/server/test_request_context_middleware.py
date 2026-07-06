@@ -8,12 +8,12 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from intric.main.config import get_settings
-from intric.main.request_context import (
+from eneo.main.config import get_settings
+from eneo.main.request_context import (
     clear_request_context,
     get_request_context,
 )
-from intric.server.middleware.request_context import RequestContextMiddleware
+from eneo.server.middleware.request_context import RequestContextMiddleware
 
 
 @pytest.fixture(autouse=True)
@@ -169,7 +169,7 @@ def test_resolve_client_ip_invoked_with_settings(monkeypatch):
         return "1.2.3.4"
 
     monkeypatch.setattr(
-        "intric.server.middleware.request_context.resolve_client_ip",
+        "eneo.server.middleware.request_context.resolve_client_ip",
         fake_resolve,
     )
 
@@ -195,7 +195,7 @@ def test_dispatch_calls_set_request_context(monkeypatch):
         return values
 
     monkeypatch.setattr(
-        "intric.server.middleware.request_context.set_request_context", fake_set
+        "eneo.server.middleware.request_context.set_request_context", fake_set
     )
 
     captured: dict[str, dict] = {}

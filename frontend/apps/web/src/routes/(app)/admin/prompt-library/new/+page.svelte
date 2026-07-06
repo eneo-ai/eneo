@@ -9,13 +9,13 @@
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
   import PromptLibraryForm from "$lib/features/prompt-library/components/PromptLibraryForm.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   async function create(payload: { name: string; description: string | null; text: string }) {
-    await intric.promptLibrary.create(payload);
+    await eneo.promptLibrary.create(payload);
     await invalidate("admin:prompt-library");
     await goto(resolve("/admin/prompt-library"));
   }

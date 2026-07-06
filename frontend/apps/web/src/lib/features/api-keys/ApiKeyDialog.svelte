@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ApiKeyScopeType, ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyScopeType, ApiKeyV2 } from "@eneo/eneo-js";
   import CreateApiKeyDialog from "./CreateApiKeyDialog.svelte";
 
   type DialogMode = "create" | "edit" | "view";

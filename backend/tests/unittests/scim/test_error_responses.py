@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from intric.scim.app import scim_app
-from intric.scim.auth import require_scim_auth
-from intric.scim.deps import get_scim_user_service
-from intric.scim.services.user_service import ScimUserService
-from intric.server.main import app
+from eneo.scim.app import scim_app
+from eneo.scim.auth import require_scim_auth
+from eneo.scim.deps import get_scim_user_service
+from eneo.scim.services.user_service import ScimUserService
+from eneo.server.main import app
 from tests.unittests.scim.conftest import _check_test_token
 
 TEST_TOKEN = "test-scim-token"
@@ -24,7 +24,8 @@ async def client() -> AsyncClient:
         spec=ScimUserService
     )
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
     ) as c:
         yield c
     scim_app.dependency_overrides.clear()

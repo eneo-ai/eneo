@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from intric.main.container.container import Container
+from eneo.main.container.container import Container
 
 
 # =============================================================================
@@ -48,7 +48,7 @@ class TestContainerSessionScope:
 
     async def test_session_scope_yields_session(self, test_settings):
         """session_scope should yield a valid AsyncSession."""
-        from intric.database.database import sessionmanager, AsyncSession
+        from eneo.database.database import sessionmanager, AsyncSession
 
         # Initialize sessionmanager with test database
         if not sessionmanager._engine:
@@ -70,7 +70,7 @@ class TestContainerSessionScope:
         is visible in a subsequent session. Uses a real table (tenants) with
         a safe SELECT to avoid TEMP table cross-session issues.
         """
-        from intric.database.database import sessionmanager
+        from eneo.database.database import sessionmanager
 
         if not sessionmanager._engine:
             sessionmanager.init(test_settings.database_url)
@@ -98,7 +98,7 @@ class TestContainerSessionScope:
         We verify rollback by checking that the session_scope context manager
         properly handles exceptions and doesn't leave the session in a bad state.
         """
-        from intric.database.database import sessionmanager
+        from eneo.database.database import sessionmanager
 
         if not sessionmanager._engine:
             sessionmanager.init(test_settings.database_url)
@@ -138,7 +138,7 @@ class TestContainerSessionScope:
         )
 
         # Patch sessionmanager to use our tiny engine
-        from intric.database.database import sessionmanager
+        from eneo.database.database import sessionmanager
 
         original_session = sessionmanager.session
 
@@ -200,7 +200,7 @@ class TestSessionScopePoolExhaustion:
         This proves the session_scope pattern releases connections quickly enough
         for concurrent tasks to share a small pool.
         """
-        from intric.database.database import sessionmanager
+        from eneo.database.database import sessionmanager
 
         if not sessionmanager._engine:
             sessionmanager.init(test_settings.database_url)
@@ -368,7 +368,7 @@ class TestWorkerBootstrapSession:
         - Creates sessionless container
         - Executes task (no session held)
         """
-        from intric.database.database import sessionmanager
+        from eneo.database.database import sessionmanager
 
         if not sessionmanager._engine:
             sessionmanager.init(test_settings.database_url)

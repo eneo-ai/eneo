@@ -15,18 +15,18 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     MCPAuthenticationError,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.mcp_servers.infrastructure.client.mcp_client import (
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
-from intric.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
-from intric.mcp_servers.presentation.models import (
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+from eneo.mcp_servers.presentation.models import (
     MCPServerCreate,
     MCPServerPublic,
     MCPServerUpdate,
@@ -215,7 +215,7 @@ class TestMCPProxySessionToolCollision:
         )
 
         with patch(
-            "intric.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger"
+            "eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger"
         ) as mock_logger:
             proxy = MCPProxySession([server1, server2])
 
@@ -263,7 +263,7 @@ class TestMCPProxySessionToolCollision:
 
         # Both "list.items" and "list@items" sanitize to "list_items"
         with patch(
-            "intric.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger"
+            "eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session.logger"
         ) as mock_logger:
             proxy = MCPProxySession([server1, server2])
 
@@ -289,7 +289,7 @@ class TestMCPServerSettingsServiceBareExceptFix:
     @pytest.mark.asyncio
     async def test_returns_false_for_not_found(self):
         """Should return False when server is not found."""
-        from intric.mcp_servers.application.mcp_server_settings_service import (
+        from eneo.mcp_servers.application.mcp_server_settings_service import (
             MCPServerSettingsService,
         )
 
@@ -307,7 +307,7 @@ class TestMCPServerSettingsServiceBareExceptFix:
     @pytest.mark.asyncio
     async def test_propagates_other_exceptions(self):
         """Should propagate exceptions other than NotFoundException."""
-        from intric.mcp_servers.application.mcp_server_settings_service import (
+        from eneo.mcp_servers.application.mcp_server_settings_service import (
             MCPServerSettingsService,
         )
 
@@ -328,7 +328,7 @@ class TestMCPServerSettingsServiceBareExceptFix:
     @pytest.mark.asyncio
     async def test_returns_true_when_enabled(self):
         """Should return True when server exists, matches tenant, and is enabled."""
-        from intric.mcp_servers.application.mcp_server_settings_service import (
+        from eneo.mcp_servers.application.mcp_server_settings_service import (
             MCPServerSettingsService,
         )
 
@@ -352,7 +352,7 @@ class TestMCPServerSettingsServiceBareExceptFix:
     @pytest.mark.asyncio
     async def test_returns_false_when_disabled(self):
         """Should return False when server exists but is disabled."""
-        from intric.mcp_servers.application.mcp_server_settings_service import (
+        from eneo.mcp_servers.application.mcp_server_settings_service import (
             MCPServerSettingsService,
         )
 
@@ -385,7 +385,7 @@ class TestMCPServerServiceTenantOwnership:
     @pytest.mark.asyncio
     async def test_raises_unauthorized_for_different_tenant(self):
         """Should raise UnauthorizedException when server belongs to different tenant."""
-        from intric.mcp_servers.application.mcp_server_service import MCPServerService
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 
         user_tenant_id = uuid4()
         server_tenant_id = uuid4()  # Different tenant
@@ -411,7 +411,7 @@ class TestMCPServerServiceTenantOwnership:
     @pytest.mark.asyncio
     async def test_raises_not_found_when_server_missing(self):
         """Should raise NotFoundException when server doesn't exist."""
-        from intric.mcp_servers.application.mcp_server_service import MCPServerService
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 
         mock_repo = AsyncMock()
         mock_repo.one.side_effect = NotFoundException("Server not found")
@@ -546,7 +546,7 @@ class TestSpaceRepoToolOwnershipValidation:
     @pytest.mark.asyncio
     async def test_rejects_invalid_tool_ids(self):
         """Should raise BadRequestException for tool IDs not belonging to selected servers."""
-        from intric.spaces.space_repo import SpaceRepository
+        from eneo.spaces.space_repo import SpaceRepository
 
         # Create mock session with query support
         mock_session = AsyncMock()
@@ -580,7 +580,7 @@ class TestSpaceRepoToolOwnershipValidation:
     @pytest.mark.asyncio
     async def test_accepts_valid_tool_ids(self):
         """Should accept tool IDs that belong to selected servers."""
-        from intric.spaces.space_repo import SpaceRepository
+        from eneo.spaces.space_repo import SpaceRepository
 
         valid_tool_id = uuid4()
         valid_server_id = uuid4()
@@ -622,7 +622,7 @@ class TestSpaceRepoToolOwnershipValidation:
     @pytest.mark.asyncio
     async def test_empty_tool_settings_skips_validation(self):
         """Should handle empty tool settings without error."""
-        from intric.spaces.space_repo import SpaceRepository
+        from eneo.spaces.space_repo import SpaceRepository
 
         mock_session = AsyncMock()
 

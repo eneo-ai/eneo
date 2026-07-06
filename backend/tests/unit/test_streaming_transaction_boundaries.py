@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.files.file_service import FileService
-from intric.sessions.session_service import SessionService
+from eneo.files.file_service import FileService
+from eneo.sessions.session_service import SessionService
 
 
 @pytest.mark.asyncio

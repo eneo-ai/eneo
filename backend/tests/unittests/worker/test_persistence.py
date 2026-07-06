@@ -13,7 +13,7 @@ import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
+from eneo.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
 
 
 def create_mock_container(embeddings_service):
@@ -34,21 +34,21 @@ class TestPersistenceModuleImports:
     """Tests that the persistence module can be imported from both locations."""
 
     def test_import_from_crawl_package(self):
-        """persist_batch should be importable from intric.worker.crawl."""
-        from intric.worker.crawl import persist_batch
+        """persist_batch should be importable from eneo.worker.crawl."""
+        from eneo.worker.crawl import persist_batch
 
         assert callable(persist_batch)
 
     def test_import_from_crawl_tasks_backward_compat(self):
         """persist_batch should still be importable from crawl_tasks for backward compatibility."""
-        from intric.worker.crawl_tasks import persist_batch
+        from eneo.worker.crawl_tasks import persist_batch
 
         assert callable(persist_batch)
 
     def test_both_imports_are_same_function(self):
         """Both import paths should resolve to the same function."""
-        from intric.worker.crawl import persist_batch as pb1
-        from intric.worker.crawl_tasks import persist_batch as pb2
+        from eneo.worker.crawl import persist_batch as pb1
+        from eneo.worker.crawl_tasks import persist_batch as pb2
 
         # Note: pb1 and pb2 might not be the exact same object due to re-export,
         # but they should have the same behavior. We test that both are callable.
@@ -62,7 +62,7 @@ class TestPersistenceModuleSemantics:
     @pytest.mark.asyncio
     async def test_empty_buffer_returns_zeros(self):
         """Empty page buffer should return (0, 0, [], {})."""
-        from intric.worker.crawl.persistence import persist_batch
+        from eneo.worker.crawl.persistence import persist_batch
 
         ctx = CrawlContext(
             website_id=uuid4(),
@@ -106,8 +106,8 @@ class TestPersistenceModuleSemantics:
     @pytest.mark.asyncio
     async def test_none_embedding_model_fails_all_pages(self):
         """None embedding model should fail all pages with NO_EMBEDDING_MODEL reason."""
-        from intric.worker.crawl.persistence import persist_batch
-        from intric.worker.crawl_context import FailureReason
+        from eneo.worker.crawl.persistence import persist_batch
+        from eneo.worker.crawl_context import FailureReason
 
         ctx = CrawlContext(
             website_id=uuid4(),
@@ -145,14 +145,14 @@ class TestEmbeddingSemaphore:
 
     def test_semaphore_getter_is_callable(self):
         """_get_embedding_semaphore should be callable."""
-        from intric.worker.crawl.persistence import _get_embedding_semaphore
+        from eneo.worker.crawl.persistence import _get_embedding_semaphore
 
         assert callable(_get_embedding_semaphore)
 
     def test_semaphore_returns_asyncio_semaphore(self):
         """_get_embedding_semaphore should return an asyncio.Semaphore."""
         import asyncio
-        from intric.worker.crawl.persistence import _get_embedding_semaphore
+        from eneo.worker.crawl.persistence import _get_embedding_semaphore
 
         sem = _get_embedding_semaphore()
         assert isinstance(sem, asyncio.Semaphore)

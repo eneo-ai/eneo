@@ -43,7 +43,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .medium {
     @apply h-7 w-7 min-w-7 text-lg font-medium;
   }

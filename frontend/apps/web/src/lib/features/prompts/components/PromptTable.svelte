@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import PromptActions from "./PromptActions.svelte";
   import { getPromptManager } from "../PromptManager";

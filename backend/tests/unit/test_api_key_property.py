@@ -30,11 +30,11 @@ from unittest.mock import patch
 
 import pytest
 
-from intric.authentication.api_key_resolver import (
+from eneo.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyPermission,
 )
@@ -124,7 +124,7 @@ def _run_impl(
         basic_permission=basic_permission,
         resource_permissions=resource_permissions,
     )
-    with patch("intric.authentication.api_key_resolver.get_settings") as mock_settings:
+    with patch("eneo.authentication.api_key_resolver.get_settings") as mock_settings:
         mock_settings.return_value.api_key_enforce_resource_permissions = flag_enabled
         try:
             check_resource_permission(key, resource_type, required)
@@ -343,7 +343,7 @@ def test_random_garbage_payloads_never_raise_unexpected_exceptions(seed: int):
                 # 'deny' and skip oracle comparison for clearly-malformed
                 # shapes (e.g. non-dict outermost, unknown/typed-wrong values).
                 try:
-                    from intric.authentication.auth_models import (
+                    from eneo.authentication.auth_models import (
                         ResourcePermissions,
                     )
 

@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
-  import type { AppSparse } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import type { AppSparse } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import PublishingDialog from "$lib/features/publishing/components/PublishingDialog.svelte";
   import { writable } from "svelte/store";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -21,12 +21,12 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   async function deleteService() {
     isProcessing = true;
     try {
-      await intric.apps.delete(app);
+      await eneo.apps.delete(app);
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
@@ -112,7 +112,7 @@
 
 <PublishingDialog
   resource={app}
-  endpoints={intric.apps}
+  endpoints={eneo.apps}
   openController={showPublishDialog}
   resourceKind="app"
   awaitUpdate

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import type { PublishableResource, PublishableResourceEndpoints } from "../Publisher";
   import PublishingDialog from "./PublishingDialog.svelte";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import PublishingStatusChip from "./PublishingStatusChip.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";

@@ -12,8 +12,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from intric.crawler.sitemap_check import probe_sitemap, state_is_fresh
-from intric.crawler.url_scope import host_of
+from eneo.crawler.sitemap_check import probe_sitemap, state_is_fresh
+from eneo.crawler.url_scope import host_of
 
 URLSET = """<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

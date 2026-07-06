@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.files import file_router
-from intric.main.exceptions import NotFoundException
+from eneo.files import file_router
+from eneo.main.exceptions import NotFoundException
 
 
 async def test_download_file_signed_raises_not_found_for_missing_content(monkeypatch):

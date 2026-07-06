@@ -5,7 +5,7 @@
   import BlobTable from "./BlobTable.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let data;

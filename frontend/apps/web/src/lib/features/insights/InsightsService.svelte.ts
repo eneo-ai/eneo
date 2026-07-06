@@ -8,15 +8,15 @@ import { browser } from "$app/environment";
 import { PAGINATION } from "$lib/core/constants";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
-import { getIntric } from "$lib/core/Intric";
+import { getEneo } from "$lib/core/Eneo";
 import { CalendarDate } from "@internationalized/date";
 import { SvelteSet } from "svelte/reactivity";
-import type { ChatPartner, Conversation, ConversationSparse, Intric } from "@intric/intric-js";
+import type { ChatPartner, Conversation, ConversationSparse, Eneo } from "@eneo/eneo-js";
 
-type InsightStatistics = Awaited<ReturnType<Intric["analytics"]["insights"]["statistics"]>>;
+type InsightStatistics = Awaited<ReturnType<Eneo["analytics"]["insights"]["statistics"]>>;
 
 class InsightsService {
-  #intric: Intric;
+  #eneo: Eneo;
   /** General data range for all insight requests */
   dateRange: { start: CalendarDate | undefined; end: CalendarDate | undefined } = $state()!;
   /** Stable date range used for requests, guards against transient undefined bindings */
@@ -54,8 +54,8 @@ class InsightsService {
   #statisticsLoaded = $state(false);
   #conversationsLoaded = $state(false);
 
-  constructor(intric = getIntric(), chatPartner: () => ChatPartner) {
-    this.#intric = intric;
+  constructor(eneo = getEneo(), chatPartner: () => ChatPartner) {
+    this.#eneo = eneo;
 
     const now = new Date();
     const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
@@ -170,7 +170,7 @@ class InsightsService {
       this.statisticsLoading = true;
       this.statisticsError = null;
       try {
-        const result = await this.#intric.analytics.insights.statistics({
+        const result = await this.#eneo.analytics.insights.statistics({
           chatPartner: this.#chatPartner,
           startDate: timeframe?.start?.toString(),
           // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
@@ -237,7 +237,7 @@ class InsightsService {
       }
 
       try {
-        const conversations = await this.#intric.analytics.insights.conversations.list({
+        const conversations = await this.#eneo.analytics.insights.conversations.list({
           chatPartner: this.#chatPartner,
           startDate: timeframe?.start?.toString(),
           // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
@@ -309,7 +309,7 @@ class InsightsService {
     const requestId = ++this.#previewRequestId;
     let loadedConversation;
     try {
-      loadedConversation = await this.#intric.analytics.insights.conversations.get(conversation);
+      loadedConversation = await this.#eneo.analytics.insights.conversations.get(conversation);
     } catch (error) {
       if (requestId === this.#previewRequestId) {
         this.previewLoadError = "failed";
@@ -332,7 +332,7 @@ class InsightsService {
 
     let response;
     try {
-      response = await this.#intric.analytics.insights.ask({
+      response = await this.#eneo.analytics.insights.ask({
         startDate: this.#activeDateRange.start?.toString(),
         // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
         endDate: this.#activeDateRange.end?.add({ days: 1 }).toString(),
@@ -372,7 +372,7 @@ class InsightsService {
 
       let status;
       try {
-        status = await this.#intric.analytics.insights.getJobStatus({ jobId });
+        status = await this.#eneo.analytics.insights.getJobStatus({ jobId });
       } catch (error) {
         this.analysisJobStatus = "failed";
         this.analysisJobError = "failed";

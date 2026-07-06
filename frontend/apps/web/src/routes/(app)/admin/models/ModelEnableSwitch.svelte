@@ -2,8 +2,8 @@
 
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -21,19 +21,19 @@
   export let model: LockableModel;
   export let type: ModelTypeKey;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
-  // The `intric.models.update` endpoint takes a discriminated union keyed by
+  // The `eneo.models.update` endpoint takes a discriminated union keyed by
   // model type. Branching here lets TypeScript narrow correctly.
   async function persistEnabledFlag(next: boolean) {
     const update = { is_org_enabled: next };
     if (type === "completionModel") {
-      return intric.models.update({ completionModel: { id: model.id }, update });
+      return eneo.models.update({ completionModel: { id: model.id }, update });
     }
     if (type === "embeddingModel") {
-      return intric.models.update({ embeddingModel: { id: model.id }, update });
+      return eneo.models.update({ embeddingModel: { id: model.id }, update });
     }
-    return intric.models.update({ transcriptionModel: { id: model.id }, update });
+    return eneo.models.update({ transcriptionModel: { id: model.id }, update });
   }
 
   async function handleCheckedChange(next: boolean) {

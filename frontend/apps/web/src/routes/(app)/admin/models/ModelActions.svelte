@@ -2,12 +2,12 @@
 
 <script lang="ts">
   import {
-    IntricError,
+    EneoError,
     type CompletionModel,
     type EmbeddingModel,
     type TranscriptionModel
-  } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
+  } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
   import {
@@ -29,7 +29,7 @@
   import MigrateModelDialog from "./MigrateModelDialog.svelte";
 
   /** Backend error code for "model is referenced and can't be soft-deleted".
-   *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/intric/main/exceptions.py`. */
+   *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/eneo/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -43,7 +43,7 @@
   export let completionModels: CompletionModel[] = [];
   export let transcriptionModels: TranscriptionModel[] = [];
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const showEditDialog = writable(false);
   const showMigrateDialog = writable(false);
@@ -80,11 +80,11 @@
 
     try {
       if (type === "completionModel") {
-        await intric.tenantModels.deleteCompletion({ id: model.id });
+        await eneo.tenantModels.deleteCompletion({ id: model.id });
       } else if (type === "embeddingModel") {
-        await intric.tenantModels.deleteEmbedding({ id: model.id });
+        await eneo.tenantModels.deleteEmbedding({ id: model.id });
       } else {
-        await intric.tenantModels.deleteTranscription({ id: model.id });
+        await eneo.tenantModels.deleteTranscription({ id: model.id });
       }
 
       await invalidate("admin:model-providers:load");
@@ -94,7 +94,7 @@
       showMigrateOption =
         supportsMigration &&
         !isMigratedModel &&
-        e instanceof IntricError &&
+        e instanceof EneoError &&
         e.code === MODEL_IN_USE_CODE;
     } finally {
       isDeleting = false;

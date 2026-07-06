@@ -109,15 +109,15 @@ Async exports are streamed and resilient for large datasets. Export files are re
 ## Implementation example
 
 ```python
-from intric.audit.domain.audit_metadata_schema import (
+from eneo.audit.domain.audit_metadata_schema import (
     AuditMetadata,
     AuditActor,
     AuditTarget,
     AuditChange,
 )
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
 
 metadata = AuditMetadata(
     actor=AuditActor(

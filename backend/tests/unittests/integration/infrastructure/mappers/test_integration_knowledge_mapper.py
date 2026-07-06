@@ -2,10 +2,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from intric.integration.domain.entities.integration_knowledge import (
+from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
-from intric.integration.infrastructure.mappers.integration_knowledge_mapper import (
+from eneo.integration.infrastructure.mappers.integration_knowledge_mapper import (
     IntegrationKnowledgeMapper,
 )
 
@@ -105,7 +105,7 @@ class TestIntegrationKnowledgeMapper(unittest.TestCase):
         self.assertEqual(db_dict["original_name"], "Original SharePoint Name")
 
     @patch(
-        "intric.integration.domain.factories.integration_knowledge_factory.IntegrationKnowledgeFactory.create_entity"  # noqa
+        "eneo.integration.domain.factories.integration_knowledge_factory.IntegrationKnowledgeFactory.create_entity"  # noqa
     )
     def test_to_entity(self, mock_create_entity):
         """Test mapping from DB model to domain entity using factory."""
@@ -147,7 +147,7 @@ class TestIntegrationKnowledgeMapper(unittest.TestCase):
         self.assertEqual(entity, mock_entity)
 
     @patch(
-        "intric.integration.domain.factories.integration_knowledge_factory.IntegrationKnowledgeFactory.create_entities"  # noqa
+        "eneo.integration.domain.factories.integration_knowledge_factory.IntegrationKnowledgeFactory.create_entities"  # noqa
     )
     def test_to_entities(self, mock_create_entities):
         """Test mapping from DB models to domain entities using factory."""

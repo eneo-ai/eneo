@@ -16,7 +16,7 @@ import pytest
 import redis.asyncio as aioredis
 from httpx import AsyncClient
 
-from intric.main.config import Settings
+from eneo.main.config import Settings
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -67,7 +67,7 @@ async def test_redis_outage_during_crawl_uses_fallback(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     limiter = TenantConcurrencyLimiter(
         redis=redis_client,
@@ -137,7 +137,7 @@ async def test_fallback_mode_behavior_under_redis_failure(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     # Force circuit open to trigger fallback
     class FailingRedis:
@@ -212,7 +212,7 @@ async def test_limiter_release_always_succeeds_with_new_logic(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     limiter = TenantConcurrencyLimiter(
         redis=redis_client,

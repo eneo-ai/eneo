@@ -5,25 +5,25 @@
 -->
 
 <script lang="ts">
-  import { IconHistory } from "@intric/icons/history";
-  import { Dialog, Button, Tooltip } from "@intric/ui";
+  import { IconHistory } from "@eneo/icons/history";
+  import { Dialog, Button, Tooltip } from "@eneo/ui";
   import PromptTable from "./PromptTable.svelte";
   import PromptPreview from "./PromptPreview.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { initPromptManager } from "../PromptManager";
-  import type { Prompt, PromptSparse } from "@intric/intric-js";
+  import type { Prompt, PromptSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   export let title = m.prompt_history();
   export let onPromptSelected: (prompt: Prompt) => void;
   export let loadPromptVersionHistory: () => Promise<PromptSparse[]>;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const {
     state: { showPromptVersionDialog }
   } = initPromptManager({
-    intric,
+    eneo,
     onPromptSelected,
     loadPromptVersionHistory
   });

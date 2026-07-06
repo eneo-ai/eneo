@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Markdown } from "@intric/ui";
-  import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
+  import { Markdown } from "@eneo/ui";
+  import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import { dynamicColour } from "$lib/core/colours";
-  import { IconSpeechBubble } from "@intric/icons/speech-bubble";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
@@ -356,7 +356,7 @@
   <Markdown
     source={message.answer}
     customRenderers={{
-      inref: MessageIntricInfoBlob
+      inref: MessageEneoInfoBlob
     }}
   />
 </div>

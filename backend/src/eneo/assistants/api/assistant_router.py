@@ -1,0 +1,1435 @@
+import logging
+from collections.abc import Sequence
+from datetime import datetime
+from typing import TYPE_CHECKING, Annotated, cast
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from eneo.assistants.api import assistant_protocol
+from eneo.assistants.api.assistant_models import (
+    AskAssistant,
+    AssistantCreatePublic,
+    AssistantPublic,
+    AssistantUpdatePublic,
+)
+
+# Audit logging - module level imports for consistency
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.api_key_notification_auto_follow import (
+    auto_follow_on_publish,
+)
+from eneo.authentication.api_key_router_helpers import (
+    error_responses as api_key_error_responses,
+)
+from eneo.authentication.auth_dependencies import (
+    get_scope_filter,
+    require_resource_permission_for_method,
+    require_user_for_creation,
+    require_user_identity,
+)
+from eneo.authentication.auth_models import (
+    ApiKey,
+    ApiKeyNotificationTargetType,
+    audit_actor_for,
+)
+from eneo.database.database import AsyncSession
+from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.main.models import (
+    NOT_PROVIDED,
+    CursorPaginatedResponse,
+    PaginatedResponse,
+    is_provided,
+)
+from eneo.prompts.api.prompt_models import PromptSparse
+from eneo.server import protocol
+from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
+from eneo.sessions.session import (
+    AskResponse,
+    SessionFeedback,
+    SessionMetadataPublic,
+    SessionPublic,
+)
+from eneo.sessions.session_protocol import (
+    to_session_public,
+    to_sessions_paginated_response,
+)
+from eneo.spaces.api.space_models import TransferApplicationRequest
+
+if TYPE_CHECKING:
+    from eneo.assistants.assistant import Assistant
+    from eneo.main.models import NotProvided
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
+    "key": "ina_6f2c9b3a8f...7b31",
+    "truncated_key": "7b31",
+}
+
+
+@router.post(
+    "/",
+    response_model=AssistantPublic,
+    description="Create a new assistant in a space.",
+    responses=responses.get_responses([403, 404]),
+)
+async def create_assistant(
+    request: Request,
+    assistant: AssistantCreatePublic,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
+):
+    # Scope validation: scoped keys cannot create assistants outside their scope
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is not None:
+        if scope_filter.space_id != assistant.space_id:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "insufficient_scope",
+                    "message": (
+                        f"API key is scoped to space '{scope_filter.space_id}'. "
+                        f"Cannot create assistant in space '{assistant.space_id}'."
+                    ),
+                },
+            )
+
+    assistant_service = container.assistant_service()
+    assembler = container.assistant_assembler()
+    current_user = container.user()
+
+    # Create assistant
+    created_assistant, permissions = await assistant_service.create_assistant(
+        name=assistant.name, space_id=assistant.space_id
+    )
+
+    # Get space for context
+    space = None
+    if created_assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(created_assistant.space_id)
+        except Exception:
+            space = None
+
+    # Build extra context for assistant configuration
+    extra = {
+        "type": created_assistant.type.value if created_assistant.type else "standard",
+        "configuration": {
+            "model": created_assistant.completion_model.nickname
+            if created_assistant.completion_model
+            else None,
+            "temperature": created_assistant.completion_model_kwargs.temperature
+            if created_assistant.completion_model_kwargs
+            else None,
+            "top_p": created_assistant.completion_model_kwargs.top_p
+            if created_assistant.completion_model_kwargs
+            else None,
+            "data_retention_days": created_assistant.data_retention_days,
+            "insights_enabled": created_assistant.insight_enabled
+            if hasattr(created_assistant, "insight_enabled")
+            else None,
+            "published": created_assistant.published,
+        },
+    }
+
+    created_assistant_id = created_assistant.id
+    assert created_assistant_id is not None
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.ASSISTANT_CREATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=created_assistant_id,
+        description=f"Created assistant '{created_assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=created_assistant,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    return assembler.from_assistant_to_model(created_assistant, permissions=permissions)
+
+
+@router.get(
+    "/",
+    response_model=PaginatedResponse[AssistantPublic],
+    description="List assistants. Requires Admin permission if `for_tenant` is `true`.",
+    responses=responses.get_responses([403]),
+)
+async def get_assistants(
+    request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    name: str | None = None,
+    for_tenant: bool = False,
+):
+    """Requires Admin permission if `for_tenant` is `true`."""
+    scope_filter = get_scope_filter(request)
+
+    # Assistant-scoped keys must not bypass scope via for_tenant
+    if (
+        for_tenant
+        and scope_filter.scope_type is not None
+        and scope_filter.scope_type != "tenant"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "insufficient_scope",
+                "message": (
+                    "Scoped API keys cannot use for_tenant=true. "
+                    "This parameter requires a tenant-scoped key or bearer auth."
+                ),
+            },
+        )
+
+    service = container.assistant_service()
+    assembler = container.assistant_assembler()
+
+    assistants = await service.get_assistants(
+        name,
+        for_tenant,
+        space_id_filter=scope_filter.space_id,
+        assistant_id_filter=scope_filter.assistant_id,
+    )
+
+    assistants = [
+        assembler.from_assistant_to_model(assistant)
+        for assistant in assistants
+        if assistant.completion_model is not None
+    ]
+
+    return protocol.to_paginated_response(assistants)
+
+
+async def _assistant_response(
+    container: Container, assistant_id: UUID
+) -> AssistantPublic:
+    """Single serialization path for an assistant response.
+
+    Always resolves and attaches effective_config, so no endpoint can forget it
+    — a personal default assistant returned without it makes the chat UI drop
+    governance filtering (show every model/MCP server). Used by GET and update.
+    """
+    service = container.assistant_service()
+    assembler = container.assistant_assembler()
+    (
+        assistant,
+        permissions,
+        effective_config,
+    ) = await service.get_assistant_with_effective_config(assistant_id=assistant_id)
+    is_help_assistant = await service.is_help_assistant(assistant_id=assistant_id)
+    return assembler.from_assistant_to_model(
+        assistant=assistant,
+        permissions=permissions,
+        effective_config=effective_config,
+        is_help_assistant=is_help_assistant,
+    )
+
+
+@router.get(
+    "/{id}/",
+    response_model=AssistantPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def get_assistant(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    return await _assistant_response(container, id)
+
+
+def _build_assistant_update_changes(
+    *,
+    assistant: AssistantUpdatePublic,
+    old_assistant: "Assistant",
+    updated_assistant: "Assistant",
+    completion_model_id: "UUID | None",
+    description: "str | NotProvided | None",
+    old_mcp_tool_overrides: "dict[str, bool] | None",
+) -> tuple[dict[str, object], list[str]]:
+    """Build the audit `changes` dict and human-readable summary for an
+    assistant update by diffing old vs updated state. Pure/presentation-
+    only: extracted from the endpoint to keep it readable.
+    """
+    # Track ALL changes comprehensively
+    changes: dict[str, object] = {}
+
+    # Name change
+    if assistant.name and assistant.name != old_assistant.name:
+        changes["name"] = {"old": old_assistant.name, "new": assistant.name}
+
+    # Prompt change. Mirror the apps router: trigger on `prompt is not None`
+    # (the field was included in the request) and treat an empty new text
+    # as "prompt was cleared" rather than ignoring it — see the matching
+    # service-side comment in `assistant_service.update_assistant` for the
+    # bug this used to mask.
+    if assistant.prompt is not None:
+        new_prompt_text = assistant.prompt.text or ""
+        old_prompt_text = old_assistant.prompt.text if old_assistant.prompt else ""
+        if new_prompt_text != old_prompt_text:
+            prompt_preview = (
+                new_prompt_text[:50] + "..."
+                if len(new_prompt_text) > 50
+                else new_prompt_text
+            )
+            changes["prompt"] = {
+                "changed": True,
+                "preview": prompt_preview if new_prompt_text else "Removed prompt",
+            }
+
+    # Model change
+    if (
+        completion_model_id
+        and old_assistant.completion_model
+        and completion_model_id != old_assistant.completion_model.id
+    ):
+        changes["model"] = {
+            "old": old_assistant.completion_model.nickname
+            if old_assistant.completion_model
+            else None,
+            "new": updated_assistant.completion_model.nickname
+            if updated_assistant.completion_model
+            else None,
+        }
+
+    # Temperature/Top-p changes
+    # Get temperature values from completion_model_kwargs
+    old_temperature = (
+        old_assistant.completion_model_kwargs.temperature
+        if old_assistant.completion_model_kwargs
+        else None
+    )
+    new_temperature = (
+        updated_assistant.completion_model_kwargs.temperature
+        if updated_assistant.completion_model_kwargs
+        else None
+    )
+    if old_temperature != new_temperature:
+        changes["temperature"] = {"old": old_temperature, "new": new_temperature}
+
+    old_top_p = (
+        old_assistant.completion_model_kwargs.top_p
+        if old_assistant.completion_model_kwargs
+        else None
+    )
+    new_top_p = (
+        updated_assistant.completion_model_kwargs.top_p
+        if updated_assistant.completion_model_kwargs
+        else None
+    )
+    if old_top_p != new_top_p:
+        changes["top_p"] = {"old": old_top_p, "new": new_top_p}
+
+    # Description change
+    if is_provided(description) and description != old_assistant.description:
+        if isinstance(old_assistant.description, str):
+            old_desc_preview = (
+                (old_assistant.description[:50] + "...")
+                if len(old_assistant.description) > 50
+                else old_assistant.description
+            )
+        else:
+            old_desc_preview = old_assistant.description
+        if isinstance(description, str):
+            new_desc_preview = (
+                (description[:50] + "...") if len(description) > 50 else description
+            )
+        else:
+            new_desc_preview = description
+        changes["description"] = {"old": old_desc_preview, "new": new_desc_preview}
+
+    # Insights change
+    if assistant.insight_enabled != old_assistant.insight_enabled:
+        changes["insights_enabled"] = {
+            "old": old_assistant.insight_enabled,
+            "new": assistant.insight_enabled,
+        }
+
+    # Data retention change
+    if assistant.data_retention_days != old_assistant.data_retention_days:
+        changes["data_retention_days"] = {
+            "old": old_assistant.data_retention_days,
+            "new": assistant.data_retention_days,
+        }
+
+    # Helper function to track added/removed items
+    def get_changes_for_list(
+        old_list: Sequence[object] | None,
+        new_list: Sequence[object] | None,
+        name_attr: str = "name",
+        is_attachment: bool = False,
+        assistant_space_id: UUID | None = None,
+    ) -> tuple[list[dict[str, str | None]], list[dict[str, str | None]]]:
+        """Compare two lists and return added/removed items with their IDs, names, and scope."""
+        old_items: dict[str, dict[str, str | None]] = {}
+        new_items: dict[str, dict[str, str | None]] = {}
+
+        def get_scope(item: object, assistant_space_id: UUID | None) -> str | None:
+            """Determine if knowledge is 'space' or 'organizational'"""
+            if assistant_space_id is None or not hasattr(item, "space_id"):
+                return None  # Cannot determine scope
+
+            # If the item's space_id matches the assistant's, it's space-scoped
+            # Otherwise, it's organizational (from parent/org space)
+            if getattr(item, "space_id") == assistant_space_id:
+                return "space"
+            else:
+                return "organizational"
+
+        def extract_item_info(
+            item: object, assistant_space_id: UUID | None
+        ) -> tuple[str, str, str | None]:
+            """Extract ID, name, and scope from an item, handling attachments specially."""
+            item_id = str(getattr(item, "id", item))
+
+            # Special handling for FileAttachment objects
+            if is_attachment:
+                # For attachments, extract just the filename and optionally blob ID
+                item_name = str(getattr(item, "name", "unknown_file"))
+                # Add blob ID if it exists and is not None
+                blob = getattr(item, "blob", None)
+                if blob:
+                    item_name = f"{item_name} (blob: {blob})"
+            else:
+                # For other types, use the specified attribute or a safe fallback
+                if hasattr(item, name_attr):
+                    item_name = str(getattr(item, name_attr))
+                elif hasattr(item, "name"):
+                    item_name = str(getattr(item, "name"))
+                else:
+                    # Only use str() for simple types, not complex objects
+                    item_name = f"{item.__class__.__name__}_{item_id}"
+
+            # Determine scope
+            scope = get_scope(item, assistant_space_id)
+
+            return item_id, item_name, scope
+
+        if old_list:
+            for item in old_list:
+                item_id, item_name, scope = extract_item_info(item, assistant_space_id)
+                old_items[item_id] = {"name": item_name, "scope": scope}
+
+        if new_list:
+            for item in new_list:
+                item_id, item_name, scope = extract_item_info(item, assistant_space_id)
+                new_items[item_id] = {"name": item_name, "scope": scope}
+
+        # Build added/removed lists with scope information
+        added: list[dict[str, str | None]] = []
+        for k in new_items:
+            if k not in old_items:
+                item_data: dict[str, str | None] = {
+                    "id": k,
+                    "name": new_items[k]["name"],
+                }
+                if new_items[k]["scope"]:
+                    item_data["scope"] = new_items[k]["scope"]
+                added.append(item_data)
+
+        removed: list[dict[str, str | None]] = []
+        for k in old_items:
+            if k not in new_items:
+                item_data: dict[str, str | None] = {
+                    "id": k,
+                    "name": old_items[k]["name"],
+                }
+                if old_items[k]["scope"]:
+                    item_data["scope"] = old_items[k]["scope"]
+                removed.append(item_data)
+
+        return added, removed
+
+    # Track knowledge source changes in detail
+    knowledge_changes: dict[str, dict[str, list[dict[str, str | None]]]] = {}
+
+    # Collections
+    collections_added, collections_removed = get_changes_for_list(
+        old_assistant.collections,
+        updated_assistant.collections,
+        assistant_space_id=updated_assistant.space_id,
+    )
+    if collections_added or collections_removed:
+        knowledge_changes["collections"] = {}
+        if collections_added:
+            knowledge_changes["collections"]["added"] = collections_added
+        if collections_removed:
+            knowledge_changes["collections"]["removed"] = collections_removed
+
+    # Websites
+    websites_added, websites_removed = get_changes_for_list(
+        old_assistant.websites,
+        updated_assistant.websites,
+        name_attr="url",
+        assistant_space_id=updated_assistant.space_id,
+    )
+    if websites_added or websites_removed:
+        knowledge_changes["websites"] = {}
+        if websites_added:
+            knowledge_changes["websites"]["added"] = websites_added
+        if websites_removed:
+            knowledge_changes["websites"]["removed"] = websites_removed
+
+    # Attachments
+    attachments_added, attachments_removed = get_changes_for_list(
+        old_assistant.attachments,
+        updated_assistant.attachments,
+        name_attr="name",
+        is_attachment=True,
+        assistant_space_id=updated_assistant.space_id,
+    )
+    if attachments_added or attachments_removed:
+        knowledge_changes["attachments"] = {}
+        if attachments_added:
+            knowledge_changes["attachments"]["added"] = attachments_added
+        if attachments_removed:
+            knowledge_changes["attachments"]["removed"] = attachments_removed
+
+    # Integration Knowledge
+    integrations_added, integrations_removed = get_changes_for_list(
+        old_assistant.integration_knowledge_list,
+        updated_assistant.integration_knowledge_list,
+        assistant_space_id=updated_assistant.space_id,
+    )
+    if integrations_added or integrations_removed:
+        knowledge_changes["integrations"] = {}
+        if integrations_added:
+            knowledge_changes["integrations"]["added"] = integrations_added
+        if integrations_removed:
+            knowledge_changes["integrations"]["removed"] = integrations_removed
+
+    if knowledge_changes:
+        changes["knowledge_sources"] = knowledge_changes
+
+    # MCP Servers
+    mcp_servers_added, mcp_servers_removed = get_changes_for_list(
+        old_assistant.mcp_servers,
+        updated_assistant.mcp_servers,
+        assistant_space_id=updated_assistant.space_id,
+    )
+    if mcp_servers_added or mcp_servers_removed:
+        changes["mcp_servers"] = {}
+        if mcp_servers_added:
+            changes["mcp_servers"]["added"] = mcp_servers_added
+        if mcp_servers_removed:
+            changes["mcp_servers"]["removed"] = mcp_servers_removed
+
+    # MCP Tool settings - compare request against the updated assistant's persisted state
+    if assistant.mcp_tools is not None and old_mcp_tool_overrides is not None:
+        new_tool_map = {str(t.tool_id): t.is_enabled for t in assistant.mcp_tools}
+
+        tool_changes: list[dict[str, object]] = []
+        for tid, is_enabled in new_tool_map.items():
+            old_enabled = old_mcp_tool_overrides.get(tid)
+            if old_enabled != is_enabled:
+                tool_changes.append(
+                    {
+                        "tool_id": tid,
+                        "old_enabled": old_enabled,
+                        "new_enabled": is_enabled,
+                    }
+                )
+        if tool_changes:
+            changes["mcp_tools"] = tool_changes
+
+    # Create summary of changes
+    change_summary: list[str] = []
+    if "name" in changes:
+        change_summary.append("name")
+    if "prompt" in changes:
+        change_summary.append("prompt")
+    if "model" in changes:
+        change_summary.append("model")
+    if "temperature" in changes or "top_p" in changes:
+        change_summary.append("parameters")
+    if "description" in changes:
+        change_summary.append("description")
+    if "insights_enabled" in changes:
+        change_summary.append("insights")
+    if "data_retention_days" in changes:
+        change_summary.append("retention")
+    if "knowledge_sources" in changes:
+        change_summary.append("knowledge sources")
+    if "mcp_servers" in changes:
+        change_summary.append("MCP servers")
+    if "mcp_tools" in changes:
+        change_summary.append("MCP tools")
+
+    return changes, change_summary
+
+
+@router.post(
+    "/{id}/",
+    response_model=AssistantPublic,
+    responses=responses.get_responses([400, 403, 404]),
+    description="Update an assistant. Omitted fields are left unchanged.",
+)
+async def update_assistant(
+    id: UUID,
+    assistant: AssistantUpdatePublic,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Omitted fields are not updated"""
+    service = container.assistant_service()
+    current_user = container.user()
+
+    # Get old state for change tracking
+    old_assistant, _ = await service.get_assistant(assistant_id=id)
+
+    # Snapshot old MCP tool overrides before update (not on domain entity)
+    old_mcp_tool_overrides = None
+    if assistant.mcp_tools is not None:
+        import sqlalchemy as sa
+
+        from eneo.database.tables.assistant_table import AssistantMCPServerTools
+
+        stmt = sa.select(
+            AssistantMCPServerTools.mcp_server_tool_id,
+            AssistantMCPServerTools.is_enabled,
+        ).where(AssistantMCPServerTools.assistant_id == id)
+        result = await service.repo.session.execute(stmt)
+        old_mcp_tool_overrides = {str(row[0]): row[1] for row in result.all()}
+
+    attachment_ids = None
+    if assistant.attachments is not None:
+        attachment_ids = [attachment.id for attachment in assistant.attachments]
+
+    groups = None
+    if assistant.groups is not None:
+        groups = [g.id for g in assistant.groups]
+
+    websites = None
+    if assistant.websites is not None:
+        websites = [w.id for w in assistant.websites]
+
+    integration_knowledge_ids = None
+    if assistant.integration_knowledge_list is not None:
+        integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
+
+    mcp_server_ids = None
+    if assistant.mcp_servers is not None:
+        mcp_server_ids = [m.id for m in assistant.mcp_servers]
+
+    mcp_tool_settings = None
+    if assistant.mcp_tools is not None:
+        mcp_tool_settings = [
+            (tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools
+        ]
+
+    completion_model_id = None
+    if assistant.completion_model is not None:
+        completion_model_id = assistant.completion_model.id
+
+    completion_model_kwargs = None
+    if assistant.completion_model_kwargs is not None:
+        completion_model_kwargs = assistant.completion_model_kwargs
+
+    # get original request dict to check if description was actually provided
+    # (@partial_model overrides NOT_PROVIDED with None)
+    request_dict = assistant.model_dump(exclude_unset=True)
+    description = assistant.description
+    metadata_json = assistant.metadata_json
+
+    # if description wasn't in the original request, use NOT_PROVIDED
+    if "description" not in request_dict:
+        description = NOT_PROVIDED
+
+    if "metadata_json" not in request_dict:
+        metadata_json = NOT_PROVIDED
+
+    data_retention_days = assistant.data_retention_days
+    if "data_retention_days" not in request_dict:
+        data_retention_days = NOT_PROVIDED
+
+    # Handle icon_id: check if it was provided in the request
+    icon_id = NOT_PROVIDED
+    if "icon_id" in request_dict:
+        icon_id = assistant.icon_id
+
+    updated_assistant, _ = await service.update_assistant(
+        assistant_id=id,
+        name=assistant.name,
+        prompt=assistant.prompt,
+        completion_model_id=completion_model_id,
+        completion_model_kwargs=completion_model_kwargs,
+        logging_enabled=assistant.logging_enabled,
+        attachment_ids=attachment_ids,
+        groups=groups,
+        websites=websites,
+        integration_knowledge_ids=integration_knowledge_ids,
+        mcp_server_ids=mcp_server_ids,
+        mcp_tools=mcp_tool_settings,
+        description=description,
+        insight_enabled=assistant.insight_enabled,
+        data_retention_days=data_retention_days,
+        metadata_json=metadata_json,
+        icon_id=icon_id,
+    )
+
+    changes, change_summary = _build_assistant_update_changes(
+        assistant=assistant,
+        old_assistant=old_assistant,
+        updated_assistant=updated_assistant,
+        completion_model_id=completion_model_id,
+        description=description,
+        old_mcp_tool_overrides=old_mcp_tool_overrides,
+    )
+
+    # Get space for context
+    space = None
+    if updated_assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(updated_assistant.space_id)
+        except Exception:
+            space = None
+
+    # Build extra context
+    extra = {
+        "type": updated_assistant.type.value if updated_assistant.type else "standard",
+        "summary": f"Modified {', '.join(change_summary)}"
+        if change_summary
+        else "No changes detected",
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Updated assistant '{updated_assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=updated_assistant,
+            space=space,
+            changes=changes,
+            extra=extra,
+        ),
+    )
+
+    # Re-resolve through the shared response path so the body carries the
+    # governance effective_config (same as GET /{id}/ and the space endpoint).
+    # Without it a personal default-assistant update returns effective_config=None
+    # and the chat UI falls back to showing every model and MCP server.
+    return await _assistant_response(container, id)
+
+
+@router.delete(
+    "/{id}/",
+    status_code=204,
+    description="Delete an assistant.",
+    responses=responses.get_responses([403, 404]),
+)
+async def delete_assistant(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.assistant_service()
+    current_user = container.user()
+
+    # Get assistant details BEFORE deletion (snapshot pattern)
+    assistant, _ = await service.get_assistant(id)
+
+    # Get space for context before deletion
+    space = None
+    if assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(assistant.space_id)
+        except Exception:
+            space = None
+
+    # Delete assistant
+    await service.delete_assistant(id)
+
+    # Build extra context capturing what was deleted (for incident investigation)
+    extra = {
+        "type": assistant.type.value if assistant.type else "standard",
+        "impact": {
+            "knowledge_sources": {
+                "collections": len(assistant.collections)
+                if assistant.collections
+                else 0,
+                "websites": len(assistant.websites) if assistant.websites else 0,
+                "integrations": len(assistant.integration_knowledge_list)
+                if assistant.integration_knowledge_list
+                else 0,
+            },
+            "configuration": {
+                "model": assistant.completion_model.nickname
+                if assistant.completion_model
+                else None,
+                "temperature": assistant.completion_model_kwargs.temperature
+                if assistant.completion_model_kwargs
+                else None,
+                "top_p": assistant.completion_model_kwargs.top_p
+                if assistant.completion_model_kwargs
+                else None,
+                "data_retention_days": assistant.data_retention_days,
+                "published": assistant.published,
+            },
+            "created_at": assistant.created_at.isoformat()
+            if assistant.created_at
+            else None,
+        },
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.ASSISTANT_DELETED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Deleted assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=assistant,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+
+@router.post(
+    "/{id}/sessions/",
+    response_model=AskResponse,
+    description="Ask an assistant and start a new session. Streams the response as Server-Sent Events if `stream` is `true`.",
+    responses=responses.streaming_response(AskResponse, [400, 403, 404]),
+)
+async def ask_assistant(
+    id: UUID,
+    ask: AskAssistant,
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user_from_assistant_api_key=True)),
+    ],
+    version: Annotated[int, Query(ge=1, le=2)] = 1,
+):
+    """Streams the response as Server-Sent Events if stream == true"""
+    service = container.assistant_service()
+    user = container.user()
+
+    file_ids = list(ask.files)
+    tool_assistant_id = None
+    if ask.tools is not None and ask.tools.assistants:
+        tool_assistant_id = ask.tools.assistants[0].id
+    response = await service.ask(
+        question=ask.question,
+        assistant_id=id,
+        file_ids=file_ids,
+        stream=ask.stream,
+        tool_assistant_id=tool_assistant_id,
+        version=version,
+    )
+
+    # Audit logging for new session started
+    session_id = response.session.id
+    assistant, _ = await service.get_assistant(id)
+
+    # Get space for context
+    space = None
+    if assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(assistant.space_id)
+        except Exception:
+            space = None
+
+    # Build extra context for session
+    extra = {
+        "session_id": str(session_id),
+        "stream": ask.stream,
+        "has_files": len(file_ids) > 0,
+        "file_count": len(file_ids),
+        "has_tool_assistant": tool_assistant_id is not None,
+    }
+
+    audit_service = container.audit_service()
+    actor_id, actor_type = audit_actor_for(user)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=actor_id,
+        actor_type=actor_type,
+        action=ActionType.SESSION_STARTED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Started new session with assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    return await assistant_protocol.to_response(
+        response=response,
+        stream=ask.stream,
+        show_pricing=user.can_view_model_pricing,
+    )
+
+
+@router.get(
+    "/{id}/sessions/",
+    response_model=CursorPaginatedResponse[SessionMetadataPublic],
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def get_assistant_sessions(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: Annotated[int | None, Query(gt=0)] = None,
+    cursor: datetime | None = None,
+    previous: bool = False,
+):
+    assistant_service = container.assistant_service()
+    session_service = container.session_service()
+
+    assistant_in_db, _ = await assistant_service.get_assistant(id)
+
+    sessions, total_count = await session_service.get_sessions_by_assistant(
+        assistant_id=assistant_in_db.id,
+        limit=limit,
+        cursor=cursor,
+        previous=previous,
+    )
+
+    return to_sessions_paginated_response(
+        sessions=sessions,
+        limit=limit,
+        cursor=cursor,
+        previous=previous,
+        total_count=total_count,
+    )
+
+
+@router.get(
+    "/{id}/sessions/{session_id}/",
+    response_model=SessionPublic,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def get_assistant_session(
+    id: UUID,
+    session_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    assistant_service = container.assistant_service()
+    session_service = container.session_service()
+
+    await assistant_service.get_assistant(id)
+    session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    return to_session_public(session)
+
+
+@router.delete(
+    "/{id}/sessions/{session_id}/",
+    response_model=SessionPublic,
+    description="Delete a session belonging to an assistant.",
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def delete_assistant_session(
+    id: UUID,
+    session_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    session_service = container.session_service()
+    assistant_service = container.assistant_service()
+    user = container.user()
+
+    # Authorize before mutating the session. This also enforces personal_chat
+    # for sessions belonging to the personal space's default assistant.
+    assistant, _ = await assistant_service.get_assistant(id)
+
+    session = await session_service.delete(session_id, assistant_id=id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get space for context
+    space = None
+    if assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(assistant.space_id)
+        except Exception:
+            space = None
+
+    # Build extra context for session deletion
+    extra = {
+        "session_id": str(session_id),
+    }
+
+    audit_service = container.audit_service()
+    actor_id, actor_type = audit_actor_for(user)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=actor_id,
+        actor_type=actor_type,
+        action=ActionType.SESSION_ENDED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Ended session with assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    return to_session_public(session)
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/",
+    response_model=AskResponse,
+    description="Ask a follow-up question in an existing session. Streams the response as Server-Sent Events if `stream` is `true`.",
+    responses=responses.streaming_response(AskResponse, [400, 403, 404]),
+)
+async def ask_followup(
+    id: UUID,
+    session_id: UUID,
+    ask: AskAssistant,
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user_from_assistant_api_key=True)),
+    ],
+    version: Annotated[int, Query(ge=1, le=2)] = 1,
+):
+    """Streams the response as Server-Sent Events if stream == true"""
+    service = container.assistant_service()
+
+    file_ids = list(ask.files)
+    tool_assistant_id = None
+    if ask.tools is not None and ask.tools.assistants:
+        tool_assistant_id = ask.tools.assistants[0].id
+    response = await service.ask(
+        question=ask.question,
+        assistant_id=id,
+        file_ids=file_ids,
+        stream=ask.stream,
+        session_id=session_id,
+        tool_assistant_id=tool_assistant_id,
+        version=version,
+    )
+
+    return await assistant_protocol.to_response(
+        response=response,
+        stream=ask.stream,
+        show_pricing=container.user().can_view_model_pricing,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/feedback/",
+    response_model=SessionPublic,
+    description="Leave feedback on a session.",
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def leave_feedback(
+    id: UUID,
+    session_id: UUID,
+    feedback: SessionFeedback,
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user_from_assistant_api_key=True)),
+    ],
+):
+    assistant_service = container.assistant_service()
+    session_service = container.session_service()
+
+    await assistant_service.get_assistant(id)
+    session = await session_service.leave_feedback(
+        session_id=session_id, assistant_id=id, feedback=feedback
+    )
+
+    return to_session_public(session)
+
+
+@router.get(
+    "/{id}/api-keys/",
+    response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy assistant API key",
+    deprecated=True,
+    description=(
+        "Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys."
+        " This returns a legacy assistant-scoped key."
+    ),
+    responses={
+        200: {
+            "description": "Legacy assistant API key created and returned once.",
+            "content": {
+                "application/json": {"example": _LEGACY_ASSISTANT_API_KEY_EXAMPLE}
+            },
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
+)
+async def generate_read_only_assistant_key(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(require_user_identity),
+):
+    """Generates a read-only api key for this assistant.
+
+    This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
+    and `POST /api/v1/assistants/{id}/sessions/{session_id}/`."""
+    settings = get_settings()
+    if not settings.api_key_legacy_endpoints_enabled:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "deprecated_endpoint",
+                "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
+            },
+        )
+    service = container.assistant_service()
+    user = container.user()
+
+    # Generate API key
+    api_key = await service.generate_api_key(id)
+
+    # Get assistant info for audit log
+    assistant, _ = await service.get_assistant(id)
+
+    # Get space for context
+    space = None
+    if assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(assistant.space_id)
+        except Exception:
+            space = None
+
+    # Build extra context for API key generation
+    extra = {
+        "truncated_key": api_key.truncated_key,
+        "key_type": "assistant_read_only",
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.API_KEY_GENERATED,
+        entity_type=EntityType.API_KEY,
+        entity_id=id,  # Use assistant ID as entity ID for assistant API keys
+        description=f"Generated read-only API key for assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    return api_key
+
+
+@router.post(
+    "/{id}/transfer/",
+    status_code=204,
+    description="Transfer an assistant to another space.",
+    responses=responses.get_responses([403, 404]),
+)
+async def transfer_assistant_to_space(
+    id: UUID,
+    transfer_req: TransferApplicationRequest,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    # Get assistant info BEFORE transfer to capture source space
+    user = container.user()
+    assistant_service = container.assistant_service()
+    assistant_before, _ = await assistant_service.get_assistant(id)
+
+    # Get source space info
+    source_space = None
+    if assistant_before.space_id:
+        try:
+            space_service = container.space_service()
+            source_space = await space_service.get_space(assistant_before.space_id)
+        except Exception:
+            source_space = None
+
+    # Transfer assistant
+    service = container.resource_mover_service()
+    await service.move_assistant_to_space(
+        assistant_id=id,
+        space_id=transfer_req.target_space_id,
+        move_resources=transfer_req.move_resources,
+    )
+
+    # Get target space info
+    target_space = None
+    try:
+        space_service = container.space_service()
+        target_space = await space_service.get_space(transfer_req.target_space_id)
+    except Exception:
+        target_space = None
+
+    # Build extra context for transfer (captures both source and target for incident investigation)
+    extra = {
+        "transfer": {
+            "source_space_id": str(assistant_before.space_id)
+            if assistant_before.space_id
+            else None,
+            "source_space_name": source_space.name if source_space else None,
+            "target_space_id": str(transfer_req.target_space_id),
+            "target_space_name": target_space.name if target_space else None,
+            "move_resources": transfer_req.move_resources,
+        },
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.ASSISTANT_TRANSFERRED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Transferred assistant '{assistant_before.name}' from '{source_space.name if source_space else 'unknown'}' to '{target_space.name if target_space else 'unknown'}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant_before,
+            space=target_space,  # Use target space as the current space context
+            extra=extra,
+        ),
+    )
+
+
+@router.get(
+    "/{id}/prompts/",
+    response_model=PaginatedResponse[PromptSparse],
+    description="List the prompt history for an assistant.",
+    responses=responses.get_responses([404]),
+    include_in_schema=get_settings().dev,
+)
+async def get_prompts(
+    id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
+):
+    service = container.assistant_service()
+    assembler = container.prompt_assembler()
+
+    prompts = await service.get_prompts_by_assistant(id)
+    prompts = [assembler.from_prompt_to_model(prompt) for prompt in prompts]
+
+    return protocol.to_paginated_response(prompts)
+
+
+@router.post(
+    "/{id}/publish/",
+    response_model=AssistantPublic,
+    description="Publish or unpublish an assistant.",
+    responses=responses.get_responses([403, 404]),
+)
+async def publish_assistant(
+    id: UUID,
+    published: bool,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.assistant_service()
+    assembler = container.assistant_assembler()
+    user = container.user()
+
+    # Publish/unpublish assistant
+    assistant, permissions = await service.publish_assistant(
+        assistant_id=id, publish=published
+    )
+
+    # Get space for context
+    space = None
+    if assistant.space_id:
+        try:
+            space_service = container.space_service()
+            space = await space_service.get_space(assistant.space_id)
+        except Exception:
+            space = None
+
+    # Build extra context
+    extra = {
+        "published": published,
+        "action": "published" if published else "unpublished",
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.ASSISTANT_PUBLISHED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"{'Published' if published else 'Unpublished'} assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    if published:
+        try:
+            session = cast(AsyncSession, container.session())
+            await auto_follow_on_publish(
+                session=session,
+                user=user,
+                target_type=ApiKeyNotificationTargetType.ASSISTANT,
+                target_id=id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to auto-follow API key expiry notifications for published assistant %s",
+                id,
+            )
+
+    return assembler.from_assistant_to_model(
+        assistant=assistant, permissions=permissions
+    )
+
+
+@router.get(
+    "/{id}/mcp-servers/",
+    response_model=None,
+    description="Get all MCP servers associated with an assistant.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_assistant_mcp_servers(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Get all MCP servers associated with an assistant."""
+    service = container.assistant_service()
+    mcp_servers = await service.get_assistant_mcp_servers(id)
+
+    # Return as list of AssistantMCPServerPublic
+    return {
+        "items": [
+            {
+                "mcp_server_id": mcp.id,
+                "mcp_server_name": mcp.name,
+                "enabled": True,  # If it's in the list, it's enabled
+                "config": None,  # TODO: Get from association table
+                "priority": 0,  # TODO: Get from association table
+            }
+            for mcp in mcp_servers
+        ]
+    }
+
+
+@router.post(
+    "/{id}/mcp-servers/{mcp_server_id}/",
+    response_model=None,
+    description="Add an MCP server to an assistant.",
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def add_mcp_to_assistant(
+    id: UUID,
+    mcp_server_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Add an MCP server to an assistant."""
+    service = container.assistant_service()
+
+    assistant, _permissions = await service.add_mcp_to_assistant(
+        assistant_id=id,
+        mcp_server_id=mcp_server_id,
+    )
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    mcp_server_service = container.mcp_server_service()
+    mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Added MCP server '{mcp_server.name}' to assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            changes={
+                "mcp_servers": {
+                    "added": [{"id": str(mcp_server.id), "name": mcp_server.name}]
+                }
+            },
+        ),
+    )
+
+    return {"success": True}
+
+
+@router.delete(
+    "/{id}/mcp-servers/{mcp_server_id}/",
+    status_code=204,
+    description="Remove an MCP server from an assistant.",
+    responses=responses.get_responses([403, 404]),
+)
+async def remove_mcp_from_assistant(
+    id: UUID,
+    mcp_server_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Remove an MCP server from an assistant."""
+    service = container.assistant_service()
+
+    # Get context before removal for audit log
+    assistant, _ = await service.get_assistant(assistant_id=id)
+    mcp_server_service = container.mcp_server_service()
+    mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
+
+    await service.remove_mcp_from_assistant(
+        assistant_id=id,
+        mcp_server_id=mcp_server_id,
+    )
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Removed MCP server '{mcp_server.name}' from assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            changes={
+                "mcp_servers": {
+                    "removed": [{"id": str(mcp_server.id), "name": mcp_server.name}]
+                }
+            },
+        ),
+    )

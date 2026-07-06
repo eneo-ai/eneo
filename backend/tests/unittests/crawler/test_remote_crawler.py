@@ -14,13 +14,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from intric.crawler.remote_crawler import (
+from eneo.crawler.remote_crawler import (
     RemoteCrawler,
     _filename_for_link,
     create_crawler,
 )
-from intric.main.exceptions import CrawlerException, CrawlTimeoutError
-from intric.websites.domain.crawl_run import CrawlType
+from eneo.main.exceptions import CrawlerException, CrawlTimeoutError
+from eneo.websites.domain.crawl_run import CrawlType
 
 
 def ndjson(*events: dict) -> bytes:
@@ -261,7 +261,7 @@ class TestFailureSemantics:
 
         # Force the client-side ceiling to fire instead of the disconnect
         with patch(
-            "intric.crawler.remote_crawler.RemoteCrawler._stream_crawl",
+            "eneo.crawler.remote_crawler.RemoteCrawler._stream_crawl",
             side_effect=asyncio.TimeoutError,
         ):
             with pytest.raises(CrawlTimeoutError):
@@ -666,7 +666,7 @@ class TestDiscoverSitemapLocations:
 class TestCreateCrawler:
     def test_returns_remote_when_url_configured(self):
         with patch(
-            "intric.main.config.get_settings",
+            "eneo.main.config.get_settings",
             return_value=SimpleNamespace(
                 crawler_service_url="http://crawler:8870",
                 crawler_service_api_key="k",
@@ -678,7 +678,7 @@ class TestCreateCrawler:
 
     def test_raises_clear_error_when_unset(self):
         with patch(
-            "intric.main.config.get_settings",
+            "eneo.main.config.get_settings",
             return_value=SimpleNamespace(
                 crawler_service_url=None, crawler_service_api_key=None
             ),

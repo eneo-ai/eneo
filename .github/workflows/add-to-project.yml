@@ -1,0 +1,67 @@
+name: Eneo project intake
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+  pull_request_target:
+    types: [opened, edited, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  PROJECT_OWNER: eneo-ai
+  PROJECT_NUMBER: "5"
+  PROJECT_URL: https://github.com/orgs/eneo-ai/projects/5
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out intake scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Ensure planning labels
+        run: node .github/scripts/ensure-planning-labels.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Validate project intake token
+        if: >-
+          (github.event_name == 'issues' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action)) ||
+          (github.event_name == 'pull_request_target' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action))
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=Missing ADD_TO_PROJECT_PAT::Create an Actions repository secret named ADD_TO_PROJECT_PAT. It must contain a GitHub token that can add items to organization project eneo-ai/5."
+            exit 1
+          fi
+
+          gh project item-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --limit 1 --format json >/dev/null
+
+      - name: Ensure project planning fields
+        if: >-
+          (github.event_name == 'issues' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action)) ||
+          (github.event_name == 'pull_request_target' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action))
+        run: node .github/scripts/ensure-project-fields.mjs
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+      - name: Add to Eneo project
+        if: >-
+          (github.event_name == 'issues' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action)) ||
+          (github.event_name == 'pull_request_target' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action))
+        uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: ${{ env.PROJECT_URL }}
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+      - name: Validate planning metadata
+        run: node .github/scripts/project-intake.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Job } from "@intric/intric-js";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import type { Job } from "@eneo/eneo-js";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
   import ExpandableErrorRow from "./ExpandableErrorRow.svelte";
 

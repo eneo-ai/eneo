@@ -37,9 +37,9 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
-from starlette.routing import Mount
 
-from intric.main.exceptions import EXCEPTION_MAP
+from eneo.main.exceptions import EXCEPTION_MAP
+from tests.unit.api_key_test_utils import route_dependency_callables, runtime_app_routes
 
 # Dependency __name__ (or require_permission's inner qualname) -> required code.
 # These raise HTTPException/UnauthorizedException/AuthenticationException directly
@@ -74,39 +74,15 @@ _SUCCESS_AND_VALIDATION = {200, 201, 202, 203, 204, 422}
 @dataclass(frozen=True)
 class DiscoveredRoute:
     path: str
-    route: APIRoute
-
-
-def _join_path(prefix: str, path: str) -> str:
-    if not prefix:
-        return path
-    return f"{prefix.rstrip('/')}/{path.lstrip('/')}"
-
-
-def _walk_routes(routes: list[Any], *, prefix: str = "") -> list[DiscoveredRoute]:
-    out: list[DiscoveredRoute] = []
-    for route in routes:
-        if isinstance(route, APIRoute) and route.path and route.path != "/":
-            out.append(
-                DiscoveredRoute(path=_join_path(prefix, route.path), route=route)
-            )
-            continue
-        if isinstance(route, Mount):
-            child_routes = getattr(route.app, "routes", None)
-            if child_routes is not None:
-                out.extend(
-                    _walk_routes(
-                        list(child_routes),
-                        prefix=_join_path(prefix, route.path),
-                    )
-                )
-    return out
+    route: Any
 
 
 def _routes() -> list[DiscoveredRoute]:
-    from intric.server.main import app
-
-    return _walk_routes(list(app.routes))
+    return [
+        DiscoveredRoute(path=route.path, route=route)
+        for route in runtime_app_routes()
+        if isinstance(route.route, APIRoute) and route.path and route.path != "/"
+    ]
 
 
 def _identity(path: str, method: str) -> str:
@@ -128,23 +104,7 @@ def _declared_codes(route: APIRoute) -> set[int]:
 
 
 def _dep_callables(route: APIRoute) -> list[Any]:
-    callables: list[Any] = []
-    for dep in route.dependencies or []:
-        fn = getattr(dep, "dependency", None)
-        if fn is not None:
-            callables.append(fn)
-
-    def walk(dependant: Any) -> None:
-        if dependant is None:
-            return
-        call = getattr(dependant, "call", None)
-        if call is not None:
-            callables.append(call)
-        for sub in getattr(dependant, "dependencies", []) or []:
-            walk(sub)
-
-    walk(route.dependant)
-    return callables
+    return route_dependency_callables(route)
 
 
 def _auth_required_codes(route: APIRoute) -> set[int]:

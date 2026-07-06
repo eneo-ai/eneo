@@ -1,10 +1,10 @@
-import { createIntric } from "@intric/intric-js";
+import { createEneo } from "@eneo/eneo-js";
 import { env } from "$env/dynamic/public";
 
 /**
- * Unauthenticated intric client for public endpoints like federation discovery.
+ * Unauthenticated eneo client for public endpoints like federation discovery.
  * Used in login flows before user authentication.
  */
-export const intric = createIntric({
-  baseUrl: env.PUBLIC_ENEO_BACKEND_URL || env.PUBLIC_INTRIC_BACKEND_URL || ""
+export const eneo = createEneo({
+  baseUrl: env.PUBLIC_ENEO_BACKEND_URL || ""
 });

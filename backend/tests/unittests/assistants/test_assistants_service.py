@@ -6,20 +6,22 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.api.assistant_models import (
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
-from intric.assistants.assistant_service import AssistantService
-from intric.main.exceptions import (
+from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant_service import AssistantService
+from eneo.files.file_models import FileType
+from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
     UnauthorizedException,
 )
-from intric.main.models import ModelId
-from intric.prompts.api.prompt_models import PromptCreate
+from eneo.main.models import ModelId
+from eneo.prompts.api.prompt_models import PromptCreate
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -59,6 +61,7 @@ def setup_fixture():
     mock_assistant.collections = []
     mock_assistant.websites = []
     mock_assistant.integration_knowledge_list = []
+    mock_assistant.attachments = []
     mock_assistant.has_knowledge.return_value = False
     mock_assistant.has_mcp.return_value = False
     mock_space = MagicMock()
@@ -95,6 +98,12 @@ def setup_fixture():
         org_space_assistant_role_repo=role_repo_mock,
         help_assistant_assignment_history_repo=history_repo_mock,
     )
+
+    # Attachment fit validation needs a real model + token counts; it is
+    # exercised directly in test_attachment_budget.py. Stub it here so these
+    # orchestration tests (update flow, model selection, permissions) aren't
+    # coupled to the token-counting subsystem.
+    service._validate_attachments_fit = AsyncMock()
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
 
@@ -246,6 +255,27 @@ async def test_update_assistant_skips_prompt_creation_when_field_omitted(setup: 
     setup.service.prompt_service.create_prompt.assert_not_awaited()
 
 
+async def test_update_runs_fit_check_for_prompt_only_change(setup: Setup):
+    # Wiring guard for f961deaca: a prompt-only update must trigger the fit
+    # check, because the prompt counts toward the context ceiling on its own.
+    # If the gate were narrowed back to `attachments is not None`, this fails.
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        prompt=PromptCreate(text="some prompt", description=""),
+    )
+
+    setup.service._validate_attachments_fit.assert_awaited_once()
+
+
+async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
+    # Counterpart: a rename touches neither prompt, model nor attachments, so the
+    # fit check must not run — it would be wasted work and could spuriously
+    # reject on an edit that can't change the context cost.
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+
+    setup.service._validate_attachments_fit.assert_not_awaited()
+
+
 def configure_personal_default_assistant(
     setup: Setup, *, can_manage_assistants: bool = False
 ):
@@ -363,6 +393,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     space.get_completion_model.return_value = template_model
 
     created_assistant = MagicMock(id=uuid4())
+    created_assistant.attachments = []  # no attachments -> fit check is a no-op
     refreshed_space = MagicMock()
     refreshed_space.get_assistant.return_value = created_assistant
 
@@ -403,6 +434,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     template_data.get_ids_by_type.return_value = []
 
     created_assistant = MagicMock(id=uuid4())
+    created_assistant.attachments = []  # no attachments -> fit check is a no-op
     refreshed_space = MagicMock()
     refreshed_space.get_assistant.return_value = created_assistant
 
@@ -569,52 +601,74 @@ async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setu
 
 
 def _mock_file(file_type, parent_file_id=None):
-    return MagicMock(id=uuid4(), file_type=file_type, parent_file_id=parent_file_id)
+    mimetype = "image/jpeg" if file_type == FileType.IMAGE else "application/pdf"
+    return MagicMock(
+        id=uuid4(),
+        file_type=file_type,
+        parent_file_id=parent_file_id,
+        mimetype=mimetype,
+        size=1,
+    )
 
 
-async def test_vision_derivatives_expand_completion_files_and_attachments(
+def _assistant_with_attachments(attachments):
+    return Assistant(
+        id=None,
+        user=MagicMock(),
+        name="test",
+        space_id=MagicMock(),
+        prompt=None,
+        completion_model=MagicMock(),
+        completion_model_kwargs=ModelKwargs(),
+        logging_enabled=False,
+        websites=[],
+        collections=[],
+        attachments=attachments,
+        published=False,
+    )
+
+
+async def test_completion_file_inputs_include_prompt_derivatives_without_mutating_persistent_attachments(
     setup: Setup,
 ):
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
     attachment = _mock_file(FileType.TEXT)
     attachment_image = _mock_file(FileType.IMAGE, parent_file_id=attachment.id)
-    assistant = MagicMock()
-    assistant.attachments = [attachment]
+    assistant = _assistant_with_attachments([attachment])
     session = MagicMock(questions=[])
     setup.service.file_service.with_derived_images.side_effect = [
         [attachment, attachment_image],
         [pdf, derived],
     ]
 
-    result = await setup.service._with_vision_derivatives(
+    result = await setup.service._build_completion_file_inputs(
         files=[pdf],
         session=session,
         assistant=assistant,
         completion_model=MagicMock(vision=True),
     )
 
-    assert result == [pdf, derived]
-    assert assistant.attachments == [attachment, attachment_image]
+    assert result.completion_message_files == [pdf, derived]
+    assert result.completion_prompt_files == [attachment, attachment_image]
+    assert assistant.attachments == [attachment]
 
 
 async def test_vision_derivatives_skip_everything_without_vision(setup: Setup):
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     assistant = MagicMock()
+    assistant.attachments = []
     session = MagicMock(questions=[])
 
-    result = await setup.service._with_vision_derivatives(
+    result = await setup.service._build_completion_file_inputs(
         files=[pdf],
         session=session,
         assistant=assistant,
         completion_model=MagicMock(vision=False),
     )
 
-    assert result == [pdf]
+    assert result.completion_message_files == [pdf]
+    assert result.completion_prompt_files == []
     setup.service.file_service.with_derived_images.assert_not_awaited()
     setup.service.file_service.get_derived_images.assert_not_awaited()
 
@@ -624,8 +678,6 @@ async def test_vision_derivatives_gate_on_effective_model_not_configured(
 ):
     """Governance can steer to a different model than the assistant's own —
     derived images must follow the model that actually answers."""
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
     assistant = MagicMock()
@@ -634,19 +686,18 @@ async def test_vision_derivatives_gate_on_effective_model_not_configured(
     session = MagicMock(questions=[])
     setup.service.file_service.with_derived_images.return_value = [pdf, derived]
 
-    result = await setup.service._with_vision_derivatives(
+    result = await setup.service._build_completion_file_inputs(
         files=[pdf],
         session=session,
         assistant=assistant,
         completion_model=MagicMock(vision=True),  # policy-enforced model has it
     )
 
-    assert result == [pdf, derived]
+    assert result.completion_message_files == [pdf, derived]
+    assert result.completion_prompt_files == []
 
 
 async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
-    from intric.files.file_models import FileType
-
     pdf_one = _mock_file(FileType.TEXT)
     pdf_two = _mock_file(FileType.TEXT)
     derived_one = _mock_file(FileType.IMAGE, parent_file_id=pdf_one.id)
@@ -668,8 +719,6 @@ async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
 
 
 async def test_history_derivatives_do_not_duplicate_present_images(setup: Setup):
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
     question = MagicMock(files=[pdf, derived])

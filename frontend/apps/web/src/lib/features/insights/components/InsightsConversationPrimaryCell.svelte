@@ -7,9 +7,9 @@
 <!-- Needs to be a svelte 4 component for compatibility reasons with the table -->
 
 <script lang="ts">
-  import type { ConversationSparse } from "@intric/intric-js";
+  import type { ConversationSparse } from "@eneo/eneo-js";
   import { getInsightsService } from "../InsightsService.svelte";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
 
   const insights = getInsightsService();
   export let conversation: ConversationSparse;

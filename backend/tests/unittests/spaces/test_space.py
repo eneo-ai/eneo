@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.spaces.space import UNAUTHORIZED_EXCEPTION_MESSAGE, Space, SpaceRoleValue
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.spaces.space import UNAUTHORIZED_EXCEPTION_MESSAGE, Space, SpaceRoleValue
 
 
 @pytest.fixture

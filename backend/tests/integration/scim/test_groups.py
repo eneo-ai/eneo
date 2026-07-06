@@ -22,12 +22,12 @@ import pytest
 from dependency_injector import providers
 from sqlalchemy import func, select
 
-from intric.database.tables.user_groups_table import UserGroups
-from intric.database.tables.users_table import Users, usergroups_users_table
-from intric.main.container.container import Container
-from intric.scim.repositories.group_repository import ScimGroupRepository
-from intric.scim.schemas.common import ScimFilter, ScimSort
-from intric.tenants.tenant import TenantBase
+from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.users_table import Users, usergroups_users_table
+from eneo.main.container.container import Container
+from eneo.scim.repositories.group_repository import ScimGroupRepository
+from eneo.scim.schemas.common import ScimFilter, ScimSort
+from eneo.tenants.tenant import TenantBase
 
 # ---------------------------------------------------------------------------
 # Repository-level integration tests
@@ -105,7 +105,7 @@ async def test_list_filter_unsupported_attribute_raises_invalid_filter(
 ):
     """RFC 7644 §3.4.2.2: unsupported filter attributes must surface as 400
     invalidFilter rather than silently returning all groups in the tenant."""
-    from intric.scim.domain.errors import ScimInvalidFilterError
+    from eneo.scim.domain.errors import ScimInvalidFilterError
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { WebsiteSparse } from "@intric/intric-js";
-  import { Label } from "@intric/ui";
+  import type { WebsiteSparse } from "@eneo/eneo-js";
+  import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import dayjs from "dayjs";

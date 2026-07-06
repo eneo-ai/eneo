@@ -10,10 +10,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.sharepoint_subscription import (
+from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
-from intric.integration.infrastructure.sharepoint_subscription_service import (
+from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
 
@@ -77,7 +77,7 @@ def expired_subscription():
 def service(mock_subscription_repo, mock_oauth_token_service):
     """Create SharePointSubscriptionService with mocked dependencies."""
     with patch(
-        "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+        "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
     ) as mock_settings:
         settings = MagicMock()
         settings.sharepoint_webhook_notification_url = "https://example.com/webhook/"
@@ -158,7 +158,7 @@ class TestEnsureSubscriptionForSite:
     ):
         """Returns None if webhook notification URL is not configured."""
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+            "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = None
@@ -231,6 +231,9 @@ class TestRecreateExpiredSubscription:
         updated_sub = mock_subscription_repo.update.call_args[0][0]
         assert updated_sub.subscription_id == "new-subscription-id"
         assert updated_sub.expires_at > datetime.now(timezone.utc)
+        assert updated_sub.consecutive_renewal_failures == 0
+        assert updated_sub.last_renewal_failed_at is None
+        assert updated_sub.last_renewal_error is None
 
     async def test_recreate_deletes_old_subscription_first(
         self, service, mock_subscription_repo, expired_subscription, mock_token
@@ -292,6 +295,10 @@ class TestRenewSubscription:
         self, service, mock_subscription_repo, mock_subscription, mock_token
     ):
         """Successfully renews a subscription."""
+        mock_subscription.consecutive_renewal_failures = 2
+        mock_subscription.last_renewal_failed_at = datetime.now(timezone.utc)
+        mock_subscription.last_renewal_error = "previous failure"
+
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.__aenter__ = AsyncMock(return_value=mock_response)
@@ -311,6 +318,10 @@ class TestRenewSubscription:
 
         assert result is True
         mock_subscription_repo.update.assert_called_once()
+        updated_sub = mock_subscription_repo.update.call_args[0][0]
+        assert updated_sub.consecutive_renewal_failures == 0
+        assert updated_sub.last_renewal_failed_at is None
+        assert updated_sub.last_renewal_error is None
 
     async def test_renew_recreates_on_404(
         self, service, mock_subscription_repo, mock_subscription, mock_token
@@ -514,7 +525,7 @@ class TestGraphApiInteractions:
     ):
         """Must fail fast if SHAREPOINT_WEBHOOK_CLIENT_STATE is not configured."""
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_service.get_settings"
+            "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
         ) as mock_settings:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = (

@@ -4,7 +4,7 @@ Deletable together with openai_image_pricing.py if the special handling
 is ever dropped.
 """
 
-from intric.tokens.openai_image_pricing import openai_image_tokens
+from eneo.tokens.openai_image_pricing import openai_image_tokens
 
 
 def test_default_tile_formula_for_gpt4o_family():

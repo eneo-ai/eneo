@@ -1,6 +1,6 @@
 """Unit tests for the cross-provider /v1/models normalization helpers."""
 
-from intric.model_providers.domain.model_provider_service import (
+from eneo.model_providers.domain.model_provider_service import (
     _auth_headers_for,
     _coerce_to_epoch,
     _extract_mode_hint,

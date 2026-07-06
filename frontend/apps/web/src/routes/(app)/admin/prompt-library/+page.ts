@@ -6,7 +6,7 @@
 
 export const load = async (event) => {
   event.depends("admin:prompt-library");
-  const { intric } = await event.parent();
-  const entries = await intric.promptLibrary.list();
+  const { eneo } = await event.parent();
+  const entries = await eneo.promptLibrary.list();
   return { entries };
 };

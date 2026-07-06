@@ -6,11 +6,11 @@ from uuid import UUID
 import pytest
 from sqlalchemy import update
 
-from intric.database.tables.tenant_table import Tenants
-from intric.database.tables.user_groups_table import UserGroups
-from intric.database.tables.users_table import Users
-from intric.scim.app import scim_app
-from intric.scim.auth import require_scim_auth
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.users_table import Users
+from eneo.scim.app import scim_app
+from eneo.scim.auth import require_scim_auth
 
 TEST_SCIM_TOKEN = "integration-test-scim-bearer-token"
 _TEST_SCIM_TOKEN_HASH = hashlib.sha256(TEST_SCIM_TOKEN.encode()).hexdigest()

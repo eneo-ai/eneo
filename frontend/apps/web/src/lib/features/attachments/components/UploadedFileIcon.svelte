@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { IconFile } from "@intric/icons/file";
-  import { IconFileAudio } from "@intric/icons/file-audio";
-  import { IconFileImage } from "@intric/icons/file-image";
-  import { IconFileText } from "@intric/icons/file-text";
+  import { IconFile } from "@eneo/icons/file";
+  import { IconFileAudio } from "@eneo/icons/file-audio";
+  import { IconFileImage } from "@eneo/icons/file-image";
+  import { IconFileText } from "@eneo/icons/file-text";
   import type { ClassValue } from "svelte/elements";
 
   const icons = {

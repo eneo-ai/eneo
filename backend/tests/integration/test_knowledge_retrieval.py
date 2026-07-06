@@ -9,9 +9,9 @@ Tests cover:
 
 from sqlalchemy import select
 
-from intric.database.tables.spaces_table import Spaces
-from intric.database.tables.integration_table import IntegrationKnowledge
-from intric.database.tables.integration_knowledge_spaces_table import (
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.integration_table import IntegrationKnowledge
+from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
 

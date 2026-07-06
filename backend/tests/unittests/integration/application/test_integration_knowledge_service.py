@@ -15,14 +15,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.application.integration_knowledge_service import (
+from eneo.integration.application.integration_knowledge_service import (
     IntegrationKnowledgeService,
 )
-from intric.integration.domain.entities.integration_knowledge import (
+from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.roles.permissions import Permission
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_USER
 
 
@@ -99,7 +99,7 @@ class TestTenantAppAdminPermission:
 
     @pytest.fixture
     def non_admin_user(self):
-        from intric.users.user import UserInDB
+        from eneo.users.user import UserInDB
 
         user = MagicMock(spec=UserInDB)
         user.id = uuid4()
@@ -1083,7 +1083,7 @@ class TestCreateSpaceIntegrationKnowledge:
     ):
         """Test that tenant_app integration requires ADMIN permission."""
         # Create a user without ADMIN permission
-        from intric.users.user import UserInDB
+        from eneo.users.user import UserInDB
 
         non_admin_user = MagicMock(spec=UserInDB)
         non_admin_user.id = uuid4()
@@ -1179,7 +1179,7 @@ class TestCreateSpaceIntegrationKnowledge:
         """Test that an editor with space-level create permission but without system
         ADMIN permission is blocked when trying to create tenant_app integrations.
         This is the key security check for shared spaces."""
-        from intric.users.user import UserInDB
+        from eneo.users.user import UserInDB
 
         editor_user = MagicMock(spec=UserInDB)
         editor_user.id = uuid4()

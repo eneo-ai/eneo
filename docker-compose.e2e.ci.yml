@@ -110,7 +110,7 @@ services:
         export PATH="/app/.venv/bin:$$PATH"
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
         python /e2e/seed.py          # seed mock completion model
-        exec gunicorn src.intric.server.main:app \
+        exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --bind 0.0.0.0:8000
     volumes:

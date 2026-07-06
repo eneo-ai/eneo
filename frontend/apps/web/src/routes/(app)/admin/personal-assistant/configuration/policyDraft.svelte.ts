@@ -21,7 +21,7 @@
 import { invalidate } from "$app/navigation";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
@@ -82,7 +82,7 @@ type PolicyUpdate = {
 };
 
 export type PolicyPageData = {
-  intric: Intric;
+  eneo: Eneo;
   policy: Policy;
   models: { completionModels: CompletionModel[] };
   modelProviders?: ModelProvider[] | null;
@@ -102,7 +102,7 @@ export class PolicyDraft {
   // Assigned by `sync()`, which the page calls from an `$effect` on mount and
   // on every loader rerun — seeding here (rather than a constructor arg) avoids
   // statically capturing the initial `data` prop (state_referenced_locally).
-  #intric!: Intric;
+  #eneo!: Eneo;
 
   // ---- Inputs (re-seeded from the loader on every data change) -------------
   #policy = $state<Policy>(EMPTY_POLICY);
@@ -132,7 +132,7 @@ export class PolicyDraft {
   /** Re-seed inputs, baseline and editable state from the loader. Reads only
       from `data` so it is safe to call inside an `$effect`. */
   sync(data: PolicyPageData) {
-    this.#intric = data.intric;
+    this.#eneo = data.eneo;
     this.#policy = data.policy;
     // Only models the backend will accept (`can_access`); offering a
     // deprecated/locked model would make the policy PUT 400 on save.
@@ -466,7 +466,7 @@ export class PolicyDraft {
           prompt_library_id: this.promptEnabled ? this.selectedPromptId : null
         };
       }
-      await this.#intric.governancePolicy.update(update);
+      await this.#eneo.governancePolicy.update(update);
       await invalidate("admin:governance-policy");
       this.pendingConfirm = null;
       this.saveAnnouncement = m.governance_save_success();

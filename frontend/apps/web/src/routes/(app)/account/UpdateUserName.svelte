@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { Dialog, Button, Input } from "@intric/ui";
+  import { Dialog, Button, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 

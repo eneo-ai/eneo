@@ -5,7 +5,7 @@
 */
 
 /**
- * Login via a combination of MobilityGuard and intric's own endpoints.
+ * Login via a combination of MobilityGuard and eneo's own endpoints.
  */
 
 import { dev } from "$app/environment";

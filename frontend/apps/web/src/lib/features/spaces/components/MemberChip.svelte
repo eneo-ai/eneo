@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { dynamicColour } from "$lib/core/colours";
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
 
   export let member:
     | {
@@ -34,11 +34,11 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .chip {
     @apply border-on-fill -ml-2 flex h-9 w-9 items-center justify-center rounded-full border-2 shadow hover:z-30 hover:shadow-lg;
   }
   .fallback {
-    @apply bg-brand-intric text-on-fill text-center text-sm;
+    @apply bg-brand-eneo text-on-fill text-center text-sm;
   }
 </style>

@@ -1,5 +1,5 @@
 import { derived, get, readable, writable, type Readable } from "svelte/store";
-import { type Intric, type UploadedFile } from "@intric/intric-js";
+import { type Eneo, type UploadedFile } from "@eneo/eneo-js";
 import { createContext } from "$lib/core/context";
 import { ATTACHMENTS } from "$lib/core/constants";
 import { formatBytes } from "$lib/core/formatting/formatBytes";
@@ -43,11 +43,11 @@ const [getAttachmentManager, setAttachmentManager] =
   createContext<ReturnType<typeof createAttachmentManager>>();
 
 type AttachmentManagerParams = {
-  intric: Intric;
+  eneo: Eneo;
   options?: {
     /**  */
     rules?: AttachmentRules | Readable<AttachmentRules>;
-    /** Callback to run once a file has been uploaded to intric */
+    /** Callback to run once a file has been uploaded to eneo */
     onFileUploaded?: (file: UploadedFile) => void;
     /** When true, upload/validation errors are exposed via the `uploadError`
      * store for the consumer to render inline (e.g. next to the chat input)
@@ -65,7 +65,7 @@ function initAttachmentManager(data: AttachmentManagerParams) {
 export { initAttachmentManager, getAttachmentManager };
 
 function createAttachmentManager(data: AttachmentManagerParams) {
-  const { intric } = data;
+  const { eneo } = data;
   const inlineErrors = data.options?.inlineErrors ?? false;
   const attachmentRules = (() => {
     const rules = data.options?.rules ?? {};
@@ -148,7 +148,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           return attachment;
         });
 
-        const fileRef = await intric.files.upload({
+        const fileRef = await eneo.files.upload({
           file,
           onProgress: (ev) => {
             updateAttachment(currentUpload, (attachment) => {
@@ -167,7 +167,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           attachment.remove = async () => {
             // This can fail, but that's ok
             try {
-              await intric.files.delete({ fileId: fileRef.id });
+              await eneo.files.delete({ fileId: fileRef.id });
             } finally {
               // We always remove from our list, so it is not included in the question
               attachments.update(($attachments) =>

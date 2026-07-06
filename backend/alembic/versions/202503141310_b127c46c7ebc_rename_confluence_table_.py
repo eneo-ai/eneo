@@ -28,7 +28,7 @@ def upgrade():
     op.execute(
         """
         INSERT INTO integrations ("name",description,integration_type) VALUES
-            ('Sharepoint','This integration enables the seamless import knowledge of different forms from Sharepoint into intric.','sharepoint');
+            ('Sharepoint','This integration enables the seamless import knowledge of different forms from Sharepoint into Eneo.','sharepoint');
     """
     )
 

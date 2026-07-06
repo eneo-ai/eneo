@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.audit.infrastructure.rate_limiting import RateLimitServiceUnavailableError
-from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
+from eneo.audit.infrastructure.rate_limiting import RateLimitServiceUnavailableError
+from eneo.mcp_servers.infrastructure.tool_approval import get_approval_manager
 
 
 async def _create_space(client, bearer_token: str) -> str:
@@ -280,7 +280,7 @@ async def test_approve_tools_succeeds_when_rate_limiter_unavailable(
         raise RateLimitServiceUnavailableError(Exception("redis down"))
 
     monkeypatch.setattr(
-        "intric.conversations.conversations_router.enforce_rate_limit",
+        "eneo.conversations.conversations_router.enforce_rate_limit",
         _failing_rate_limit,
     )
 
@@ -415,7 +415,7 @@ async def test_approval_flow_fails_closed_when_redis_unavailable_mid_approval(
     )
 
     with patch(
-        "intric.conversations.conversations_router.get_approval_manager",
+        "eneo.conversations.conversations_router.get_approval_manager",
         return_value=failing_manager,
     ):
         with pytest.raises(ConnectionError):

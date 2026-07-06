@@ -54,10 +54,10 @@ Container STDOUT  ─►  Log collector (Fluent Bit / Vector / Alloy / ...)     
 ```
 
 Key files:
-1. [backend/src/intric/main/observability.py](../backend/src/intric/main/observability.py) shared init for API and worker (`init_observability`, `instrument_fastapi`).
-2. [backend/src/intric/main/logging.py](../backend/src/intric/main/logging.py) `OTELJSONFormatter` and severity mapping.
-3. [backend/src/intric/server/middleware/trace_id.py](../backend/src/intric/server/middleware/trace_id.py) pure-ASGI middleware that injects `X-Trace-Id` on response start.
-4. [backend/src/intric/server/middleware/request_context.py](../backend/src/intric/server/middleware/request_context.py) populates the per-request contextvars from the active span.
+1. [backend/src/eneo/main/observability.py](../backend/src/eneo/main/observability.py) shared init for API and worker (`init_observability`, `instrument_fastapi`).
+2. [backend/src/eneo/main/logging.py](../backend/src/eneo/main/logging.py) `OTELJSONFormatter` and severity mapping.
+3. [backend/src/eneo/server/middleware/trace_id.py](../backend/src/eneo/server/middleware/trace_id.py) pure-ASGI middleware that injects `X-Trace-Id` on response start.
+4. [backend/src/eneo/server/middleware/request_context.py](../backend/src/eneo/server/middleware/request_context.py) populates the per-request contextvars from the active span.
 
 ---
 
@@ -104,7 +104,7 @@ Each line emitted by the backend is a complete JSON object. Top-level fields are
     "status_code": 200,
     "tenant_slug": "exampletenant",
     "user_email": "user@example.com",
-    "logger": "intric.main.container.container"
+    "logger": "eneo.main.container.container"
   },
   "resource": {
     "service.name": "eneo",
@@ -153,7 +153,7 @@ Eneo uses three distinct IDs. They are not interchangeable.
 `correlation_id` predates the OTel work. It is retained because existing support flows, dashboards, and the frontend client read `X-Correlation-ID`. During the migration period:
 
 - The backend sets `correlation_id = trace_id` in contextvars, in log lines, and in the `X-Correlation-ID` response header. The two fields always carry the same value.
-- The frontend's `IntricError.getTraceId()` reads `X-Trace-Id` first and falls back to `X-Correlation-ID`, so both old and new backends are handled.
+- The frontend's `EneoError.getTraceId()` reads `X-Trace-Id` first and falls back to `X-Correlation-ID`, so both old and new backends are handled.
 - New code should reference `trace_id` / `X-Trace-Id` only.
 
 Removal of `correlation_id` and `X-Correlation-ID` is deferred until support flows, internal dashboards, and frontend consumers have migrated. There is no specific deprecation date in v1; the alias is free to retire when no active reader remains.
@@ -181,7 +181,7 @@ The OTel FastAPI instrumentation creates a server span for each request. If the 
 
 `TraceIdResponseMiddleware` sets `X-Trace-Id` (and `X-Correlation-ID`) on `http.response.start`, which guarantees the headers are present on every status code including 4xx and 5xx. The middleware is pure-ASGI rather than `BaseHTTPMiddleware`, which would create a context-copy boundary that loses the active server span.
 
-CORS exposes both headers via `Access-Control-Expose-Headers`. The list of exposed trace headers is defined once in [backend/src/intric/server/main.py](../backend/src/intric/server/main.py) as `_TRACE_EXPOSE_HEADERS` and reused in the normal CORS configuration and in the manual CORS blocks used by 500-error responses.
+CORS exposes both headers via `Access-Control-Expose-Headers`. The list of exposed trace headers is defined once in [backend/src/eneo/server/main.py](../backend/src/eneo/server/main.py) as `_TRACE_EXPOSE_HEADERS` and reused in the normal CORS configuration and in the manual CORS blocks used by 500-error responses.
 
 ### Outbound backend-to-backend calls
 
@@ -203,16 +203,16 @@ The frontend treats `X-Trace-Id` as a support header, not a distributed-tracing 
 
 ### What the frontend does
 
-- `IntricError.getTraceId()` (in [`@intric/intric-js`](../frontend/packages/intric-js/src/client/client.js)) reads `X-Trace-Id` from the response headers, falling back to `X-Correlation-ID` if absent. Every error from an Eneo API call carries the trace ID without further plumbing.
+- `EneoError.getTraceId()` (in [`@eneo/eneo-js`](../frontend/packages/eneo-js/src/client/client.js)) reads `X-Trace-Id` from the response headers, falling back to `X-Correlation-ID` if absent. Every error from an Eneo API call carries the trace ID without further plumbing.
 - SvelteKit error hooks ([hooks.client.ts](../frontend/apps/web/src/hooks.client.ts), [hooks.server.ts](../frontend/apps/web/src/hooks.server.ts)) include `traceId` on the error payload, so `$page.error.traceId` is available to display.
-- Auth flows ([intric.server.ts](../frontend/apps/web/src/lib/features/auth/intric.server.ts), [oidc.server.ts](../frontend/apps/web/src/lib/features/auth/oidc.server.ts)) read the trace ID from response headers and pass it through `LoginError.traceId` so callback pages can surface it to the user and log it.
+- Auth flows ([eneo.server.ts](../frontend/apps/web/src/lib/features/auth/eneo.server.ts), [oidc.server.ts](../frontend/apps/web/src/lib/features/auth/oidc.server.ts)) read the trace ID from response headers and pass it through `LoginError.traceId` so callback pages can surface it to the user and log it.
 
 ### What the frontend does not do
 
 - It does not generate, propagate, or send `traceparent` itself. `traceparent` is a backend-to-backend W3C contract.
 - It does not export spans or logs to any backend in v1.
 
-Surfacing the trace ID to users (in error toasts, support links, etc.) is a UI concern; the value is always available on `IntricError.getTraceId()` and `App.Error.traceId`.
+Surfacing the trace ID to users (in error toasts, support links, etc.) is a UI concern; the value is always available on `EneoError.getTraceId()` and `App.Error.traceId`.
 
 ---
 
@@ -228,7 +228,7 @@ Redaction is enforced at two layers: stdout log attributes and auto-instrumented
 
 ### Query parameters that are replaced with `[REDACTED]`
 
-The full list is defined as a regular expression in [observability.py](../backend/src/intric/main/observability.py) (`_SENSITIVE_PARAM_RE`):
+The full list is defined as a regular expression in [observability.py](../backend/src/eneo/main/observability.py) (`_SENSITIVE_PARAM_RE`):
 
 - Exact matches: `code`, `state`, `token`, `access_token`, `refresh_token`, `client_secret`
 - Wildcard matches: any parameter whose name contains `token` or `secret` (case-insensitive)
@@ -362,4 +362,4 @@ The following are explicitly **not** part of v1:
 - [Deployment Guide](./DEPLOYMENT.md) production deployment, env templates.
 - [Security](./SECURITY.md) redaction policy in the broader security context.
 - [Troubleshooting](./TROUBLESHOOTING.md) operational issues, including how to use `trace_id` and `error_id` for support.
-- [API Error Handling](../backend/docs/api/error-handling.md) error response shape (`error_id`, `intric_error_code`, `request_id`).
+- [API Error Handling](../backend/docs/api/error-handling.md) error response shape (`error_id`, `eneo_error_code`, `request_id`).

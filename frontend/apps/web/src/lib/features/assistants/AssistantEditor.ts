@@ -1,6 +1,6 @@
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Intric, Assistant } from "@intric/intric-js";
+import type { Eneo, Assistant } from "@eneo/eneo-js";
 
 const [getAssistantEditor, setAssistantEditor] =
   createContext<ReturnType<typeof initAssistantEditor>>("Edit an Assistant");
@@ -11,11 +11,11 @@ const [getAssistantEditor, setAssistantEditor] =
  */
 function initAssistantEditor(data: {
   assistant: Assistant;
-  intric: Intric;
+  eneo: Eneo;
   onUpdateDone?: (assistant: Assistant) => void;
 }) {
   const editor = createResourceEditor({
-    intric: data.intric,
+    eneo: data.eneo,
     resource: data.assistant,
     defaults: {
       prompt: { description: "", text: "" },
@@ -23,9 +23,9 @@ function initAssistantEditor(data: {
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {
-      const updated = await data.intric.assistants.update({
+      const updated = await data.eneo.assistants.update({
         assistant: resource,
-        update: changes as Parameters<typeof data.intric.assistants.update>[0]["update"]
+        update: changes as Parameters<typeof data.eneo.assistants.update>[0]["update"]
       });
       data.onUpdateDone?.(updated);
       return updated;

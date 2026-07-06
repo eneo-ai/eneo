@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
 
   interface TenantInfo {
     slug: string;
@@ -51,8 +51,8 @@
     }
 
     try {
-      const { intric } = await import("$lib/api/client");
-      const data = await intric.auth.listTenants();
+      const { eneo } = await import("$lib/api/client");
+      const data = await eneo.auth.listTenants();
       tenantList = data.tenants || [];
       loading = false;
       autoSelectLastTenant();

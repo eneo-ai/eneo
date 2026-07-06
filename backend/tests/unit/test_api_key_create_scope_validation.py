@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import State
 
-from intric.authentication.auth_dependencies import ScopeFilter, get_scope_filter
+from eneo.authentication.auth_dependencies import ScopeFilter, get_scope_filter
 
 # ---------------------------------------------------------------------------
 # Helpers

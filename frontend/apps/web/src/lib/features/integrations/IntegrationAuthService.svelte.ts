@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
-import { getIntric } from "$lib/core/Intric";
-import type { Intric, UserIntegration } from "@intric/intric-js";
+import { getEneo } from "$lib/core/Eneo";
+import type { Eneo, UserIntegration } from "@eneo/eneo-js";
 import { onMount } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import { toast } from "$lib/components/toast";
@@ -35,11 +35,11 @@ export class IntegrationAuthService {
   /** Stores the current auth requests, key is the `tenant_integration_id` */
   #authRequests = new SvelteMap<string, AuthRequestContext>();
   #onConnected: OnConnectedCallback;
-  #intric: Intric;
+  #eneo: Eneo;
 
   constructor(options: { onConnected: OnConnectedCallback }) {
     this.#onConnected = options.onConnected;
-    this.#intric = getIntric();
+    this.#eneo = getEneo();
     onMount(() => {
       window.addEventListener("message", this.receiveMessageHandler);
     });
@@ -76,9 +76,8 @@ export class IntegrationAuthService {
       `width=${width},height=${height},top=${top},left=${left},popup`
     );
 
-    const url = await this.#intric.integrations.user.getAuthUrl({
-      integration: { tenant_integration_id },
-      state: tenant_integration_id
+    const { url, state } = await this.#eneo.integrations.user.getAuthUrl({
+      integration: { tenant_integration_id }
     });
 
     if (popup) {
@@ -96,10 +95,13 @@ export class IntegrationAuthService {
       }
     }, 1000);
 
+    // Keyed by tenant_integration_id (for isConnecting / duplicate checks); the
+    // backend-issued CSRF `state` is stored to correlate the popup callback.
     this.#authRequests.set(integration.tenant_integration_id!, {
       popup,
       popupInspectInterval,
-      integration
+      integration,
+      state
     });
   }
 
@@ -125,21 +127,21 @@ export class IntegrationAuthService {
     if (!allowedOrigins.includes(origin)) return;
     if (!isIntegrationCallbackMessage(data)) return;
 
-    const { code, state: integrationId } = data;
+    const { code, state } = data;
 
-    // code and id are required
-    if (!code || !integrationId) {
+    // code and state are required
+    if (!code || !state) {
       const missing = [];
       if (!code) missing.push("code");
-      if (!integrationId) missing.push("state");
+      if (!state) missing.push("state");
       toast.warning(`Missing required fields: ${missing.join(", ")}`);
       return;
     }
 
-    // Find and validate request
-    const request = this.#authRequests.get(integrationId);
+    // Correlate the callback to its request by the backend-issued state.
+    const request = [...this.#authRequests.values()].find((r) => r.state === state);
     if (!request) {
-      toast.error(`No auth request found for state ${integrationId}`);
+      toast.error(`No auth request found for state ${state}`);
       return;
     }
 
@@ -147,16 +149,17 @@ export class IntegrationAuthService {
     clearInterval(request.popupInspectInterval);
 
     try {
-      const updatedIntegration = await this.#intric.integrations.user.registerAuthCode({
+      const updatedIntegration = await this.#eneo.integrations.user.registerAuthCode({
         integration: request.integration,
-        code
+        code,
+        state
       });
       this.#onConnected({ success: true, integration: updatedIntegration });
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
       this.#onConnected({ success: false, error });
     } finally {
-      this.#authRequests.delete(integrationId);
+      this.#authRequests.delete(request.integration.tenant_integration_id!);
     }
   };
 
@@ -191,10 +194,12 @@ type AuthRequestContext = {
   integration: UserIntegration;
   popup: ReturnType<Window["open"]> | null;
   popupInspectInterval: ReturnType<typeof setInterval>;
+  /** Backend-issued CSRF state used to correlate the popup callback. */
+  state: string;
 };
 
 type IntegrationCallbackMessage = {
-  type: "intric/integration-callback";
+  type: "eneo/integration-callback";
   code: string | null;
   state: string | null;
   params: string;
@@ -205,5 +210,5 @@ function isIntegrationCallbackMessage(data: unknown): data is IntegrationCallbac
   if (typeof data !== "object") return false;
   if (!("type" in data)) return false;
 
-  return data && typeof data === "object" && data.type === "intric/integration-callback";
+  return data && typeof data === "object" && data.type === "eneo/integration-callback";
 }

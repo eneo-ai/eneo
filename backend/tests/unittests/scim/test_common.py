@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
-from intric.scim.schemas.common import ScimFilter, clamp_count
+from eneo.scim.constants import SCIM_FILTER_MAX_RESULTS
+from eneo.scim.schemas.common import ScimFilter, clamp_count
 
 
 class TestClampCount:
@@ -64,8 +64,8 @@ class TestCompositeFilterRejectedByService:
     async def test_list_users_raises_invalid_filter_on_composite(self):
         from uuid import uuid4
 
-        from intric.scim.domain.errors import ScimInvalidFilterError
-        from intric.scim.services.user_service import ScimUserService
+        from eneo.scim.domain.errors import ScimInvalidFilterError
+        from eneo.scim.services.user_service import ScimUserService
 
         service = ScimUserService(repository=AsyncMock(), tenant_id=uuid4())
         with pytest.raises(ScimInvalidFilterError):

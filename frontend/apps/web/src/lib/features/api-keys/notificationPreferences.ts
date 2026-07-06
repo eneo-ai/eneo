@@ -1,4 +1,4 @@
-import type { ApiKeyScopeType, Intric } from "@intric/intric-js";
+import type { ApiKeyScopeType, Eneo } from "@eneo/eneo-js";
 
 export type ApiKeyNotificationTargetType = "key" | "assistant" | "app" | "space";
 
@@ -115,77 +115,75 @@ export function hasScopeSubscription(
 }
 
 export async function getNotificationPreferences(
-  intric: Intric
+  eneo: Eneo
 ): Promise<ApiKeyNotificationPreferences> {
-  const response = await intric.apiKeys.getNotificationPreferences();
+  const response = await eneo.apiKeys.getNotificationPreferences();
   return normalizePreferences(response);
 }
 
 export async function updateNotificationPreferences(
-  intric: Intric,
+  eneo: Eneo,
   updates: Partial<ApiKeyNotificationPreferences>
 ): Promise<ApiKeyNotificationPreferences> {
-  const response = await intric.apiKeys.updateNotificationPreferences(updates);
+  const response = await eneo.apiKeys.updateNotificationPreferences(updates);
   return normalizePreferences(response);
 }
 
 export async function listNotificationSubscriptions(
-  intric: Intric
+  eneo: Eneo
 ): Promise<ApiKeyNotificationSubscription[]> {
-  const response = await intric.apiKeys.listNotificationSubscriptions();
+  const response = await eneo.apiKeys.listNotificationSubscriptions();
   const rawItems = isObject(response) && Array.isArray(response.items) ? response.items : [];
   return rawItems
     .map((item) => normalizeSubscription(item))
     .filter((item): item is ApiKeyNotificationSubscription => item !== null);
 }
 
-export async function followApiKeyNotifications(intric: Intric, apiKeyId: string): Promise<void> {
-  await intric.apiKeys.followNotificationTarget({
+export async function followApiKeyNotifications(eneo: Eneo, apiKeyId: string): Promise<void> {
+  await eneo.apiKeys.followNotificationTarget({
     target_type: "key",
     target_id: apiKeyId
   });
 }
 
-export async function unfollowApiKeyNotifications(intric: Intric, apiKeyId: string): Promise<void> {
-  await intric.apiKeys.unfollowNotificationTarget({
+export async function unfollowApiKeyNotifications(eneo: Eneo, apiKeyId: string): Promise<void> {
+  await eneo.apiKeys.unfollowNotificationTarget({
     target_type: "key",
     target_id: apiKeyId
   });
 }
 
 export async function followScopeNotifications(
-  intric: Intric,
+  eneo: Eneo,
   scopeType: ApiKeyScopeType | string,
   scopeId: string
 ): Promise<void> {
-  await intric.apiKeys.followNotificationTarget({
+  await eneo.apiKeys.followNotificationTarget({
     target_type: mapScopeTypeToTargetType(scopeType),
     target_id: scopeId
   });
 }
 
 export async function unfollowScopeNotifications(
-  intric: Intric,
+  eneo: Eneo,
   scopeType: ApiKeyScopeType | string,
   scopeId: string
 ): Promise<void> {
-  await intric.apiKeys.unfollowNotificationTarget({
+  await eneo.apiKeys.unfollowNotificationTarget({
     target_type: mapScopeTypeToTargetType(scopeType),
     target_id: scopeId
   });
 }
 
-export async function getAdminNotificationPolicy(
-  intric: Intric
-): Promise<ApiKeyNotificationPolicy> {
-  const response = await intric.apiKeys.admin.getNotificationPolicy();
+export async function getAdminNotificationPolicy(eneo: Eneo): Promise<ApiKeyNotificationPolicy> {
+  const response = await eneo.apiKeys.admin.getNotificationPolicy();
   return normalizePolicy(response);
 }
 
 export async function updateAdminNotificationPolicy(
-  intric: Intric,
+  eneo: Eneo,
   updates: Partial<ApiKeyNotificationPolicy>
 ): Promise<ApiKeyNotificationPolicy> {
-  const response = await intric.apiKeys.admin.updateNotificationPolicy(updates);
+  const response = await eneo.apiKeys.admin.updateNotificationPolicy(updates);
   return normalizePolicy(response);
 }

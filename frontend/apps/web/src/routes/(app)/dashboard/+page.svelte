@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconProfile } from "@intric/icons/profile";
-  import { IconLogout } from "@intric/icons/logout";
-  import { Button, Dropdown } from "@intric/ui";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconProfile } from "@eneo/icons/profile";
+  import { IconLogout } from "@eneo/icons/logout";
+  import { Button, Dropdown } from "@eneo/ui";
   import SpaceAccordionContent from "./SpaceAccordionContent.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { createAccordion } from "@melt-ui/svelte";
@@ -59,7 +59,7 @@
   <div
     class="bg-frosted-glass-primary sticky top-0 z-10 flex items-center justify-between p-4 py-2.5"
   >
-    <EneoWordMark class="text-brand-intric my-2 h-5 w-20"></EneoWordMark>
+    <EneoWordMark class="text-brand-eneo my-2 h-5 w-20"></EneoWordMark>
     <Dropdown.Root>
       <Dropdown.Trigger let:trigger asFragment>
         <Button is={trigger} padding="icon">

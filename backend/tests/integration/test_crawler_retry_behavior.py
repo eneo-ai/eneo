@@ -17,7 +17,7 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.crawl.recovery import (
+from eneo.worker.crawl.recovery import (
     calculate_exponential_backoff,
     update_job_retry_stats,
 )
@@ -293,7 +293,7 @@ async def test_exponential_backoff_with_real_calculation(
 
     # Use deterministic jitter source to avoid statistical flakes.
     monkeypatch.setattr(
-        "intric.worker.crawl.recovery.random.uniform",
+        "eneo.worker.crawl.recovery.random.uniform",
         lambda low, high: rng.uniform(low, high),
     )
 

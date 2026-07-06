@@ -9,18 +9,24 @@ Phase 5 + Phase 8A-D from the implementation plan.
 import ast
 import importlib
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
-from intric.authentication.auth_dependencies import (
+from eneo.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
 )
-from intric.main.config import get_settings
-from tests.unit.api_key_test_utils import walk_routes
+from eneo.main.config import get_settings
+from tests.unit.api_key_test_utils import (
+    route_dependency_closures,
+    route_has_dependency_named,
+    runtime_router_routes,
+    walk_routes,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,52 +34,27 @@ from tests.unit.api_key_test_utils import walk_routes
 
 
 def _get_router():
-    from intric.server.routers import router
-
-    return router
+    return SimpleNamespace(routes=runtime_router_routes())
 
 
 def _route_has_resource_permission_dep(route) -> bool:
     """Check if a route has _resource_permission_dep dependency."""
-    deps = getattr(route, "dependencies", [])
-    return any(
-        hasattr(dep, "dependency")
-        and getattr(dep.dependency, "__name__", "") == "_resource_permission_dep"
-        for dep in deps
-    )
+    return route_has_dependency_named(route, "_resource_permission_dep")
 
 
 def _route_has_scope_check_dep(route) -> bool:
-    deps = getattr(route, "dependencies", [])
-    return any(
-        hasattr(dep, "dependency")
-        and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
-        for dep in deps
-    )
+    return route_has_dependency_named(route, "_scope_check_dep")
 
 
 def _route_has_dep_name(route, dep_name: str) -> bool:
-    deps = getattr(route, "dependencies", [])
-    return any(
-        hasattr(dep, "dependency")
-        and getattr(dep.dependency, "__name__", "") == dep_name
-        for dep in deps
-    )
+    return route_has_dependency_named(route, dep_name)
 
 
 def _route_resource_permission_types(route) -> set[str]:
     resource_types: set[str] = set()
-    for dep in getattr(route, "dependencies", []):
-        fn = getattr(dep, "dependency", None)
-        if getattr(fn, "__name__", "") != "_resource_permission_dep":
-            continue
-        code = getattr(fn, "__code__", None)
-        closure = getattr(fn, "__closure__", None)
-        if code is None or closure is None:
-            continue
-        for name, cell in zip(code.co_freevars, closure):
-            if name == "resource_type":
-                resource_types.add(str(cell.cell_contents))
+    for closure in route_dependency_closures(route, "_resource_permission_dep"):
+        if "resource_type" in closure:
+            resource_types.add(str(closure["resource_type"]))
     return resource_types
 
 
@@ -105,13 +86,13 @@ def _extract_path_prefix(path: str) -> str:
     return path
 
 
-def _get_intric_src_path() -> pathlib.Path:
-    """Resolve the intric source package path dynamically."""
-    spec = importlib.util.find_spec("intric")
+def _get_eneo_src_path() -> pathlib.Path:
+    """Resolve the eneo source package path dynamically."""
+    spec = importlib.util.find_spec("eneo")
     if spec and spec.submodule_search_locations:
         return pathlib.Path(spec.submodule_search_locations[0])
     # Fallback
-    return pathlib.Path(__file__).parent.parent.parent / "src" / "intric"
+    return pathlib.Path(__file__).parent.parent.parent / "src" / "eneo"
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +123,7 @@ INTENTIONALLY_UNGUARDED = {
     "/storage": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/token-usage": "Admin scope + admin key permission guards (not resource guard)",
     "/templates": "Read-only discovery endpoints",
-    "/sysadmin": "Separate intric_super_api_key auth, out of scope",
+    "/sysadmin": "Separate super API key auth, out of scope",
     "/modules": "Separate auth, out of scope",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
@@ -264,9 +245,9 @@ class TestNoDuplicatePermissionMaps:
 
     def test_no_duplicate_method_permission_map(self):
         """METHOD_PERMISSION_MAP must exist in exactly one place (auth_models.py)."""
-        intric_src = _get_intric_src_path()
+        eneo_src = _get_eneo_src_path()
         matches = []
-        for py_file in intric_src.rglob("*.py"):
+        for py_file in eneo_src.rglob("*.py"):
             if "test" in str(py_file):
                 continue
             try:
@@ -280,7 +261,7 @@ class TestNoDuplicatePermissionMaps:
                             isinstance(target, ast.Name)
                             and target.id == "METHOD_PERMISSION_MAP"
                         ):
-                            rel = py_file.relative_to(intric_src)
+                            rel = py_file.relative_to(eneo_src)
                             matches.append(f"{rel}:{node.lineno}")
                 elif isinstance(node, ast.AnnAssign):
                     target = node.target
@@ -288,7 +269,7 @@ class TestNoDuplicatePermissionMaps:
                         isinstance(target, ast.Name)
                         and target.id == "METHOD_PERMISSION_MAP"
                     ):
-                        rel = py_file.relative_to(intric_src)
+                        rel = py_file.relative_to(eneo_src)
                         matches.append(f"{rel}:{node.lineno}")
 
         assert len(matches) == 1, (
@@ -298,7 +279,7 @@ class TestNoDuplicatePermissionMaps:
 
     def test_method_permission_map_is_in_auth_models(self):
         """Verify the single definition is in auth_models.py."""
-        from intric.authentication.auth_models import METHOD_PERMISSION_MAP
+        from eneo.authentication.auth_models import METHOD_PERMISSION_MAP
 
         assert isinstance(METHOD_PERMISSION_MAP, dict)
         assert "GET" in METHOD_PERMISSION_MAP
@@ -306,7 +287,7 @@ class TestNoDuplicatePermissionMaps:
 
     def test_permission_level_order_is_in_auth_models(self):
         """Verify PERMISSION_LEVEL_ORDER is in auth_models.py."""
-        from intric.authentication.auth_models import PERMISSION_LEVEL_ORDER
+        from eneo.authentication.auth_models import PERMISSION_LEVEL_ORDER
 
         assert isinstance(PERMISSION_LEVEL_ORDER, dict)
         assert PERMISSION_LEVEL_ORDER["read"] < PERMISSION_LEVEL_ORDER["admin"]
@@ -367,20 +348,10 @@ class TestReadOverrideWiring:
         - resource_type (str)
         We look for the frozenset cell.
         """
-        deps = getattr(route, "dependencies", [])
-        for dep in deps:
-            if not hasattr(dep, "dependency"):
-                continue
-            fn = dep.dependency
-            if getattr(fn, "__name__", "") == "_resource_permission_dep":
-                if hasattr(fn, "__closure__") and fn.__closure__:
-                    for cell in fn.__closure__:
-                        try:
-                            val = cell.cell_contents
-                        except ValueError:
-                            continue
-                        if isinstance(val, frozenset):
-                            return val
+        for closure in route_dependency_closures(route, "_resource_permission_dep"):
+            val = closure.get("read_override_endpoints")
+            if isinstance(val, frozenset):
+                return val
         return None
 
     def test_assistants_router_has_assistants_read_overrides(self):
@@ -428,12 +399,7 @@ class TestTenantAdminApiKeyGuards:
     """
 
     def _has_dependency(self, route, dep_name: str) -> bool:
-        deps = getattr(route, "dependencies", [])
-        return any(
-            hasattr(dep, "dependency")
-            and getattr(dep.dependency, "__name__", "") == dep_name
-            for dep in deps
-        )
+        return route_has_dependency_named(route, dep_name)
 
     def _routes_for_prefix(self, prefix: str):
         router = _get_router()
@@ -687,8 +653,8 @@ class TestFeatureFlagContract:
 
     def test_flag_true_layer2_enforces(self):
         """flag=True: read key + DELETE on unguarded route → 403."""
-        from intric.authentication.api_key_resolver import ApiKeyValidationError
-        from intric.users.user_service import _check_basic_method_permission
+        from eneo.authentication.api_key_resolver import ApiKeyValidationError
+        from eneo.users.user_service import _check_basic_method_permission
 
         key = self._make_key("read")
         request = self._make_request("DELETE")
@@ -701,7 +667,7 @@ class TestFeatureFlagContract:
         """flag=True: read key + DELETE on guarded route → 403 (resource check)."""
         from unittest.mock import patch
 
-        from intric.authentication.api_key_resolver import (
+        from eneo.authentication.api_key_resolver import (
             ApiKeyValidationError,
             check_resource_permission,
         )
@@ -709,7 +675,7 @@ class TestFeatureFlagContract:
         key = self._make_key("read")
 
         with patch(
-            "intric.authentication.api_key_resolver.get_settings"
+            "eneo.authentication.api_key_resolver.get_settings"
         ) as mock_settings:
             mock_settings.return_value.api_key_enforce_resource_permissions = True
             with pytest.raises(ApiKeyValidationError):
@@ -719,12 +685,12 @@ class TestFeatureFlagContract:
         """flag=False: Layer 1 skipped (no exception)."""
         from unittest.mock import patch
 
-        from intric.authentication.api_key_resolver import check_resource_permission
+        from eneo.authentication.api_key_resolver import check_resource_permission
 
         key = self._make_key("read")
 
         with patch(
-            "intric.authentication.api_key_resolver.get_settings"
+            "eneo.authentication.api_key_resolver.get_settings"
         ) as mock_settings:
             mock_settings.return_value.api_key_enforce_resource_permissions = False
             # Should NOT raise
@@ -732,8 +698,8 @@ class TestFeatureFlagContract:
 
     def test_phase4_management_guard_always_enforces(self):
         """Phase 4 management guards enforce regardless of feature flag."""
-        from intric.authentication.api_key_resolver import ApiKeyValidationError
-        from intric.users.user_service import _check_management_permission
+        from eneo.authentication.api_key_resolver import ApiKeyValidationError
+        from eneo.users.user_service import _check_management_permission
 
         key = self._make_key("write")
 
@@ -752,8 +718,8 @@ class TestNoEndpointLevelStashDependencies:
     """Scope/management stash dependencies must be mounted at router level only."""
 
     def _find_endpoint_level_stash_usage(self, rel_path: str) -> list[str]:
-        intric_src = _get_intric_src_path()
-        source_path = intric_src / rel_path
+        eneo_src = _get_eneo_src_path()
+        source_path = eneo_src / rel_path
         tree = ast.parse(source_path.read_text())
         hits: list[str] = []
 

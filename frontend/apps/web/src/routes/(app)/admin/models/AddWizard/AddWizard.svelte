@@ -22,8 +22,8 @@
   import { cubicOut } from "svelte/easing";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import type { ModelProviderPublic } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getErrorMessage, toastError } from "$lib/core/errors";
@@ -64,7 +64,7 @@
     modelType?: ModelType;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Open state bridging ------------------------------------------------
   // The host page passes a `Writable<boolean>` (legacy contract). We bridge
@@ -98,7 +98,7 @@
     if (capabilities || capabilitiesLoading) return;
     capabilitiesLoading = true;
     try {
-      capabilities = await getModelProviderCapabilities(intric);
+      capabilities = await getModelProviderCapabilities(eneo);
     } catch {
       // Steps fall back gracefully via `resolveProviderFields(null, ...)`.
     } finally {
@@ -277,7 +277,7 @@
     const warnings: string[] = [];
     for (const model of models) {
       try {
-        const result = await intric.modelProviders.validateModel(
+        const result = await eneo.modelProviders.validateModel(
           { id: providerId },
           { model_name: model.name, model_type: modelType }
         );
@@ -378,7 +378,7 @@
     providerId: string
   ): Promise<{ id: string } | undefined> {
     if (modelType === "completion") {
-      return intric.tenantModels.createCompletion({
+      return eneo.tenantModels.createCompletion({
         provider_id: providerId,
         name: model.name,
         display_name: model.displayName,
@@ -399,7 +399,7 @@
       });
     }
     if (modelType === "embedding") {
-      return intric.tenantModels.createEmbedding({
+      return eneo.tenantModels.createEmbedding({
         provider_id: providerId,
         name: model.name,
         display_name: model.displayName,
@@ -416,7 +416,7 @@
           : null
       });
     }
-    return intric.tenantModels.createTranscription({
+    return eneo.tenantModels.createTranscription({
       provider_id: providerId,
       name: model.name,
       display_name: model.displayName,

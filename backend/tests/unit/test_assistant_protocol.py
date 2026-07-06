@@ -3,18 +3,18 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ResponseType,
     ToolCallMetadata,
 )
-from intric.assistants.api.assistant_protocol import (
+from eneo.assistants.api.assistant_protocol import (
     to_ask_conversation_response,
     to_sse_response,
 )
-from intric.questions.question import UseTools
-from intric.sessions.session import SessionInDB
+from eneo.questions.question import UseTools
+from eneo.sessions.session import SessionInDB
 
 
 def test_non_streaming_conversation_response_includes_mcp_references():

@@ -1,4 +1,4 @@
-# @Intric/ui
+# @Eneo/ui
 
 Basic UI library based on Melt UI builders.
 

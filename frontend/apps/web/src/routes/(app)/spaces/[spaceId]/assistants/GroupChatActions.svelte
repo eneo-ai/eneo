@@ -1,15 +1,15 @@
 <script lang="ts">
-  import type { GroupChatSparse } from "@intric/intric-js";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { GroupChatSparse } from "@eneo/eneo-js";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { writable } from "svelte/store";
   import PublishingDialog from "$lib/features/publishing/components/PublishingDialog.svelte";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
@@ -22,11 +22,11 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const deleteGroupChat = createAsyncState(async () => {
     try {
-      await intric.groupChats.delete(groupChat);
+      await eneo.groupChats.delete(groupChat);
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
@@ -112,7 +112,7 @@
 
 <PublishingDialog
   resource={groupChat}
-  endpoints={intric.groupChats}
+  endpoints={eneo.groupChats}
   openController={showPublishDialog}
   awaitUpdate
 ></PublishingDialog>

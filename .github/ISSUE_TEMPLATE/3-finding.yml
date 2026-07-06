@@ -1,0 +1,63 @@
+name: Finding
+description: Capture an observed issue, risk, or improvement candidate before it becomes planned work.
+title: "[Finding]: "
+labels: ["kind:finding", "needs:triage"]
+projects: ["eneo-ai/5"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Findings are allowed to live in the main Eneo project. Convert a finding into planned work by linking or creating a development task under an epic.
+
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: What was observed, where, and why it may matter.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend
+        - Frontend
+        - Infra
+        - Docs
+        - Security
+        - Other
+      default: 5
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Links, logs, screenshots, customer report, or reproduction notes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_followup
+    attributes:
+      label: Proposed follow-up
+      description: Link an existing epic/task or describe what needs triage.
+      placeholder: |
+        - Related epic: #123
+        - Suggested task: ...

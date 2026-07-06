@@ -8,14 +8,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.database.tables.ai_models_table import EmbeddingModels
-from intric.database.tables.integration_table import (
+from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.integration_table import (
     Integration,
     TenantIntegration,
     UserIntegration,
 )
-from intric.database.tables.tenant_table import Tenants
-from intric.database.tables.users_table import Users
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 
 
 @pytest.fixture

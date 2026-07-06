@@ -47,11 +47,11 @@ bun run knip
 ```
 
 Known-noise that is configured away: generated paraglide i18n
-(`**/paraglide/**`), the `@intric/icons/*` virtual module (vite plugin), the
+(`**/paraglide/**`), the `@eneo/icons/*` virtual module (vite plugin), the
 build-time icon template `packages/ui/src/icons/Icon.svelte`, the SvelteKit
 `hooks.ts` reroute entry, the `apps/docs-site` workspace (separate Next/Nextra
 toolchain), and `tests/**`. `openapi-typescript` is invoked via `bun x` in
-`intric-js/update.js`, so it is ignored there too.
+`eneo-js/update.js`, so it is ignored there too.
 
 The `exports`/`types` rules are turned **off** (`rules` in `knip.json`): in this
 component-heavy app they are dominated by barrel / compound-component re-exports
@@ -64,7 +64,7 @@ Flip those rules back on temporarily if you want to audit exports.
 [Vulture](https://github.com/jendrikseipp/vulture) finds dead Python symbols
 (functions, classes, variables, unreachable branches) — the layer ruff's `F`
 rules don't reach. Config: `[tool.vulture]` in `backend/pyproject.toml`
-(`min_confidence = 80`, scans `src/intric`).
+(`min_confidence = 80`, scans `src/eneo`).
 
 ```bash
 cd backend

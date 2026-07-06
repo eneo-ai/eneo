@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
+from eneo.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 
 @pytest.mark.asyncio

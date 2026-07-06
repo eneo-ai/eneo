@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import type { SpaceSparse } from "@intric/intric-js";
+  import type { SpaceSparse } from "@eneo/eneo-js";
   import { dynamicColour } from "$lib/core/colours";
   import { getAppContext } from "$lib/core/AppContext";
   import { localizeHref } from "$lib/paraglide/runtime";

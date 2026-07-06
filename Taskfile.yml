@@ -36,8 +36,8 @@ tasks:
   check:backend:
     dir: ./backend
     cmds:
-      - uv run ruff check src/intric
-      - uv run ruff format --check src/intric
+      - uv run ruff check src/eneo
+      - uv run ruff format --check src/eneo
 
   check:frontend:
     dir: ./frontend

@@ -45,6 +45,67 @@ env:
   OPENAI_API_KEY: test-api-key
 
 jobs:
+  changes:
+    name: Change scope
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      backend: ${{ steps.scope.outputs.backend }}
+      frontend: ${{ steps.scope.outputs.frontend }}
+      frontend_e2e: ${{ steps.scope.outputs.frontend_e2e }}
+      schema: ${{ steps.scope.outputs.schema }}
+      scripts: ${{ steps.scope.outputs.scripts }}
+      route_metadata: ${{ steps.scope.outputs.route_metadata }}
+      docker_backend: ${{ steps.scope.outputs.docker_backend }}
+      docker_frontend: ${{ steps.scope.outputs.docker_frontend }}
+      docker_devcontainer: ${{ steps.scope.outputs.docker_devcontainer }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: changed-files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          BEFORE_SHA: ${{ github.event.before || '' }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE_SHA"
+          else
+            base="$BEFORE_SHA"
+          fi
+
+          head="$HEAD_SHA"
+          files="$RUNNER_TEMP/changed-files.txt"
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            git diff-tree --no-commit-id --name-only -r "$head" > "$files"
+          else
+            git diff --name-only "$base" "$head" > "$files"
+          fi
+
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Changed files"
+            echo ""
+            if [[ -s "$files" ]]; then
+              sed 's/^/- `/' "$files" | sed 's/$/`/'
+            else
+              echo "_No changed files detected. CI will fail open and run all scoped jobs._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Classify CI scope
+        id: scope
+        run: node .github/scripts/ci-change-scope.mjs --files "${{ steps.changed-files.outputs.files }}" >> "$GITHUB_OUTPUT"
+
   branch-policy:
     if: github.event_name == 'pull_request'
     name: Branch policy
@@ -70,6 +131,8 @@ jobs:
 
   backend-quality:
     name: Backend quality
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -107,16 +170,18 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Ruff lint
-        run: uv run ruff check src/intric --output-format github
+        run: uv run ruff check src/eneo --output-format github
 
       - name: Ruff format check
-        run: uv run ruff format --check src/intric
+        run: uv run ruff format --check src/eneo
 
       - name: Pyright type check
         run: uv run pyright
 
   backend-tests:
     name: Backend tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -164,12 +229,12 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 2 -m "not integration" --cov=src/intric --cov-report=term:skip-covered tests/
+        run: uv run pytest -v -n 2 -m "not integration" --cov=src/eneo --cov-report=term:skip-covered tests/
 
       - name: Run integration tests
         # --cov-append: add integration coverage on top of the unit run, then
         # emit the combined xml (for diff-cover) + html (human artifact).
-        run: uv run pytest -v -n 2 -m integration --cov=src/intric --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
+        run: uv run pytest -v -n 2 -m integration --cov=src/eneo --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -187,6 +252,8 @@ jobs:
 
   script-tests:
     name: Script tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.scripts == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -196,8 +263,18 @@ jobs:
       - name: Run developer-tooling tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
+      - name: Run project workflow self-tests
+        run: |
+          node .github/scripts/ensure-project-fields.mjs --self-test
+          node .github/scripts/project-intake.mjs --self-test
+          node .github/scripts/ci-change-scope.mjs --self-test
+          node .github/scripts/render-diff-coverage.mjs --self-test
+          node scripts/export_github_roadmap.mjs --self-test
+
   route-metadata:
     name: Route metadata
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.route_metadata == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -207,8 +284,21 @@ jobs:
       - name: Check all HTTP route decorators
         run: python3 scripts/check_route_metadata.py --repo-root . --all
 
+  no-intric:
+    name: No intric references
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard against re-introducing the old product name
+        run: python3 scripts/check_no_intric.py --repo-root .
+
   frontend:
     name: Frontend
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -228,23 +318,23 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.3.0
+          bun-version: 1.3.14
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Build workspace dependencies
-        run: bun run --filter @intric/ui build
+        run: bun run --filter @eneo/ui build
 
       - name: Run type checks
         run: bun run check
 
       # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
-        run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
+        run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
 
       - name: Run package tests
-        run: FORCE_COLOR=1 bun run --filter '@intric/eslint-plugin' test
+        run: FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
       # matching Playwright browser must be on the runner. Pin the playwright
@@ -252,10 +342,10 @@ jobs:
       # installs a browser build that @vitest/browser (on the pinned playwright)
       # can't find. Keep this in sync with apps/web's playwright dependency.
       - name: Install Playwright Chromium
-        run: bun x playwright@1.58.2 install --with-deps chromium chromium-headless-shell
+        run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
 
       - name: Run web unit & component tests (with coverage)
-        run: FORCE_COLOR=1 bun run --filter '@intric/web' test:coverage
+        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test:coverage
 
       - name: Upload frontend coverage
         if: ${{ !cancelled() }}
@@ -274,6 +364,8 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend_e2e == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -287,7 +379,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.3.0
+          bun-version: 1.3.14
 
       - name: Install dependencies
         working-directory: frontend
@@ -295,14 +387,14 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @intric/ui build
+        run: bun run --filter @eneo/ui build
 
       # Pin to match apps/web's @playwright/test dependency; a bare
       # `bun x playwright` fetches the latest and installs a browser build the
       # pinned runner can't find ("Executable doesn't exist").
       - name: Install Playwright Chromium
         working-directory: frontend/apps/web
-        run: bun x playwright@1.58.2 install --with-deps chromium
+        run: bun x playwright@1.61.1 install --with-deps chromium
 
       # Build the production app up front so the Playwright webServer only has to
       # start `preview`. A full `vite build` inside the webServer's 180s timeout
@@ -344,6 +436,8 @@ jobs:
 
   schema-drift:
     name: Schema drift
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.schema == 'true'
     runs-on: ubuntu-latest
     services:
       redis:
@@ -389,7 +483,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.3.0
+          bun-version: 1.3.14
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -399,18 +493,18 @@ jobs:
       # it in sync, so a backend model change that skips regeneration silently
       # leaves the frontend types (and any ActionType-driven i18n guards) stale.
       - name: Dump backend OpenAPI spec
-        run: uv run python -c "import json; from intric.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
+        run: uv run python -c "import json; from eneo.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
         working-directory: backend
 
       - name: Regenerate schema.d.ts
         run: |
           bun x openapi-typescript /tmp/openapi.gen.json -o src/types/schema.d.ts --default-non-nullable=false
           bun x prettier --write src/types/schema.d.ts
-        working-directory: frontend/packages/intric-js
+        working-directory: frontend/packages/eneo-js
 
       - name: Fail on schema drift
         run: |
-          SCHEMA=frontend/packages/intric-js/src/types/schema.d.ts
+          SCHEMA=frontend/packages/eneo-js/src/types/schema.d.ts
           if git diff --quiet -- "$SCHEMA"; then
             echo "$SCHEMA is in sync with the backend OpenAPI spec."
             exit 0
@@ -423,7 +517,7 @@ jobs:
             echo "## ❌ schema.d.ts drift detected"
             echo ""
             echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
-            echo "Regenerate it (\`cd frontend/packages/intric-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+            echo "Regenerate it (\`cd frontend/packages/eneo-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
             echo ""
             echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
             echo ""
@@ -442,18 +536,17 @@ jobs:
 
   # Reports how well the tests cover the lines THIS PR changed (patch coverage),
   # for frontend and backend separately. Report-only: never fails the PR and is
-  # not part of the aggregate `CI` gate below. Posts/updates a sticky PR comment
-  # and writes the same compact report to the job summary.
+  # not part of the aggregate `CI` gate below. Writes a compact report to the
+  # job summary and uploads the same markdown as an artifact.
   coverage-diff:
     name: Coverage diff
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.frontend.result == 'success' || needs.backend-tests.result == 'success') }}
     runs-on: ubuntu-latest
     needs:
       - frontend
       - backend-tests
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -499,93 +592,14 @@ jobs:
 
           if [ -f backend/coverage.xml ]; then
             sed -e 's|<source>.*</source>|<source>.</source>|' \
-                -e 's|filename="|filename="backend/src/intric/|g' \
+                -e 's|filename="|filename="backend/src/eneo/|g' \
                 backend/coverage.xml > be.xml
             diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format json:be.json || true
           fi
 
-      - name: Post or update PR comment
+      - name: Write diff coverage summary
         if: ${{ !cancelled() }}
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require("fs");
-            const marker = "<!-- diff-coverage-report -->";
-
-            const load = (p) => {
-              try {
-                return JSON.parse(fs.readFileSync(p, "utf8"));
-              } catch {
-                return null;
-              }
-            };
-            // Show only the tail of long paths so the list stays readable.
-            const shorten = (p) => {
-              const s = p.split("/");
-              return s.length > 3 ? "…/" + s.slice(-3).join("/") : p;
-            };
-            // Collapse a sorted line list into "12, 18–20" style ranges.
-            const ranges = (nums) => {
-              const sorted = [...new Set(nums)].sort((a, b) => a - b);
-              const out = [];
-              let start = null;
-              let prev = null;
-              for (const n of sorted) {
-                if (start === null) start = prev = n;
-                else if (n === prev + 1) prev = n;
-                else {
-                  out.push([start, prev]);
-                  start = prev = n;
-                }
-              }
-              if (start !== null) out.push([start, prev]);
-              return out.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(", ");
-            };
-
-            // Drop areas with no changed lines so the comment only shows what's relevant.
-            const areas = [
-              ["Frontend", load("fe.json")],
-              ["Backend", load("be.json")],
-            ].filter(([, d]) => d && (d.total_num_lines || 0) > 0);
-
-            const rows = [];
-            const details = [];
-            for (const [label, d] of areas) {
-              const total = d.total_num_lines || 0;
-              const miss = d.total_num_violations || 0;
-              const pct = Math.round(d.total_percent_covered || 0);
-              rows.push(`| ${label} | ${total} | ${miss} | ${pct}% |`);
-              const files = Object.entries(d.src_stats || {})
-                .map(([f, st]) => [f, st.violation_lines || []])
-                .filter(([, vl]) => vl.length)
-                .map(([f, vl]) => `- \`${shorten(f)}\` — ${ranges(vl)}`);
-              if (files.length) details.push([label, files]);
-            }
-
-            let body = `${marker}\n## 📊 Patch coverage\n\nShare of this PR's new/changed lines exercised by tests. Report-only — never gates the PR.\n\n`;
-            if (rows.length) {
-              body += `| Area | Changed | Uncovered | Coverage |\n| --- | ---: | ---: | ---: |\n${rows.join("\n")}\n`;
-            } else {
-              body += "_No changed lines with coverage data in this PR._\n";
-            }
-            for (const [label, files] of details) {
-              const n = files.length;
-              body += `\n<details><summary>Uncovered lines — ${label} (${n} file${n === 1 ? "" : "s"})</summary>\n\n${files.join("\n")}\n\n</details>\n`;
-            }
-
-            fs.writeFileSync("diff-coverage.md", body);
-            await core.summary.addRaw(body).write();
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            }
+        run: node .github/scripts/render-diff-coverage.mjs --frontend fe.json --backend be.json --output diff-coverage.md --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload diff-coverage report
         if: ${{ !cancelled() }}
@@ -600,6 +614,12 @@ jobs:
 
   docker-builds:
     name: Docker builds (${{ matrix.image }})
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.docker_backend == 'true' ||
+      needs.changes.outputs.docker_frontend == 'true' ||
+      needs.changes.outputs.docker_devcontainer == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -617,9 +637,19 @@ jobs:
 
     steps:
       - name: Checkout
+        if: >-
+          github.event_name != 'pull_request' ||
+          (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
+          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
+          (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         uses: actions/checkout@v4
 
       - name: Build Docker image
+        if: >-
+          github.event_name != 'pull_request' ||
+          (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
+          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
+          (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         env:
           DOCKER_BUILDKIT: "1"
         run: docker build --pull --file "${{ matrix.file }}" --tag "eneo-${{ matrix.image }}:ci" "${{ matrix.context }}"
@@ -629,11 +659,13 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - changes
       - branch-policy
       - backend-quality
       - backend-tests
       - script-tests
       - route-metadata
+      - no-intric
       - frontend
       - frontend-e2e
       - schema-drift
@@ -642,11 +674,13 @@ jobs:
     steps:
       - name: Check required jobs
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
+          NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
@@ -669,11 +703,13 @@ jobs:
             esac
           }
 
+          check_result "Change scope" "$CHANGES_RESULT"
           check_result "Branch policy" "$BRANCH_POLICY_RESULT"
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
+          check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"

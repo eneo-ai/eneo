@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from intric.authentication.auth_models import ApiKeyState, compute_effective_state
+from eneo.authentication.auth_models import ApiKeyState, compute_effective_state
 
 
 def test_effective_state_revoked_has_highest_precedence() -> None:

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { InfoBlob } from "@intric/intric-js";
+  import type { InfoBlob } from "@eneo/eneo-js";
   import * as Pagination from "$lib/components/ui/pagination/index.js";
   import { m } from "$lib/paraglide/messages";
   import BlobPreview from "../BlobPreview.svelte";

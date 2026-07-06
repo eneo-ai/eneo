@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.users import user_router
+from eneo.users import user_router
 
 
 class AllowedOriginRepoStub:

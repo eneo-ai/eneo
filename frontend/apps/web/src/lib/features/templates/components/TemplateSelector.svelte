@@ -3,13 +3,13 @@
   import { getTemplateController } from "../TemplateController";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import TemplateIcon from "./TemplateIcon.svelte";
-  import { Input } from "@intric/ui";
-  import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
-  import { IconInfo } from "@intric/icons/info";
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconFile } from "@intric/icons/file";
+  import { Input } from "@eneo/ui";
+  import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
+  import { IconInfo } from "@eneo/icons/info";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconFile } from "@eneo/icons/file";
   import { m } from "$lib/paraglide/messages";
-  import type { Settings } from "@intric/intric-js";
+  import type { Settings } from "@eneo/eneo-js";
 
   const {
     state: { name, creationMode, selectedTemplate, showTemplateGallery, hasWizard },
@@ -104,7 +104,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   button.selector {
     @apply border-default text-muted flex h-[3.25rem] flex-grow items-center justify-between overflow-hidden rounded-lg border p-3 pr-2 shadow;
   }

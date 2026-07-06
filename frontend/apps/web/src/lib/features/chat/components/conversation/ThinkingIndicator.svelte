@@ -18,7 +18,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   .thinking-badge {
     @apply bg-accent-dimmer text-accent-stronger relative overflow-hidden rounded-full;

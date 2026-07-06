@@ -23,13 +23,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ResponseType,
 )
-from intric.sessions import session_service as session_service_module
-from intric.sessions.session_service import (
+from eneo.sessions import session_service as session_service_module
+from eneo.sessions.session_service import (
     SessionService,
     persist_partial_question_answer,
 )
@@ -330,7 +330,7 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
     async def tracking_persist(**kwargs: object) -> None:
         persist_calls.append(kwargs)
 
-    # Patch BOTH places: assistant_service does a deferred `from intric.sessions...
+    # Patch BOTH places: assistant_service does a deferred `from eneo.sessions...
     # import persist_partial_question_answer` inside finally, so patch the source
     # module attribute.
     with patch.object(
@@ -338,7 +338,7 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
         "persist_partial_question_answer",
         tracking_persist,
     ):
-        from intric.assistants.assistant_service import AssistantService
+        from eneo.assistants.assistant_service import AssistantService
 
         gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
             svc,  # pyright: ignore[reportArgumentType]
@@ -412,7 +412,7 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
         "persist_partial_question_answer",
         tracking_persist,
     ):
-        from intric.assistants.assistant_service import AssistantService
+        from eneo.assistants.assistant_service import AssistantService
 
         gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
             svc,  # pyright: ignore[reportArgumentType]
@@ -489,7 +489,7 @@ async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
     session_service_mock.complete_question_with_answer = AsyncMock()
     svc = _make_assistant_service_for_streaming(session_service_mock)
 
-    from intric.assistants.assistant_service import AssistantService
+    from eneo.assistants.assistant_service import AssistantService
 
     gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
         svc,  # pyright: ignore[reportArgumentType]
@@ -543,7 +543,7 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
     session_service_mock.complete_question_with_answer = AsyncMock()
     svc = _make_assistant_service_for_streaming(session_service_mock)
 
-    from intric.assistants.assistant_service import AssistantService
+    from eneo.assistants.assistant_service import AssistantService
 
     gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
         svc,  # pyright: ignore[reportArgumentType]
@@ -609,7 +609,7 @@ async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort()
         "persist_partial_question_answer",
         tracking_persist,
     ):
-        from intric.assistants.assistant_service import AssistantService
+        from eneo.assistants.assistant_service import AssistantService
 
         gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
             svc,  # pyright: ignore[reportArgumentType]
@@ -671,7 +671,7 @@ async def test_streaming_handle_response_skips_partial_save_when_no_content():
         "persist_partial_question_answer",
         tracking_persist,
     ):
-        from intric.assistants.assistant_service import AssistantService
+        from eneo.assistants.assistant_service import AssistantService
 
         gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
             svc,  # pyright: ignore[reportArgumentType]
@@ -750,7 +750,7 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
         ),
         patch.object(session_service_module, "count_tokens", side_effect=boom),
     ):
-        from intric.assistants.assistant_service import AssistantService
+        from eneo.assistants.assistant_service import AssistantService
 
         gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
             svc,  # pyright: ignore[reportArgumentType]

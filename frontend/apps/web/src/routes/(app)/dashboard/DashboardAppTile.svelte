@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { IconApp } from "@intric/icons/app";
-  import type { AppSparse } from "@intric/intric-js";
+  import { IconApp } from "@eneo/icons/app";
+  import type { AppSparse } from "@eneo/eneo-js";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { m } from "$lib/paraglide/messages";
 

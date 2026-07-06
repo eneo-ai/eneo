@@ -1,8 +1,8 @@
 from uuid import uuid4
 
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.help_assistants.domain.helper_run import HelperRun
-from intric.help_assistants.domain.helper_run_status import HelperRunStatus
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.help_assistants.domain.helper_run import HelperRun
+from eneo.help_assistants.domain.helper_run_status import HelperRunStatus
 
 
 def _make_run(**overrides: object) -> HelperRun:

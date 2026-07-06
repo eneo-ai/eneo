@@ -2,10 +2,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.assistant import Assistant
-from intric.main.exceptions import BadRequestException
-from intric.main.models import NOT_PROVIDED
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant import Assistant
+from eneo.files.file_models import FileType
+from eneo.main.exceptions import BadRequestException
+from eneo.main.models import NOT_PROVIDED
 
 
 @pytest.fixture
@@ -314,3 +315,34 @@ async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
     # MCP servers should be passed to completion call
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["mcp_servers"] == mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_ask_uses_runtime_prompt_files_without_mutating_attachments(
+    assistant_with_model,
+):
+    assistant_with_model.completion_model.vision = True
+    stored_attachment = MagicMock(
+        file_type=FileType.TEXT, mimetype="application/pdf", size=1
+    )
+    runtime_attachment_image = MagicMock(
+        file_type=FileType.IMAGE, mimetype="image/jpeg", size=1
+    )
+    assistant_with_model.attachments = [stored_attachment]
+
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock()
+
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.ask(
+        question="test",
+        references_service=references_service,
+        completion_service=completion_service,
+        completion_prompt_files=[stored_attachment, runtime_attachment_image],
+    )
+
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["prompt_files"] == [stored_attachment, runtime_attachment_image]
+    assert assistant_with_model.attachments == [stored_attachment]

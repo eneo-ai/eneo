@@ -11,12 +11,12 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from intric.audit.domain.action_types import ActionType
-from intric.authentication.api_key_resolver import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
-from intric.authentication.auth_dependencies import (
+from eneo.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
@@ -25,7 +25,7 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_resource_permission_for_method,
 )
-from intric.authentication.auth_models import (
+from eneo.authentication.auth_models import (
     METHOD_PERMISSION_MAP,
     PERMISSION_LEVEL_ORDER,
     ApiKeyPermission,
@@ -33,7 +33,7 @@ from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from intric.users.user_service import (
+from eneo.users.user_service import (
     UserService,
     _check_basic_method_permission,
     _check_management_permission,
@@ -111,7 +111,7 @@ class TestMethodAwarePermissionCheck:
     def test_read_key_get_passes(self, monkeypatch):
         """1. Read key + GET → pass."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -123,7 +123,7 @@ class TestMethodAwarePermissionCheck:
     def test_read_key_post_blocked(self, monkeypatch):
         """2. Read key + POST → 403."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -137,7 +137,7 @@ class TestMethodAwarePermissionCheck:
     def test_read_key_delete_blocked(self, monkeypatch):
         """3. Read key + DELETE → 403."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -151,7 +151,7 @@ class TestMethodAwarePermissionCheck:
     def test_write_key_post_passes(self, monkeypatch):
         """4. Write key + POST → pass."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -165,7 +165,7 @@ class TestMethodAwarePermissionCheck:
     def test_write_key_delete_blocked(self, monkeypatch):
         """5. Write key + DELETE → 403."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -181,7 +181,7 @@ class TestMethodAwarePermissionCheck:
     def test_admin_key_delete_passes(self, monkeypatch):
         """6. Admin key + DELETE → pass (both method and resource checks)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -196,7 +196,7 @@ class TestMethodAwarePermissionCheck:
     def test_unknown_method_defaults_to_admin(self, monkeypatch):
         """7. Unknown HTTP method → admin (fail-closed)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -248,7 +248,7 @@ class TestMethodAwarePermissionCheck:
     def test_post_override_endpoint_treated_as_read(self, monkeypatch):
         """9. POST hitting override endpoint name → read (pass for read key)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -275,7 +275,7 @@ class TestEndpointPermissionTransitions:
     def test_read_key_allowed_on_post_ask_assistant_via_override(self, monkeypatch):
         """10. Read key + POST ask_assistant → pass (ask_assistant is a read-override)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -294,7 +294,7 @@ class TestEndpointPermissionTransitions:
     def test_write_key_denied_on_delete_apps(self, monkeypatch):
         """11. Write key denied on DELETE delete_app (requires admin)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -310,7 +310,7 @@ class TestEndpointPermissionTransitions:
     def test_no_resource_permissions_falls_back_to_basic_permission(self, monkeypatch):
         """12. Key with resource_permissions=None falls back to basic permission check."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         # WRITE key: GET passes, POST passes, DELETE blocked (requires admin)
@@ -372,7 +372,7 @@ class TestPolicyMaxRateLimit:
 
     @pytest.mark.asyncio
     async def test_max_rate_limit_override_blocks_unlimited(self):
-        from intric.authentication.api_key_policy import ApiKeyPolicyService
+        from eneo.authentication.api_key_policy import ApiKeyPolicyService
 
         tenant = SimpleNamespace(api_key_policy={"max_rate_limit_override": 100})
         user = SimpleNamespace(tenant=tenant, permissions=[])
@@ -435,7 +435,7 @@ class TestErrorContracts:
 
     def test_router_helpers_raise_preserves_contract(self):
         """15. raise_api_key_http_error in api_key_router_helpers.py."""
-        from intric.authentication.api_key_router_helpers import (
+        from eneo.authentication.api_key_router_helpers import (
             raise_api_key_http_error,
         )
 
@@ -456,7 +456,7 @@ class TestErrorContracts:
 
     def test_container_raise_preserves_contract(self):
         """16. _raise_api_key_http_error in container.py."""
-        from intric.server.dependencies.container import (
+        from eneo.server.dependencies.container import (
             _raise_api_key_http_error as container_raise,
         )
 
@@ -476,7 +476,7 @@ class TestErrorContracts:
         assert http_exc.headers["WWW-Authenticate"] == "Bearer"
 
     def test_converter_strips_granted_level_from_response_context(self):
-        from intric.authentication.api_key_router_helpers import (
+        from eneo.authentication.api_key_router_helpers import (
             raise_api_key_http_error,
         )
 
@@ -501,7 +501,7 @@ class TestErrorContracts:
         assert "granted_level" not in detail["context"]
 
     def test_converter_does_not_add_auth_layer_for_400(self):
-        from intric.authentication.api_key_router_helpers import (
+        from eneo.authentication.api_key_router_helpers import (
             raise_api_key_http_error,
         )
 
@@ -517,7 +517,7 @@ class TestErrorContracts:
         assert "context" not in exc_info.value.detail
 
     def test_converter_maps_guardrail_layer(self):
-        from intric.authentication.api_key_router_helpers import (
+        from eneo.authentication.api_key_router_helpers import (
             raise_api_key_http_error,
         )
 
@@ -552,13 +552,13 @@ class TestOverrideNameValidation:
 
     def test_override_names_match_registered_routes(self):
         """Import the routers, iterate all registered routes, assert overrides match."""
-        from intric.apps.apps.api.app_router import router as apps_router
-        from intric.assistants.api.assistant_router import router as assistants_router
-        from intric.conversations.conversations_router import (
+        from eneo.apps.apps.api.app_router import router as apps_router
+        from eneo.assistants.api.assistant_router import router as assistants_router
+        from eneo.conversations.conversations_router import (
             router as conversations_router,
         )
-        from intric.groups_legacy.api.group_router import router as groups_router
-        from intric.services.service_router import router as services_router
+        from eneo.groups_legacy.api.group_router import router as groups_router
+        from eneo.services.service_router import router as services_router
 
         assistant_names = self._collect_endpoint_names(assistants_router)
         group_names = self._collect_endpoint_names(groups_router)
@@ -599,7 +599,7 @@ class TestResourceDenialContext:
 
     def test_check_resource_permission_attaches_context(self, monkeypatch):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -761,7 +761,7 @@ class TestHTTPIntegration:
     async def test_read_key_post_returns_403(self, monkeypatch):
         """18. Read-only API key + POST to guarded route → 403."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -783,7 +783,7 @@ class TestHTTPIntegration:
     async def test_bearer_token_post_passes(self, monkeypatch):
         """19. Bearer-token auth (no API key) + POST to guarded route → 200."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         app = self._build_app(auth_key=None)
@@ -803,7 +803,7 @@ class TestHTTPIntegration:
     async def test_rate_limited_returns_429_with_headers(self, monkeypatch):
         """20. Rate-limited request → 429 with Retry-After and X-RateLimit-* headers."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -909,7 +909,7 @@ class TestReadOverrideConstants:
     def test_conversations_chat_override(self, monkeypatch):
         """Read key + POST to 'chat' on conversations → pass (read-override)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -927,7 +927,7 @@ class TestReadOverrideConstants:
     def test_conversations_leave_feedback_override(self, monkeypatch):
         """Read key + POST to 'leave_feedback' on conversations → pass."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -945,7 +945,7 @@ class TestReadOverrideConstants:
     def test_apps_run_service_override(self, monkeypatch):
         """Read key + POST to 'run_service' on apps → pass (read-override)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -961,7 +961,7 @@ class TestReadOverrideConstants:
     def test_apps_run_app_override(self, monkeypatch):
         """Read key + POST to 'run_app' on apps → pass (read-override)."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -977,7 +977,7 @@ class TestReadOverrideConstants:
     def test_non_override_post_still_blocked(self, monkeypatch):
         """Read key + POST to non-override endpoint → 403."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1003,7 +1003,7 @@ class TestLegacySplitMapping:
 
     def test_user_key_migration_creates_admin(self):
         """User key migration → permission=ADMIN."""
-        from intric.authentication.auth_models import ApiKeyPermission
+        from eneo.authentication.auth_models import ApiKeyPermission
 
         # The code at api_key_resolver.py sets permission=ApiKeyPermission.ADMIN.value
         # for user keys (scope_type=tenant). Verify constant value.
@@ -1011,7 +1011,7 @@ class TestLegacySplitMapping:
 
     def test_assistant_key_migration_creates_read(self):
         """Assistant key migration → permission=READ."""
-        from intric.authentication.auth_models import ApiKeyPermission
+        from eneo.authentication.auth_models import ApiKeyPermission
 
         # The code at api_key_resolver.py sets permission=ApiKeyPermission.READ.value
         # for assistant keys (scope_type=assistant). Verify constant value.
@@ -1040,7 +1040,7 @@ class TestFeatureFlagEnforcement:
     def test_flag_disabled_skips_resource_check(self, monkeypatch):
         """Flag disabled → check_resource_permission returns without raising."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=False),
         )
         # Read key + admin-level resource check → should pass when flag disabled
@@ -1052,7 +1052,7 @@ class TestFeatureFlagEnforcement:
     def test_flag_enabled_enforces_resource_check(self, monkeypatch):
         """Flag enabled → check_resource_permission raises on insufficient permission."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1117,7 +1117,7 @@ class TestErrorMessageSecurity:
     def test_resource_permission_no_leak_in_message(self, monkeypatch):
         """check_resource_permission message doesn't contain key.permission."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1146,7 +1146,7 @@ class TestPrimaryBugScenario:
         producing 'insufficient_permission' before the resource check runs.
         """
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1162,7 +1162,7 @@ class TestPrimaryBugScenario:
     def test_read_key_null_resource_permissions_post_blocked(self, monkeypatch):
         """Read key (resource_permissions=None) + POST on guarded route → 403."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1177,7 +1177,7 @@ class TestPrimaryBugScenario:
     def test_read_key_null_resource_permissions_get_passes(self, monkeypatch):
         """Read key (resource_permissions=None) + GET on guarded route → pass."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1215,7 +1215,7 @@ class TestPermissionMatrix:
     ):
         """Read key + POST to read-override endpoint → pass."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1248,7 +1248,7 @@ class TestGuardrailInteraction:
         The method→permission check fires first (READ < ADMIN for DELETE).
         """
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         # Simulating a key that would pass origin check but fail permission check
@@ -1269,7 +1269,7 @@ class TestGuardrailInteraction:
     def test_permission_check_passes_when_sufficient(self, monkeypatch):
         """Admin key passes permission check regardless of guardrail status."""
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
@@ -1306,7 +1306,7 @@ class TestGuardrailInteraction:
         so the resource check fires (apps=READ < ADMIN).
         """
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         # Layer 1: method check passes (ADMIN), resource check fails (apps=READ)
@@ -1407,7 +1407,7 @@ class TestErrorContractSnapshots:
     )
     def test_error_contract(self, monkeypatch, contract):
         monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
+            "eneo.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
 
@@ -1566,7 +1566,7 @@ class TestManagementEndpointGuard:
         create an admin-level key for itself.
         """
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1586,7 +1586,7 @@ class TestManagementEndpointGuard:
     async def test_read_key_cannot_create_api_key(self, monkeypatch):
         """Read key + POST /api-keys → 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.READ)
@@ -1604,7 +1604,7 @@ class TestManagementEndpointGuard:
     async def test_admin_key_can_create_api_key(self, monkeypatch):
         """Admin key + POST /api-keys → 200."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.ADMIN)
@@ -1626,7 +1626,7 @@ class TestManagementEndpointGuard:
         Bearer-token users are not subject to API key permission checks.
         """
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         app = self._build_management_app(auth_key=None)
@@ -1643,7 +1643,7 @@ class TestManagementEndpointGuard:
     async def test_write_key_cannot_revoke(self, monkeypatch):
         """Write key + DELETE /api-keys/{id} → 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1661,7 +1661,7 @@ class TestManagementEndpointGuard:
     async def test_write_key_cannot_rotate(self, monkeypatch):
         """Write key + POST /api-keys/{id}/rotate → 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1679,7 +1679,7 @@ class TestManagementEndpointGuard:
     async def test_write_key_cannot_suspend(self, monkeypatch):
         """Write key + POST /api-keys/{id}/suspend → 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1697,7 +1697,7 @@ class TestManagementEndpointGuard:
     async def test_write_key_cannot_reactivate(self, monkeypatch):
         """Write key + POST /api-keys/{id}/reactivate → 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1715,7 +1715,7 @@ class TestManagementEndpointGuard:
     async def test_write_key_cannot_update(self, monkeypatch):
         """Write key + PATCH /api-keys/{id} → 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1733,7 +1733,7 @@ class TestManagementEndpointGuard:
     async def test_admin_key_can_do_all_mutations(self, monkeypatch):
         """Admin key can perform all management operations."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.ADMIN)
@@ -1762,7 +1762,7 @@ class TestManagementEndpointGuard:
     async def test_read_endpoints_not_blocked_for_read_key(self, monkeypatch):
         """Read key can access GET endpoints (no management guard on reads)."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.READ)
@@ -1787,7 +1787,7 @@ class TestManagementEndpointGuard:
     async def test_error_message_includes_actionable_guidance(self, monkeypatch):
         """403 response from management guard includes upgrade instructions."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1808,7 +1808,7 @@ class TestManagementEndpointGuard:
     async def test_error_message_does_not_leak_granted_permission(self, monkeypatch):
         """403 from management guard does NOT reveal the key's actual permission."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         for perm in [ApiKeyPermission.READ, ApiKeyPermission.WRITE]:
@@ -1909,7 +1909,7 @@ class TestManagementGuardFailClosed:
         correct: bearer-token users have full permissions.
         """
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         app = TestManagementEndpointGuard._build_management_app(auth_key=None)
@@ -1947,7 +1947,7 @@ class TestManagementGuardNotFeatureFlagged:
     async def test_write_key_blocked_even_with_flag_off(self, monkeypatch):
         """Feature flag OFF + write key + POST /api-keys → still 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -1966,7 +1966,7 @@ class TestManagementGuardNotFeatureFlagged:
     async def test_read_key_blocked_even_with_flag_off(self, monkeypatch):
         """Feature flag OFF + read key + DELETE /api-keys/{id} → still 403."""
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.READ)
@@ -2006,7 +2006,7 @@ class TestManagementGuardPermissionMatrix:
         path,
     ):
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.READ)
@@ -2029,7 +2029,7 @@ class TestManagementGuardPermissionMatrix:
         path,
     ):
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.WRITE)
@@ -2054,7 +2054,7 @@ class TestManagementGuardPermissionMatrix:
         path,
     ):
         monkeypatch.setattr(
-            "intric.authentication.auth_dependencies.get_settings",
+            "eneo.authentication.auth_dependencies.get_settings",
             lambda: SimpleNamespace(api_key_header_name="X-API-Key"),
         )
         key = _make_key(permission=ApiKeyPermission.ADMIN)
@@ -2104,7 +2104,7 @@ class TestRouteGuardCoverage:
 
     def test_user_api_key_mutations_have_guard(self):
         """All mutation endpoints in api_key_router have require_api_key_permission."""
-        from intric.authentication.api_key_router import router as user_router
+        from eneo.authentication.api_key_router import router as user_router
 
         mutation_methods = {"POST", "PATCH", "DELETE", "PUT"}
         unguarded = []
@@ -2125,7 +2125,7 @@ class TestRouteGuardCoverage:
 
     def test_admin_api_key_mutations_have_guard(self):
         """All API key mutation endpoints in admin_router have require_api_key_permission."""
-        from intric.admin.admin_router import router as admin_router_obj
+        from eneo.admin.admin_router import router as admin_router_obj
 
         mutation_methods = {"POST", "PATCH", "DELETE", "PUT"}
         unguarded = []
@@ -2153,7 +2153,7 @@ class TestRouteGuardCoverage:
         Read operations (list, get, constraints) should be accessible to
         any authenticated key, not just admin keys.
         """
-        from intric.authentication.api_key_router import router as user_router
+        from eneo.authentication.api_key_router import router as user_router
 
         guarded_reads = []
 

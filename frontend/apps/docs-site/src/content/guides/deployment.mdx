@@ -157,6 +157,35 @@ Navigate to `https://your-domain.com`
 
 ---
 
+## Network Isolation
+
+The Docker Compose stack uses three networks:
+
+| Network | Services | Purpose |
+|---------|----------|---------|
+| `proxy_tier` (external) | Traefik, frontend, backend, worker | Ingress and outbound access for APIs, OIDC, and crawls |
+| `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer without internet egress, isolated from Traefik and frontend |
+| `module_net` | Traefik, backend | Reserved for optional module containers |
+
+PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend or Traefik containers, and they have no outbound internet access.
+
+<Callout type="warning">
+  **Existing installations:** Older deployment files put every service on `proxy_tier`. Running `docker compose up -d` with the current template recreates containers with the new network membership while keeping PostgreSQL and Redis volumes intact. External backup jobs or admin tools that connected to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec` or attach to `eneo_data_net`.
+</Callout>
+
+Verify the isolation after upgrading:
+
+```bash
+# Should fail: frontend can no longer resolve the database
+docker exec eneo_frontend getent hosts db
+
+# Should succeed
+docker exec eneo_backend python -c "import socket; socket.getaddrinfo('db', 5432)"
+curl -fsS https://your-domain.com/version
+```
+
+---
+
 ## Environment Configuration
 
 <Tabs items={['Backend', 'Frontend', 'Database']}>
@@ -206,10 +235,10 @@ Navigate to `https://your-domain.com`
 
     ```bash
     # Development (with uv)
-    uv run python -m intric.cli.generate_encryption_key
+    uv run python -m eneo.cli.generate_encryption_key
 
     # Production (Docker)
-    docker compose run --rm backend python -m intric.cli.generate_encryption_key
+    docker compose run --rm backend python -m eneo.cli.generate_encryption_key
 
     # Alternative (Python)
     python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
@@ -656,11 +685,11 @@ gunzip -c backup_20250108.sql.gz | docker compose exec -T db psql -U eneo eneo
 docker compose down
 
 # Backup PostgreSQL data volume
-docker run --rm -v eneo_postgres_data:/data -v $(pwd):/backup ubuntu \
+docker run --rm -v eneo_eneo_postgres_data:/data -v $(pwd):/backup ubuntu \
   tar czf /backup/postgres_volume_$(date +%Y%m%d).tar.gz /data
 
 # Backup Redis data volume (optional)
-docker run --rm -v eneo_redis_data:/data -v $(pwd):/backup ubuntu \
+docker run --rm -v eneo_eneo_redis_data:/data -v $(pwd):/backup ubuntu \
   tar czf /backup/redis_volume_$(date +%Y%m%d).tar.gz /data
 ```
 
@@ -677,6 +706,10 @@ docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).s
 ### Update version tags (if pinned)
 
 Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
+
+### Review network changes
+
+If your current deployment predates the three-network template, `docker compose up -d` recreates containers with the new network membership. External backup jobs or admin tools that connected to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec` or attach to `eneo_data_net`.
 
 ### Pull and deploy
 
@@ -714,30 +747,6 @@ docker image prune -a
 # Scale backend instances (with load balancer)
 docker compose up -d --scale backend=3 --scale worker=2
 ```
-
----
-
-## Migration: INTRIC_ to ENEO_ Environment Variables
-
-All `INTRIC_`-prefixed environment variables have been renamed to `ENEO_`. The old names are still accepted but deprecated and will be removed in v3.0.
-
-<Callout type="info">
-  **No immediate action required.** Existing installations using `INTRIC_*` variables will continue to work. A deprecation warning will appear in the logs on startup. Update at your convenience before v3.0.
-</Callout>
-
-| Old variable | New variable |
-|---|---|
-| `INTRIC_SUPER_API_KEY` | `ENEO_SUPER_API_KEY` |
-| `INTRIC_SUPER_DUPER_API_KEY` | `ENEO_SUPER_DUPER_API_KEY` |
-| `INTRIC_BACKEND_URL` | `ENEO_BACKEND_URL` |
-| `INTRIC_BACKEND_SERVER_URL` | `ENEO_BACKEND_SERVER_URL` |
-| `PUBLIC_INTRIC_BACKEND_URL` | `PUBLIC_ENEO_BACKEND_URL` |
-
-**Removed (no replacement needed):**
-- `INTRIC_MARKETPLACE_API_KEY` — was unused
-- `INTRIC_MARKETPLACE_URL` — was unused
-
-To migrate, update your `env_backend.env` and `env_frontend.env` files and restart all services.
 
 ---
 

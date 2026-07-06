@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-import intric.mcp_servers.infrastructure.tool_approval as tool_approval_module
-from intric.mcp_servers.infrastructure.tool_approval import (
+import eneo.mcp_servers.infrastructure.tool_approval as tool_approval_module
+from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalManager,
 )
@@ -426,7 +426,7 @@ async def test_request_approval_uses_namespaced_redis_key_and_ttl():
     redis_key = args[0]
     payload = json.loads(args[1])
     assert redis_key.startswith(
-        f"intric:{tool_approval_module.get_settings().environment}:mcp:approval:"
+        f"eneo:{tool_approval_module.get_settings().environment}:mcp:approval:"
     )
     assert redis_key.endswith(f":{approval_id}")
     assert kwargs["ex"] == tool_approval_module.APPROVAL_TTL_SECONDS

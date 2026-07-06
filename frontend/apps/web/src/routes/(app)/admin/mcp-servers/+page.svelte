@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
@@ -24,7 +24,7 @@
 
   async function handleAddMCP(mcpData: Record<string, unknown>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await data.intric.mcpServers.create(mcpData as any);
+    await data.eneo.mcpServers.create(mcpData as any);
     await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
   }
 

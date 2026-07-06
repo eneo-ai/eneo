@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import * as LucideIcons from "lucide-svelte";
 
   interface Props {

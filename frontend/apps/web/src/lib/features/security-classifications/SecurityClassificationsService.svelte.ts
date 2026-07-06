@@ -6,10 +6,10 @@
 
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
-import { type SecurityClassification, type Intric } from "@intric/intric-js";
+import { type SecurityClassification, type Eneo } from "@eneo/eneo-js";
 
 class SecurityClassificationsService {
-  #intric: Intric;
+  #eneo: Eneo;
   #enabled = $state(false);
   isSecurityEnabled = $derived(this.#enabled);
 
@@ -17,13 +17,13 @@ class SecurityClassificationsService {
   classifications = $derived.by(() => this.#classifications.toReversed());
 
   constructor(
-    intric: Intric,
+    eneo: Eneo,
     securityClassifications?: {
       security_enabled: boolean;
       security_classifications: SecurityClassification[];
     }
   ) {
-    this.#intric = intric;
+    this.#eneo = eneo;
     if (securityClassifications) {
       this.#enabled = securityClassifications.security_enabled;
       this.#classifications = securityClassifications.security_classifications;
@@ -31,7 +31,7 @@ class SecurityClassificationsService {
   }
 
   enable = createAsyncState(async () => {
-    const isEnabled = await this.#intric.securityClassifications
+    const isEnabled = await this.#eneo.securityClassifications
       .enable()
       .then((res) => res.security_enabled);
     this.#enabled = isEnabled;
@@ -39,7 +39,7 @@ class SecurityClassificationsService {
   });
 
   disable = createAsyncState(async () => {
-    const isEnabled = await this.#intric.securityClassifications
+    const isEnabled = await this.#eneo.securityClassifications
       .disable()
       .then((res) => res.security_enabled);
     this.#enabled = isEnabled;
@@ -47,7 +47,7 @@ class SecurityClassificationsService {
   });
 
   async createClassification(classification: { name: string; description: string }) {
-    const res = await this.#intric.securityClassifications.create({
+    const res = await this.#eneo.securityClassifications.create({
       ...classification,
       insertAs: "lowest"
     });
@@ -55,13 +55,13 @@ class SecurityClassificationsService {
   }
 
   async deleteClassification(classification: { id: string }) {
-    await this.#intric.securityClassifications.delete(classification);
+    await this.#eneo.securityClassifications.delete(classification);
     const idx = this.#classifications.findIndex(({ id }) => id === classification.id);
     this.#classifications.splice(idx, 1);
   }
 
   async updateClassification(classification: { id: string; name?: string; description?: string }) {
-    const updated = await this.#intric.securityClassifications.update(classification);
+    const updated = await this.#eneo.securityClassifications.update(classification);
     const idx = this.#classifications.findIndex(({ id }) => id === classification.id);
     this.#classifications[idx] = updated;
   }
@@ -83,7 +83,7 @@ class SecurityClassificationsService {
       reordered[idx - 1] = move;
     }
 
-    this.#classifications = await this.#intric.securityClassifications.rank(reordered);
+    this.#classifications = await this.#eneo.securityClassifications.rank(reordered);
   }
 }
 

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from intric.api.audit.schemas import ExportJobRequest
+from eneo.api.audit.schemas import ExportJobRequest
 
 
 @pytest.mark.parametrize(

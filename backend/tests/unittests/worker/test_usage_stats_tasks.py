@@ -8,11 +8,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.jobs.job_models import Task
-from intric.jobs.task_models import UpdateUsageStatsTaskParams
-from intric.tenants.tenant import TenantInDB, TenantState
-from intric.users.user import UserInDB
-from intric.worker.usage_stats_tasks import (
+from eneo.jobs.job_models import Task
+from eneo.jobs.task_models import UpdateUsageStatsTaskParams
+from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.user import UserInDB
+from eneo.worker.usage_stats_tasks import (
     recalculate_all_tenants_usage_stats,
     recalculate_tenant_usage_stats,
 )
@@ -347,7 +347,7 @@ async def test_recalculate_all_tenants_usage_stats_processes_active_tenants_only
                 yield FakeSession([None])
         iteration[0] += 1
 
-    with patch("intric.worker.usage_stats_tasks.sessionmanager") as mock_sm:
+    with patch("eneo.worker.usage_stats_tasks.sessionmanager") as mock_sm:
         mock_sm.session = mock_session
         result = await recalculate_all_tenants_usage_stats(container)
 
@@ -400,7 +400,7 @@ async def test_recalculate_all_tenants_usage_stats_balances_multiple_tenants():
                 yield FakeSession([None])
         iteration[0] += 1
 
-    with patch("intric.worker.usage_stats_tasks.sessionmanager") as mock_sm:
+    with patch("eneo.worker.usage_stats_tasks.sessionmanager") as mock_sm:
         mock_sm.session = mock_session
         result = await recalculate_all_tenants_usage_stats(container)
 

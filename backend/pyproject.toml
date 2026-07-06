@@ -1,5 +1,5 @@
 [project]
-name = "intric"
+name = "eneo"
 version = "0.1.0"
 description = ""
 authors = [{ name = "Sundsvalls Kommun" }]
@@ -22,9 +22,9 @@ dependencies = [
     "pdfplumber>=0.11,<1",
     "pillow>=10,<13",  # image downscaling for vision input (also transitive via pdfplumber)
     "pillow-heif>=0.18,<2",  # HEIC/HEIF decode (iPhone photos) -> converted to JPEG
-    "langchain-core>=1.2.22,<2",  # output parsers; >=1.2.22 fixes load_prompt path traversal
+    "langchain-core>=1.4.8,<2",  # output parsers; pulls patched langsmith
     "langchain-text-splitters>=1.1.2,<2",  # RecursiveCharacterTextSplitter; >=1.1.2 clears GHSA-fv5p
-    "pydantic-settings>=2.1.0,<3",
+    "pydantic-settings>=2.14.2,<3",
     "wrapt>=1.16.0,<2",
     "python-multipart>=0.0.27,<1",
     "arq>=0.26,<1",  # v0.26+ required for allow_abort_jobs, lifecycle hooks
@@ -41,9 +41,9 @@ dependencies = [
     "sentry-sdk[fastapi]==2.8.0",
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.88.1",
+    "litellm==1.90.2",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
-    "cryptography>=46.0.5,<47", # For Fernet encryption of HTTP auth passwords
+    "cryptography>=48.0.1,<49", # For Fernet encryption of HTTP auth passwords
     "httpx~=0.28.0",
     "pandas>=2.2.3,<3",
     "orjson>=3.9,<4",
@@ -59,14 +59,14 @@ dependencies = [
 ]
 
 [project.scripts]
-start = "intric.server.main:start"
-worker = "intric.worker.cli:start"
+start = "eneo.server.main:start"
+worker = "eneo.worker.cli:start"
 
 [dependency-groups]
 dev = [
-    "pytest>=7.2.1,<8",
+    "pytest>=9.0.3,<10",
     "pytest-cov>=4.0.0,<5",
-    "pytest-asyncio>=0.20.3,<0.21",
+    "pytest-asyncio>=1,<2",
     "asgi-lifespan>=2.1.0,<3",
     "pyright>=1.1.390,<2",
     "ruff>=0.12.0,<0.13",
@@ -74,8 +74,9 @@ dev = [
     "freezegun>=1.2.2,<2",
     "pytest-integration>=0.2.3,<0.3",
     "pytest-vcr>=1.0.2,<2",
-    "pytest-env>=1.1.3,<2",
-    "vcrpy>=5,<6",
+    "pytest-env>=1.1.5,<1.2",  # newer releases add --envfile, which conflicts with pytest-dotenv
+    "vcrpy>=8.2.1,<9",
+    "httpx2>=2.5.0,<3",  # Starlette TestClient backend for starlette>=1.3
     "testcontainers>=4.8.1,<5",
     "pytest-dotenv>=0.5.2,<0.6",
     "openpyxl>=3.1.5,<4",
@@ -90,7 +91,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/intric"]
+packages = ["src/eneo"]
 
 [tool.ruff]
 line-length = 88
@@ -125,7 +126,7 @@ indent-style = "space"
 # Coverage of the shipped package only. Run via `uv run pytest --cov` (CI passes
 # the report flags); the xml report feeds diff-cover, html is the human artifact.
 [tool.coverage.run]
-source = ["src/intric"]
+source = ["src/eneo"]
 branch = true
 omit = [
     "*/tests/*",
@@ -144,7 +145,7 @@ skip_covered = false
 [tool.deptry]
 # example_mcp_server.py is a standalone copy-paste sample (imports fastmcp, which
 # is intentionally not a project dependency), so it is excluded from the scan.
-extend_exclude = ["src/intric/server/example_mcp_server.py"]
+extend_exclude = ["src/eneo/server/example_mcp_server.py"]
 
 # DEP003 (transitive): imported directly but only resolve via transitive deps.
 # Promoting them to direct dependencies is a separate cleanup; ignored here so
@@ -172,7 +173,7 @@ DEP002 = [
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src/intric"]
+paths = ["src/eneo"]
 sort_by_size = true
 # base_adapter.py keeps an intentional `if False: yield` shim so its abstract
 # async-generator signature matches subclass overrides (see the comment there);

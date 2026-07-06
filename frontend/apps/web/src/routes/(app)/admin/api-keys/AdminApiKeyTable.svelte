@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { ApiKeyCreatedResponse } from "@intric/intric-js";
-  import { getIntric } from "$lib/core/Intric";
+  import type { ApiKeyCreatedResponse } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import {
     type AdminApiKey,
@@ -43,7 +43,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   import AdminApiKeyActions from "./AdminApiKeyActions.svelte";
   import ApiKeyStateBadge from "$lib/features/api-keys/ApiKeyStateBadge.svelte";
   import RotationGraceBadge from "$lib/features/api-keys/RotationGraceBadge.svelte";
@@ -67,7 +67,7 @@
 
   const usage = useApiKeyUsage(
     (params) =>
-      intric.apiKeys.admin.getUsage(params) as Promise<
+      eneo.apiKeys.admin.getUsage(params) as Promise<
         import("$lib/features/api-keys/apiKeyTableUtils").ApiKeyUsageResponse
       >
   );

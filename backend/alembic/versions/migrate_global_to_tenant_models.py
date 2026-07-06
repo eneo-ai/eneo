@@ -12,12 +12,14 @@ Revises: f7f7647d5327
 Create Date: 2025-12-09
 """
 
-from alembic import op
-from sqlalchemy import text
-from uuid import uuid4
-from datetime import datetime, timezone
-import os
 import json
+import os
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import text
+
+from alembic import op
 
 # revision identifiers, used by Alembic
 revision = 'migrate_global_to_tenant_models'
@@ -1017,7 +1019,7 @@ def upgrade() -> None:
     print("MIGRATION COMPLETE!")
     print("=" * 60)
     print("\nNext steps:")
-    print("1. Delete backend/src/intric/server/dependencies/ai_models.yml")
+    print("1. Delete backend/src/eneo/server/dependencies/ai_models.yml")
     print("2. Remove init_models() call from startup")
     print("=" * 60 + "\n")
 

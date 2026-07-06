@@ -5,11 +5,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.audit.application.audit_service import AuditService, _fill_request_context
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
-from intric.main.request_context import (
+from eneo.audit.application.audit_service import AuditService, _fill_request_context
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.main.request_context import (
     clear_request_context,
     set_request_context,
 )
@@ -78,7 +78,7 @@ async def test_log_async_picks_up_context_when_kwargs_omitted(monkeypatch):
         enqueued.update(params)
 
     monkeypatch.setattr(
-        "intric.audit.application.audit_service.job_manager.enqueue", fake_enqueue
+        "eneo.audit.application.audit_service.job_manager.enqueue", fake_enqueue
     )
 
     request_id = UUID("550e8400-e29b-41d4-a716-446655440000")
@@ -120,7 +120,7 @@ async def test_log_async_writes_null_when_context_is_empty(monkeypatch):
         enqueued.update(params)
 
     monkeypatch.setattr(
-        "intric.audit.application.audit_service.job_manager.enqueue", fake_enqueue
+        "eneo.audit.application.audit_service.job_manager.enqueue", fake_enqueue
     )
 
     repo = AsyncMock()
@@ -149,7 +149,7 @@ async def test_log_async_explicit_kwargs_override_contextvars(monkeypatch):
         enqueued.update(params)
 
     monkeypatch.setattr(
-        "intric.audit.application.audit_service.job_manager.enqueue", fake_enqueue
+        "eneo.audit.application.audit_service.job_manager.enqueue", fake_enqueue
     )
 
     set_request_context(
@@ -190,7 +190,7 @@ async def test_log_async_skips_when_should_log_returns_false(monkeypatch):
         enqueued.update(params)
 
     monkeypatch.setattr(
-        "intric.audit.application.audit_service.job_manager.enqueue", fake_enqueue
+        "eneo.audit.application.audit_service.job_manager.enqueue", fake_enqueue
     )
 
     repo = AsyncMock()
@@ -227,13 +227,13 @@ async def test_log_async_swallows_redis_enqueue_failure(monkeypatch, caplog):
         raise ConnectionError("redis unreachable")
 
     monkeypatch.setattr(
-        "intric.audit.application.audit_service.job_manager.enqueue", fake_enqueue
+        "eneo.audit.application.audit_service.job_manager.enqueue", fake_enqueue
     )
 
     repo = AsyncMock()
     service = AuditService(repository=repo)
 
-    caplog.set_level(logging.WARNING, logger="intric.audit.application.audit_service")
+    caplog.set_level(logging.WARNING, logger="eneo.audit.application.audit_service")
 
     job_id = await service.log_async(
         tenant_id=uuid4(),

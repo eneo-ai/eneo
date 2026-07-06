@@ -5,17 +5,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
 )
-from intric.templates.app_template.api.app_template_models import (
+from eneo.templates.app_template.api.app_template_models import (
     AppTemplateCreate,
     AppTemplateUpdate,
     AppTemplateWizard,
 )
-from intric.templates.app_template.app_template_service import AppTemplateService
+from eneo.templates.app_template.app_template_service import AppTemplateService
 
 
 @pytest.fixture

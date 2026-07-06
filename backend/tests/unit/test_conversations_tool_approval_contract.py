@@ -8,19 +8,19 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from intric.assistants.api.assistant_models import AskAssistant
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.infrastructure.rate_limiting import (
+from eneo.assistants.api.assistant_models import AskAssistant
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.rate_limiting import (
     RateLimitExceededError,
     RateLimitResult,
 )
-from intric.conversations.conversations_router import (
+from eneo.conversations.conversations_router import (
     approve_tools,
     get_tool_call_result,
 )
-from intric.main.exceptions import UnauthorizedException
-from intric.mcp_servers.infrastructure.tool_approval import (
+from eneo.main.exceptions import UnauthorizedException
+from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalContext,
     ToolApprovalContextLookupResult,
     ToolApprovalDecision,
@@ -77,7 +77,7 @@ async def test_tool_result_rechecks_current_session_access():
     authorize = AsyncMock()
 
     with patch(
-        "intric.conversations.conversations_router._authorize_session_access",
+        "eneo.conversations.conversations_router._authorize_session_access",
         new=authorize,
     ):
         response = await get_tool_call_result(
@@ -105,7 +105,7 @@ async def test_tool_result_is_not_read_when_current_access_is_revoked():
 
     with (
         patch(
-            "intric.conversations.conversations_router._authorize_session_access",
+            "eneo.conversations.conversations_router._authorize_session_access",
             new=AsyncMock(side_effect=UnauthorizedException("revoked")),
         ),
         pytest.raises(UnauthorizedException, match="revoked"),
@@ -141,15 +141,15 @@ async def test_approve_tools_returns_accepted_payload_shape():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):
@@ -192,15 +192,15 @@ async def test_approve_tools_returns_already_processed_payload_shape():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):
@@ -228,11 +228,11 @@ async def test_approve_tools_returns_404_payload_shape():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
     ):
@@ -266,15 +266,15 @@ async def test_approve_tools_returns_409_payload_shape():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):
@@ -305,7 +305,7 @@ async def test_approve_tools_returns_429_payload_shape_with_retry_after():
     )
 
     with patch(
-        "intric.conversations.conversations_router.enforce_rate_limit",
+        "eneo.conversations.conversations_router.enforce_rate_limit",
         side_effect=RateLimitExceededError(rate_limit_result),
     ):
         with pytest.raises(HTTPException) as exc_info:
@@ -346,15 +346,15 @@ async def test_approve_tools_success_creates_audit_log_entry():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):
@@ -402,15 +402,15 @@ async def test_approve_tools_denial_creates_audit_log_entry():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):
@@ -452,15 +452,15 @@ async def test_approve_tools_skip_audit_log_on_replay():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):
@@ -504,15 +504,15 @@ async def test_approve_tools_session_entity_type():
 
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.get_approval_manager",
+            "eneo.conversations.conversations_router.get_approval_manager",
             return_value=manager,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate_scope,
         ),
     ):

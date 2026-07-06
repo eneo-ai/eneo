@@ -10,7 +10,7 @@ import { redirect } from "@sveltejs/kit";
 export const load = async (event) => {
   event.depends("admin:layout");
 
-  const { user, intric } = await event.parent();
+  const { user, eneo } = await event.parent();
 
   // This check potentially runs client side, so this is _not_ a security feature
   // The actual security is on the backend, where all org calls will fail if not superuser
@@ -18,10 +18,7 @@ export const load = async (event) => {
     redirect(302, "/");
   }
 
-  const [auditConfig, settings] = await Promise.all([
-    intric.audit.getConfig(),
-    intric.settings.get()
-  ]);
+  const [auditConfig, settings] = await Promise.all([eneo.audit.getConfig(), eneo.settings.get()]);
 
   return {
     auditConfig,

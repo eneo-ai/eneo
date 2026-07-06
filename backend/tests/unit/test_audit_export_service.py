@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_export_service import (
+from eneo.audit.application.audit_export_service import (
     AuditExportService,
     ExportTooLargeError,
 )

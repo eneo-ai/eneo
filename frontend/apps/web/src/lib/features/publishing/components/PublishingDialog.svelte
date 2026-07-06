@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import type { PublishableResource, PublishableResourceEndpoints } from "../Publisher";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";

@@ -5,11 +5,11 @@
 -->
 
 <script lang="ts">
-  import { IconSearch } from "@intric/icons/search";
-  import { Button, Dialog, Select, Tooltip } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { IconSearch } from "@eneo/icons/search";
+  import { Button, Dialog, Select, Tooltip } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { UserSparse } from "@intric/intric-js";
+  import type { UserSparse } from "@eneo/eneo-js";
   import { createCombobox } from "@melt-ui/svelte";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
   import { UserList } from "$lib/features/users/user-list.svelte";
@@ -37,7 +37,7 @@
   let userList = new UserList({});
   let selectedRole = $state.raw($currentSpace.available_roles[0]);
   const memberIds = $derived($currentSpace.members.map((member) => member.id));
-  const intric = getIntric();
+  const eneo = getEneo();
   let inputElement: HTMLInputElement;
   let showDialog = $state<Dialog.OpenState>();
 
@@ -52,7 +52,7 @@
     const id = $selected?.value.id;
     if (!id) return;
     try {
-      await intric.spaces.members.add({
+      await eneo.spaces.members.add({
         spaceId: $currentSpace.id,
         user: { id, role: selectedRole.value }
       });

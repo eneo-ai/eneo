@@ -15,9 +15,9 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.feeder.capacity import CapacityManager
-from intric.worker.feeder.election import LeaderElection
-from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
+from eneo.worker.feeder.capacity import CapacityManager
+from eneo.worker.feeder.election import LeaderElection
+from eneo.worker.feeder.queues import JobEnqueuer, PendingQueue
 
 
 @pytest.mark.integration
@@ -219,7 +219,7 @@ class TestCrashBeforeLremRecovery:
         job_enqueuer = JobEnqueuer()
 
         # Mock job_manager.enqueue to raise duplicate error
-        with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
+        with patch("eneo.worker.feeder.queues.job_manager") as mock_job_manager:
             mock_job_manager.enqueue = AsyncMock(
                 side_effect=Exception("job_id already exists in queue")
             )
@@ -257,7 +257,7 @@ class TestCrashBeforeLremRecovery:
         job_enqueuer = JobEnqueuer()
 
         # Mock job_manager.enqueue to raise a REAL error
-        with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
+        with patch("eneo.worker.feeder.queues.job_manager") as mock_job_manager:
             mock_job_manager.enqueue = AsyncMock(
                 side_effect=Exception("Redis connection timeout")
             )
@@ -303,7 +303,7 @@ class TestCrashBeforeLremRecovery:
             job_enqueuer = JobEnqueuer()
 
             # Mock job_manager.enqueue
-            with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
+            with patch("eneo.worker.feeder.queues.job_manager") as mock_job_manager:
                 mock_job_manager.enqueue = AsyncMock(side_effect=Exception(error_msg))
 
                 success, is_duplicate, _ = await job_enqueuer.enqueue(

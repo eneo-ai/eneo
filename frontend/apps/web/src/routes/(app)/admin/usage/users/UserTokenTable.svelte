@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import type { UserTokenUsage, UserSortBy } from "@intric/intric-js";
+  import type { UserTokenUsage, UserSortBy } from "@eneo/eneo-js";
   import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@intric/ui";
+  import { Button, Table } from "@eneo/ui";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";
   import UsageBadgeWrapper from "./UsageBadgeWrapper.svelte";

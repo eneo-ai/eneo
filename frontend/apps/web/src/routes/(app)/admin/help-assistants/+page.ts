@@ -7,7 +7,7 @@
 import type { PageLoad } from "./$types";
 
 export const load: PageLoad = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   event.depends("admin:help-assistants:load");
 
   // `roles` = the help assistants currently installed for this tenant (the
@@ -17,8 +17,8 @@ export const load: PageLoad = async (event) => {
   // elsewhere (e.g. the Prompt Guide button on assistant settings pages); this
   // page only installs / configures / removes them.
   const [roles, templates] = await Promise.all([
-    intric.helpAssistants.admin.listRoles(),
-    intric.helpAssistants.admin.listTemplates()
+    eneo.helpAssistants.admin.listRoles(),
+    eneo.helpAssistants.admin.listTemplates()
   ]);
 
   return { roles, templates };

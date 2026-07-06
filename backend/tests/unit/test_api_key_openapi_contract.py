@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.server.main import get_application
+from eneo.server.main import get_application
 
 
 @pytest.fixture(scope="module")

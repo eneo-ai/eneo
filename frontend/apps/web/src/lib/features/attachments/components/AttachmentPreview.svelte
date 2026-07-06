@@ -1,38 +1,50 @@
 <script lang="ts">
   import { browser } from "$app/environment";
-  import type { UploadedFile } from "@intric/intric-js";
-  import { IconDocument } from "@intric/icons/document";
-  import { Button, Dialog, Markdown } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { UploadedFile } from "@eneo/eneo-js";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconDocument } from "@eneo/icons/document";
+  import { IconDownload } from "@eneo/icons/download";
+  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
   import type { Snippet } from "svelte";
 
-  export let file: UploadedFile;
-  export let index: number | undefined = undefined;
-  export let isTableView = false;
-  export let isOpen: Dialog.OpenState | undefined = undefined;
-  export let children: Snippet<[{ showFile: () => void }]> | undefined = undefined;
+  let {
+    file,
+    index = undefined,
+    isTableView = false,
+    children
+  }: {
+    file: UploadedFile;
+    index?: number;
+    isTableView?: boolean;
+    children?: Snippet<[{ showFile: () => void }]>;
+  } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
-  let loadedContent: string | undefined = undefined;
-  let signedUrl: string | undefined = undefined;
-  let loadingFile = false;
-  let loadError = false;
+  let loadedContent = $state<string | undefined>(undefined);
+  let signedUrl = $state<string | undefined>(undefined);
+  let loadingFile = $state(false);
+  let loadError = $state(false);
+  let copied = $state(false);
+  let isOpen = $state<Dialog.OpenState>();
 
   // Text files include plain text, PDFs, DOCX, PPTX, etc. (all are returned as text from backend)
-  const isTextFile =
+  const isTextFile = $derived(
     (file.mimetype?.includes("text") ||
       file.mimetype?.includes("pdf") ||
       file.mimetype?.includes("document") ||
       file.mimetype?.includes("presentation") ||
       file.mimetype?.includes("msword") ||
       file.mimetype?.includes("officedocument")) ??
-    false;
-  const isImageFile = file.mimetype?.includes("image") ?? false;
-  const isAudioFile = file.mimetype?.includes("audio") ?? false;
+      false
+  );
+  const isImageFile = $derived(file.mimetype?.includes("image") ?? false);
+  const isAudioFile = $derived(file.mimetype?.includes("audio") ?? false);
 
   async function loadFile() {
     if (signedUrl) return true;
@@ -41,7 +53,7 @@
     loadError = false;
 
     try {
-      const response = await intric.files.generateSignedUrl({
+      const response = await eneo.files.generateSignedUrl({
         fileId: file.id,
         expiresIn: 3600,
         contentDisposition: "inline"
@@ -72,7 +84,7 @@
     if (!browser) return;
 
     try {
-      const response = await intric.files.generateSignedUrl({
+      const response = await eneo.files.generateSignedUrl({
         fileId: file.id,
         expiresIn: 3600,
         contentDisposition: "attachment"
@@ -86,23 +98,20 @@
     }
   }
 
-  let copyButtonText = m.copy_to_clipboard();
   async function copyText() {
     await loadFile();
     if (loadedContent && browser) {
       navigator.clipboard.writeText(loadedContent);
-      copyButtonText = m.copied();
+      copied = true;
       setTimeout(() => {
-        copyButtonText = m.copy_to_clipboard();
+        copied = false;
       }, 2000);
     }
   }
 
   const showFile = () => {
-    if (isOpen) {
-      $isOpen = true;
-      loadFile();
-    }
+    $isOpen = true;
+    loadFile();
   };
 </script>
 
@@ -131,11 +140,11 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{file.name}</Dialog.Title>
-    <Dialog.Description hidden
-      >{m.attachment_file_preview_for({ name: file.name })}</Dialog.Description
-    >
+    <Dialog.Description hidden>
+      {m.attachment_file_preview_for({ name: file.name })}
+    </Dialog.Description>
 
-    <Dialog.Section scrollable>
+    <Dialog.Section class="max-h-[60vh]" scrollable>
       <div class="p-4">
         {#if loadingFile}
           <pre>{m.loading()}</pre>
@@ -153,7 +162,8 @@
         {:else}
           <div class="text-center">
             <p class="mb-4">{m.preview_not_available()}</p>
-            <Button on:click={downloadFile} variant="outlined">
+            <Button variant="outlined" on:click={downloadFile} padding="icon-leading">
+              <IconDownload />
               {m.download_file()}
             </Button>
           </div>
@@ -163,12 +173,19 @@
 
     <Dialog.Controls let:close>
       <Button variant="simple" on:click={downloadFile} padding="icon-leading">
+        <IconDownload />
         {m.download_file()}
       </Button>
 
       {#if isTextFile && loadedContent}
-        <Button variant="simple" padding="icon-leading" on:click={copyText}>
-          {copyButtonText}
+        <Button variant="simple" on:click={copyText} padding="icon-leading">
+          {#if copied}
+            <IconCheck />
+            {m.copied()}
+          {:else}
+            <IconCopy />
+            {m.copy_to_clipboard()}
+          {/if}
         </Button>
       {/if}
 

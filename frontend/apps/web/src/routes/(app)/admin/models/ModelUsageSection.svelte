@@ -9,7 +9,7 @@
 -->
 
 <script lang="ts">
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { Loader2 } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -27,7 +27,7 @@
     active?: boolean;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let isLoading = $state(false);
   let loadError = $state<string | null>(null);
@@ -46,16 +46,16 @@
     const isTranscription = type === "transcriptionModel";
     try {
       const detailsRes = (await (isTranscription
-        ? intric.models.getTranscriptionUsageDetails({ modelId, limit: 100 })
-        : intric.models.getUsageDetails({ modelId, limit: 100 }))) as {
+        ? eneo.models.getTranscriptionUsageDetails({ modelId, limit: 100 })
+        : eneo.models.getUsageDetails({ modelId, limit: 100 }))) as {
         items?: UsageDetail[];
         total?: number;
       };
       details = detailsRes?.items ?? [];
       total = detailsRes?.total ?? details.length;
       const stats = (await (isTranscription
-        ? intric.models.getTranscriptionUsageStats({ modelId })
-        : intric.models.getUsageStats({ modelId }))) as {
+        ? eneo.models.getTranscriptionUsageStats({ modelId })
+        : eneo.models.getUsageStats({ modelId }))) as {
         spaces_count?: number;
       };
       spacesCount = stats.spaces_count ?? 0;

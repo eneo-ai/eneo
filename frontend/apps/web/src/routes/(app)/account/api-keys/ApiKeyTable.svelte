@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
   import { SvelteSet } from "svelte/reactivity";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { getReasonCodeLabel } from "$lib/features/api-keys/reasonCodeLabel";
   import {
@@ -47,7 +47,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let {
     keys = [],
@@ -76,7 +76,7 @@
 
   const usage = useApiKeyUsage(
     (params) =>
-      intric.apiKeys.getUsage(params) as Promise<
+      eneo.apiKeys.getUsage(params) as Promise<
         import("$lib/features/api-keys/apiKeyTableUtils").ApiKeyUsageResponse
       >
   );

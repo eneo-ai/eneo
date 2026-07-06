@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from intric.integration.presentation.admin_sharepoint_router import (
+from eneo.integration.presentation.admin_sharepoint_router import (
     _get_sharepoint_token_for_user_integration,
     _require_sharepoint_webhook_client_state,
     list_sharepoint_subscriptions,
@@ -36,7 +36,7 @@ async def test_list_subscriptions_scopes_by_tenant():
     container.user_repo.return_value = AsyncMock()
 
     with patch(
-        "intric.integration.presentation.admin_sharepoint_router.validate_permission"
+        "eneo.integration.presentation.admin_sharepoint_router.validate_permission"
     ):
         result = await list_sharepoint_subscriptions(container=container)
 
@@ -57,7 +57,7 @@ async def test_renew_expired_subscriptions_scopes_by_tenant():
     container.user_integration_repo.return_value = AsyncMock()
 
     with patch(
-        "intric.integration.presentation.admin_sharepoint_router.validate_permission"
+        "eneo.integration.presentation.admin_sharepoint_router.validate_permission"
     ):
         result = await renew_expired_subscriptions(container=container)
 
@@ -79,7 +79,7 @@ async def test_recreate_subscription_uses_tenant_scoped_lookup():
     container.user_integration_repo.return_value = AsyncMock()
 
     with patch(
-        "intric.integration.presentation.admin_sharepoint_router.validate_permission"
+        "eneo.integration.presentation.admin_sharepoint_router.validate_permission"
     ):
         with pytest.raises(HTTPException) as exc_info:
             await recreate_subscription(
@@ -132,7 +132,7 @@ def test_require_sharepoint_webhook_client_state_raises_when_missing():
     settings.sharepoint_webhook_client_state = None
 
     with patch(
-        "intric.integration.presentation.admin_sharepoint_router.get_settings",
+        "eneo.integration.presentation.admin_sharepoint_router.get_settings",
         return_value=settings,
     ):
         with pytest.raises(HTTPException) as exc_info:
@@ -147,7 +147,7 @@ def test_require_sharepoint_webhook_client_state_returns_trimmed_value():
     settings.sharepoint_webhook_client_state = "  webhook-secret  "
 
     with patch(
-        "intric.integration.presentation.admin_sharepoint_router.get_settings",
+        "eneo.integration.presentation.admin_sharepoint_router.get_settings",
         return_value=settings,
     ):
         result = _require_sharepoint_webhook_client_state()

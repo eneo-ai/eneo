@@ -12,8 +12,8 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Tooltip } from "@intric/ui";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { Tooltip } from "@eneo/ui";
   import {
     formatCostPerMillionTokens,
     formatCostPerMinute,

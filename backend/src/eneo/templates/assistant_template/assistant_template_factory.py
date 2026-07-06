@@ -1,0 +1,51 @@
+from typing import TYPE_CHECKING, Sequence
+
+from eneo.templates.assistant_template.api.assistant_template_models import (
+    AssistantTemplateWizard,
+)
+from eneo.templates.assistant_template.assistant_template import AssistantTemplate
+
+if TYPE_CHECKING:
+    from eneo.database.tables.assistant_template_table import (
+        AssistantTemplates as AssistantTemplateDBModel,
+    )
+
+
+class AssistantTemplateFactory:
+    @staticmethod
+    def create_assistant_template(
+        item: "AssistantTemplateDBModel",
+    ) -> AssistantTemplate:
+        wizard = (
+            AssistantTemplateWizard.model_validate(item.wizard) if item.wizard else None
+        )
+        return AssistantTemplate(
+            id=item.id,
+            name=item.name,
+            description=item.description,
+            category=item.category,
+            prompt_text=item.prompt_text,
+            completion_model_kwargs=item.completion_model_kwargs,
+            wizard=wizard,
+            completion_model=item.completion_model,
+            updated_at=item.updated_at,
+            created_at=item.created_at,
+            organization=item.organization,
+            tenant_id=item.tenant_id,
+            deleted_at=item.deleted_at,
+            original_snapshot=item.original_snapshot,
+            deleted_by_user_id=item.deleted_by_user_id,
+            restored_by_user_id=item.restored_by_user_id,
+            restored_at=item.restored_at,
+            is_default=item.is_default,
+            icon_name=item.icon_name,
+        )
+
+    @staticmethod
+    def create_assistant_template_list(
+        items: "Sequence[AssistantTemplateDBModel]",
+    ) -> list[AssistantTemplate]:
+        return [
+            AssistantTemplateFactory.create_assistant_template(item=item)
+            for item in items
+        ]

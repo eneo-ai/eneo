@@ -7,7 +7,7 @@
 <script lang="ts">
   import { Button } from "$lib/Button/index.js";
   import { Tooltip } from "$lib/Tooltip/index.js";
-  import type { Icon } from "@intric/icons";
+  import type { Icon } from "@eneo/icons";
 
   export let customClass: string = "";
   export let tooltip: string = "";

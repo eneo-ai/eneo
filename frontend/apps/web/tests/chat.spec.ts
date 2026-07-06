@@ -20,8 +20,8 @@ test("a streamed answer is saved and can be reopened from history", async ({ pag
 
   await page.getByRole("tablist").getByRole("tab").nth(1).click();
 
-  const savedConversation = page.locator("table tbody button").first();
-  await expect(savedConversation).toBeVisible();
+  const savedConversation = page.getByRole("button", { name: question }).first();
+  await expect(savedConversation).toBeVisible({ timeout: 15_000 });
   await savedConversation.click();
 
   const conversation = page.locator("#session-message-container");

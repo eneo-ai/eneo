@@ -5,18 +5,18 @@
 -->
 
 <script lang="ts">
-  import type { Icon } from "@intric/icons";
+  import type { Icon } from "@eneo/icons";
   import type { ComponentType } from "svelte";
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { IconAssistants } from "@intric/icons/assistants";
-  import { IconThumb } from "@intric/icons/thumb";
-  import { IconLibrary } from "@intric/icons/library";
-  import { IconCPU } from "@intric/icons/CPU";
-  import { IconBulb } from "@intric/icons/bulb";
-  import { IconHistory } from "@intric/icons/history";
-  import { IconSpeechBubble } from "@intric/icons/speech-bubble";
-  import { IconSparkles } from "@intric/icons/sparkles";
-  import { IconKey } from "@intric/icons/key";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { IconAssistants } from "@eneo/icons/assistants";
+  import { IconThumb } from "@eneo/icons/thumb";
+  import { IconLibrary } from "@eneo/icons/library";
+  import { IconCPU } from "@eneo/icons/CPU";
+  import { IconBulb } from "@eneo/icons/bulb";
+  import { IconHistory } from "@eneo/icons/history";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
+  import { IconSparkles } from "@eneo/icons/sparkles";
+  import { IconKey } from "@eneo/icons/key";
   import { BookText, ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";

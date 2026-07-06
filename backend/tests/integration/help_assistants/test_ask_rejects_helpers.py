@@ -21,19 +21,19 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.sessions_table import Sessions
-from intric.help_assistants.domain.assignment_history_reason import (
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.sessions_table import Sessions
+from eneo.help_assistants.domain.assignment_history_reason import (
     AssignmentHistoryReason,
 )
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.main.exceptions import UnauthorizedException
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.main.exceptions import UnauthorizedException
 
 
 async def _get_org_space(
     session: sa.ext.asyncio.AsyncSession, *, tenant_id: UUID
 ) -> UUID:
-    from intric.database.tables.spaces_table import Spaces
+    from eneo.database.tables.spaces_table import Spaces
 
     row = await session.scalar(
         sa.select(Spaces.id).where(
@@ -387,7 +387,7 @@ async def test_guard_does_not_block_regular_assistant(db_container, admin_user):
         )
         await session.flush()
 
-        from intric.help_assistants.application.ask_guard import (
+        from eneo.help_assistants.application.ask_guard import (
             assert_not_helper_assistant,
         )
 

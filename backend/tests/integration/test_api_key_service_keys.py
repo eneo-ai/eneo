@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.users.user import UserAdd, UserState
+from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
 # Fixtures

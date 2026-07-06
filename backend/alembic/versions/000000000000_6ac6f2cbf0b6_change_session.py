@@ -7,7 +7,7 @@ Create Date: 2023-05-05 15:47:59.268078
 import sqlalchemy as sa
 
 from alembic import op
-from intric.database.alembic_utils import timestamps
+from eneo.database.alembic_utils import timestamps
 
 # revision identifiers, used by Alembic
 revision = "6ac6f2cbf0b6"

@@ -4,7 +4,7 @@
     "chart-green",
     "chart-moss",
     "chart-red",
-    "chart-intric",
+    "chart-eneo",
     "chart-yellow",
     "chart-blue",
     "accent-default"
@@ -30,9 +30,9 @@
 </script>
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Tooltip } from "@intric/ui";
-  import { IconInfo } from "@intric/icons/info";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { Tooltip } from "@eneo/ui";
+  import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
 
   export let model:
