@@ -159,3 +159,9 @@ class TestKnowledgeCatalog:
         assert "ALWAYS search before answering" in catalog
         assert "could not be found in the knowledge sources" in catalog
         assert "never answer from general knowledge" in catalog
+
+    def test_catalog_defers_to_other_tools_for_non_knowledge_requests(self):
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "another available tool answers the request directly" in catalog
+        assert "obviously cannot contain" in catalog

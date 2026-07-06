@@ -7,6 +7,7 @@
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
+  import { serverDisplayName, toolDisplayName } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
@@ -99,10 +100,10 @@
                 ? "running"
                 : "complete";
       return {
-        // Prefer the server-provided title annotation, falling back to the
-        // raw tool name when the MCP server omits one.
-        toolName: tc.title || tc.tool_name,
-        serverName: tc.server_name,
+        // Eneo's own built-in tools get localized labels; otherwise prefer the
+        // server-provided title annotation, falling back to the raw tool name.
+        toolName: toolDisplayName(tc.tool_name, tc.title),
+        serverName: serverDisplayName(tc.server_name),
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status
@@ -253,7 +254,9 @@
             <!-- Tool info -->
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex items-center gap-2">
-                <span class="text-default truncate text-sm font-medium">{toolCall.tool_name}</span>
+                <span class="text-default truncate text-sm font-medium"
+                  >{toolDisplayName(toolCall.tool_name)}</span
+                >
                 {#if isDenied}
                   <span
                     class="bg-negative-dimmer text-negative-default inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
