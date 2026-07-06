@@ -24,7 +24,7 @@ const chipClass =
 const moreButtonClass =
   "text-muted-foreground hover:text-foreground hover:border-ring rounded-lg border px-2.5 py-1.5 text-xs transition-colors";
 
-export type SourceChip = { key: string; title: string; url?: string };
+export type SourceChip = { key: string; title: string; url?: string; sourceId: string };
 
 /** Merge a message's knowledge documents and web references into one ordered list. */
 export function mergeSources(
@@ -38,13 +38,15 @@ export function mergeSources(
       return {
         key: `doc-${source.sourceId}`,
         title: source.title || source.sourceId,
-        url: eneo.metadata?.url ?? undefined
+        url: eneo.metadata?.url ?? undefined,
+        sourceId: source.sourceId
       };
     });
   const web: SourceChip[] = (webReferences ?? []).map((ref) => ({
     key: `web-${ref.id}`,
     title: ref.title || ref.url,
-    url: ref.url
+    url: ref.url,
+    sourceId: ref.id
   }));
   return [...docs, ...web];
 }

@@ -14,11 +14,11 @@ export const generateMetadata = pageTitle("login");
 export default async function LoginPage({
   searchParams
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; message?: string }>;
 }) {
   if (await getSession()) redirect(DEFAULT_LANDING);
 
-  const { next, error } = await searchParams;
+  const { next, error, message } = await searchParams;
   const t = await getTranslations();
   const oidc = isOidcEnabled();
 
@@ -34,6 +34,16 @@ export default async function LoginPage({
           {error === "access_denied" && (
             <Alert variant="destructive">
               <AlertDescription>{t("login_failed")}</AlertDescription>
+            </Alert>
+          )}
+          {message === "expired" && (
+            <Alert>
+              <AlertDescription>{t("session_expired_please_login_again")}</AlertDescription>
+            </Alert>
+          )}
+          {message === "logout" && (
+            <Alert>
+              <AlertDescription>{t("logout_success")}</AlertDescription>
             </Alert>
           )}
           {oidc && (

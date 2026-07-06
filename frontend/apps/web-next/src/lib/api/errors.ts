@@ -79,6 +79,18 @@ function parseErrorBody(body: unknown): { message?: string; code?: number; detai
   return {};
 }
 
+/**
+ * Reads the backend error code from a failed response without consuming the
+ * body (clones). Returns undefined for non-JSON bodies or unknown shapes.
+ */
+export async function errorCodeFromResponse(response: Response): Promise<number | undefined> {
+  try {
+    return parseErrorBody(await response.clone().json()).code;
+  } catch {
+    return undefined;
+  }
+}
+
 export function apiErrorFromResponse(response: Response, body: unknown): EneoApiError {
   const { message, code, details } = parseErrorBody(body);
   return new EneoApiError(message ?? `Request failed with status ${response.status}`, {

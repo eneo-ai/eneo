@@ -16,6 +16,7 @@ import {
   MessageContent,
   MessageResponse
 } from "@/components/ai-elements/message";
+import { resolveInrefs, stripInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage } from "@/lib/chat/types";
 
 import { ActivityTimeline } from "./activity-timeline";
@@ -52,6 +53,7 @@ export function ChatMessage({
     .join("\n\n");
   const answering = message.metadata?.answeringAssistant ?? (isStreaming ? liveAnswering : null);
   const sources = mergeSources(message.parts, message.metadata?.webSearchReferences);
+  const sourceIds = sources.map((source) => source.sourceId);
 
   return (
     <Message from={message.role}>
@@ -75,7 +77,7 @@ export function ChatMessage({
                   remarkPlugins={[remarkCitations(sources.length, message.id)]}
                   components={citationComponents}
                 >
-                  {part.text}
+                  {resolveInrefs(isStreaming ? trimPartialInref(part.text) : part.text, sourceIds)}
                 </MessageResponse>
               </CitationSourcesProvider>
             ) : (
@@ -114,7 +116,7 @@ export function ChatMessage({
           <MessageAction
             tooltip={t("copy")}
             onClick={() => {
-              navigator.clipboard.writeText(textContent);
+              navigator.clipboard.writeText(stripInrefs(textContent));
               toast.success(t("copied"));
             }}
           >

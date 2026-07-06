@@ -107,9 +107,11 @@ export async function getAccessTokenOrNull(): Promise<string | null> {
   return session.accessToken;
 }
 
-/** Like getAccessTokenOrNull, but redirects to /login instead of returning null. */
+/** Like getAccessTokenOrNull, but redirects instead of returning null. Goes
+ * through the logout route (not /login directly) so the dead-but-decryptable
+ * cookie is cleared — /login bounces cookie-holders into the app. */
 export async function getAccessToken(): Promise<string> {
   const token = await getAccessTokenOrNull();
-  if (!token) redirect("/login");
+  if (!token) redirect("/logout?reason=expired");
   return token;
 }

@@ -1,4 +1,6 @@
 {
+  "access_disabled": "Din åtkomst till Eneo har tillfälligt inaktiverats. Kontakta din administratör för att återfå åtkomsten för din organisation.",
+  "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_unclassified": "Oklassad",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",
   "mcp_toggle_server": "Aktivera {name}",

@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const value = backendResponse.headers.get(name);
     if (value) headers.set(name, value);
   }
-  headers.set("cache-control", "no-cache");
+  headers.set("cache-control", "no-store");
 
   return new Response(backendResponse.body, {
     status: backendResponse.status,

@@ -11,8 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * to the matching source chip. Operating on the markdown AST (not a string
  * regex) means code blocks and existing links are left untouched.
  *
- * Lights up as soon as answers contain `[N]` markers — the backend/model must
- * emit them (or a citations field) for this to appear in real chats.
+ * Real backend answers cite via `<inref id="…"/>` tags; lib/chat/inref.ts
+ * rewrites those to `[N]` before the text reaches this plugin.
  */
 
 type MdNode = {

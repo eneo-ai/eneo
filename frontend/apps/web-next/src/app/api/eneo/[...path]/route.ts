@@ -84,6 +84,8 @@ async function proxyRequest(request: NextRequest): Promise<Response> {
     const value = backendResponse.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }
+  // Authenticated responses must never land in shared or disk caches.
+  responseHeaders.set("cache-control", "no-store");
 
   // Forward the audit access-session cookie back to the browser, re-scoped to
   // the proxy path so it rides along on subsequent /api/eneo audit calls.

@@ -271,7 +271,9 @@ export function ChatView({
       files: attachments.fileIds.map((id) => ({ id })),
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       use_web_search: useWebSearch || undefined,
-      require_tool_approval: true
+      // The backend rejects tool approval for group chats (400 not_supported),
+      // including continued group-chat sessions.
+      require_tool_approval: partner.type !== "group-chat"
     };
 
     sendMessage({ text }, { body });
