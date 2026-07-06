@@ -156,7 +156,7 @@ class ArchitectureCommitDraft(_PlanningModel):
     aggregation_intent: AggregationIntent = "linear"
 
     @model_validator(mode="after")
-    def _at_most_one_compiled_chain_pattern(self) -> "ArchitectureCommitDraft":
+    def _validate_chosen_patterns(self) -> "ArchitectureCommitDraft":
         from eneo.flows.ai_builder.pattern_registry import (
             PATTERN_REGISTRY,
             compiled_chain_pattern_ids,

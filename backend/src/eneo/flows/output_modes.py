@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-ALLOWED_OUTPUT_MODES = {
-    "pass_through",
-    "http_post",
-    "transcribe_only",
-    "template_fill",
-    "render_verbatim",
-}
+from eneo.flows.enums import FLOW_OUTPUT_MODE_VALUES
+
+ALLOWED_OUTPUT_MODES = set(FLOW_OUTPUT_MODE_VALUES)
 
 
 def transcribe_only_violation(
