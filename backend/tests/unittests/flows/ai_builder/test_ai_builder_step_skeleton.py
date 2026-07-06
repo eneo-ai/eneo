@@ -354,17 +354,17 @@ def test_artifact_skeleton_keeps_final_semantic_body_text_when_fields_are_reques
 
     assert [step.output_type.value for step in composition.steps] == [
         "text",
+        "json",
         "text",
         "docx",
     ]
-    assert composition.steps[1].output_fields is None
+    assert composition.steps[1].output_fields is not None
+    assert composition.steps[2].name == "Skapa slutresultat"
+    assert composition.steps[2].input_type == InputType.TEXT
     assert composition.steps[-1].input_source == InputSource.PREVIOUS_STEP
     assert composition.steps[-1].input_type == InputType.TEXT
-    assert len(composition.output_type_drifts) == 1
-    drift = composition.output_type_drifts[0]
-    assert drift.requested_output_type == OutputType.JSON
-    assert drift.enforced_output_type == OutputType.TEXT
-    assert drift.dropped_output_fields is True
+    assert composition.document_body_writer_step_indexes == (2,)
+    assert composition.output_type_drifts == ()
 
 
 def test_docx_template_skeleton_keeps_template_body_text_when_fields_requested() -> (
@@ -402,9 +402,7 @@ def test_docx_template_skeleton_keeps_template_body_text_when_fields_requested()
     assert drift.dropped_output_fields is True
 
 
-def test_document_artifact_terminal_keeps_locked_input_type_after_json_semantics() -> (
-    None
-):
+def test_document_artifact_terminal_marks_body_writer_after_json_semantics() -> None:
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.PDF,
@@ -431,18 +429,53 @@ def test_document_artifact_terminal_keeps_locked_input_type_after_json_semantics
     assert [step.name for step in composition.steps] == [
         "Extract section data",
         "Extract risk data",
+        "Create final answer",
         "Create PDF",
     ]
-    assert composition.document_body_writer_step_indexes == ()
-    assert composition.steps[1].output_type == OutputType.TEXT
-    assert composition.steps[1].output_fields is None
+    assert [step.output_type for step in composition.steps] == [
+        OutputType.JSON,
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert composition.document_body_writer_step_indexes == (2,)
     assert composition.steps[2].input_type == InputType.TEXT
-    assert len(composition.output_type_drifts) == 1
-    drift = composition.output_type_drifts[0]
-    assert drift.slot_ordinal == 1
-    assert drift.requested_output_type == OutputType.JSON
-    assert drift.enforced_output_type == OutputType.TEXT
-    assert drift.dropped_output_fields is True
+    assert composition.steps[3].input_type == InputType.TEXT
+    assert composition.output_type_drifts == ()
+
+
+def test_document_artifact_inserts_body_writer_after_single_json_semantic() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=("document_to_pdf_report",),
+        chain_steps=(),
+    )
+
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Extract document facts",
+                instructions="Extract document type, title, category, and conclusions.",
+                output_fields=tuple(default_structured_output_fields()),
+            )
+        ]
+    )
+
+    assert [step.output_type for step in composition.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert composition.steps[0].output_fields is not None
+    assert composition.steps[1].name == "Create final answer"
+    assert composition.steps[1].input_source == InputSource.PREVIOUS_STEP
+    assert composition.steps[1].input_type == InputType.TEXT
+    assert composition.steps[2].input_source == InputSource.PREVIOUS_STEP
+    assert composition.steps[2].input_type == InputType.TEXT
+    assert composition.document_body_writer_step_indexes == (1,)
+    assert composition.output_type_drifts == ()
 
 
 @pytest.mark.parametrize("semantic_step_count", [1, 2, 3])

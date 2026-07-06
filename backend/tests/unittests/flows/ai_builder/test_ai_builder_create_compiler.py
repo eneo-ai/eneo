@@ -1337,6 +1337,18 @@ def test_outline_flow_schema_exposes_review_mode_on_steps() -> None:
     assert review_mode["enum"] == ["view", "edit", None]
 
 
+def test_outline_flow_schema_tells_model_to_include_named_source_facts() -> None:
+    schema = build_create_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
+    )
+    parameters = schema["function"]["parameters"]
+    step_props = parameters["properties"]["steps"]["items"]["properties"]
+    output_fields = step_props["output_fields"]
+
+    assert "every user-named source fact" in output_fields["description"]
+    assert "generic facts/notes envelope" in output_fields["description"]
+
+
 def test_parse_create_flow_intent_arguments_accepts_review_mode() -> None:
     outline = parse_create_flow_intent_arguments(
         {
@@ -1791,6 +1803,7 @@ def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
                 document_delivery_mode="generated",
             ),
         ],
+        document_body_writer_step_indexes=(1,),
     )
 
 
@@ -2094,10 +2107,21 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
                 instructions="Synthesize all themes.",
                 input_source="all_previous_steps",
                 input_type="text",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Create PDF",
+                instructions=(
+                    "Create the final output from the previous structured work. "
+                    "Preserve the user's requested scope, ordering, and constraints."
+                ),
+                input_source="previous_step",
+                input_type="text",
                 output_type="pdf",
                 document_delivery_mode="generated",
             ),
         ],
+        document_body_writer_step_indexes=(1,),
     )
 
 
@@ -2147,6 +2171,7 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
                 document_delivery_mode="generated",
             ),
         ],
+        document_body_writer_step_indexes=(0,),
     )
 
 
@@ -5215,14 +5240,23 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
     assert [step.name for step in draft.steps] == [
         "Transcribe audio",
         "Generera DOCX-dokument",
+        "Create final answer",
         "Create DOCX",
     ]
     assert [step.output_type.value for step in draft.steps] == [
         "text",
+        "json",
         "text",
         "docx",
     ]
-    assert compiled.steps[1].output_contract is None
+    assert compiled.steps[1].output_contract is not None
+    assert compiled.steps[2].input_bindings == {
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Source material"},
+        ]
+    }
+    assert compiled.document_body_writer_step_refs == ("step_c",)
     assert compiled.steps[-1].input_type.value == "text"
     assert compiled.steps[-1].input_bindings is None
     assert validation.valid
@@ -7907,13 +7941,27 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
     validation = validate_spec(compiled)
 
     protocol_step = compiled.steps[3]
-    assert protocol_step.input_source.value == "previous_step"
-    assert protocol_step.input_type.value == "text"
-    assert protocol_step.output_type.value == "text"
-    assert compiled.steps[3].input_bindings is not None
-    protocol_question = _question_binding(compiled.steps[3].input_bindings)
-    assert "transcription_text" in protocol_question
-    assert "meeting_title" in protocol_question
+    body_step = compiled.steps[4]
+    renderer_step = compiled.steps[5]
+    assert protocol_step.output_type.value == "json"
+    assert protocol_step.output_contract is not None
+    assert body_step.input_source.value == "previous_step"
+    assert body_step.input_type.value == "text"
+    assert body_step.output_type.value == "text"
+    assert body_step.input_bindings is not None
+    body_source_refs = body_step.input_bindings["source_refs"]
+    assert {
+        (ref["step_ref"], ref.get("field_path"))
+        for ref in body_source_refs
+        if isinstance(ref, dict)
+    } >= {
+        ("step_b", "transcription_text"),
+        ("step_c", "meeting_title"),
+        ("step_d", "protocol_sections"),
+    }
+    assert renderer_step.output_type.value == "pdf"
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == ("step_e",)
     assert validation.valid
 
 
@@ -8168,6 +8216,137 @@ def test_compile_outline_flow_audio_artifact_aggregate_keeps_synthesis_before_te
     assert draft.steps[-1].input_source.value == "previous_step"
     assert draft.steps[-1].input_type.value == "text"
     assert compiled.steps[-1].input_bindings is None
+    assert validation.valid
+
+
+@pytest.mark.parametrize("aggregation_intent", ["aggregate", "compare"])
+@pytest.mark.parametrize("final_output_type", [OutputType.PDF, OutputType.DOCX])
+def test_compile_outline_document_artifact_keeps_body_writer_before_renderer(
+    aggregation_intent: str,
+    final_output_type: OutputType,
+) -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document artifact report",
+            "plan_rationale": "Extract facts, analyze them, and render a document.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract document type, category, date, author, and conclusions.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Structured facts per document.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Analyze document meaning",
+                    "instructions": "Analyze the extracted document facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "analysis",
+                            "field_type": "object",
+                            "description": "Interpretation of the document facts.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the final report body from all structured work.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=final_output_type,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            aggregation_intent=cast(AggregationIntent, aggregation_intent),
+        ),
+    )
+    validation = validate_spec(compiled)
+
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.JSON,
+        OutputType.TEXT,
+        final_output_type,
+    ]
+    body_step = compiled.steps[-2]
+    renderer_step = compiled.steps[-1]
+    assert body_step.name == "Write report body"
+    assert body_step.output_type == OutputType.TEXT
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.output_type == final_output_type
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validation.valid
+
+
+def test_compile_outline_document_artifact_single_structured_step_adds_body_writer() -> (
+    None
+):
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document analysis PDF",
+            "plan_rationale": "Extract structured document facts and render a PDF.",
+            "steps": [
+                {
+                    "name": "Extract document facts",
+                    "instructions": (
+                        "Extract document type, title, year, category, author, "
+                        "summary, and conclusions."
+                    ),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Structured facts per source document.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+        ),
+    )
+    validation = validate_spec(compiled)
+
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    source_step = compiled.steps[0]
+    body_step = compiled.steps[1]
+    renderer_step = compiled.steps[2]
+    assert source_step.output_contract is not None
+    assert body_step.input_source == InputSource.PREVIOUS_STEP
+    assert body_step.input_type == InputType.TEXT
+    assert body_step.input_bindings == {
+        "source_refs": [{"step_ref": source_step.plan_step_ref, "output": "structured"}]
+    }
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
     assert validation.valid
 
 
@@ -8666,7 +8845,7 @@ def test_compile_outline_flow_document_pdf_preserves_authored_semantic_steps() -
         "Draft report",
         "Create PDF",
     ]
-    assert compiled.document_body_writer_step_refs is None
+    assert compiled.document_body_writer_step_refs == ("step_b",)
     assert compiled.steps[-1].output_type.value == "pdf"
     assert validation.valid
 
@@ -9095,10 +9274,19 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
     assert [step.input_source.value for step in draft.steps] == [
         "flow_input",
         "previous_step",
-        "all_previous_steps",
+        "previous_step",
+        "previous_step",
+    ]
+    assert [step.output_type.value for step in draft.steps] == [
+        "json",
+        "json",
+        "text",
+        "docx",
     ]
     assert draft.steps[2].input_type.value == "text"
-    assert compiled.steps[2].input_bindings is None
+    assert compiled.steps[2].input_bindings is not None
+    assert compiled.document_body_writer_step_refs == ("step_c",)
+    assert compiled.steps[3].input_bindings is None
     assert validation.valid
     assert not any(
         warning.code == "all_previous_overuse" for warning in validation.warnings

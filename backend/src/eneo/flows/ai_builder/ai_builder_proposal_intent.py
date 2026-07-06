@@ -636,7 +636,13 @@ def build_semantic_step_schema(
             },
             "output_fields": {
                 "type": ["array", "null"],
-                "description": "Semantic structured fields this step should produce.",
+                "description": (
+                    "Semantic structured fields this step should produce. For JSON "
+                    "source-reading steps, every user-named source fact needed by "
+                    "later text, document, or JSON output must be an explicit field "
+                    "or nested item field, not only instruction prose or a generic "
+                    "facts/notes envelope."
+                ),
                 "items": build_structured_field_schema(),
             },
             "uses_form_fields": {

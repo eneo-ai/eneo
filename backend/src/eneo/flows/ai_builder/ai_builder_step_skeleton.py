@@ -316,6 +316,28 @@ class StepSkeletonPlan:
         semantic_index = 0
 
         for slot_index, slot in enumerate(slots):
+            if (
+                _slot_renders_generated_document(slot)
+                and steps
+                and steps[-1].output_type != OutputType.TEXT
+            ):
+                body_slot = _terminal_artifact_slot(
+                    slot_ordinal=len(steps),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    final_output_type=OutputType.TEXT,
+                    final_output_mode=None,
+                    ui_language=self.ui_language,
+                )
+                body_step, _ = _compose_step_skeleton_slot(
+                    slot=body_slot,
+                    content=None,
+                    prior_step=steps[-1],
+                    allow_json_output=True,
+                )
+                steps.append(body_step)
+                if _slot_writes_document_body(body_slot):
+                    document_body_writer_step_indexes.append(len(steps) - 1)
+
             content: StepSkeletonSemanticContent | None = None
             semantic_step_number: int | None = None
             if slot.role == "semantic_required":
@@ -342,8 +364,36 @@ class StepSkeletonPlan:
                 semantic_step_to_compiled_step[semantic_step_number] = len(steps)
             if _slot_writes_document_body(slot):
                 document_body_writer_step_indexes.append(len(steps) - 1)
+            _mark_body_writer_before_generated_renderer(
+                slot=slot,
+                steps=steps,
+                document_body_writer_step_indexes=document_body_writer_step_indexes,
+            )
             if drift is not None:
                 output_type_drifts.append(drift)
+
+        if (
+            steps
+            and self.final_output_type in _DOCUMENT_OUTPUT_TYPES
+            and steps[-1].output_type != OutputType.TEXT
+            and steps[-1].output_type != self.final_output_type
+        ):
+            body_slot = _terminal_artifact_slot(
+                slot_ordinal=len(steps),
+                input_source=InputSource.PREVIOUS_STEP,
+                final_output_type=OutputType.TEXT,
+                final_output_mode=None,
+                ui_language=self.ui_language,
+            )
+            body_step, _ = _compose_step_skeleton_slot(
+                slot=body_slot,
+                content=None,
+                prior_step=steps[-1],
+                allow_json_output=True,
+            )
+            steps.append(body_step)
+            if _slot_writes_document_body(body_slot):
+                document_body_writer_step_indexes.append(len(steps) - 1)
 
         if steps and steps[-1].output_type != self.final_output_type:
             terminal_slot = _terminal_artifact_slot(
@@ -362,6 +412,11 @@ class StepSkeletonPlan:
             steps.append(terminal_step)
             if _slot_writes_document_body(terminal_slot):
                 document_body_writer_step_indexes.append(len(steps) - 1)
+            _mark_body_writer_before_generated_renderer(
+                slot=terminal_slot,
+                steps=steps,
+                document_body_writer_step_indexes=document_body_writer_step_indexes,
+            )
         return StepSkeletonComposition(
             steps=tuple(steps),
             output_type_drifts=tuple(output_type_drifts),
@@ -577,6 +632,31 @@ def _slot_writes_document_body(slot: StepSkeleton) -> bool:
     )
 
 
+def _mark_body_writer_before_generated_renderer(
+    *,
+    slot: StepSkeleton,
+    steps: list[NewStepDraft],
+    document_body_writer_step_indexes: list[int],
+) -> None:
+    if not _slot_renders_generated_document(slot) or len(steps) < 2:
+        return
+    body_writer_index = len(steps) - 2
+    if body_writer_index in document_body_writer_step_indexes:
+        return
+    if steps[body_writer_index].output_type != OutputType.TEXT:
+        return
+    document_body_writer_step_indexes.append(body_writer_index)
+
+
+def _slot_renders_generated_document(slot: StepSkeleton) -> bool:
+    return (
+        slot.chain_token == TERMINAL_ARTIFACT_STEP
+        and slot.input_type == InputType.TEXT
+        and slot.output_type in _DOCUMENT_OUTPUT_TYPES
+        and slot.document_delivery_mode == "generated"
+    )
+
+
 def _compose_step_skeleton_slot(
     *,
     slot: StepSkeleton,
@@ -782,9 +862,17 @@ def _semantic_json_output_allowed(
     ):
         return True
 
-    return not any(
-        _backend_fixed_text_consumer(remaining_slot)
+    backend_text_consumers = [
+        remaining_slot
         for remaining_slot in remaining_slots
+        if _backend_fixed_text_consumer(remaining_slot)
+    ]
+    if not backend_text_consumers:
+        return True
+
+    return all(
+        _slot_renders_generated_document(remaining_slot)
+        for remaining_slot in backend_text_consumers
     )
 
 
@@ -1211,6 +1299,10 @@ def _materialize_comparison_skeleton(
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> StepSkeletonPlan:
+    terminal_artifact_needed = final_output_type in _DOCUMENT_OUTPUT_TYPES
+    semantic_output_type = (
+        OutputType.TEXT if terminal_artifact_needed else final_output_type
+    )
     return _skeleton_plan(
         prefix_slots=(),
         semantic_slot=_semantic_required_slot(
@@ -1218,15 +1310,19 @@ def _materialize_comparison_skeleton(
             slot_id="comparison_semantic_step",
             input_source=InputSource.FLOW_INPUT,
             input_type=runtime_input_type,
-            output_type=final_output_type,
+            output_type=semantic_output_type,
             output_mode=_final_output_mode(
                 input_type=runtime_input_type,
-                final_output_type=final_output_type,
-                final_output_mode=final_output_mode,
+                final_output_type=semantic_output_type,
+                final_output_mode=None
+                if terminal_artifact_needed
+                else final_output_mode,
             ),
             document_delivery_mode=_document_delivery_mode_for_output(
-                output_type=final_output_type,
-                final_output_mode=final_output_mode,
+                output_type=semantic_output_type,
+                final_output_mode=None
+                if terminal_artifact_needed
+                else final_output_mode,
             ),
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
@@ -1243,7 +1339,11 @@ def _materialize_comparison_skeleton(
         suffix_slots=(),
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
-        semantic_output_policy="final_output_on_last_semantic",
+        semantic_output_policy=(
+            "text_for_all_semantic"
+            if terminal_artifact_needed
+            else "final_output_on_last_semantic"
+        ),
         fan_in_policy="last_semantic",
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,

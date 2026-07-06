@@ -664,6 +664,159 @@ def test_normalize_create_step_mechanics_folds_adjacent_source_json_refinement()
     assert validate_spec(spec).valid
 
 
+def test_normalize_create_step_mechanics_folds_redundant_text_render_helper() -> None:
+    normalized = _normalize_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            {
+                "name": "Läs och strukturera dokumenten",
+                "instructions": "Extrahera dokumentuppgifter.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [_field("documents", "array")],
+                "runtime_required": True,
+            },
+            {
+                "name": "Sammanställ slutrapport",
+                "instructions": "Skriv den färdiga rapporttexten.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 1, "field_path": "documents"},
+                ],
+            },
+            {
+                "name": "Rendera PDF",
+                "instructions": (
+                    "Rendera den färdiga rapporttexten som ett komplett "
+                    "PDF-dokument utan att lägga till ny information."
+                ),
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 1, "field_path": "documents"},
+                ],
+                "uses_previous_outputs": [{"from_step": 2}],
+            },
+            {
+                "name": "Skapa PDF",
+                "instructions": "Skapa slutresultatet från föregående arbete.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    assert [step.name for step in normalized] == [
+        "Läs och strukturera dokumenten",
+        "Sammanställ slutrapport",
+        "Skapa PDF",
+    ]
+    assert "utan att lägga till ny information" in (normalized[-1].instructions or "")
+
+
+def test_normalize_create_step_mechanics_folds_all_previous_text_render_helper() -> (
+    None
+):
+    normalized = _normalize_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            {
+                "name": "Läs och strukturera dokumenten",
+                "instructions": "Extrahera dokumentuppgifter.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [_field("documents", "array")],
+                "runtime_required": True,
+            },
+            {
+                "name": "Sammanställ rapporten",
+                "instructions": "Skriv den färdiga rapporttexten.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [
+                    {"from_step": 1, "field_path": "documents"},
+                ],
+            },
+            {
+                "name": "Rendera PDF",
+                "instructions": "Rendera rapporttexten som PDF.",
+                "input_source": "all_previous_steps",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Skapa PDF",
+                "instructions": "Skapa slutresultatet från föregående arbete.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    assert [step.name for step in normalized] == [
+        "Läs och strukturera dokumenten",
+        "Sammanställ rapporten",
+        "Skapa PDF",
+    ]
+    assert normalized[-1].input_source == "previous_step"
+
+
+def test_normalize_create_step_mechanics_keeps_substantive_artifact_body_step() -> None:
+    normalized = _normalize_steps(
+        flow_name="PDF report",
+        steps=[
+            {
+                "name": "Extract",
+                "instructions": "Extract facts.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [_field("facts")],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv en kort analys.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "uses_previous_fields": [{"from_step": 1, "field_path": "facts"}],
+            },
+            {
+                "name": "Skapa PDF-rapport",
+                "instructions": "Skapa en PDF-rapport med slutsats och risker.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Skapa PDF",
+                "instructions": "Skapa slutdokumentet.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    assert [step.name for step in normalized] == [
+        "Extract",
+        "Skriv rapport",
+        "Skapa PDF-rapport",
+        "Skapa PDF",
+    ]
+
+
 def test_normalize_create_step_mechanics_keeps_json_refinement_with_external_context() -> (
     None
 ):

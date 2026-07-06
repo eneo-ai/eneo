@@ -5,6 +5,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_token_prefix,
+    normalize_discovery_text,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_position_input_source,
     normalize_new_step_input_shape,
@@ -45,6 +49,14 @@ if TYPE_CHECKING:
 
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _SOURCE_READER_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
+_ARTIFACT_RENDER_ONLY_PREFIXES = (
+    "render",
+    "rendera",
+    "format",
+    "formattera",
+    "convert",
+    "konvertera",
+)
 TARGETED_UNDERLAG_TOTAL_FIELD_CAP = 8
 _TargetedUnderlagBindingMode = Literal["skip", "with_text_priors"]
 _PreviousRefKind = Literal["uses_previous_fields", "uses_previous_outputs"]
@@ -83,6 +95,7 @@ def normalize_create_step_mechanics(
         normalized_steps,
         aggregation_intent=aggregation_intent,
     )
+    normalized_steps = _fold_redundant_artifact_text_render_helper(normalized_steps)
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
         normalized_steps,
         flow_name=flow_name,
@@ -244,6 +257,82 @@ def _fold_adjacent_source_json_refinements(
         index += 1
 
     return folded_steps if changed else steps
+
+
+def _fold_redundant_artifact_text_render_helper(
+    steps: list[NewStepDraft],
+) -> list[NewStepDraft]:
+    if len(steps) < 3:
+        return steps
+
+    body_step = steps[-3]
+    helper_step = steps[-2]
+    terminal_step = steps[-1]
+    if not _is_generated_document_renderer(terminal_step):
+        return steps
+    if body_step.output_type != OutputType.TEXT:
+        return steps
+    if not _is_redundant_artifact_text_render_helper(
+        helper_step,
+        final_output_type=terminal_step.output_type,
+    ):
+        return steps
+
+    folded_terminal = terminal_step.model_copy(
+        update={
+            "instructions": _join_step_instructions(
+                terminal_step.instructions,
+                helper_step.instructions,
+            )
+        }
+    )
+    return [*steps[:-2], folded_terminal]
+
+
+def _is_generated_document_renderer(step: NewStepDraft) -> bool:
+    return (
+        step.input_source == InputSource.PREVIOUS_STEP
+        and step.input_type == InputType.TEXT
+        and step.output_type in _DOCUMENT_OUTPUT_TYPES
+        and step.document_delivery_mode in {"generated", "not_applicable"}
+    )
+
+
+def _is_redundant_artifact_text_render_helper(
+    step: NewStepDraft,
+    *,
+    final_output_type: OutputType,
+) -> bool:
+    if step.input_source not in {
+        InputSource.PREVIOUS_STEP,
+        InputSource.ALL_PREVIOUS_STEPS,
+    }:
+        return False
+    if step.input_type != InputType.TEXT or step.output_type != OutputType.TEXT:
+        return False
+    if (
+        step.uses_form_fields
+        or step.knowledge_refs
+        or step.mcp_server_refs
+        or step.mcp_tool_refs
+        or step.citations_requested
+        or step.review_mode is not None
+        or step.output_fields is not None
+    ):
+        return False
+
+    text = normalize_discovery_text(f"{step.name} {step.instructions or ''}")
+    if not contains_any_token_prefix(text, _ARTIFACT_RENDER_ONLY_PREFIXES):
+        return False
+    return final_output_type.value in text
+
+
+def _join_step_instructions(
+    first: str | None,
+    second: str | None,
+) -> str | None:
+    parts = [part.strip() for part in (first, second) if part and part.strip()]
+    return "\n\n".join(parts) if parts else None
 
 
 def _is_source_json_reader(step: NewStepDraft) -> bool:
