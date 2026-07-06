@@ -202,7 +202,11 @@ def _document_page_content(
                 uri=AnyUrl(f"eneo://info-blob/{blob.id}"),
                 mimeType="text/plain",
                 text=f"Title: {title}\ndocument_id: {blob.id}\n\n{page}",
-                _meta={"info_blob_id": str(blob.id), "offset": offset},
+                _meta={
+                    "title": title,
+                    "info_blob_id": str(blob.id),
+                    "offset": offset,
+                },
             ),
         )
     ]
@@ -274,7 +278,10 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
                         f"document_id: {chunk.info_blob_id}\n\n"
                         f"{chunk.text}"
                     ),
+                    # `title` is the generic meta key the reference UI reads
+                    # for the chip label (falls back to the uri host otherwise).
                     _meta={
+                        "title": title,
                         "info_blob_id": str(chunk.info_blob_id),
                         "score": chunk.score,
                     },

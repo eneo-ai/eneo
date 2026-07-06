@@ -109,6 +109,7 @@ class TestSearchResultContent:
             f"Garden waste is collected every other week."
         )
         assert resource.meta == {
+            "title": "Waste sorting guide",
             "info_blob_id": str(chunk.info_blob_id),
             "score": 0.87,
         }
@@ -224,6 +225,7 @@ class TestDocumentPageContent:
             f"Title: Waste policy\ndocument_id: {blob.id}\n\nShort policy text."
         )
         assert str(resource.uri) == f"eneo://info-blob/{blob.id}"
+        assert resource.meta["title"] == "Waste policy"
 
     def test_long_document_truncates_with_resume_offset(self):
         blob = self._blob("a" * 250)
