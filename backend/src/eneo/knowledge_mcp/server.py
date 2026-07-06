@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Literal
 from uuid import UUID, uuid4
 
 import jwt
@@ -48,13 +49,25 @@ KNOWLEDGE_SERVER_NAME = "knowledge"
 # truncates oversized tool output.
 MAX_RESULTS_CEILING = 20
 
+# Mode strategy constants. "specific" fetches a small candidate set and lets
+# the score-curve elbow cut (autocut) trim the irrelevant tail; "overview"
+# over-fetches and then spreads results across documents so a broad question
+# sees the corpus, not one document's every chunk.
+SPECIFIC_FETCH = 10
+SPECIFIC_AUTOCUT = 2
+SPECIFIC_CAP = 6
+OVERVIEW_FETCH = 60
+OVERVIEW_CAP = 15
+OVERVIEW_CHUNKS_PER_DOC = 2
+
 mcp = FastMCP(
     name="Eneo Knowledge",
     stateless_http=True,
     instructions=(
-        "Tools for searching the knowledge sources attached to this Eneo "
-        "assistant. The searchable scope is fixed by the access token; tools "
-        "take no assistant id."
+        "Search tools for this Eneo assistant's knowledge sources. Scope is "
+        "fixed by the access token; tools take no assistant id. Search before "
+        "answering, ground answers only in returned sources, and say so when "
+        "the sources do not contain the answer."
     ),
 )
 
@@ -123,6 +136,109 @@ def _clamp_max_results(max_results: int) -> int:
     return max(1, min(max_results, MAX_RESULTS_CEILING))
 
 
+def _resolve_search_params(
+    mode: str, max_results: int | None
+) -> tuple[int, int | None, int]:
+    """Map a search mode to ``(fetch, autocut_cutoff, return_cap)``.
+
+    An explicit ``max_results`` overrides the mode's return cap (still
+    ceiling-clamped); the fetch size grows with it so the cap can be met.
+    """
+    if mode == "overview":
+        cap = OVERVIEW_CAP if max_results is None else _clamp_max_results(max_results)
+        return OVERVIEW_FETCH, None, cap
+
+    cap = SPECIFIC_CAP if max_results is None else _clamp_max_results(max_results)
+    return max(SPECIFIC_FETCH, cap), SPECIFIC_AUTOCUT, cap
+
+
+def _diversify(chunks, per_doc: int, cap: int):
+    """Spread score-ordered chunks across documents, coverage before depth.
+
+    Pass 1 takes each document's best chunk in score order, pass 2 the second
+    best, and so on up to ``per_doc``; stops at ``cap`` results.
+    """
+    by_doc: dict = {}
+    for chunk in chunks:
+        by_doc.setdefault(chunk.info_blob_id, []).append(chunk)
+
+    selected = []
+    for round_no in range(per_doc):
+        for doc_chunks in by_doc.values():
+            if len(selected) >= cap:
+                return selected
+            if round_no < len(doc_chunks):
+                selected.append(doc_chunks[round_no])
+    return selected
+
+
+def _document_page_content(
+    blob, *, offset: int, page_cap: int
+) -> list[TextContent | EmbeddedResource]:
+    """One page of a document as citable content, with a resume notice.
+
+    The page is self-capped: the proxy's output truncation is destructive
+    (the whole result becomes an error blob), so oversized documents must be
+    sliced here and continued via ``offset``.
+    """
+    total = len(blob.text)
+    page = blob.text[offset : offset + page_cap]
+    if not page:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"Offset {offset} is past the end of the document "
+                    f"({total} characters)."
+                ),
+            )
+        ]
+
+    title = blob.title or "Untitled source"
+    content: list[TextContent | EmbeddedResource] = [
+        EmbeddedResource(
+            type="resource",
+            resource=TextResourceContents(
+                uri=AnyUrl(f"eneo://info-blob/{blob.id}"),
+                mimeType="text/plain",
+                text=f"Title: {title}\ndocument_id: {blob.id}\n\n{page}",
+                _meta={"info_blob_id": str(blob.id), "offset": offset},
+            ),
+        )
+    ]
+    end = offset + len(page)
+    if end < total:
+        content.append(
+            TextContent(
+                type="text",
+                text=(
+                    f"Document truncated at character {end} of {total}. Call "
+                    f"read_source again with offset={end} for the next part."
+                ),
+            )
+        )
+    return content
+
+
+def _blob_in_scope(blob, assistant) -> bool:
+    """True when the info blob belongs to one of the assistant's sources."""
+    return (
+        (
+            blob.group_id is not None
+            and blob.group_id in {c.id for c in assistant.collections}
+        )
+        or (
+            blob.website_id is not None
+            and blob.website_id in {w.id for w in assistant.websites}
+        )
+        or (
+            blob.integration_knowledge_id is not None
+            and blob.integration_knowledge_id
+            in {k.id for k in assistant.integration_knowledge_list}
+        )
+    )
+
+
 def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedResource]:
     """Convert search hits to MCP content blocks.
 
@@ -153,7 +269,11 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
                         f"eneo://info-blob/{chunk.info_blob_id}#chunk-{chunk.chunk_no}"
                     ),
                     mimeType="text/plain",
-                    text=f"Title: {title}\n\n{chunk.text}",
+                    text=(
+                        f"Title: {title}\n"
+                        f"document_id: {chunk.info_blob_id}\n\n"
+                        f"{chunk.text}"
+                    ),
                     _meta={
                         "info_blob_id": str(chunk.info_blob_id),
                         "score": chunk.score,
@@ -171,15 +291,24 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
 async def search_knowledge(
     query: str,
     ctx: Context,
-    max_results: int = 8,
+    mode: Literal["specific", "overview"] = "specific",
+    max_results: int | None = None,
 ) -> list[TextContent | EmbeddedResource]:
-    """Semantically search this assistant's knowledge sources.
+    """Search this assistant's knowledge sources for relevant passages.
 
-    Returns the most relevant text passages. Use a focused, self-contained
-    query (not the user's whole message); call again with a refined query if
-    the results do not answer the question.
+    Write a focused, self-contained query in the language of the sources.
+    Modes:
+    - "specific" (default): small, high-precision result set for factual
+      questions ("when does department X open today?").
+    - "overview": results spread across many documents for broad questions
+      ("explain X"). For multi-topic questions, make one overview call per
+      topic, in parallel.
+
+    If nothing relevant returns, retry once with different wording before
+    concluding the sources do not cover it. Each result includes a
+    document_id; pass it to read_source to read that full document.
     """
-    max_results = _clamp_max_results(max_results)
+    fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     async with _knowledge_context(ctx) as (container, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         embedding_model = _pick_embedding_model(assistant)
@@ -197,11 +326,54 @@ async def search_knowledge(
             collections=assistant.collections,
             websites=assistant.websites,
             integration_knowledge_list=assistant.integration_knowledge_list,
-            num_chunks=max_results,
-            autocut_cutoff=None,
+            num_chunks=fetch,
+            autocut_cutoff=autocut_cutoff,
         )
 
+    if mode == "overview":
+        chunks = _diversify(chunks, per_doc=OVERVIEW_CHUNKS_PER_DOC, cap=cap)
+    else:
+        chunks = chunks[:cap]
+
     return _search_result_content(query, chunks)
+
+
+@mcp.tool(title="Read source document")
+async def read_source(
+    document_id: str,
+    ctx: Context,
+    offset: int = 0,
+) -> list[TextContent | EmbeddedResource]:
+    """Read the full text of one document from the knowledge sources.
+
+    Use after search_knowledge when chunks are not enough (procedures,
+    tables, full policies): pass the document_id shown in a search result.
+    Long documents are returned in parts; the truncation notice gives the
+    offset for the next part.
+    """
+    not_found = TextContent(
+        type="text",
+        text="No document with that id in this assistant's knowledge sources.",
+    )
+    try:
+        blob_id = UUID(document_id)
+    except ValueError:
+        return [TextContent(type="text", text="Invalid document_id.")]
+    offset = max(0, offset)
+
+    async with _knowledge_context(ctx) as (container, assistant_id):
+        assistant, _ = await container.assistant_service().get_assistant(assistant_id)
+        try:
+            blob = await container.info_blob_repo().get(blob_id)
+        except Exception:
+            # The repo raises on a missing row; out-of-scope and missing must
+            # be indistinguishable to the caller (no existence oracle).
+            return [not_found]
+        if not _blob_in_scope(blob, assistant):
+            return [not_found]
+
+    page_cap = min(20_000, get_settings().mcp_tool_output_max_chars // 2)
+    return _document_page_content(blob, offset=offset, page_cap=page_cap)
 
 
 @mcp.tool(title="List knowledge sources")

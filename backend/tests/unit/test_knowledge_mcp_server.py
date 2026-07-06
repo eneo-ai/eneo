@@ -16,11 +16,17 @@ from eneo.knowledge_mcp.server import (
     KNOWLEDGE_SERVER_NAME,
     MAX_RESULTS_CEILING,
     _assistant_id_from_token,
+    _blob_in_scope,
     _clamp_max_results,
+    _diversify,
+    _document_page_content,
     _pick_embedding_model,
+    _resolve_search_params,
     _search_result_content,
     build_knowledge_mcp_server,
     mcp,
+    read_source,
+    search_knowledge,
 )
 
 
@@ -46,7 +52,7 @@ class TestBuildKnowledgeMcpServer:
         assert [t.input_schema for t in server.tools] == [
             t.inputSchema for t in live_tools
         ]
-        assert {"search_knowledge", "list_knowledge_sources"} <= {
+        assert {"search_knowledge", "list_knowledge_sources", "read_source"} <= {
             t.name for t in server.tools
         }
 
@@ -98,7 +104,9 @@ class TestSearchResultContent:
             f"eneo://info-blob/{chunk.info_blob_id}#chunk-{chunk.chunk_no}"
         )
         assert resource.text == (
-            "Title: Waste sorting guide\n\nGarden waste is collected every other week."
+            f"Title: Waste sorting guide\n"
+            f"document_id: {chunk.info_blob_id}\n\n"
+            f"Garden waste is collected every other week."
         )
         assert resource.meta == {
             "info_blob_id": str(chunk.info_blob_id),
@@ -119,6 +127,137 @@ class TestSearchResultContent:
         assert _clamp_max_results(500) == MAX_RESULTS_CEILING
         assert _clamp_max_results(0) == 1
         assert _clamp_max_results(8) == 8
+
+
+class TestResolveSearchParams:
+    def test_specific_defaults(self):
+        assert _resolve_search_params("specific", None) == (10, 2, 6)
+
+    def test_overview_defaults(self):
+        assert _resolve_search_params("overview", None) == (60, None, 15)
+
+    def test_explicit_max_results_overrides_cap(self):
+        fetch, autocut, cap = _resolve_search_params("specific", 12)
+        assert cap == 12
+        assert fetch >= cap
+
+        _, _, overview_cap = _resolve_search_params("overview", 3)
+        assert overview_cap == 3
+
+    def test_max_results_is_ceiling_clamped(self):
+        assert _resolve_search_params("specific", 500)[2] == MAX_RESULTS_CEILING
+        assert _resolve_search_params("overview", 500)[2] == MAX_RESULTS_CEILING
+
+
+class TestDiversify:
+    def test_coverage_before_depth(self):
+        doc_a, doc_b, doc_c = uuid4(), uuid4(), uuid4()
+        chunks = [
+            _chunk(info_blob_id=doc_a, chunk_no=1),
+            _chunk(info_blob_id=doc_a, chunk_no=2),
+            _chunk(info_blob_id=doc_a, chunk_no=3),
+            _chunk(info_blob_id=doc_b, chunk_no=1),
+            _chunk(info_blob_id=doc_c, chunk_no=1),
+        ]
+
+        selected = _diversify(chunks, per_doc=2, cap=10)
+
+        assert [(c.info_blob_id, c.chunk_no) for c in selected] == [
+            (doc_a, 1),
+            (doc_b, 1),
+            (doc_c, 1),
+            (doc_a, 2),
+        ]
+
+    def test_respects_total_cap(self):
+        chunks = [_chunk(info_blob_id=uuid4()) for _ in range(5)]
+        assert len(_diversify(chunks, per_doc=2, cap=2)) == 2
+
+
+class TestBlobInScope:
+    def _assistant(self, collections=(), websites=(), integrations=()):
+        return SimpleNamespace(
+            collections=[SimpleNamespace(id=i) for i in collections],
+            websites=[SimpleNamespace(id=i) for i in websites],
+            integration_knowledge_list=[SimpleNamespace(id=i) for i in integrations],
+        )
+
+    def _blob(self, group_id=None, website_id=None, integration_knowledge_id=None):
+        return SimpleNamespace(
+            group_id=group_id,
+            website_id=website_id,
+            integration_knowledge_id=integration_knowledge_id,
+        )
+
+    def test_matches_by_each_source_type(self):
+        cid, wid, iid = uuid4(), uuid4(), uuid4()
+        assistant = self._assistant(
+            collections=[cid], websites=[wid], integrations=[iid]
+        )
+
+        assert _blob_in_scope(self._blob(group_id=cid), assistant)
+        assert _blob_in_scope(self._blob(website_id=wid), assistant)
+        assert _blob_in_scope(self._blob(integration_knowledge_id=iid), assistant)
+
+    def test_rejects_foreign_and_unattached_blobs(self):
+        assistant = self._assistant(collections=[uuid4()])
+
+        assert not _blob_in_scope(self._blob(group_id=uuid4()), assistant)
+        assert not _blob_in_scope(self._blob(), assistant)
+
+    def test_group_blob_not_matched_by_website_assistant(self):
+        assistant = self._assistant(websites=[uuid4()])
+        assert not _blob_in_scope(self._blob(group_id=uuid4()), assistant)
+
+
+class TestDocumentPageContent:
+    def _blob(self, text):
+        return SimpleNamespace(id=uuid4(), title="Waste policy", text=text)
+
+    def test_short_document_fits_without_notice(self):
+        blob = self._blob("Short policy text.")
+        content = _document_page_content(blob, offset=0, page_cap=100)
+
+        assert len(content) == 1
+        resource = content[0].resource
+        assert resource.text == (
+            f"Title: Waste policy\ndocument_id: {blob.id}\n\nShort policy text."
+        )
+        assert str(resource.uri) == f"eneo://info-blob/{blob.id}"
+
+    def test_long_document_truncates_with_resume_offset(self):
+        blob = self._blob("a" * 250)
+        content = _document_page_content(blob, offset=0, page_cap=100)
+
+        assert len(content) == 2
+        assert len(content[0].resource.text.split("\n\n", 1)[1]) == 100
+        assert "character 100 of 250" in content[1].text
+        assert "offset=100" in content[1].text
+
+    def test_offset_pages_through_the_document(self):
+        blob = self._blob("a" * 150 + "b" * 50)
+        content = _document_page_content(blob, offset=150, page_cap=100)
+
+        assert len(content) == 1
+        assert content[0].resource.text.endswith("b" * 50)
+
+    def test_offset_past_end_reports_document_length(self):
+        blob = self._blob("abc")
+        content = _document_page_content(blob, offset=10, page_cap=100)
+
+        assert len(content) == 1
+        assert content[0].type == "text"
+        assert "past the end" in content[0].text
+
+
+class TestToolSteering:
+    def test_search_knowledge_documents_both_modes(self):
+        doc = search_knowledge.__doc__ or ""
+        assert '"specific"' in doc
+        assert '"overview"' in doc
+
+    def test_read_source_documents_the_document_id_handle(self):
+        assert "document_id" in (read_source.__doc__ or "")
 
 
 class TestPickEmbeddingModel:

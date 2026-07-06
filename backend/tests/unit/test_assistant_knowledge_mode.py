@@ -152,3 +152,10 @@ class TestKnowledgeCatalog:
     def test_empty_without_knowledge(self):
         assistant = _assistant(collections=[])
         assert assistant.build_knowledge_catalog() == ""
+
+    def test_catalog_enforces_search_first_and_strict_grounding(self):
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "ALWAYS search before answering" in catalog
+        assert "could not be found in the knowledge sources" in catalog
+        assert "never answer from general knowledge" in catalog

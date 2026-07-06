@@ -268,9 +268,22 @@ class Assistant(Entity):
         if not lines:
             return ""
         return (
-            "You have access to the following knowledge sources via the "
-            "knowledge search tool. When a question may be answered by them, "
-            "search before answering; do not guess.\n" + "\n".join(lines)
+            "You have access to the knowledge sources listed below through "
+            "the knowledge search tools. Rules:\n"
+            "1. ALWAYS search before answering. Skip searching only for "
+            "greetings, thanks, talk about the conversation itself, or "
+            "reformatting text already present in this conversation.\n"
+            "2. Ground every answer in search results. If the results do not "
+            "contain the answer, say it could not be found in the knowledge "
+            "sources; never answer from general knowledge.\n"
+            "3. Broad or multi-part questions: split into one focused "
+            "search_knowledge call per topic and issue them in parallel, "
+            "using mode='overview' to cover many documents.\n"
+            "4. Specific factual questions: one precise query with "
+            "mode='specific'.\n"
+            "5. When a result looks central but incomplete, read the full "
+            "document with read_source and its document_id.\n"
+            "Knowledge sources:\n" + "\n".join(lines)
         )
 
     def update(
