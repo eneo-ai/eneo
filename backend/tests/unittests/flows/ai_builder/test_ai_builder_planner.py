@@ -149,12 +149,10 @@ def _make_file(text: str = "Reference") -> File:
 
 
 def _runtime_result(
-    discovery_block_message: str | None,
     discovery_analysis: object,
     planning_state: PlanningState,
 ) -> DiscoveryRuntimeResult:
     return DiscoveryRuntimeResult(
-        discovery_block_message=discovery_block_message,
         discovery_analysis=cast(DiscoveryAnalysis, discovery_analysis),
         planning_state=planning_state,
     )
@@ -698,9 +696,7 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
+            return_value=_runtime_result(discovery_analysis, PlanningState.empty()),
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
@@ -761,7 +757,6 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(
-                "legacy discovery question",
                 discovery_analysis,
                 planning_state,
             ),
@@ -835,7 +830,6 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(
-                None,
                 discovery_analysis,
                 planning_state,
             ),
@@ -924,7 +918,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(
-                None,
                 discovery_analysis,
                 planning_state,
             ),
@@ -999,7 +992,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(None, discovery_analysis, state),
+            return_value=_runtime_result(discovery_analysis, state),
         ) as build_discovery_runtime_result,
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
@@ -1100,7 +1093,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(None, discovery_analysis, state),
+            return_value=_runtime_result(discovery_analysis, state),
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
@@ -1158,9 +1151,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
+            return_value=_runtime_result(discovery_analysis, PlanningState.empty()),
         ) as discovery_runtime,
     ):
         await _prepare_planner_request_for_test(
@@ -1225,7 +1216,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(None, discovery_analysis, state),
+            return_value=_runtime_result(discovery_analysis, state),
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",

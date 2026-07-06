@@ -56,7 +56,6 @@ class RuntimeDiscoveryContext:
 
 @dataclass(frozen=True, slots=True)
 class DiscoveryRuntimeResult:
-    discovery_block_message: str | None
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
@@ -245,7 +244,11 @@ async def build_discovery_block_message_runtime(
         attachment_context=attachment_context,
     )
     return (
-        result.discovery_block_message,
+        build_discovery_block_message(
+            conversation,
+            flow=flow,
+            analysis=result.discovery_analysis,
+        ),
         result.discovery_analysis,
         result.planning_state,
     )
@@ -280,13 +283,7 @@ async def build_discovery_runtime_result(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
-    discovery_block_message = build_discovery_block_message(
-        conversation,
-        flow=flow,
-        analysis=analysis,
-    )
     return DiscoveryRuntimeResult(
-        discovery_block_message=discovery_block_message,
         discovery_analysis=analysis,
         planning_state=context.planning_state,
         slot_classification_metadata=context.slot_classification_metadata,
