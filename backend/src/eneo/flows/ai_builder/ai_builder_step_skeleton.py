@@ -990,6 +990,17 @@ def default_final_step_instructions(*, ui_language: str | None) -> str:
     )
 
 
+def default_render_step_instructions(
+    output_type: OutputType,
+    *,
+    ui_language: str | None,
+) -> str:
+    output_label = output_type.value.upper()
+    if ui_language == "sv":
+        return f"Rendera föregående text som {output_label} utan att ändra innehållet."
+    return f"Render the previous text as a {output_label} without changing the content."
+
+
 def _semantic_default_name(*, slot_id: str, ui_language: str | None) -> str:
     if ui_language == "sv":
         return {
@@ -1438,17 +1449,18 @@ def _terminal_artifact_slot(
     final_output_mode: OutputMode | None,
     ui_language: str | None,
 ) -> StepSkeleton:
+    output_mode = _final_output_mode(
+        input_type=InputType.TEXT,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+    )
     return _backend_fixed_slot(
         slot_ordinal=slot_ordinal,
         chain_token=TERMINAL_ARTIFACT_STEP,
         input_source=input_source,
         input_type=InputType.TEXT,
         output_type=final_output_type,
-        output_mode=_final_output_mode(
-            input_type=InputType.TEXT,
-            final_output_type=final_output_type,
-            final_output_mode=final_output_mode,
-        ),
+        output_mode=output_mode,
         document_delivery_mode=_document_delivery_mode_for_output(
             output_type=final_output_type,
             final_output_mode=final_output_mode,
@@ -1457,8 +1469,13 @@ def _terminal_artifact_slot(
             final_output_type,
             ui_language=ui_language,
         ),
-        default_instructions=default_final_step_instructions(
-            ui_language=ui_language,
+        default_instructions=(
+            default_render_step_instructions(
+                final_output_type,
+                ui_language=ui_language,
+            )
+            if output_mode == OutputMode.RENDER_VERBATIM
+            else default_final_step_instructions(ui_language=ui_language)
         ),
         ui_language=ui_language,
     )

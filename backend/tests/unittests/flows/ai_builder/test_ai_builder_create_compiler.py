@@ -1946,8 +1946,7 @@ def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
             _create_step_snapshot(
                 name="Create PDF",
                 instructions=(
-                    "Create the final output from the previous structured work. "
-                    "Preserve the user's requested scope, ordering, and constraints."
+                    "Render the previous text as a PDF without changing the content."
                 ),
                 input_source="previous_step",
                 input_type="text",
@@ -2264,8 +2263,7 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
             _create_step_snapshot(
                 name="Create PDF",
                 instructions=(
-                    "Create the final output from the previous structured work. "
-                    "Preserve the user's requested scope, ordering, and constraints."
+                    "Render the previous text as a PDF without changing the content."
                 ),
                 input_source="previous_step",
                 input_type="text",
@@ -2314,8 +2312,7 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
             _create_step_snapshot(
                 name="Create PDF",
                 instructions=(
-                    "Create the final output from the previous structured work. "
-                    "Preserve the user's requested scope, ordering, and constraints."
+                    "Render the previous text as a PDF without changing the content."
                 ),
                 input_source="previous_step",
                 input_type="text",
