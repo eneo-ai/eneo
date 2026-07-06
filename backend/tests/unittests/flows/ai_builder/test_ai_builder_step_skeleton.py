@@ -79,7 +79,6 @@ def test_step_skeleton_policy_combinations_are_closed() -> None:
         {
             ("backend_fixed", "locked", "backend_default"),
             ("semantic_required", "fill_missing", "required_from_intent"),
-            ("semantic_optional", "reject_if_conflicting", "optional_from_intent"),
         }
     )
 

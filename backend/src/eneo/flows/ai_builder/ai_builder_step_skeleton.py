@@ -37,7 +37,6 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 StepSkeletonRole = Literal[
     "backend_fixed",
     "semantic_required",
-    "semantic_optional",
 ]
 MechanicsPolicy = Literal["locked", "fill_missing", "reject_if_conflicting"]
 SemanticPolicy = Literal[
@@ -64,7 +63,6 @@ _LEGAL_STEP_SKELETON_POLICIES = frozenset(
     {
         ("backend_fixed", "locked", "backend_default"),
         ("semantic_required", "fill_missing", "required_from_intent"),
-        ("semantic_optional", "reject_if_conflicting", "optional_from_intent"),
     }
 )
 
@@ -853,13 +851,12 @@ def _semantic_json_output_allowed(
     slots: tuple[StepSkeleton, ...],
 ) -> bool:
     slot = slots[slot_index]
-    if slot.role not in {"semantic_required", "semantic_optional"}:
+    if slot.role != "semantic_required":
         return True
 
     remaining_slots = slots[slot_index + 1 :]
     if any(
-        remaining_slot.role in {"semantic_required", "semantic_optional"}
-        for remaining_slot in remaining_slots
+        remaining_slot.role == "semantic_required" for remaining_slot in remaining_slots
     ):
         return True
 

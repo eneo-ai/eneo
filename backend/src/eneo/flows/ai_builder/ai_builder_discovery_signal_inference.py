@@ -438,7 +438,6 @@ def infer_post_processing_goal(text: str) -> str | None:
             "issue",
             "issues",
             "problem",
-            "problem",
             "red flag",
             "red flags",
         ),

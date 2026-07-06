@@ -31,59 +31,6 @@ PrimaryRuntimeInput = Literal[
     "audio", "documents", "json", "text", "text_and_documents", "unknown"
 ]
 
-_AUDIO_PREFIX_MARKERS: tuple[str, ...] = (
-    "audio",
-    "ljud",
-    "inspelning",
-    "recording",
-    "samtal",
-    "discussion",
-    "medarbetarsamtal",
-    "möte",
-    "meeting",
-    "intervju",
-    "interview",
-    "call",
-    "conversation",
-)
-
-_DOCUMENT_INPUT_MARKERS: tuple[str, ...] = (
-    "document",
-    "documents",
-    "dokument",
-    "bilaga",
-    "bilagor",
-    "attachment",
-    "attachments",
-    "word file",
-    "word files",
-    "docx",
-    "uppladdat dokument",
-    "uploaded document",
-    "uppladdade dokument",
-    "uploaded documents",
-)
-
-_DOCUMENT_UPLOAD_MARKERS: tuple[str, ...] = (
-    "ladda upp",
-    "upload",
-    "skicka in",
-    "send in",
-    "ta emot",
-    "receive",
-    "bifoga",
-    "attach",
-    "som primär indata",
-    "primary input",
-    "primär uppladdning",
-    "runtime input",
-    "vid körning",
-    "as usual",
-    "som vanligt",
-    "behåll dokument",
-    "keep documents",
-)
-
 _DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
     "avtal",
     "agreement",
