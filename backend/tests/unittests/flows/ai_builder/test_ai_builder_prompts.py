@@ -10,10 +10,12 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from eneo.flows.ai_builder.ai_builder_edit_scope import (
     EditScopeResolution,
 )
-from eneo.flows.ai_builder.ai_builder_prompts import (
+from eneo.flows.ai_builder.ai_builder_flow_context import (
     build_flow_context,
     build_plan_summary,
     build_step_ref_mapping,
+)
+from eneo.flows.ai_builder.ai_builder_prompts import (
     trim_conversation_for_context,
 )
 from eneo.flows.assistant_authoring_snapshot import (

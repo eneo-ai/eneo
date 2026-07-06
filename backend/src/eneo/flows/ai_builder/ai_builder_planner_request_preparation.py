@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
 )
@@ -50,7 +51,6 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
 )
 from eneo.flows.ai_builder.ai_builder_prompts import (
-    build_flow_context,
     compute_conversation_token_budget,
     trim_conversation_for_context,
 )

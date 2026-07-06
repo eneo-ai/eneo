@@ -29,11 +29,9 @@ from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
-from eneo.flows.ai_builder.ai_builder_prompts import (
-    has_confirmed_requirements,
-)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
+    resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
@@ -78,13 +76,13 @@ def _make_turn(
 
 
 # ---------------------------------------------------------------------------
-# has_confirmed_requirements conversation scanning
+# requirements confirmation conversation scanning
 # ---------------------------------------------------------------------------
 
 
-class TestHasConfirmedRequirements:
+class TestRequirementsConfirmation:
     def test_returns_false_for_empty_conversation(self) -> None:
-        assert has_confirmed_requirements([]) is False
+        assert resolve_requirements_state([]).confirmed is False
 
     def test_returns_false_without_confirmation(self) -> None:
         conversation = [
@@ -106,7 +104,7 @@ class TestHasConfirmedRequirements:
                 tool_call_id="call_1",
             ),
         ]
-        assert has_confirmed_requirements(conversation) is False
+        assert resolve_requirements_state(conversation).confirmed is False
 
     def test_returns_true_after_requirements_confirmed(self) -> None:
         requirements_version = build_requirements_version(
@@ -159,7 +157,7 @@ class TestHasConfirmedRequirements:
                 },
             ),
         ]
-        assert has_confirmed_requirements(conversation) is True
+        assert resolve_requirements_state(conversation).confirmed is True
 
     def test_returns_false_with_requirements_but_no_user_confirmation(self) -> None:
         requirements_version = build_requirements_version(
@@ -204,7 +202,7 @@ class TestHasConfirmedRequirements:
                 },
             ),
         ]
-        assert has_confirmed_requirements(conversation) is False
+        assert resolve_requirements_state(conversation).confirmed is False
 
     def test_returns_false_when_user_changes_requirements_after_confirmation(
         self,
@@ -258,7 +256,7 @@ class TestHasConfirmedRequirements:
                 content="Jag vill ändra till en PDF i taget.",
             ),
         ]
-        assert has_confirmed_requirements(conversation) is False
+        assert resolve_requirements_state(conversation).confirmed is False
 
     def test_returns_false_when_stored_requirements_version_does_not_match_summary(
         self,
@@ -297,7 +295,7 @@ class TestHasConfirmedRequirements:
                 },
             ),
         ]
-        assert has_confirmed_requirements(conversation) is False
+        assert resolve_requirements_state(conversation).confirmed is False
 
 
 # ---------------------------------------------------------------------------

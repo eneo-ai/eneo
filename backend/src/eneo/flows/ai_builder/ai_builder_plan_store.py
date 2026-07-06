@@ -19,7 +19,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
     LintWarning,
 )
-from eneo.flows.ai_builder.ai_builder_prompts import build_plan_summary
+from eneo.flows.ai_builder.ai_builder_flow_context import build_plan_summary
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import CompiledProposal
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn

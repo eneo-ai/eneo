@@ -7,24 +7,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, TypeVar, cast
 
-from eneo.flows.ai_builder.ai_builder_domain_models import (
-    ConversationMessage,
-)
-from eneo.flows.ai_builder.ai_builder_flow_context import (
-    build_flow_context,
-    build_plan_summary,
-    build_step_ref_mapping,
-)
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    resolve_requirements_state,
-)
-
 __all__ = [
-    "build_flow_context",
-    "build_plan_summary",
-    "build_step_ref_mapping",
     "compute_conversation_token_budget",
-    "has_confirmed_requirements",
     "trim_conversation_for_context",
 ]
 
@@ -140,8 +124,3 @@ def _estimate_message_tokens(message: Mapping[str, Any]) -> int:
     # Use // 3 instead of // 4: Swedish compound words average fewer chars
     # per token than English, so the conservative factor prevents undercount.
     return max(1, sum(max(1, len(chunk) // 3) for chunk in chunks) + 4)
-
-
-def has_confirmed_requirements(conversation: list[ConversationMessage]) -> bool:
-    """Check if the latest requirements summary is confirmed."""
-    return resolve_requirements_state(conversation).confirmed
