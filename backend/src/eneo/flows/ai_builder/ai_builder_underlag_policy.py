@@ -34,9 +34,7 @@ class TargetedUnderlagStepSignal:
     is_renderer: bool
     has_structured_json_output: bool
     already_targets_previous_fields: bool
-    question_targets_prior_structured_field: bool
     is_source_surfacing_text: bool = False
-    question_targets_prior_text_output_count: int = 0
 
 
 _SOURCE_SURFACING_INPUT_TYPES = frozenset(
@@ -95,10 +93,7 @@ def targeted_underlag_rewrite_indexes(
             continue
         if step.input_type != InputType.TEXT or step.output_type != OutputType.TEXT:
             continue
-        if (
-            step.already_targets_previous_fields
-            or step.question_targets_prior_structured_field
-        ):
+        if step.already_targets_previous_fields:
             continue
 
         priors = [prior for prior in steps[:index] if not prior.is_renderer]
@@ -149,8 +144,6 @@ def final_assembler_rewrite_indexes(
             and not prior.is_source_surfacing_text
         )
         if prior_text_count < 2:
-            continue
-        if composer.question_targets_prior_text_output_count >= prior_text_count:
             continue
         indexes.append(composer_index)
 

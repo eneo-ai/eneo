@@ -715,7 +715,6 @@ def _final_assembler_rewrite_indexes_for_steps(
 def _underlag_step_signals_for_steps(
     steps: list[NewStepDraft],
 ) -> tuple[TargetedUnderlagStepSignal, ...]:
-    """Create-step mode has no compiled question, so it cannot count refs."""
     return tuple(
         TargetedUnderlagStepSignal(
             input_source=require_resolved_input_source(step),
@@ -726,7 +725,6 @@ def _underlag_step_signals_for_steps(
                 step.output_type == OutputType.JSON and bool(step.output_fields)
             ),
             already_targets_previous_fields=bool(step.uses_previous_fields),
-            question_targets_prior_structured_field=False,
             is_source_surfacing_text=is_source_surfacing_text(
                 input_source=require_resolved_input_source(step),
                 input_type=step.input_type,

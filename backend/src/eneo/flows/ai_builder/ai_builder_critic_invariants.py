@@ -1070,11 +1070,9 @@ def _composer_question_distinct_prior_structured_step_count(
     """Number of distinct prior steps the composer's `input_bindings.question`
     pulls a structured field from.
 
-    Mirrors `_composer_question_targets_prior_structured_field` but counts
-    distinct prior step indices rather than collapsing to a boolean. Used
-    by the under-bind rule, which suppresses only when ≥2 priors are
-    already targeted (one prior is the auto-binder's bare-minimum case
-    and still leaves earlier predecessors silently dropped).
+    The under-bind rule suppresses only when ≥2 priors are already targeted:
+    one prior is the auto-binder's bare-minimum case and still leaves earlier
+    predecessors silently dropped.
     """
     composer = spec.steps[composer_index]
     question = effective_question_binding(composer.input_bindings)
