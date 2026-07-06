@@ -851,8 +851,6 @@ async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes()
             {
                 "section_text_steps_must_reference_source_json_fields",
                 "final_text_step_must_reference_relevant_structured_outputs",
-                "final_assembler_must_reference_explicit_section_outputs",
-                "prefer_targeted_underlag_over_all_previous_steps",
             }
         ),
     )
@@ -862,11 +860,9 @@ async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes()
     assert payload["code"] == "self_correction_quality_failure"
     assert payload["details"] == {
         "quality_failure_codes": (
-            "final_assembler_must_reference_explicit_section_outputs,"
             "final_text_step_must_reference_relevant_structured_outputs,"
-            "prefer_targeted_underlag_over_all_previous_steps"
+            "section_text_steps_must_reference_source_json_fields"
         ),
-        "quality_failure_code_count": 4,
     }
     assert "still bad" not in json.dumps(payload["details"])
 

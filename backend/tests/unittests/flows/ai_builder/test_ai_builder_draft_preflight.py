@@ -79,45 +79,6 @@ def test_preflight_passes_a_clean_single_step_draft() -> None:
     assert result.critic_invariant_id is None
 
 
-def test_preflight_flags_broad_all_previous_steps_as_retryable() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Strukturerad rapport",
-        flow_description="",
-        steps=[
-            _step(
-                "step_a",
-                "Extrahera fält",
-                "Extrahera nyckelfält ur dokumentet.",
-                input_type=InputType.DOCUMENT,
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"sammanfattning": {"type": "string"}},
-                },
-            ),
-            _step(
-                "step_b",
-                "Skriv rapport",
-                "Sammanställ en rapport av tidigare steg.",
-                input_source=InputSource.ALL_PREVIOUS_STEPS,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-        ],
-    )
-
-    result = _preflight(spec)
-
-    assert result.passed is False
-    # A semantic quality issue: retryable, does not block materialization.
-    assert result.blocks_materialization is False
-    assert result.can_retry is True
-    assert (
-        "prefer_targeted_underlag_over_all_previous_steps"
-        in result.critic_invariant_ids
-    )
-
-
 def test_preflight_flags_form_field_declared_but_never_referenced() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Onboarding",

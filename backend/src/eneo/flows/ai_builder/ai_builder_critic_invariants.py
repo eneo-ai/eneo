@@ -54,13 +54,8 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
 )
 from eneo.flows.ai_builder.ai_builder_underlag_policy import (
     TARGETED_UNDERLAG_SOFT_CAP,
-    TargetedUnderlagStepSignal,
-    final_assembler_rewrite_indexes,
     is_document_renderer,
     is_source_surfacing_text,
-    last_compositional_step_index,
-    targeted_underlag_rewrite_indexes,
-    terminal_renderer_rewrite_indexes,
 )
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
@@ -859,100 +854,6 @@ _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
 )
 
 
-# ── Targeted underlag preferred over all_previous_steps ─────────────────
-
-
-def targeted_underlag_all_previous_indexes_for_spec(
-    spec: FlowDraftSpecCore,
-    *,
-    aggregation_intent: AggregationIntent,
-) -> tuple[int, ...]:
-    """Return compiled spec step indexes that violate targeted-underlag
-    material routing.
-    """
-    return targeted_underlag_rewrite_indexes(
-        _underlag_step_signals_for_spec(spec),
-        aggregation_intent=aggregation_intent,
-    )
-
-
-def final_assembler_all_previous_indexes_for_spec(
-    spec: FlowDraftSpecCore,
-    *,
-    aggregation_intent: AggregationIntent,
-) -> tuple[int, ...]:
-    return final_assembler_rewrite_indexes(
-        _underlag_step_signals_for_spec(spec),
-        aggregation_intent=aggregation_intent,
-    )
-
-
-def terminal_renderer_all_previous_indexes_for_spec(
-    spec: FlowDraftSpecCore,
-) -> tuple[int, ...]:
-    return terminal_renderer_rewrite_indexes(
-        _underlag_step_signals_for_spec(spec),
-    )
-
-
-def _underlag_step_signals_for_spec(
-    spec: FlowDraftSpecCore,
-) -> tuple[TargetedUnderlagStepSignal, ...]:
-    return tuple(
-        TargetedUnderlagStepSignal(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            output_type=step.output_type,
-            is_renderer=_is_renderer_step(step),
-            has_structured_json_output=(
-                step.output_type == OutputType.JSON and step.output_contract is not None
-            ),
-            already_targets_previous_fields=False,
-            question_targets_prior_structured_field=(
-                _composer_question_targets_prior_structured_field(
-                    spec=spec, composer_index=index
-                )
-            ),
-            is_source_surfacing_text=is_source_surfacing_text(
-                input_source=step.input_source,
-                input_type=step.input_type,
-                output_type=step.output_type,
-            ),
-            question_targets_prior_text_output_count=(
-                _composer_question_prior_text_output_ref_count(
-                    spec=spec,
-                    composer_index=index,
-                )
-            ),
-        )
-        for index, step in enumerate(spec.steps)
-    )
-
-
-def _underlag_structural_step_signals_for_spec(
-    spec: FlowDraftSpecCore,
-) -> tuple[TargetedUnderlagStepSignal, ...]:
-    return tuple(
-        TargetedUnderlagStepSignal(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            output_type=step.output_type,
-            is_renderer=_is_renderer_step(step),
-            has_structured_json_output=(
-                step.output_type == OutputType.JSON and step.output_contract is not None
-            ),
-            already_targets_previous_fields=False,
-            question_targets_prior_structured_field=False,
-            is_source_surfacing_text=is_source_surfacing_text(
-                input_source=step.input_source,
-                input_type=step.input_type,
-                output_type=step.output_type,
-            ),
-        )
-        for step in spec.steps
-    )
-
-
 def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
     """Index of the last step that composes content.
 
@@ -961,226 +862,10 @@ def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
     happens one step earlier; the targeted-underlag rule must evaluate
     that step's input wiring, not the renderer's.
     """
-    return last_compositional_step_index(
-        _underlag_structural_step_signals_for_spec(spec)
-    )
-
-
-def _composer_question_prior_text_output_ref_count(
-    *, spec: FlowDraftSpecCore, composer_index: int
-) -> int:
-    composer = spec.steps[composer_index]
-    question = effective_question_binding(composer.input_bindings)
-    if question is None:
-        return 0
-
-    prior_text_indexes = {
-        index
-        for index, step in enumerate(spec.steps[:composer_index])
-        if not _is_renderer_step(step)
-        and step.output_type == OutputType.TEXT
-        and not is_source_surfacing_text(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            output_type=step.output_type,
-        )
-    }
-    if not prior_text_indexes:
-        return 0
-
-    step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
-    form_field_names = {field.name for field in (spec.form_fields or [])}
-    references = analyze_template(
-        question,
-        step_refs=step_refs,
-        form_field_names=form_field_names,
-    )
-    return len(
-        {
-            reference.step_order
-            for reference in references
-            if reference.kind is TemplateReferenceKind.STEP
-            and reference.path_error_code is None
-            and reference.step_order in prior_text_indexes
-            and reference.tail == "output.text"
-        }
-    )
-
-
-def _composer_question_targets_prior_structured_field(
-    *, spec: FlowDraftSpecCore, composer_index: int
-) -> bool:
-    """True when the composer's `input_bindings.question` resolves to a
-    structured output on a step that runs before it.
-
-    Uses the canonical `analyze_template` parser so the predicate stays
-    aligned with how the runtime actually resolves `{{ ... }}`
-    expressions — including JSON-escaped quoting and arbitrarily deep
-    `output.structured` / `output.structured.<a>.<b>...` paths. Future
-    or current-step references and parse errors do not count as targeted
-    underlag.
-    """
-    return any(
-        _composer_question_targets_prior_structured_step(
-            spec=spec,
-            composer_index=composer_index,
-            structured_step_index=structured_step_index,
-        )
-        for structured_step_index in range(composer_index)
-    )
-
-
-def _composer_question_targets_prior_structured_step(
-    *,
-    spec: FlowDraftSpecCore,
-    composer_index: int,
-    structured_step_index: int,
-) -> bool:
-    if structured_step_index >= composer_index:
-        return False
-    composer = spec.steps[composer_index]
-    question = effective_question_binding(composer.input_bindings)
-    if question is None:
-        return False
-    step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
-    form_field_names = {field.name for field in (spec.form_fields or [])}
-    references = analyze_template(
-        question,
-        step_refs=step_refs,
-        form_field_names=form_field_names,
-    )
-    return any(
-        reference.kind is TemplateReferenceKind.STEP
-        and reference.path_error_code is None
-        and reference.step_order == structured_step_index
-        and _reference_targets_structured_output(reference)
-        for reference in references
-    )
-
-
-def _prefer_targeted_underlag_over_all_previous_steps_evidence(
-    context: CriticContext,
-) -> bool:
-    """Fire when a compositional step reads
-    `input_source=all_previous_steps` while ≥1 prior content step
-    emits structured JSON the composer could reference selectively.
-
-    Suppression cases:
-    - aggregation_intent == compare: true document-comparison flows
-      intentionally need broad fan-in. Aggregate intent is not exempt
-      because broad aggregate classification is intentionally conservative.
-    - text-emitting prior content steps exceed `TARGETED_UNDERLAG_SOFT_CAP`:
-      body-coalescing many text priors via `uses_previous_outputs` is
-      unwieldy. JSON priors with output_contract bind via
-      `uses_previous_fields` and scale, so they do not count against
-      the cap.
-    - All priors are text-typed: there are no structured fields to
-      reference — `all_previous_steps` is the only composition.
-    - The composer's `input_bindings.question` already targets prior
-      structured fields explicitly: the spec is effectively using
-      targeted underlag despite the nominal source.
-    """
-    targeted_indexes = set(
-        targeted_underlag_all_previous_indexes_for_spec(
-            context.spec,
-            aggregation_intent=context.aggregation_intent,
-        )
-    )
-    final_assembler_indexes = set(
-        final_assembler_all_previous_indexes_for_spec(
-            context.spec,
-            aggregation_intent=context.aggregation_intent,
-        )
-    )
-    return bool(targeted_indexes - final_assembler_indexes)
-
-
-_PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS = CriticInvariant(
-    id="prefer_targeted_underlag_over_all_previous_steps",
-    kind="semantic",
-    description=(
-        "When a compositional text step reads `all_previous_steps` "
-        "but at least one prior content step emits a structured JSON "
-        "output_contract, the spec should switch to `previous_step` and "
-        "compose its underlag from explicit `uses_previous_fields` "
-        "references. `all_previous_steps` concatenates every prior body "
-        "text, scaling tokens monotonically with step count; targeted "
-        "underlag scopes input to the fields the composer actually "
-        "consumes. Document renderer terminals (template_fill, DOCX, PDF) "
-        "are skipped — the rule evaluates the step that builds the body."
-    ),
-    evidence=_prefer_targeted_underlag_over_all_previous_steps_evidence,
-    remediation=(
-        'Ett komponerande textsteg har `input_source="all_previous_steps"` '
-        "fastän tidigare steg producerar strukturerad JSON. Det betyder att hela "
-        "texten från alla tidigare steg sammanfogas och skickas in — token-kostnaden "
-        "växer linjärt med antalet steg, även om det komponerande steget egentligen "
-        "bara behöver några specifika fält. Byt till "
-        '`input_source="previous_step"` och bygg underlaget explicit: deklarera '
-        "`uses_previous_fields` för de fält som steget faktiskt läser och referera "
-        "dem i `input_bindings.question` via `{{ step_<ref>.output.structured.<fält> }}`. "
-        "Eventuella DOCX/PDF-renderingar i slutet förblir orörda — regeln gäller bara "
-        "det komponerande textsteget."
-    ),
-)
-
-
-def _final_assembler_must_reference_explicit_section_outputs_evidence(
-    context: CriticContext,
-) -> bool:
-    return bool(
-        final_assembler_all_previous_indexes_for_spec(
-            context.spec,
-            aggregation_intent=context.aggregation_intent,
-        )
-    )
-
-
-_FINAL_ASSEMBLER_MUST_REFERENCE_EXPLICIT_SECTION_OUTPUTS = CriticInvariant(
-    id="final_assembler_must_reference_explicit_section_outputs",
-    kind="semantic",
-    description=(
-        "When a compositional text step on the document-rendering path reads "
-        "`all_previous_steps`, but multiple prior text composers already produced "
-        "the report sections, that assembler should reference those section "
-        "outputs explicitly. Broad `all_previous_steps` also sends extraction and "
-        "source material the document assembly path does not need."
-    ),
-    evidence=_final_assembler_must_reference_explicit_section_outputs_evidence,
-    remediation=(
-        'Ett textsteg på vägen mot DOCX/PDF-skapandet använder `input_source="all_previous_steps"` '
-        "trots att flera tidigare textsteg redan har skrivit avsnitt som ska sättas ihop. "
-        'Byt till `input_source="previous_step"` och bygg underlaget med explicita '
-        "`uses_previous_outputs` för varje relevant avsnittstext, så att "
-        "sammanställningssteget inte läser rå källa, extraktioner eller annat "
-        "tidigare innehåll i onödan."
-    ),
-)
-
-
-def _terminal_renderer_must_consume_previous_composer_evidence(
-    context: CriticContext,
-) -> bool:
-    return bool(terminal_renderer_all_previous_indexes_for_spec(context.spec))
-
-
-_TERMINAL_RENDERER_MUST_CONSUME_PREVIOUS_COMPOSER = CriticInvariant(
-    id="terminal_renderer_must_consume_previous_composer",
-    kind="semantic",
-    description=(
-        "A terminal DOCX/PDF/template renderer should consume the immediately "
-        "previous composed text body. `all_previous_steps` on the renderer "
-        "re-sends source, extraction, and section material that the renderer "
-        "does not need."
-    ),
-    evidence=_terminal_renderer_must_consume_previous_composer_evidence,
-    remediation=(
-        'Ett terminalt DOCX/PDF-steg använder `input_source="all_previous_steps"` '
-        "trots att ett tidigare textsteg redan har satt ihop innehållet. Byt "
-        'renderern till `input_source="previous_step"` så att den bara renderar '
-        "den färdiga texten och inte läser hela käll- och analyskedjan igen."
-    ),
-)
+    for index in range(len(spec.steps) - 1, -1, -1):
+        if not _is_renderer_step(spec.steps[index]):
+            return index
+    return None
 
 
 _REVIEW_STEP_MARKERS: tuple[str, ...] = (
@@ -1265,6 +950,34 @@ _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
         "hela dokumentet som renderern kan använda."
     ),
 )
+
+
+def _composer_question_targets_prior_structured_step(
+    *,
+    spec: FlowDraftSpecCore,
+    composer_index: int,
+    structured_step_index: int,
+) -> bool:
+    if structured_step_index >= composer_index:
+        return False
+    composer = spec.steps[composer_index]
+    question = effective_question_binding(composer.input_bindings)
+    if question is None:
+        return False
+    step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
+    form_field_names = {field.name for field in (spec.form_fields or [])}
+    references = analyze_template(
+        question,
+        step_refs=step_refs,
+        form_field_names=form_field_names,
+    )
+    return any(
+        reference.kind is TemplateReferenceKind.STEP
+        and reference.path_error_code is None
+        and reference.step_order == structured_step_index
+        and _reference_targets_structured_output(reference)
+        for reference in references
+    )
 
 
 def _section_text_steps_must_reference_source_json_fields_evidence(
@@ -1555,15 +1268,12 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     but at least two prior content steps emit structured JSON the
     composer is silently dropping.
 
-    Defense-in-depth complement of
-    `prefer_targeted_underlag_over_all_previous_steps`. The over-fan
-    shape (`all_previous_steps` with structured priors) is owned by
-    that rule; this rule covers the opposite under-bind shape where the
-    composer reads `previous_step` and only sees the most recent JSON
-    predecessor — even though earlier predecessors carry distinct
-    fields the composer almost certainly needs.
+    This critic rule covers the under-bind shape where the composer reads
+    `previous_step` and only sees the most recent JSON predecessor — even
+    though earlier predecessors carry distinct fields the composer almost
+    certainly needs. Broad `all_previous_steps` topology is compiler-owned.
 
-    Suppression cases mirror `prefer_targeted_underlag`:
+    Suppression cases:
     - aggregation_intent == compare: true document-comparison flows
       intentionally need broad fan-in. Aggregate intent is not exempt
       because it is often inferred from document-output language.
@@ -1842,9 +1552,6 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
-    _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,
-    _FINAL_ASSEMBLER_MUST_REFERENCE_EXPLICIT_SECTION_OUTPUTS,
-    _TERMINAL_RENDERER_MUST_CONSUME_PREVIOUS_COMPOSER,
     _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
     _SECTION_TEXT_STEPS_MUST_REFERENCE_SOURCE_JSON_FIELDS,
     _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS,

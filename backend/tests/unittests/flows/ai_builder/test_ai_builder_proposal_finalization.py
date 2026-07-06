@@ -86,7 +86,7 @@ def _make_flow_spec() -> FlowDraftSpecCore:
     )
 
 
-def _structured_fan_in_spec() -> FlowDraftSpecCore:
+def _structured_underbound_spec() -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Structured report",
         steps=[
@@ -120,7 +120,7 @@ def _structured_fan_in_spec() -> FlowDraftSpecCore:
                 plan_step_ref="step_c",
                 name="Write report",
                 assistant_spec=AssistantSpec(instructions="Write report."),
-                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
@@ -326,7 +326,7 @@ async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_cod
     store_plan = AsyncMock(return_value=_stored_plan_result())
     compiled = CompiledProposal(
         content=FlowBuilderProposalContent(
-            spec=_structured_fan_in_spec(),
+            spec=_structured_underbound_spec(),
             plan_rationale="Compose a structured report.",
         ),
         validation=SpecValidationResult(),
@@ -346,7 +346,10 @@ async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_cod
 
     assert result.events == ()
     assert result.failure_kind == "quality"
-    assert "prefer_targeted_underlag_over_all_previous_steps" in result.failure_codes
+    assert (
+        "final_text_step_must_reference_relevant_structured_outputs"
+        in result.failure_codes
+    )
     assert result.feedback is not None
     assert "Quality issues" in result.feedback
     store_plan.assert_not_awaited()

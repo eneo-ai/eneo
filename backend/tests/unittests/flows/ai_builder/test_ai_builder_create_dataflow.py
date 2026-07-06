@@ -954,21 +954,7 @@ def test_targeted_underlag_cap_preserves_breadth_across_wide_priors() -> None:
     ]
 
 
-def test_normalize_create_step_mechanics_and_critic_share_targeted_underlag_policy() -> (
-    None
-):
-    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-        CRITIC_INVARIANTS,
-        CriticContext,
-        evaluate_critic_invariants,
-    )
-    from eneo.flows.ai_builder.ai_builder_framework_policy import (
-        OutputIntentResolution,
-    )
-    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-        PlannerPatternSignals,
-    )
-
+def test_normalize_create_step_mechanics_binds_targeted_underlag_policy() -> None:
     normalized = _normalize_steps(
         flow_name="PDF-rapport",
         steps=[
@@ -1023,29 +1009,6 @@ def test_normalize_create_step_mechanics_and_critic_share_targeted_underlag_poli
         (2, "background"),
         (3, "findings"),
     }
-
-    spec = compile_create_steps_to_spec(flow_name="PDF-rapport", steps=normalized)
-    context = CriticContext(
-        spec=spec,
-        flow=None,
-        answer_signals={},
-        text="",
-        requirements_text="",
-        signal_text="",
-        planner_patterns=PlannerPatternSignals(),
-        output_intent=OutputIntentResolution(terminal_output="pdf_document"),
-        mixed_audio_doc_input=False,
-        requested_output_sections=RequestedOutputSections.empty(),
-    )
-    issue_ids = {
-        issue.id
-        for issue in evaluate_critic_invariants(
-            context,
-            invariants=CRITIC_INVARIANTS,
-        )
-    }
-
-    assert "prefer_targeted_underlag_over_all_previous_steps" not in issue_ids
 
 
 def test_normalize_create_step_mechanics_rewrites_final_assembler_to_section_outputs() -> (
@@ -1512,18 +1475,6 @@ def test_normalize_create_step_mechanics_preserves_final_assembler_field_refs() 
 def test_normalize_create_step_mechanics_rewrites_final_assembler_for_aggregate_intent() -> (
     None
 ):
-    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-        CRITIC_INVARIANTS,
-        CriticContext,
-        evaluate_critic_invariants,
-    )
-    from eneo.flows.ai_builder.ai_builder_framework_policy import (
-        OutputIntentResolution,
-    )
-    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-        PlannerPatternSignals,
-    )
-
     normalized = _normalize_steps(
         flow_name="Aggregate report",
         steps=[
@@ -1564,36 +1515,6 @@ def test_normalize_create_step_mechanics_rewrites_final_assembler_for_aggregate_
         1,
         2,
     ]
-
-    spec = compile_create_steps_to_spec(
-        flow_name="Aggregate report",
-        steps=normalized,
-        aggregation_intent="aggregate",
-    )
-    context = CriticContext(
-        spec=spec,
-        flow=None,
-        answer_signals={},
-        text="",
-        requirements_text="",
-        signal_text="",
-        planner_patterns=PlannerPatternSignals(),
-        output_intent=OutputIntentResolution(terminal_output="pdf_document"),
-        mixed_audio_doc_input=False,
-        requested_output_sections=RequestedOutputSections.empty(),
-        aggregation_intent="aggregate",
-    )
-    issue_ids = {
-        issue.id
-        for issue in evaluate_critic_invariants(
-            context,
-            invariants=CRITIC_INVARIANTS,
-        )
-    }
-
-    assert "multi_document_compare_requires_all_previous_steps" not in issue_ids
-    assert "final_assembler_must_reference_explicit_section_outputs" not in issue_ids
-    assert "terminal_renderer_must_consume_previous_composer" not in issue_ids
 
 
 def test_normalize_create_step_mechanics_keeps_final_assembler_broad_for_compare_intent() -> (

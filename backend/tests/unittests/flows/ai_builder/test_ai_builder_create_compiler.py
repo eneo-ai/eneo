@@ -5683,22 +5683,8 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
 ):
     """When the audio→DOCX skeleton produces a body composer text step with
     JSON predecessors, the dataflow normalizer must switch input_source to
-    `previous_step` and auto-populate `uses_previous_fields` so the
-    `prefer_targeted_underlag_over_all_previous_steps` semantic invariant
-    does not fire and the LLM is not stuck in a repair loop it cannot fix.
+    `previous_step` and auto-populate `uses_previous_fields`.
     """
-    from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-        CRITIC_INVARIANTS,
-        CriticContext,
-        evaluate_critic_invariants,
-    )
-    from eneo.flows.ai_builder.ai_builder_framework_policy import (
-        OutputIntentResolution,
-    )
-    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
-        PlannerPatternSignals,
-    )
-
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesrapport från ljud till Word",
@@ -5777,24 +5763,6 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     assert composer.input_bindings is not None
     question = _question_binding(composer.input_bindings)
     assert "step_" in question and "output.structured" in question
-
-    context = CriticContext(
-        spec=compiled,
-        flow=None,
-        answer_signals={},
-        text="",
-        requirements_text="",
-        signal_text="",
-        planner_patterns=PlannerPatternSignals(),
-        output_intent=OutputIntentResolution(terminal_output="docx_document"),
-        mixed_audio_doc_input=False,
-        requested_output_sections=RequestedOutputSections.empty(),
-    )
-    issues = evaluate_critic_invariants(context, invariants=CRITIC_INVARIANTS)
-    issue_ids = [issue.id for issue in issues]
-    assert "prefer_targeted_underlag_over_all_previous_steps" not in issue_ids, (
-        f"prefer_targeted_underlag must not fire after auto-binding; issues={issue_ids}"
-    )
     assert validation.valid
 
 
@@ -6171,7 +6139,7 @@ def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() ->
     assert result[-1].uses_previous_fields == []
 
 
-def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() -> None:
+def test_auto_bound_c2_shape_does_not_trigger_final_text_underlag_critic() -> None:
     from eneo.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
@@ -6259,7 +6227,6 @@ def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() ->
         )
     }
 
-    assert "prefer_targeted_underlag_over_all_previous_steps" not in issue_ids
     assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
 
 

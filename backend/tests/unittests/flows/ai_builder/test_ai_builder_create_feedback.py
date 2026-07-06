@@ -66,13 +66,10 @@ def test_format_create_intent_quality_feedback_translates_contract_terms_only() 
 @pytest.mark.parametrize(
     "issue_id",
     [
-        "prefer_targeted_underlag_over_all_previous_steps",
-        "final_assembler_must_reference_explicit_section_outputs",
-        "terminal_renderer_must_consume_previous_composer",
         "final_text_step_must_reference_relevant_structured_outputs",
     ],
 )
-def test_format_create_critic_feedback_translates_mechanics_to_semantics(
+def test_format_create_critic_feedback_translates_underlag_to_semantics(
     issue_id: str,
 ) -> None:
     feedback = format_create_critic_feedback(

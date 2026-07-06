@@ -35,15 +35,6 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "field_reuse_requires_input_bindings": (
         "Beskriv vilka namngivna fält från den strukturerade extraktionen som nästa semantiska steg ska återanvända."
     ),
-    "prefer_targeted_underlag_over_all_previous_steps": (
-        "Beskriv ett semantiskt syntessteg som sammanställer just de relevanta strukturerade resultaten från tidigare steg, i stället för att läsa allt tidigare innehåll."
-    ),
-    "final_assembler_must_reference_explicit_section_outputs": (
-        "Beskriv slutsteget som ett semantiskt sammansättningssteg som använder de relevanta strukturerade avsnittstexterna från tidigare steg explicit, i stället för att läsa allt tidigare innehåll."
-    ),
-    "terminal_renderer_must_consume_previous_composer": (
-        "Låt det terminala DOCX/PDF-steget endast rendera den färdiga texten från föregående semantiska steg, inte läsa alla tidigare strukturerade steg igen."
-    ),
     "terminal_renderer_must_not_consume_review_only_step": (
         "Lägg inte ett granskningssteg som bara producerar anteckningar direkt före DOCX/PDF. Sista textsteget före renderern ska vara den färdiga dokumenttexten: flytta granskningen före slutlig sammanställning, eller låt granskningssteget skriva en reviderad slutversion av hela dokumentet."
     ),
