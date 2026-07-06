@@ -8,9 +8,6 @@ from typing import TypeAlias
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_action_policy import (
-    compute_unresolved_core_slots,
-)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -277,10 +274,6 @@ def test_turn_controller_returns_canonical_server_decisions(
     decision = turn_control.decision
 
     assert isinstance(decision, case.expected_type)
-    assert (
-        turn_control.unresolved_architectural_choices
-        == compute_unresolved_core_slots(case.state)
-    )
 
     if isinstance(decision, AskCanonicalQuestion):
         assert decision.slot_name == case.expected_slot_name

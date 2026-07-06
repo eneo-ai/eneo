@@ -81,8 +81,6 @@ BuilderTurnDecision: TypeAlias = (
 @dataclass(frozen=True, slots=True)
 class BuilderTurnControl:
     decision: BuilderTurnDecision
-    action_policy: PlannerActionPolicy
-    unresolved_architectural_choices: frozenset[str]
 
 
 def resolve_turn_control(
@@ -107,8 +105,6 @@ def resolve_turn_control(
             is_edit_mode=is_edit_mode,
             ui_language=ui_language,
         ),
-        action_policy=action_policy,
-        unresolved_architectural_choices=unresolved_core_slots,
     )
 
 

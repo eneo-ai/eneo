@@ -85,12 +85,6 @@ def test_policy_blocks_commit_and_plan_until_core_architecture_is_resolved() -> 
         "primary_runtime_input",
         "terminal_output",
     )
-    assert policy.blocked_action_reasons["commit_architecture"].startswith(
-        "unresolved architecture choices"
-    )
-    assert policy.blocked_action_reasons["propose_plan"].startswith(
-        "architecture has not been committed"
-    )
 
 
 def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
@@ -118,7 +112,6 @@ def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
     assert unresolved == frozenset({"terminal_output"})
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("terminal_output",)
-    assert "terminal_output" in policy.blocked_action_reasons["commit_architecture"]
 
 
 def test_policy_blocks_model_medium_pattern_required_slot() -> None:
@@ -146,10 +139,6 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("document_material_scope",)
-    assert (
-        "document_material_scope"
-        in policy.blocked_action_reasons["commit_architecture"]
-    )
 
 
 @pytest.mark.parametrize(
@@ -254,8 +243,6 @@ def test_policy_allows_commit_after_core_slots_and_selected_questions_resolve() 
 
     assert policy.allowed_action_kinds == ("commit_architecture",)
     assert policy.allowed_ask_question_targets == ()
-    assert "commit_architecture" not in policy.blocked_action_reasons
-    assert "propose_plan" in policy.blocked_action_reasons
 
 
 def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() -> None:
@@ -270,10 +257,6 @@ def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() ->
 
     assert "commit_architecture" not in policy.allowed_action_kinds
     assert policy.allowed_ask_question_targets == ("document_material_scope",)
-    assert (
-        "document_material_scope"
-        in policy.blocked_action_reasons["commit_architecture"]
-    )
 
 
 def test_policy_never_exposes_resolved_slots_as_question_targets() -> None:
@@ -401,9 +384,6 @@ def test_policy_asks_missing_core_slots_even_without_discovery_selection() -> No
         "primary_runtime_input",
         "terminal_output",
     )
-    assert policy.blocked_action_reasons["commit_architecture"] == (
-        "architecture cannot be derived from resolved state"
-    )
 
 
 def test_policy_normalizes_legacy_discovery_question_ids_to_slot_targets() -> None:
@@ -427,8 +407,6 @@ def test_policy_allows_requirements_confirmation_after_architecture_commit() -> 
     )
 
     assert policy.allowed_action_kinds == ("confirm_requirements",)
-    assert "commit_architecture" in policy.blocked_action_reasons
-    assert "propose_plan" in policy.blocked_action_reasons
 
 
 def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -> None:
@@ -454,8 +432,6 @@ def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -
 
     assert policy.allowed_action_kinds == ("revise_architecture",)
     assert policy.allowed_ask_question_targets == ()
-    assert "confirm_requirements" in policy.blocked_action_reasons
-    assert "propose_plan" in policy.blocked_action_reasons
 
 
 def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -> None:
@@ -476,8 +452,6 @@ def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("terminal_output",)
-    assert "revise_architecture" in policy.blocked_action_reasons
-    assert "propose_plan" in policy.blocked_action_reasons
 
 
 def test_policy_allows_plan_after_architecture_and_requirements_confirmation() -> None:
@@ -489,7 +463,3 @@ def test_policy_allows_plan_after_architecture_and_requirements_confirmation() -
     )
 
     assert policy.allowed_action_kinds == ("propose_plan",)
-    assert policy.blocked_action_reasons["confirm_requirements"] == (
-        "requirements are already confirmed"
-    )
-    assert "propose_plan" not in policy.blocked_action_reasons

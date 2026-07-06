@@ -9,7 +9,7 @@ controller and downstream server/proposal dispatch.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
@@ -41,19 +41,12 @@ PlannerActionKind = Literal[
 ]
 
 
-def _empty_blocked_action_reasons() -> dict[PlannerActionKind, str]:
-    return {}
-
-
 @dataclass(frozen=True, slots=True)
 class PlannerActionPolicy:
     """Legal planner actions and question targets for one turn."""
 
     allowed_action_kinds: tuple[PlannerActionKind, ...]
     allowed_ask_question_targets: tuple[str, ...] = ()
-    blocked_action_reasons: dict[PlannerActionKind, str] = field(
-        default_factory=_empty_blocked_action_reasons
-    )
 
 
 def build_planner_action_policy(
@@ -119,76 +112,38 @@ def build_planner_action_policy(
             commit_grade_slot_names=commit_grade_slot_names,
         )
 
-    blocked: dict[PlannerActionKind, str] = {}
     allowed: list[PlannerActionKind] = []
 
     if ask_targets:
         allowed.append("ask_question")
-    else:
-        blocked["ask_question"] = "no unresolved ask_question targets"
 
-    if architecture_committed:
-        blocked["commit_architecture"] = "architecture is already committed"
-    elif unresolved_architectural_choices - commit_grade_slot_names:
-        blocked["commit_architecture"] = (
-            "unresolved architecture choices: "
-            + ", ".join(
-                sorted(unresolved_architectural_choices - commit_grade_slot_names)
-            )
-        )
-    elif derived_commit is None:
-        blocked["commit_architecture"] = (
-            "architecture cannot be derived from resolved state"
-        )
-    elif unresolved_commit_slots:
-        blocked["commit_architecture"] = (
-            "derived architecture requires unresolved slots: "
-            + ", ".join(sorted(unresolved_commit_slots))
-        )
-    else:
+    if (
+        not architecture_committed
+        and not (unresolved_architectural_choices - commit_grade_slot_names)
+        and derived_commit is not None
+        and not unresolved_commit_slots
+    ):
         allowed.append("commit_architecture")
 
-    if not architecture_committed:
-        blocked["revise_architecture"] = "architecture has not been committed"
-    elif ask_targets:
-        blocked["revise_architecture"] = (
-            "architecture choices need confirmation: " + ", ".join(ask_targets)
-        )
-    elif derived_commit is None:
-        blocked["revise_architecture"] = (
-            "architecture cannot be derived from resolved state"
-        )
-    elif not architecture_drift_detected:
-        blocked["revise_architecture"] = "architecture already matches committed state"
-    else:
+    if (
+        architecture_committed
+        and not ask_targets
+        and derived_commit is not None
+        and architecture_drift_detected
+    ):
         allowed.append("revise_architecture")
 
-    if not architecture_committed:
-        blocked["confirm_requirements"] = "architecture has not been committed"
-        blocked["propose_plan"] = "architecture has not been committed"
-    elif ask_targets:
-        blocked["confirm_requirements"] = (
-            "architecture choices need confirmation before requirements confirmation"
-        )
-        blocked["propose_plan"] = (
-            "architecture choices need confirmation before plan proposal"
-        )
-    elif architecture_drift_detected:
-        blocked["confirm_requirements"] = "architecture revision has not been committed"
-        blocked["propose_plan"] = "architecture revision has not been committed"
-    elif not requirements_confirmed:
-        allowed.append("confirm_requirements")
-        blocked["propose_plan"] = "requirements have not been confirmed"
-    else:
-        blocked["confirm_requirements"] = "requirements are already confirmed"
-        allowed.append("propose_plan")
+    if architecture_committed and not ask_targets and not architecture_drift_detected:
+        if requirements_confirmed:
+            allowed.append("propose_plan")
+        else:
+            allowed.append("confirm_requirements")
 
     allowed = _phase_priority(allowed)
 
     return PlannerActionPolicy(
         allowed_action_kinds=tuple(allowed),
         allowed_ask_question_targets=ask_targets,
-        blocked_action_reasons=blocked,
     )
 
 
