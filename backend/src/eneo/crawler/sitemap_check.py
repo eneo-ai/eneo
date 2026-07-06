@@ -117,14 +117,16 @@ def _parse_blocks(
 async def _fetch_xml(
     session: aiohttp.ClientSession,
     url: str,
-    auth: Optional[aiohttp.BasicAuth],
+    auth_header: Optional[str],
 ) -> Optional[str]:
     """Fetch one sitemap document, bounded in size, handling .gz payloads."""
+    headers = {"accept": "application/xml,text/xml,*/*;q=0.5"}
+    if auth_header is not None:
+        headers["Authorization"] = auth_header
     async with session.get(
         url,
-        auth=auth,
         timeout=aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_SECONDS),
-        headers={"accept": "application/xml,text/xml,*/*;q=0.5"},
+        headers=headers,
     ) as response:
         if response.status != 200:
             return None
@@ -146,7 +148,7 @@ async def _collect_entries(
     url: str,
     *,
     auth_host: Optional[str],
-    auth: Optional[aiohttp.BasicAuth],
+    auth_header: Optional[str],
 ) -> Optional[list[tuple[str, Optional[str]]]]:
     """The (loc, lastmod) entries of one sitemap document (a urlset, or a
     sitemapindex expanded one level). None means the probe cannot be trusted
@@ -159,13 +161,13 @@ async def _collect_entries(
     another host simply full-crawls. Without auth there is nothing to leak, so
     any host is fetched.
     """
-    if auth is not None and not same_host(url, auth_host):
+    if auth_header is not None and not same_host(url, auth_host):
         logger.warning(
             "Discovered sitemap on off-auth host under credentials; failing probe",
             extra={"sitemap_url": url, "auth_host": auth_host},
         )
         return None
-    xml = await _fetch_xml(session, url, auth)
+    xml = await _fetch_xml(session, url, auth_header)
     if xml is None:
         return None
 
@@ -175,14 +177,14 @@ async def _collect_entries(
             return None
         entries: list[tuple[str, Optional[str]]] = []
         for sub_url, _ in subs:
-            if auth is not None and not same_host(sub_url, auth_host):
+            if auth_header is not None and not same_host(sub_url, auth_host):
                 logger.warning(
                     "Sitemap index lists off-auth-host sub-sitemap under "
                     "credentials; failing probe",
                     extra={"sitemap_url": url, "sub_url": sub_url},
                 )
                 return None
-            sub_xml = await _fetch_xml(session, sub_url, auth)
+            sub_xml = await _fetch_xml(session, sub_url, auth_header)
             # One level of nesting only; an index-of-indexes fails the probe
             # rather than being half-read
             if sub_xml is None or _IS_INDEX.search(sub_xml):
@@ -211,10 +213,14 @@ async def probe_sitemap(
     fails the probe rather than leaking credentials."""
     if not sitemap_urls:
         return None
-    auth = aiohttp.BasicAuth(http_user, http_pass) if http_user and http_pass else None
-    if auth is not None and not auth_host:
+    auth_header = (
+        aiohttp.encode_basic_auth(http_user, http_pass)
+        if http_user and http_pass
+        else None
+    )
+    if auth_header is not None and not auth_host:
         # No host to scope credentials to; refuse to send them anywhere
-        auth = None
+        auth_header = None
 
     all_entries: list[tuple[str, Optional[str]]] = []
     try:
@@ -222,7 +228,7 @@ async def probe_sitemap(
             async with aiohttp.ClientSession() as session:
                 for location in sitemap_urls:
                     entries = await _collect_entries(
-                        session, location, auth_host=auth_host, auth=auth
+                        session, location, auth_host=auth_host, auth_header=auth_header
                     )
                     if entries is None:
                         return None

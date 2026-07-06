@@ -433,8 +433,10 @@ class RemoteCrawler:
         timeout_seconds = get_crawler_setting(
             "download_timeout", tenant_crawler_settings
         )
-        auth = (
-            aiohttp.BasicAuth(http_user, http_pass) if http_user and http_pass else None
+        auth_header = (
+            aiohttp.encode_basic_auth(http_user, http_pass)
+            if http_user and http_pass
+            else None
         )
         taken: set[str] = set()
 
@@ -451,7 +453,11 @@ class RemoteCrawler:
             try:
                 async with session.get(
                     link_url,
-                    auth=auth,
+                    headers=(
+                        {"Authorization": auth_header}
+                        if auth_header is not None
+                        else None
+                    ),
                     timeout=aiohttp.ClientTimeout(total=timeout_seconds),
                 ) as response:
                     if response.status != 200:
