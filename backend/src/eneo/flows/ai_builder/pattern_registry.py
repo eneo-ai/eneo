@@ -7,10 +7,10 @@ Catalog).
 
 Each `Pattern` captures:
 
-- `examples` / `negative_examples` / `retrieval_hints` — structural
-  descriptors the planner can match against user intent (e.g.
-  `"single-step summarize"`, `"avoid audio+template_fill"`). These are
-  deliberately terse, non-localized tokens; no prose.
+- `examples` / `negative_examples` — structural descriptors the planner can
+  match against user intent (e.g. `"single-step summarize"`,
+  `"avoid audio+template_fill"`). These are deliberately terse, non-localized
+  tokens; no prose.
 - `required_architectural_slots` — slot names from
   `ai_builder_slot_vocabulary.py` that this archetype's discovery
   must resolve before the planner can commit to it.
@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-PATTERN_REGISTRY_VERSION: int = 9
+PATTERN_REGISTRY_VERSION: int = 10
 
 PatternId = str
 ChainStepToken = str
@@ -134,7 +134,6 @@ class Pattern:
 
     id: PatternId
     examples: tuple[str, ...]
-    retrieval_hints: tuple[str, ...]
     negative_examples: tuple[str, ...]
     required_architectural_slots: tuple[str, ...]
     question_template_ids: tuple[str, ...]
@@ -165,7 +164,6 @@ def _pattern(
     *,
     id: PatternId,
     examples: tuple[str, ...],
-    retrieval_hints: tuple[str, ...],
     required_architectural_slots: tuple[str, ...],
     question_template_ids: tuple[str, ...] = (),
     negative_examples: tuple[str, ...] = (),
@@ -176,7 +174,6 @@ def _pattern(
     return Pattern(
         id=id,
         examples=examples,
-        retrieval_hints=retrieval_hints,
         negative_examples=negative_examples,
         required_architectural_slots=required_architectural_slots,
         question_template_ids=question_template_ids,
@@ -193,10 +190,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "single-step text in, text out",
             "one-shot summarization",
         ),
-        retrieval_hints=(
-            "summarize summary summera sammanfatta",
-            "input_type=text output_type=text output_mode=pass_through",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -211,10 +204,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "text in, JSON out via form fields",
             "structured extraction of named fields",
-        ),
-        retrieval_hints=(
-            "extract fields form structured json schema",
-            "input_type=text output_type=json output_mode=pass_through",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -231,10 +220,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "JSON in, JSON out transformation",
             "normalize or enrich a runtime JSON payload",
         ),
-        retrieval_hints=(
-            "json payload transform normalize map schema",
-            "input_type=json output_type=json output_mode=pass_through",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -249,10 +234,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "JSON in, readable text out",
             "summarize a runtime JSON payload for a human reader",
-        ),
-        retrieval_hints=(
-            "json payload summarize readable text",
-            "input_type=json output_type=text output_mode=pass_through",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -269,10 +250,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "JSON in, generated PDF or DOCX report out",
             "turn a runtime JSON payload into a document artifact",
         ),
-        retrieval_hints=(
-            "json payload report artifact pdf docx",
-            "input_type=json output_type=pdf docx output_mode=pass_through",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -287,11 +264,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "document in, text or JSON report out over scoped material",
             "report synthesis over uploaded documents without structured intermediate",
-        ),
-        retrieval_hints=(
-            "document analysis report",
-            "input_type=document output_type=text output_mode=pass_through",
-            "input_type=document output_type=json output_mode=pass_through",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -309,10 +281,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "document in, DOCX out via template_fill",
             "fill a DOCX template from document-derived inputs",
-        ),
-        retrieval_hints=(
-            "docx template generate report document",
-            "output_type=docx output_mode=template_fill",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -339,10 +307,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "document in, PDF out via generation",
             "PDF report synthesized from document inputs",
         ),
-        retrieval_hints=(
-            "pdf report generate document",
-            "output_type=pdf output_mode=render_verbatim",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -362,10 +326,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "audio in, text out via transcribe_only",
             "single-step audio transcription",
         ),
-        retrieval_hints=(
-            "audio transcribe transkribera transkription",
-            "input_type=audio output_type=text output_mode=transcribe_only",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -380,10 +340,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "audio in, generated report artifact out",
             "transcribe audio and produce PDF, DOCX, JSON, or structured text",
-        ),
-        retrieval_hints=(
-            "audio transcribe summarize report artifact",
-            "input_type=audio output_type=pdf docx json text",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -405,10 +361,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "text in, generated report artifact out",
             "turn pasted or transcribed text into a PDF or DOCX report",
         ),
-        retrieval_hints=(
-            "text report artifact pdf docx generated",
-            "input_type=text output_type=pdf docx output_mode=render_verbatim",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -423,11 +375,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "compare two uploaded documents and produce a structured comparison",
             "document-to-document comparison with scoped material",
-        ),
-        retrieval_hints=(
-            "compare comparison jämför jamfor diff",
-            "input_type=document output_type=json output_mode=pass_through",
-            "input_type=document output_type=text output_mode=pass_through",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -445,11 +392,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "multi-section form-field intake at flow input",
             "structured headings captured as form_fields on the first step",
-        ),
-        retrieval_hints=(
-            "sectioned form intake rubriker sections headings",
-            "input_type=text output_type=text output_mode=pass_through",
-            "input_type=text output_type=json output_mode=pass_through",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -478,11 +420,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "runtime form_field variables alongside the primary input",
             "flow captures named parameters the user fills in per run",
         ),
-        retrieval_hints=(
-            "form fields formulärfält inmatningsfält runtime variables",
-            "user provides enters fills parameters",
-            "uses_form_fields variable_name",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -499,11 +436,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         examples=(
             "step uses a specific MCP tool for live external data",
             "external system action isolated to one step with tool-level MCP refs",
-        ),
-        retrieval_hints=(
-            "mcp mcp_tool_refs mcp_server_refs",
-            "external_system live_data integration_endpoint",
-            "least_privilege step_scoped_tool_access",
         ),
         required_architectural_slots=(
             "primary_runtime_input",
@@ -529,13 +461,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "parallel → composed text summary that references each "
             "extraction's structured fields",
         ),
-        retrieval_hints=(
-            "parallel multi-aspect extraction fan-in composition",
-            "extrahera flera olika perspektiv aspekter dimensioner",
-            "för varje rubrik kategori per ämne",
-            "uses_previous_fields previous_step refs across multiple JSON priors",
-            "input_type=text|audio|document output_type=json output_type=text",
-        ),
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
@@ -551,7 +476,6 @@ _NEGATIVE_PATTERNS: tuple[Pattern, ...] = (
     _pattern(
         id="image_input_pipeline",
         examples=(),
-        retrieval_hints=("avoid image input",),
         negative_examples=(
             "input_type=image pass_through",
             "image upload at runtime as primary input",
@@ -562,7 +486,6 @@ _NEGATIVE_PATTERNS: tuple[Pattern, ...] = (
     _pattern(
         id="template_fill_non_docx",
         examples=(),
-        retrieval_hints=("avoid template_fill without docx output",),
         negative_examples=(
             "output_mode=template_fill output_type=text",
             "output_mode=template_fill output_type=pdf",
