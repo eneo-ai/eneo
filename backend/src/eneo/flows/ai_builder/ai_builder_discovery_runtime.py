@@ -13,10 +13,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     slot_classification_metadata_from_result,
 )
-from eneo.flows.ai_builder.ai_builder_discovery import (
-    analyze_discovery,
-    build_discovery_block_message,
-)
+from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
 )
@@ -59,37 +56,6 @@ class DiscoveryRuntimeResult:
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
-
-
-async def analyze_discovery_runtime(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
-    ui_language: str | None = None,
-    allow_semantic_adjudication: bool = True,
-    tenant_id: UUID,
-    attachment_context: AIBuilderAttachmentContext | None = None,
-) -> DiscoveryAnalysis:
-    context = await build_runtime_discovery_context(
-        conversation=conversation,
-        flow=flow,
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        ui_language=ui_language,
-        tenant_id=tenant_id,
-        allow_classification=allow_semantic_adjudication,
-        attachment_context=attachment_context,
-    )
-    return analyze_discovery(
-        conversation,
-        flow=flow,
-        planning_state=context.planning_state,
-        slot_classification_result=context.slot_classification_result,
-    )
 
 
 def _targeted_classification_bias(
@@ -191,66 +157,6 @@ async def build_runtime_discovery_context(
             result,
             prompt_hash=prompt_hash,
         ),
-    )
-
-
-async def build_runtime_planning_state(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
-    ui_language: str | None = None,
-    tenant_id: UUID,
-    allow_classification: bool = True,
-    attachment_context: AIBuilderAttachmentContext | None = None,
-) -> PlanningState:
-    context = await build_runtime_discovery_context(
-        conversation,
-        flow=flow,
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        ui_language=ui_language,
-        tenant_id=tenant_id,
-        allow_classification=allow_classification,
-        attachment_context=attachment_context,
-    )
-    return context.planning_state
-
-
-async def build_discovery_block_message_runtime(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
-    ui_language: str | None = None,
-    allow_semantic_adjudication: bool = True,
-    tenant_id: UUID,
-    attachment_context: AIBuilderAttachmentContext | None = None,
-) -> tuple[str | None, DiscoveryAnalysis, PlanningState]:
-    result = await build_discovery_runtime_result(
-        conversation,
-        flow=flow,
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        ui_language=ui_language,
-        allow_semantic_adjudication=allow_semantic_adjudication,
-        tenant_id=tenant_id,
-        attachment_context=attachment_context,
-    )
-    return (
-        build_discovery_block_message(
-            conversation,
-            flow=flow,
-            analysis=result.discovery_analysis,
-        ),
-        result.discovery_analysis,
-        result.planning_state,
     )
 
 

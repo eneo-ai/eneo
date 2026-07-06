@@ -12,11 +12,11 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
 )
+from eneo.flows.ai_builder.ai_builder_discovery import build_discovery_block_message
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     _targeted_classification_bias,
-    analyze_discovery_runtime,
-    build_discovery_block_message_runtime,
-    build_runtime_planning_state,
+    build_discovery_runtime_result,
+    build_runtime_discovery_context,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -123,13 +123,15 @@ async def test_runtime_planning_state_skips_model_when_resolvable_slots_are_stro
         lambda *_args, **_kwargs: _resolved_state(),
     )
 
-    state = await build_runtime_planning_state(
-        [ConversationMessage(role="user", content="Skapa ett komplett flöde.")],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [ConversationMessage(role="user", content="Skapa ett komplett flöde.")],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+        )
+    ).planning_state
 
     assert state.resolved_slots.keys() == _resolved_state().resolved_slots.keys()
     litellm_client.acompletion.assert_not_awaited()
@@ -168,18 +170,20 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
         lambda *_args, **_kwargs: weak_state,
     )
 
-    state = await build_runtime_planning_state(
-        [
-            ConversationMessage(
-                role="user",
-                content="Användaren ska ange målgrupp och detaljnivå vid körning.",
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Användaren ska ange målgrupp och detaljnivå vid körning.",
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+        )
+    ).planning_state
 
     assert state.resolved_slots["runtime_metadata_fields"].source == "model"
     assert (
@@ -191,7 +195,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
 async def test_runtime_planning_state_skips_model_when_freeform_text_is_empty() -> None:
     litellm_client = AsyncMock()
 
-    await build_runtime_planning_state(
+    await build_runtime_discovery_context(
         [ConversationMessage(role="user", content="   ")],
         litellm_client=litellm_client,
         litellm_model="gpt-test",
@@ -228,14 +232,16 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
         truncated=False,
     )
 
-    state = await build_runtime_planning_state(
-        [ConversationMessage(role="user", content="   ")],
-        litellm_client=AsyncMock(),
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        attachment_context=attachment_context,
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [ConversationMessage(role="user", content="   ")],
+            litellm_client=AsyncMock(),
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            attachment_context=attachment_context,
+        )
+    ).planning_state
 
     assert len(state.file_roles) == 1
     assert state.file_roles[0].file_id == file_id
@@ -248,7 +254,7 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
 ):
     litellm_client = AsyncMock()
 
-    await build_runtime_planning_state(
+    await build_runtime_discovery_context(
         [ConversationMessage(role="user", content="Bygg ett sammanfattningsflöde.")],
         litellm_client=litellm_client,
         litellm_model="gpt-test",
@@ -284,22 +290,24 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
         )
     )
 
-    state = await build_runtime_planning_state(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag vill klistra in ett kundmeddelande och få en tydlig "
-                    "sammanfattning."
-                ),
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill klistra in ett kundmeddelande och få en tydlig "
+                        "sammanfattning."
+                    ),
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).planning_state
 
     assert state.resolved_slots["primary_runtime_input"].source == "heuristic"
     assert state.resolved_slots["primary_runtime_input"].value == "text"
@@ -321,7 +329,7 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
         json.dumps({"slots": [], "assumptions": [], "contradictions": []})
     )
 
-    await build_runtime_planning_state(
+    await build_runtime_discovery_context(
         [
             ConversationMessage(
                 role="user",
@@ -353,21 +361,23 @@ async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_t
         json.dumps({"slots": [], "assumptions": [], "contradictions": []})
     )
 
-    state = await build_runtime_planning_state(
-        [
-            ConversationMessage(
-                role="user",
-                content="Jag vill bygga ett transkriberingsflöde.",
-                metadata={"ui_language": "sv"},
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-        attachment_context=_attachment_context(),
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Jag vill bygga ett transkriberingsflöde.",
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+            attachment_context=_attachment_context(),
+        )
+    ).planning_state
 
     assert "terminal_output" not in state.resolved_slots
 
@@ -403,19 +413,23 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
         lambda *_args, **_kwargs: PlanningState.empty(),
     )
 
-    state = await build_runtime_planning_state(
-        [
-            ConversationMessage(
-                role="user",
-                content="Jag vill bygga ett flöde som tar emot JSON och returnerar JSON.",
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde som tar emot JSON och returnerar JSON."
+                    ),
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).planning_state
 
     assert state.resolved_slots["primary_runtime_input"].value == "json"
     assert state.resolved_slots["terminal_output"].value == "structured_json"
@@ -466,23 +480,25 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
         lambda *_args, **_kwargs: heuristic_state,
     )
 
-    state = await build_runtime_planning_state(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag har en svensk ljudinspelning från ett möte. Jag vet "
-                    "inte exakt vilket format slutresultatet ska vara ännu."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag har en svensk ljudinspelning från ett möte. Jag vet "
+                        "inte exakt vilket format slutresultatet ska vara ännu."
+                    ),
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).planning_state
 
     assert state.resolved_slots["primary_runtime_input"].value == "audio"
     assert "terminal_output" not in state.resolved_slots
@@ -517,29 +533,31 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
         )
     )
 
-    state = await build_runtime_planning_state(
-        [
-            ConversationMessage(
-                role="user",
-                content="Text",
-                metadata={
-                    "question_answer": {
-                        "question_id": "input_material_mode",
-                        "selected_values": ["text"],
-                    }
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Bygg ett flöde som sammanfattar innehållet tydligt.",
-            ),
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Text",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "input_material_mode",
+                            "selected_values": ["text"],
+                        }
+                    },
+                ),
+                ConversationMessage(
+                    role="user",
+                    content="Bygg ett flöde som sammanfattar innehållet tydligt.",
+                ),
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).planning_state
 
     assert state.resolved_slots["primary_runtime_input"].source == "structured_answer"
     assert state.resolved_slots["primary_runtime_input"].value == "text"
@@ -575,25 +593,27 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
         )
     )
 
-    analysis = await analyze_discovery_runtime(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Gör ett smart supportflöde där användaren klistrar in ett "
-                    "kundmeddelande, klassificerar avsikt och prioritet, föreslår "
-                    "svar, markerar om mänsklig granskning behövs och returnerar "
-                    "både kort text och strukturerad data."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    analysis = (
+        await build_discovery_runtime_result(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Gör ett smart supportflöde där användaren klistrar in ett "
+                        "kundmeddelande, klassificerar avsikt och prioritet, föreslår "
+                        "svar, markerar om mänsklig granskning behövs och returnerar "
+                        "både kort text och strukturerad data."
+                    ),
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).discovery_analysis
 
     question_ids = {
         issue.suggestion.question_id
@@ -636,26 +656,28 @@ async def test_runtime_discovery_asks_output_question_when_model_guesses_uncerta
         )
     )
 
-    analysis = await analyze_discovery_runtime(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag har en svensk ljudinspelning från ett möte och vill "
-                    "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
-                    "vad som sades och skapa något användbart som jag kan dela "
-                    "vidare efteråt. Jag vet inte exakt vilket format "
-                    "slutresultatet ska vara ännu."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    analysis = (
+        await build_discovery_runtime_result(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag har en svensk ljudinspelning från ett möte och vill "
+                        "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
+                        "vad som sades och skapa något användbart som jag kan dela "
+                        "vidare efteråt. Jag vet inte exakt vilket format "
+                        "slutresultatet ska vara ännu."
+                    ),
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).discovery_analysis
 
     question_ids = {
         issue.suggestion.question_id
@@ -702,25 +724,27 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
         )
     )
 
-    analysis = await analyze_discovery_runtime(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Skapa ett flöde som tar emot flera leverantörsavtal och bilagor, "
-                    "extraherar risker, rekommendationer och öppna frågor, "
-                    "låter en människa granska, och returnerar strukturerad "
-                    "JSON för ett uppföljningssystem."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ],
-        litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
-        tenant_id=uuid4(),
-        ui_language="sv",
-    )
+    analysis = (
+        await build_discovery_runtime_result(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa ett flöde som tar emot flera leverantörsavtal och "
+                        "bilagor, extraherar risker, rekommendationer och öppna "
+                        "frågor, låter en människa granska, och returnerar "
+                        "strukturerad JSON för ett uppföljningssystem."
+                    ),
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).discovery_analysis
 
     question_ids = {
         issue.suggestion.question_id
@@ -759,28 +783,35 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
         )
     )
 
-    message, analysis, planning_state = await build_discovery_block_message_runtime(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Bygg ett flöde där användaren klistrar in intervjusvar och får "
-                    "en läsbar sammanfattning med viktiga teman."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ],
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Bygg ett flöde där användaren klistrar in intervjusvar och får "
+                "en läsbar sammanfattning med viktiga teman."
+            ),
+            metadata={"ui_language": "sv"},
+        )
+    ]
+    result = await build_discovery_runtime_result(
+        conversation,
         litellm_client=litellm_client,
         litellm_model="gpt-test",
         litellm_kwargs={},
         tenant_id=uuid4(),
         ui_language="sv",
     )
+    message = build_discovery_block_message(
+        conversation,
+        analysis=result.discovery_analysis,
+    )
 
     assert message is None
-    assert analysis.ready_for_confirmation is True
-    assert planning_state.resolved_slots["primary_runtime_input"].source == "model"
-    assert planning_state.resolved_slots["terminal_output"].source == "model"
+    assert result.discovery_analysis.ready_for_confirmation is True
+    assert result.planning_state.resolved_slots["primary_runtime_input"].source == (
+        "model"
+    )
+    assert result.planning_state.resolved_slots["terminal_output"].source == "model"
     litellm_client.acompletion.assert_awaited_once()
 
 
