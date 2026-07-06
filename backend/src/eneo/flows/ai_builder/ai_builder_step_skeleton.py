@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Literal
 
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
@@ -1621,16 +1622,14 @@ def _final_output_mode(
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
 ) -> OutputMode:
-    if input_type == InputType.AUDIO and final_output_type == OutputType.TEXT:
-        return OutputMode.TRANSCRIBE_ONLY
-    if (
-        final_output_type == OutputType.DOCX
-        and final_output_mode == OutputMode.TEMPLATE_FILL
-    ):
-        return OutputMode.TEMPLATE_FILL
-    if input_type == InputType.TEXT and final_output_type in _DOCUMENT_OUTPUT_TYPES:
-        return OutputMode.RENDER_VERBATIM
-    return OutputMode.PASS_THROUGH
+    return derive_output_mode(
+        input_type=input_type,
+        output_type=final_output_type,
+        document_delivery_mode=_document_delivery_mode_for_output(
+            output_type=final_output_type,
+            final_output_mode=final_output_mode,
+        ),
+    )
 
 
 def _document_delivery_mode_for_output(

@@ -11,6 +11,7 @@ from __future__ import annotations
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     derive_aggregation_intent_from_slots,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
@@ -23,6 +24,12 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+)
+from eneo.flows.flow_authoring_spec import (
+    InputType as AuthoringInputType,
+)
+from eneo.flows.flow_authoring_spec import (
+    OutputType as AuthoringOutputType,
 )
 from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
 
@@ -124,18 +131,21 @@ def _output_mode_from_state(
     input_type: FlowInputType,
     output_type: FlowOutputType,
 ) -> FlowOutputMode:
-    if input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT:
-        return FlowOutputMode.TRANSCRIBE_ONLY
-    if output_type is FlowOutputType.DOCX:
-        docx_mode = state.resolved_slots.get("docx_output_mode")
-        if docx_mode is not None and docx_mode.value == "template_fill_docx":
-            return FlowOutputMode.TEMPLATE_FILL
-    if input_type is FlowInputType.TEXT and output_type in {
-        FlowOutputType.DOCX,
-        FlowOutputType.PDF,
-    }:
-        return FlowOutputMode.RENDER_VERBATIM
-    return FlowOutputMode.PASS_THROUGH
+    docx_mode = state.resolved_slots.get("docx_output_mode")
+    document_delivery_mode = (
+        "template_fill"
+        if output_type is FlowOutputType.DOCX
+        and docx_mode is not None
+        and docx_mode.value == "template_fill_docx"
+        else "generated"
+    )
+    return FlowOutputMode(
+        derive_output_mode(
+            input_type=AuthoringInputType(input_type.value),
+            output_type=AuthoringOutputType(output_type.value),
+            document_delivery_mode=document_delivery_mode,
+        ).value
+    )
 
 
 def _chosen_patterns_for_state(
