@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
+
+from eneo.tokens.token_utils import count_message_tokens
 
 __all__ = [
     "compute_conversation_token_budget",
@@ -56,13 +58,14 @@ def trim_conversation_for_context(
     messages: list[_MessageT],
     *,
     max_tokens: int,
+    litellm_model: str = "",
 ) -> list[_MessageT]:
     """Trim conversation history to fit within the provided token budget.
 
     The budget should come from compute_conversation_token_budget() which
     derives it from the model's actual context window.
     """
-    if max_tokens >= _estimate_group_tokens(messages):
+    if max_tokens >= _count_group_tokens(messages, litellm_model):
         return list(messages)
 
     groups: list[list[_MessageT]] = []
@@ -86,7 +89,7 @@ def trim_conversation_for_context(
     kept_groups: list[list[_MessageT]] = []
     consumed_tokens = 0
     for group in reversed(groups):
-        group_tokens = _estimate_group_tokens(group)
+        group_tokens = _count_group_tokens(group, litellm_model)
         if kept_groups and consumed_tokens + group_tokens > max_tokens:
             break
         kept_groups.append(group)
@@ -99,28 +102,8 @@ def trim_conversation_for_context(
     return trimmed
 
 
-def _estimate_group_tokens(group: Sequence[Mapping[str, Any]]) -> int:
-    return sum(_estimate_message_tokens(message) for message in group)
-
-
-def _estimate_message_tokens(message: Mapping[str, Any]) -> int:
-    chunks: list[str] = []
-    content = message.get("content")
-    if isinstance(content, str):
-        chunks.append(content)
-
-    tool_calls = message.get("tool_calls")
-    if isinstance(tool_calls, list):
-        for tool_call in cast(list[object], tool_calls):
-            chunks.append(str(tool_call))
-
-    tool_call_id = message.get("tool_call_id")
-    if isinstance(tool_call_id, str):
-        chunks.append(tool_call_id)
-
-    if not chunks:
-        return 1
-
-    # Use // 3 instead of // 4: Swedish compound words average fewer chars
-    # per token than English, so the conservative factor prevents undercount.
-    return max(1, sum(max(1, len(chunk) // 3) for chunk in chunks) + 4)
+def _count_group_tokens(
+    group: Sequence[Mapping[str, Any]],
+    litellm_model: str,
+) -> int:
+    return count_message_tokens([dict(message) for message in group], litellm_model)

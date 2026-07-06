@@ -82,6 +82,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.main.logging import get_logger
 from eneo.observability.failure_events import stable_hash
+from eneo.tokens.token_utils import count_message_tokens
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
@@ -350,7 +351,10 @@ def _prepare_prompt_messages(
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> PreparedPromptMessages:
-    prompt_tokens = max(1, len(system_prompt) // 3)
+    prompt_tokens = count_message_tokens(
+        [{"role": "system", "content": system_prompt}],
+        litellm_model,
+    )
     conversation_budget = compute_conversation_token_budget(
         litellm_model=litellm_model,
         model_max_input_tokens=max_input_tokens,
@@ -368,6 +372,7 @@ def _prepare_prompt_messages(
     trimmed = trim_conversation_for_context(
         raw_messages,
         max_tokens=conversation_budget,
+        litellm_model=litellm_model,
     )
     return PreparedPromptMessages(
         llm_messages=[{"role": "system", "content": system_prompt}, *trimmed],
