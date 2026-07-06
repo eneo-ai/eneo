@@ -136,7 +136,7 @@ class TestRoundTrip:
                         output_mode="pass_through",
                     )
                 ],
-                chosen_patterns=["case_to_memo"],
+                chosen_patterns=["document_to_structured_report"],
                 committed_at=datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc),
                 architecture_hash=_VALID_ARCH_HASH,
             ),
@@ -484,6 +484,17 @@ class TestArchitectureCommitStrictStamps:
                     "committed_at": "2026-04-23T12:00:00+00:00",
                     "architecture_hash": _VALID_ARCH_HASH,
                     "question_catalog_version": 1,
+                }
+            )
+
+    def test_rejects_deleted_chosen_pattern_id(self) -> None:
+        with pytest.raises(ValidationError, match="unknown pattern ids"):
+            ArchitectureCommit.model_validate(
+                {
+                    "tuples_chain": [],
+                    "chosen_patterns": ["multi_step_quality_chain"],
+                    "committed_at": "2026-04-23T12:00:00+00:00",
+                    "architecture_hash": _VALID_ARCH_HASH,
                 }
             )
 

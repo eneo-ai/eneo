@@ -96,7 +96,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
             output_type="json",
             output_mode="pass_through",
         ),
-        chosen_patterns=["mcp_lookup"],
+        chosen_patterns=["mcp_tool_step"],
         required_capabilities=["mcp_policy"],
     )
 
@@ -157,7 +157,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         in prompt
     )
     assert "human-readable `flow_name`" in prompt
-    assert "mcp_lookup" not in prompt
+    assert "mcp_tool_step" not in prompt
     assert "mcp_policy" not in prompt
     assert "must not execute MCP tools" in prompt
     assert "input_schema" not in prompt

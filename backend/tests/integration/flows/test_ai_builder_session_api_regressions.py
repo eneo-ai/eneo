@@ -2314,7 +2314,7 @@ async def test_ai_builder_repo_commit_turn_replaces_persisted_commit_when_kwarg_
                 output_mode="pass_through",
             ),
         ],
-        chosen_patterns=["multi_step_quality_chain"],
+        chosen_patterns=["extract_structured_fields"],
         required_capabilities=["input_text", "output_mode_pass_through"],
         committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
         architecture_hash="d" * 64,

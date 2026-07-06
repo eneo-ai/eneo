@@ -434,7 +434,7 @@ def test_compile_context_rejects_schema_evidence_for_terminal_non_json() -> None
         input_type="text",
         output_type="json",
         output_mode="pass_through",
-        chosen_patterns=["text_to_json"],
+        chosen_patterns=["extract_structured_fields"],
         required_capabilities=["input_text", "output_mode_pass_through"],
     )
     json_state.output_schema_evidence = _output_schema_evidence(schema)
@@ -473,7 +473,7 @@ def test_compile_create_intent_applies_exact_terminal_output_schema_evidence() -
         input_type="text",
         output_type="json",
         output_mode="pass_through",
-        chosen_patterns=["text_to_json"],
+        chosen_patterns=["extract_structured_fields"],
         required_capabilities=["input_text", "output_mode_pass_through"],
     )
     state.output_schema_evidence = _output_schema_evidence(schema)

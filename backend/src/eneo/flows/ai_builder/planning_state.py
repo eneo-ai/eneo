@@ -158,8 +158,20 @@ class ArchitectureCommitDraft(_PlanningModel):
     @model_validator(mode="after")
     def _at_most_one_compiled_chain_pattern(self) -> "ArchitectureCommitDraft":
         from eneo.flows.ai_builder.pattern_registry import (
+            PATTERN_REGISTRY,
             compiled_chain_pattern_ids,
         )
+
+        unknown_pattern_ids = sorted(
+            pattern_id
+            for pattern_id in self.chosen_patterns
+            if pattern_id not in PATTERN_REGISTRY
+        )
+        if unknown_pattern_ids:
+            raise ValueError(
+                "architecture_commit.chosen_patterns contains unknown pattern ids: "
+                f"{unknown_pattern_ids}"
+            )
 
         compiled_pattern_ids = compiled_chain_pattern_ids(self.chosen_patterns)
         if len(compiled_pattern_ids) > 1:
