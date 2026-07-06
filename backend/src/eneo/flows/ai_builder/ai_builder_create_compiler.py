@@ -656,7 +656,15 @@ def _structured_fields_have_leaf(
 def _field_name_matches_required_leaf(field_name: str, required_name: str) -> bool:
     field_key = _field_name_match_key(field_name)
     required_key = _field_name_match_key(required_name)
-    return field_key == required_key or field_key.endswith(f"_{required_key}")
+    if field_key == required_key:
+        return True
+    if not field_key.endswith(f"_{required_key}"):
+        return False
+    logger.info(
+        "ai_builder_source_reader_contract_fuzzy_leaf_match",
+        extra={"field_name": field_name, "required_name": required_name},
+    )
+    return True
 
 
 def _field_name_match_key(value: str) -> str:

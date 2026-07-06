@@ -673,9 +673,9 @@ def is_citation_capable_step(
       `inline_inref_sidecar` citation mode, AND
     - `output_type` is `TEXT` (the only artefact the citation sidecar
       attaches to today), AND
-    - `output_mode` is neither `TEMPLATE_FILL` nor `TRANSCRIBE_ONLY`
-      (template-fill is a docx pathway; transcribe-only has no source
-      documents to cite).
+    - `output_mode` is neither `TEMPLATE_FILL`, `TRANSCRIBE_ONLY`, nor
+      `RENDER_VERBATIM` (template-fill and render-verbatim are document
+      rendering pathways; transcribe-only has no source documents to cite).
 
     `output_config` stays typed as `object` because `resolve_citation_mode`
     itself already tolerates any shape — a non-dict payload collapses to

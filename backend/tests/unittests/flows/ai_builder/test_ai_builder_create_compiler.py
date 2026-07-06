@@ -4819,6 +4819,25 @@ def test_outline_compile_context_treats_architecture_any_input_as_no_override() 
     assert context.runtime_input_type is None
 
 
+def test_outline_compile_context_maps_resolved_runtime_input_slot_to_authoring_enum() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="structured_answer",
+            confidence="high",
+        )
+    }
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_type is InputType.DOCUMENT
+
+
 def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() -> None:
     outline = parse_create_flow_intent_arguments(
         {
@@ -7968,6 +7987,45 @@ def test_compile_create_steps_to_spec_does_not_repeat_already_named_source_captu
 
     assert SOURCE_CAPTURE_HEADING not in compiled.steps[0].assistant_spec.instructions
     assert validate_spec(compiled).valid
+
+
+def test_compile_create_steps_to_spec_logs_fuzzy_source_leaf_match(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(
+        logging.INFO,
+        logger="eneo.flows.ai_builder.ai_builder_create_compiler",
+    )
+
+    compiled = _compile_create_steps(
+        flow_name="Document title",
+        terminal_output_schema={
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+        },
+        steps=[
+            NewStepDraft(
+                name="Read source",
+                instructions="Extract source facts.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                output_fields=[_field("document_title", "string")],
+            ),
+            NewStepDraft(
+                name="Return title",
+                instructions="Return the title.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+            ),
+        ],
+    )
+
+    reader_contract = compiled.steps[0].output_contract
+    assert reader_contract is not None
+    assert set(reader_contract["properties"]) == {"document_title"}
+    assert "ai_builder_source_reader_contract_fuzzy_leaf_match" in caplog.text
 
 
 def test_compile_create_steps_to_spec_caps_source_capture_fields() -> None:
