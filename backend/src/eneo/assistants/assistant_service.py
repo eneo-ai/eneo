@@ -13,7 +13,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
     TokenUsage,
 )
-from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.assistants.api.assistant_models import AssistantResponse, KnowledgeMode
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_repo import AssistantRepository
@@ -39,6 +39,7 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
 from eneo.icons.icon_repo import IconRepository
+from eneo.knowledge_mcp import build_knowledge_mcp_server
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
@@ -613,6 +614,7 @@ class AssistantService:
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
         inline_file_text: Optional[bool] = None,
+        knowledge_mode: Optional[KnowledgeMode] = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -851,29 +853,17 @@ class AssistantService:
             description=description,
             insight_enabled=insight_enabled,
             inline_file_text=inline_file_text,
+            knowledge_mode=knowledge_mode,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
         )
 
-        # Validate mutual exclusivity: knowledge and MCP servers cannot both be active.
-        # Only check when either side is being updated to avoid false positives on
-        # unrelated updates (e.g. renaming an assistant).
         knowledge_changing = (
             groups is not None
             or websites is not None
             or integration_knowledge_ids is not None
         )
-        mcp_changing = mcp_server_ids is not None
-        if knowledge_changing or mcp_changing:
-            will_have_mcp = (
-                mcp_server_ids is not None and len(mcp_server_ids) > 0
-            ) or (mcp_server_ids is None and assistant.has_mcp())
-            if assistant.has_knowledge() and will_have_mcp:
-                raise BadRequestException(
-                    "Knowledge and MCP servers cannot both be active on an assistant. "
-                    "Remove one before enabling the other."
-                )
 
         # Only validate space references when the relevant fields are actually changing
         self.validate_space_assistant(
@@ -1861,6 +1851,23 @@ class AssistantService:
         else:
             web_search_results = []
 
+        # Tool-mode knowledge: attach an ephemeral loopback MCP server whose
+        # search tool covers this assistant's knowledge, scoped by a short-lived
+        # token. Models without tool calling never get a server and fall back
+        # to legacy retrieve-and-inject inside Assistant.ask.
+        knowledge_mcp_server = None
+        if (
+            assistant_to_ask.knowledge_mode == KnowledgeMode.TOOL
+            and assistant_to_ask.has_knowledge()
+            and effective_completion_model.supports_tool_calling
+        ):
+            scoped_token = self.auth_service.create_scoped_mcp_token(
+                self.user, assistant_id=assistant_to_ask.id
+            )
+            knowledge_mcp_server = await build_knowledge_mcp_server(
+                token=scoped_token, tenant_id=self.user.tenant_id
+            )
+
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
             completion_service=self.completion_service,
@@ -1875,6 +1882,7 @@ class AssistantService:
             mcp_servers_override=mcp_servers_override,
             prompt_override=prompt_override,
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
+            knowledge_mcp_server=knowledge_mcp_server,
         )
 
         # TODO: Separate the response based on stream true or false

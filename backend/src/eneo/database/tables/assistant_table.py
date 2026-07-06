@@ -32,6 +32,11 @@ class Assistants(BasePublic):
     # large CSV from blowing the context window. Default True preserves the
     # historical inline-the-extracted-text behavior for existing assistants.
     inline_file_text: Mapped[bool] = mapped_column(default=True, server_default="true")
+    # How attached knowledge reaches the model: "tool" exposes it as a
+    # searchable MCP tool the model calls on demand; "inject" retrieves on
+    # every turn and packs chunks into the prompt (legacy behavior, also the
+    # runtime fallback for models without tool calling).
+    knowledge_mode: Mapped[str] = mapped_column(default="tool", server_default="tool")
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # TODO: refactor since this is a somewhat weird solution having a

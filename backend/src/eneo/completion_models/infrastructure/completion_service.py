@@ -257,6 +257,7 @@ class CompletionService:
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
         inline_file_text: bool = True,
+        knowledge_catalog: str = "",
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -341,6 +342,7 @@ class CompletionService:
                 web_search_results=web_search_results,
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
+                knowledge_catalog=knowledge_catalog,
                 vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
-from eneo.assistants.api.assistant_models import AssistantType
+from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.completion_service import CompletionService
@@ -72,6 +72,7 @@ class Assistant(Entity):
         description: Optional[str] = None,
         insight_enabled: bool = False,
         inline_file_text: bool = True,
+        knowledge_mode: KnowledgeMode = KnowledgeMode.TOOL,
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
@@ -99,6 +100,7 @@ class Assistant(Entity):
         self.description = description
         self.insight_enabled = insight_enabled
         self.inline_file_text = inline_file_text
+        self.knowledge_mode = knowledge_mode
         self.data_retention_days = data_retention_days
         self.type = (
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
@@ -248,6 +250,29 @@ class Assistant(Entity):
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)
 
+    def build_knowledge_catalog(self) -> str:
+        """Short prompt block telling the model what it can search in tool mode.
+
+        Token-cheap (names only): the full content stays behind the
+        ``search_knowledge`` tool.
+        """
+        lines: list[str] = []
+        for collection in self.collections:
+            lines.append(f"- Collection: {collection.name}")
+        for website in self.websites:
+            name = website.name or website.url
+            lines.append(f"- Website: {name}")
+        for knowledge in self.integration_knowledge_list:
+            lines.append(f"- Integration: {knowledge.name}")
+
+        if not lines:
+            return ""
+        return (
+            "You have access to the following knowledge sources via the "
+            "knowledge search tool. When a question may be answered by them, "
+            "search before answering; do not guess.\n" + "\n".join(lines)
+        )
+
     def update(
         self,
         name: str | None = None,
@@ -264,6 +289,7 @@ class Assistant(Entity):
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
         inline_file_text: bool | None = None,
+        knowledge_mode: KnowledgeMode | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -305,6 +331,9 @@ class Assistant(Entity):
 
         if inline_file_text is not None:
             self.inline_file_text = inline_file_text
+
+        if knowledge_mode is not None:
+            self.knowledge_mode = knowledge_mode
 
         if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
@@ -366,6 +395,7 @@ class Assistant(Entity):
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
         completion_prompt_files: list["File"] | None = None,
+        knowledge_mcp_server: Optional["MCPServer"] = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -400,7 +430,13 @@ class Assistant(Entity):
             effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
         )
 
-        if self.has_knowledge():
+        # Tool mode: the loopback knowledge-MCP server (when provided by the
+        # orchestrating service) replaces per-turn retrieval — the model calls
+        # its search tool on demand instead of every turn's context being
+        # packed with chunks. Inject mode (or a model without tool calling,
+        # which never gets a server) keeps the legacy retrieve-and-inject path.
+        use_knowledge_tool = knowledge_mcp_server is not None
+        if self.has_knowledge() and not use_knowledge_tool:
             datastore_result = await references_service.get_references(
                 question=question,
                 session=session,
@@ -420,6 +456,9 @@ class Assistant(Entity):
             if mcp_servers_override is not None
             else self.mcp_servers
         )
+        if knowledge_mcp_server is not None:
+            effective_mcp_servers = list(effective_mcp_servers) + [knowledge_mcp_server]
+        knowledge_catalog = self.build_knowledge_catalog() if use_knowledge_tool else ""
 
         response = await completion_service.get_response(
             model=completion_model,
@@ -437,9 +476,10 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=list(web_search_results or []),
-            mcp_servers=[] if self.has_knowledge() else effective_mcp_servers,
+            mcp_servers=effective_mcp_servers,
             require_tool_approval=require_tool_approval,
             inline_file_text=self.inline_file_text,
+            knowledge_catalog=knowledge_catalog,
         )
 
         return response, datastore_result

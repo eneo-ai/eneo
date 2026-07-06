@@ -103,9 +103,11 @@ def _turn_tokens(
     ) + _image_files_tokens(images, model_name)
 
 
-MIN_PERCENTAGE_KNOWLEDGE = (
-    0.8  # Strive towards a minimum of 80% of the context as knowledge
-)
+# Share of the context window reserved for knowledge chunks in inject mode
+# (history is capped to the remainder). Inject mode is the legacy path and the
+# fallback for models without tool calling; tool mode retrieves on demand and
+# never reserves this budget.
+MIN_PERCENTAGE_KNOWLEDGE = 0.5
 
 
 class _InfoBlobChunkLike(Protocol):
@@ -195,6 +197,7 @@ class _Prompt:
         super().__init__()
         self.prompt: str | None = None
         self.knowledge: str | None = None
+        self.knowledge_catalog: str | None = None
         self.web_search_result: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
@@ -219,6 +222,9 @@ class _Prompt:
 
         if self.knowledge:
             components.append(self.knowledge)
+
+        if self.knowledge_catalog:
+            components.append(self.knowledge_catalog)
 
         if self.web_search_result:
             components.append(self.web_search_result)
@@ -413,6 +419,9 @@ class _Prompt:
             information_chunks=web_search_results
         )
 
+    def add_knowledge_catalog(self, catalog: str) -> None:
+        self.knowledge_catalog = catalog or None
+
     def add_knowledge(
         self, chunks: Sequence[_InfoBlobChunkLike], max_tokens: int
     ) -> None:
@@ -588,6 +597,7 @@ class ContextBuilder:
         vision: bool = True,
         file_reference_urls: dict[UUID, str] | None = None,
         inline_file_text: bool = True,
+        knowledge_catalog: str = "",
     ) -> Context:
         if files is None:
             files = []
@@ -665,6 +675,9 @@ class ContextBuilder:
         )
         # Add web search results first so references prompt appears before knowledge
         _prompt.add_web_search_result(web_search_results=web_search_results)
+        # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
+        # content itself stays behind the knowledge-MCP search tool.
+        _prompt.add_knowledge_catalog(knowledge_catalog)
         tokens_used += _prompt.num_tokens
 
         # Create the messages. When knowledge chunks are present, reserve 80%

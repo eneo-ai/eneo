@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import KnowledgeMode
 from eneo.assistants.assistant import Assistant
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.database.tables.assistant_table import Assistants
@@ -171,6 +172,7 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             inline_file_text=assistant_in_db.inline_file_text,
+            knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             icon_id=assistant_in_db.icon_id,
         )
 
@@ -286,6 +288,7 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             inline_file_text=assistant_in_db.inline_file_text,
+            knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,

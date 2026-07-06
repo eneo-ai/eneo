@@ -53,6 +53,18 @@ class AssistantType(str, Enum):
     DEFAULT_ASSISTANT = "default-assistant"
 
 
+class KnowledgeMode(str, Enum):
+    """How attached knowledge reaches the model.
+
+    TOOL exposes knowledge as a searchable MCP tool the model calls on demand;
+    INJECT retrieves on every turn and packs chunks into the prompt (legacy
+    behavior, also the runtime fallback for models without tool calling).
+    """
+
+    TOOL = "tool"
+    INJECT = "inject"
+
+
 class ModelInfo(BaseModel):
     """Information about the model used by the assistant."""
 
@@ -236,6 +248,14 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "(e.g. to avoid large files blowing the context window)."
         ),
     )
+    knowledge_mode: Optional[KnowledgeMode] = Field(
+        default=None,
+        description=(
+            "How attached knowledge reaches the model: 'tool' exposes it as a "
+            "searchable MCP tool the model calls on demand; 'inject' retrieves on "
+            "every turn and packs results into the prompt."
+        ),
+    )
     data_retention_days: Optional[int] = None
     metadata_json: Union[dict[str, object], None, NotProvided] = Field(
         default=NOT_PROVIDED,
@@ -368,6 +388,13 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "is surfaced to the model as a signed URL only (False)."
         ),
     )
+    knowledge_mode: KnowledgeMode = Field(
+        description=(
+            "How attached knowledge reaches the model: 'tool' (searchable MCP tool, "
+            "called on demand) or 'inject' (retrieved and packed into the prompt on "
+            "every turn)."
+        ),
+    )
     data_retention_days: Optional[int] = Field(
         default=None,
         description="Number of days to retain data for this assistant",
@@ -399,6 +426,7 @@ class DefaultAssistant(AssistantPublic):
     completion_model: Optional[CompletionModelSparse] = None
     insight_enabled: bool = False
     inline_file_text: bool = True
+    knowledge_mode: KnowledgeMode = KnowledgeMode.TOOL
 
 
 SessionInDB.model_rebuild()

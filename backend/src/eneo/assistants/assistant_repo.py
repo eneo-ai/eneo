@@ -533,6 +533,7 @@ class AssistantRepository:
                 type=assistant.type,
                 insight_enabled=assistant.insight_enabled,
                 inline_file_text=assistant.inline_file_text,
+                knowledge_mode=assistant.knowledge_mode,
                 data_retention_days=assistant.data_retention_days,
                 metadata_json=assistant.metadata_json,
                 icon_id=assistant.icon_id,
