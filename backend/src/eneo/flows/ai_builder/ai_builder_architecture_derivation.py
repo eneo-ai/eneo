@@ -82,15 +82,25 @@ def _input_type_from_state(state: PlanningState) -> FlowInputType | None:
     slot = state.resolved_slots.get("primary_runtime_input")
     if slot is None:
         return None
+    return flow_input_type_from_primary_runtime_input_value(slot.value)
+
+
+def flow_input_type_from_primary_runtime_input_value(
+    value: str,
+) -> FlowInputType | None:
+    """Map persisted primary-runtime-input slot values to Flow input types."""
+
     return {
         "audio": FlowInputType.AUDIO,
+        "document": FlowInputType.DOCUMENT,
         "documents": FlowInputType.DOCUMENT,
+        "file": FlowInputType.FILE,
         "json": FlowInputType.JSON,
         "text": FlowInputType.TEXT,
         # The runtime has one primary input type. `file` is the closest
         # engine primitive for mixed pasted/uploaded material.
         "text_and_documents": FlowInputType.FILE,
-    }.get(slot.value)
+    }.get(value)
 
 
 def _output_type_from_state(state: PlanningState) -> FlowOutputType | None:
@@ -194,4 +204,7 @@ def _primary_pattern_id(
     return None
 
 
-__all__ = ["derive_architecture_commit_draft"]
+__all__ = [
+    "derive_architecture_commit_draft",
+    "flow_input_type_from_primary_runtime_input_value",
+]

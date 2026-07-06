@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
+    flow_input_type_from_primary_runtime_input_value,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -1091,15 +1092,10 @@ def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType |
     slot = state.resolved_slots.get("primary_runtime_input")
     if slot is None:
         return None
-    return {
-        "audio": InputType.AUDIO,
-        "document": InputType.DOCUMENT,
-        "documents": InputType.DOCUMENT,
-        "file": InputType.FILE,
-        "json": InputType.JSON,
-        "text": InputType.TEXT,
-        "text_and_documents": InputType.FILE,
-    }.get(slot.value)
+    flow_input_type = flow_input_type_from_primary_runtime_input_value(slot.value)
+    if flow_input_type is None:
+        return None
+    return InputType(flow_input_type.value)
 
 
 def _architecture_envelope_from_planning_state(

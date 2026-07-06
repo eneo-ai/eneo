@@ -254,6 +254,47 @@ def test_structured_analysis_slot_does_not_force_quality_chain() -> None:
     assert draft.aggregation_intent == "linear"
 
 
+@pytest.mark.parametrize("slot_value", ["document", "documents"])
+def test_derives_document_input_aliases(slot_value: str) -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input=slot_value,
+            terminal_output="structured_text",
+            document_material_scope="single_document_case",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "document",
+            "output_type": "text",
+            "output_mode": "pass_through",
+        }
+    ]
+    assert draft.chosen_patterns == ["document_to_structured_report"]
+
+
+def test_derives_file_input_slot() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="file",
+            terminal_output="structured_text",
+            document_material_scope="single_document_case",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "file",
+            "output_type": "text",
+            "output_mode": "pass_through",
+        }
+    ]
+    assert draft.chosen_patterns == ["document_to_structured_report"]
+
+
 def test_document_pdf_ignores_structured_analysis_slot() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(
