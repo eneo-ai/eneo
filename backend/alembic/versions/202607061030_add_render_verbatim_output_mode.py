@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "202607061030_render_verbatim_mode"
+revision = "202607061030_render_verbatim"
 down_revision = "202607021200_merge_eneo_flows"
 branch_labels = None
 depends_on = None
