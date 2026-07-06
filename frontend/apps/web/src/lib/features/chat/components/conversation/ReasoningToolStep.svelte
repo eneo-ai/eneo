@@ -38,16 +38,22 @@
   );
   const canExpand = $derived(hasArgs || canViewResult);
 
-  async function loadResult() {
-    if (resultLoaded || resultLoading || !onLoadResult) return;
+  async function loadResult(force = false) {
+    if (resultLoading || (resultLoaded && !force) || !onLoadResult) return;
 
     resultLoading = true;
     try {
       result = await onLoadResult();
-      resultLoaded = true;
     } catch (error) {
-      toastError(error, m.mcp_tool_response_load_error());
+      // A failed automatic attempt stays silent: mid-stream the result is
+      // simply not persisted yet (404), and toasting would fire on every
+      // still-streaming turn. Manual re-expands (force) surface real errors.
+      if (force) toastError(error, m.mcp_tool_response_load_error());
     } finally {
+      // Attempted is attempted, success or not — the auto-load effect below
+      // must never retry on its own, or a pending result becomes a request
+      // loop against the 404ing result endpoint.
+      resultLoaded = true;
       resultLoading = false;
     }
   }
@@ -56,12 +62,14 @@
     if (!canExpand) return;
     argsOpen = !argsOpen;
     if (argsOpen && canViewResult) {
-      void loadResult();
+      // Re-opening retries when nothing was captured (e.g. the first attempt
+      // ran before the stream persisted the result).
+      void loadResult(result == null);
     }
   }
 
   $effect(() => {
-    if (argsOpen && canViewResult) {
+    if (argsOpen && canViewResult && !resultLoaded) {
       void loadResult();
     }
   });
