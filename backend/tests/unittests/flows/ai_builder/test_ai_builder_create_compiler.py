@@ -4819,14 +4819,27 @@ def test_outline_compile_context_treats_architecture_any_input_as_no_override() 
     assert context.runtime_input_type is None
 
 
-def test_outline_compile_context_maps_resolved_runtime_input_slot_to_authoring_enum() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("slot_value", "expected_input_type"),
+    [
+        ("audio", InputType.AUDIO),
+        ("document", InputType.DOCUMENT),
+        ("documents", InputType.DOCUMENT),
+        ("file", InputType.FILE),
+        ("json", InputType.JSON),
+        ("text", InputType.TEXT),
+        ("text_and_documents", InputType.FILE),
+    ],
+)
+def test_outline_compile_context_maps_resolved_runtime_input_slot_to_authoring_enum(
+    slot_value: str,
+    expected_input_type: InputType,
+) -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
         "primary_runtime_input": ResolvedSlot(
             name="primary_runtime_input",
-            value="documents",
+            value=slot_value,
             source="structured_answer",
             confidence="high",
         )
@@ -4835,7 +4848,7 @@ def test_outline_compile_context_maps_resolved_runtime_input_slot_to_authoring_e
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
-    assert context.runtime_input_type is InputType.DOCUMENT
+    assert context.runtime_input_type is expected_input_type
 
 
 def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() -> None:
