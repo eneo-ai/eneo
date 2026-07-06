@@ -479,9 +479,9 @@ class ContextBuilder:
             files_string = build_files_string(text_files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
 
-        # Append fetchable signed URLs (current turn only — history URLs would be
-        # expired). The model keeps the inlined text above and additionally gets
-        # a reference it can hand to a URL-accepting tool.
+        # Append fetchable signed URLs (minted fresh per request, so history
+        # turns get working URLs too). The model keeps any inlined text above
+        # and additionally gets a reference it can hand to a URL-accepting tool.
         if file_reference_urls:
             references_string = build_file_references_string(files, file_reference_urls)
             if references_string:
@@ -509,6 +509,8 @@ class ContextBuilder:
         min_len: int = 3,
         model_name: str = "",
         vision: bool = True,
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
@@ -517,10 +519,15 @@ class ContextBuilder:
         total_tokens = 0
 
         for message in reversed(session.questions):
+            # History replays each turn's files through the same inline-vs-URL
+            # rules as the current turn: URL-only files must not have their
+            # text re-inlined on follow-ups.
             question = self._build_input(
                 message.question,
                 self._get_files_by_type(message.files, FileType.TEXT),
                 model_name=model_name,
+                file_reference_urls=file_reference_urls,
+                inline_file_text=inline_file_text,
             )
             answer = message.answer
             # History can contain images (e.g. after a model switch) — never
@@ -675,6 +682,8 @@ class ContextBuilder:
             min_len=3,
             model_name=model_name,
             vision=vision,
+            file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         tokens_used += tokens_used_messages
 

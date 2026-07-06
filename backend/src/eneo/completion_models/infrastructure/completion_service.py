@@ -289,8 +289,16 @@ class CompletionService:
 
         # Mint signed download URLs for attached files whose original bytes live
         # in external storage, so the model can hand them to a URL-accepting MCP
-        # tool. Current turn only; requires a public origin to form absolute URLs.
-        file_reference_urls = self._build_file_reference_urls(files)
+        # tool. Covers history files too — URLs are minted fresh per request, and
+        # history replay must honor URL-only mode (inline_file_text=False) the
+        # same way the current turn does, or the skipped text leaks back into
+        # context on every follow-up. Requires a public origin for absolute URLs.
+        history_files = [
+            file
+            for question in (session.questions if session else [])
+            for file in question.files
+        ]
+        file_reference_urls = self._build_file_reference_urls(files + history_files)
 
         # Create MCP proxy session before building the context, so the tool
         # definitions it will register can be counted toward the token budget.
