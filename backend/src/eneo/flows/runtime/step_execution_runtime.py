@@ -31,6 +31,7 @@ from eneo.flows.runtime.inherited_citations import (
     collect_inherited_citation_context,
 )
 from eneo.flows.runtime.models import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -572,6 +573,14 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
         payload["structured"] = output.structured_output
     if output.output_payload_extensions:
         payload.update(output.output_payload_extensions)
+    if output.generated_file_ids:
+        payload[OUTPUT_TEXT_OVERFLOW_KEY] = {
+            "generated_file_ids": [
+                str(file_id) for file_id in output.generated_file_ids
+            ],
+            "inline_text_bytes": len(output.persisted_text.encode("utf-8")),
+            "full_text_bytes": len(output.full_text.encode("utf-8")),
+        }
     return payload
 
 

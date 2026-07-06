@@ -77,6 +77,7 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.models import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -85,6 +86,7 @@ from eneo.flows.runtime.step_execution_result import (
 )
 from eneo.flows.runtime.step_execution_runtime import (
     RAG_RETRIEVAL_QUERY_CHAR_LIMIT,
+    build_output_payload,
     derive_rag_retrieval_query,
 )
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
@@ -2084,6 +2086,23 @@ async def test_apply_output_cap_handles_utf8_byte_limit(user):
     create_arg = executor.file_repo.add.await_args.args[0]
     assert create_arg.owner_type == PrincipalType.USER
     assert create_arg.owner_user_id == user.id
+
+
+def test_build_output_payload_marks_capped_text_output():
+    file_id = uuid4()
+    output = _minimal_step_execution_output()
+    output.full_text = "abcdefghi"
+    output.persisted_text = "abcd"
+    output.generated_file_ids = [file_id]
+
+    payload = build_output_payload(output)
+
+    assert payload["text"] == "abcd"
+    assert payload[OUTPUT_TEXT_OVERFLOW_KEY] == {
+        "generated_file_ids": [str(file_id)],
+        "inline_text_bytes": 4,
+        "full_text_bytes": 9,
+    }
 
 
 @pytest.mark.asyncio

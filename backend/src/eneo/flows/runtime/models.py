@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult
@@ -12,6 +12,9 @@ from eneo.flows.flow_run_provenance import AttemptStartProvenance
 if TYPE_CHECKING:
     from eneo.files.file_models import File
     from eneo.spaces.space import Space
+
+
+OUTPUT_TEXT_OVERFLOW_KEY: Final = "text_overflow"
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:

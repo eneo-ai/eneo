@@ -39,6 +39,7 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.models import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.main.exceptions import TypedIOValidationException
@@ -166,11 +167,14 @@ def _completed_step_result(
     step_order: int,
     text: str,
     structured: dict | list | None = None,
+    text_overflow: dict | None = None,
 ) -> FlowStepResult:
     now = datetime.now(timezone.utc)
-    payload = {"text": text}
+    payload: dict[str, object] = {"text": text}
     if structured is not None:
         payload["structured"] = structured
+    if text_overflow is not None:
+        payload[OUTPUT_TEXT_OVERFLOW_KEY] = text_overflow
     return FlowStepResult(
         id=uuid4(),
         flow_run_id=run_id,
@@ -293,6 +297,11 @@ async def test_resolve_step_input_json_to_json_prefers_structured(user):
             step_order=1,
             text="truncated...",  # simulates output cap truncation
             structured={"full": "data", "not_truncated": True},
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 12,
+                "full_text_bytes": 8192,
+            },
         )
     ]
     step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
@@ -362,6 +371,45 @@ async def test_resolve_step_input_json_question_binding_overrides_previous_struc
     assert resolved.used_question_binding is True
     summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
     assert len(summaries) == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_question_binding_rejects_capped_text_ref(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="truncated",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 9,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="flow_input",
+        input_type="text",
+        input_bindings={"question": "Transkribering: {{ step_1.output.text }}"},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc.value.code == "typed_io_input_too_large"
+    assert "input_bindings.question" in str(exc.value)
+    assert "step 1 text" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -820,6 +868,40 @@ async def test_resolve_step_input_previous_step_with_content_emits_underlag_summ
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_previous_step_rejects_capped_output_stub(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="truncated",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 9,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="text")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc.value.code == "typed_io_input_too_large"
+    assert "step 1 text" in str(exc.value)
+    assert "generated output file" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
@@ -867,6 +949,48 @@ async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(u
     assert "all_previous_steps" in summaries[0].message
     assert "1 prior step" in summaries[0].message
     assert f"{len(resolved.text.encode('utf-8'))} bytes" in summaries[0].message
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_rejects_capped_state_output(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    cached = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="truncated",
+        text_overflow={
+            "generated_file_ids": [str(uuid4())],
+            "inline_text_bytes": 9,
+            "full_text_bytes": 8192,
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: cached},
+        prior_results=[cached],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="text"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [cached])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[cached],
+            state=state,
+        )
+
+    assert exc.value.code == "typed_io_input_too_large"
+    assert "all_previous_steps" in str(exc.value)
+    assert "step 1 text" in str(exc.value)
 
 
 @pytest.mark.asyncio

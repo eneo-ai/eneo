@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Sequence
@@ -14,6 +15,7 @@ from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.models import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -26,6 +28,7 @@ from eneo.flows.runtime.transcription_runtime import (
 )
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.template_reference_analyzer import (
+    TemplateReference,
     analyze_template,
     consumes_runtime_input,
 )
@@ -91,6 +94,7 @@ async def resolve_step_input(
     else:
         source_text = resolve_input_source_text(
             input_source=step.input_source,
+            input_type=step.input_type,
             run=run,
             step_order=step.step_order,
             prior_results=prior_results,
@@ -170,6 +174,19 @@ async def resolve_step_input(
     if bindings is not None:
         question_template = effective_question_binding(bindings)
         if question_template is not None:
+            references = analyze_template(
+                question_template,
+                step_refs=state.step_ref_mapping if state is not None else {},
+                form_field_names=set(),
+            )
+            _raise_if_text_template_references_overflowed_output(
+                references=references,
+                prior_results=state.completed_by_order.values()
+                if state is not None
+                else prior_results,
+                consuming_step_order=step.step_order,
+                input_source="input_bindings.question",
+            )
             interpolation_context = deps.variable_resolver.build_context(
                 run.input_payload_json,
                 prior_results,
@@ -183,11 +200,6 @@ async def resolve_step_input(
             )
             input_text = interpolated_question
             used_question_binding = True
-            references = analyze_template(
-                question_template,
-                step_refs=state.step_ref_mapping if state is not None else {},
-                form_field_names=set(),
-            )
             diagnostics.append(
                 StepDiagnostic(
                     code="flow_underlag_summary",
@@ -434,6 +446,7 @@ def enforce_inline_input_cap(
 def resolve_input_source_text(
     *,
     input_source: str,
+    input_type: str = "text",
     run: FlowRun,
     step_order: int,
     prior_results: list[FlowStepResult],
@@ -453,6 +466,12 @@ def resolve_input_source_text(
             (item for item in prior_results if item.step_order == step_order - 1), None
         )
         if previous and isinstance(previous.output_payload_json, dict):
+            if not _can_read_structured_output(previous, input_type=input_type):
+                _raise_if_output_text_overflowed(
+                    previous,
+                    consuming_step_order=step_order,
+                    input_source=input_source,
+                )
             text = str(previous.output_payload_json.get("text", ""))
             if not text.strip():
                 logger.warning(
@@ -474,7 +493,17 @@ def resolve_input_source_text(
         return ""
     if input_source == "all_previous_steps":
         if state:
+            _raise_if_any_prior_output_text_overflowed(
+                prior_results=state.completed_by_order.values(),
+                consuming_step_order=step_order,
+                input_source=input_source,
+            )
             return state.all_previous_text_before(step_order)
+        _raise_if_any_prior_output_text_overflowed(
+            prior_results=prior_results,
+            consuming_step_order=step_order,
+            input_source=input_source,
+        )
         parts: list[str] = []
         for previous in sorted(prior_results, key=lambda item: item.step_order):
             if previous.step_order >= step_order:
@@ -491,3 +520,76 @@ def resolve_input_source_text(
             f"Input source '{input_source}' is not yet supported in runtime execution."
         )
     raise BadRequestException(f"Unsupported input source '{input_source}'.")
+
+
+def _raise_if_text_template_references_overflowed_output(
+    *,
+    references: Sequence[TemplateReference],
+    prior_results: Iterable[FlowStepResult],
+    consuming_step_order: int,
+    input_source: str,
+) -> None:
+    results_by_order = {
+        result.step_order: result
+        for result in prior_results
+        if result.step_order < consuming_step_order
+    }
+    for reference in references:
+        if reference.tail not in {"output", "output.text"}:
+            continue
+        referenced_step_order = reference.step_order
+        if referenced_step_order is None:
+            continue
+        result = results_by_order.get(referenced_step_order)
+        if result is None:
+            continue
+        _raise_if_output_text_overflowed(
+            result,
+            consuming_step_order=consuming_step_order,
+            input_source=input_source,
+        )
+
+
+def _raise_if_any_prior_output_text_overflowed(
+    *,
+    prior_results: Iterable[FlowStepResult],
+    consuming_step_order: int,
+    input_source: str,
+) -> None:
+    for result in prior_results:
+        if result.step_order >= consuming_step_order:
+            continue
+        _raise_if_output_text_overflowed(
+            result,
+            consuming_step_order=consuming_step_order,
+            input_source=input_source,
+        )
+
+
+def _can_read_structured_output(result: FlowStepResult, *, input_type: str) -> bool:
+    if input_type != "json":
+        return False
+    payload = result.output_payload_json
+    if not isinstance(payload, dict):
+        return False
+    return isinstance(payload.get("structured"), (dict, list))
+
+
+def _raise_if_output_text_overflowed(
+    result: FlowStepResult,
+    *,
+    consuming_step_order: int,
+    input_source: str,
+) -> None:
+    payload = result.output_payload_json
+    if not isinstance(payload, dict):
+        return
+    overflow = payload.get(OUTPUT_TEXT_OVERFLOW_KEY)
+    if not isinstance(overflow, dict):
+        return
+    raise TypedIOValidationException(
+        f"Step {consuming_step_order}: input_source '{input_source}' cannot consume "
+        f"step {result.step_order} text because that output exceeded inline storage "
+        "and was stored as generated output file(s).",
+        code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+    )
