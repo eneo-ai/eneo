@@ -52,11 +52,6 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
-from eneo.flows.ai_builder.ai_builder_underlag_policy import (
-    TARGETED_UNDERLAG_SOFT_CAP,
-    is_document_renderer,
-    is_source_surfacing_text,
-)
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -132,6 +127,10 @@ class CriticInvariant:
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────
+
+_SOURCE_SURFACING_INPUT_TYPES = frozenset(
+    {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
+)
 
 # Markers for the user explicitly asking for structured extraction for
 # downstream reuse. Terminal JSON output is resolved by `OutputIntentResolution`;
@@ -733,9 +732,33 @@ def _is_renderer_step(step: StepSpec) -> bool:
     """True for template-fill / DOCX / PDF stubs — document assembly steps
     the backend wires, not compositional content steps a stitch step would
     reference by field path."""
-    return is_document_renderer(
+    return _is_document_renderer(
         output_type=step.output_type,
         output_mode=step.output_mode,
+    )
+
+
+def _is_document_renderer(
+    *,
+    output_type: OutputType,
+    output_mode: OutputMode | None = None,
+) -> bool:
+    return output_mode == OutputMode.TEMPLATE_FILL or output_type in {
+        OutputType.DOCX,
+        OutputType.PDF,
+    }
+
+
+def _is_source_surfacing_text(
+    *,
+    input_source: InputSource,
+    input_type: InputType,
+    output_type: OutputType,
+) -> bool:
+    return (
+        input_source == InputSource.FLOW_INPUT
+        and input_type in _SOURCE_SURFACING_INPUT_TYPES
+        and output_type == OutputType.TEXT
     )
 
 
@@ -1159,7 +1182,7 @@ def _section_writer_count(spec: FlowDraftSpecCore) -> int:
         if step.output_type == OutputType.TEXT
         and not _is_renderer_step(step)
         and not _looks_like_review_only_text_step(spec, step)
-        and not is_source_surfacing_text(
+        and not _is_source_surfacing_text(
             input_source=step.input_source,
             input_type=step.input_type,
             output_type=step.output_type,
@@ -1275,11 +1298,6 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     - aggregation_intent == compare: true document-comparison flows
       intentionally need broad fan-in. Aggregate intent is not exempt
       because it is often inferred from document-output language.
-    - text-emitting prior content steps exceed `TARGETED_UNDERLAG_SOFT_CAP`:
-      body-coalescing many text priors via `uses_previous_outputs` is
-      unwieldy. JSON priors with output_contract bind via
-      `uses_previous_fields` and scale, so they do not count against
-      the cap.
     - <2 prior content steps emit JSON+output_contract: there is no
       fan-in to surface, only a 2-step refinement chain.
     - The composer's `input_bindings.question` already targets ≥2
@@ -1305,9 +1323,6 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
         step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
     ]
     if not priors:
-        return False
-    text_priors_count = sum(1 for step in priors if step.output_type == OutputType.TEXT)
-    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
         return False
     json_priors = [
         step

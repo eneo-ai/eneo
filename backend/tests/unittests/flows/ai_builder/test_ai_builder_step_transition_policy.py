@@ -7,7 +7,6 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
     supports_inline_inref_citation,
 )
-from eneo.flows.ai_builder.ai_builder_underlag_policy import is_source_surfacing_text
 from eneo.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
 )
@@ -125,6 +124,19 @@ def _effective_question(input_bindings: dict[str, object] | None) -> str:
     return question
 
 
+def _is_source_surfacing_text(
+    *,
+    input_source: InputSource,
+    input_type: InputType,
+    output_type: OutputType,
+) -> bool:
+    return (
+        input_source == InputSource.FLOW_INPUT
+        and input_type in {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
+        and output_type == OutputType.TEXT
+    )
+
+
 def _question_metrics(
     question: str,
     *,
@@ -148,7 +160,7 @@ def _question_metrics(
     source_step_refs = {
         step.plan_step_ref
         for step in spec.steps
-        if is_source_surfacing_text(
+        if _is_source_surfacing_text(
             input_source=step.input_source,
             input_type=step.input_type,
             output_type=step.output_type,

@@ -3405,11 +3405,9 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
     edit-mode, planner-authored selectors that miss priors, or future
     create-mode shapes the auto-binder does not yet cover.
 
-    Suppression mirrors `prefer_targeted_underlag`:
+    Suppression mirrors the remaining semantic exceptions:
     - `aggregation_intent` in {aggregate, compare}: those flows go
       through `multi_document_compare_requires_all_previous_steps`.
-    - >`TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
-      template stops being more legible than concatenation.
     - All priors are text-typed: there are no structured fields to
       pull, so no nudge is possible.
     - The composer's `input_bindings.question` already targets ≥2
@@ -3763,9 +3761,9 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
-    def test_silent_when_too_many_text_priors(self) -> None:
-        # Pins 78bf7994: the under-bind rule uses the same text-prior cap.
-
+    def test_fires_when_many_text_priors_still_drop_structured_json_priors(
+        self,
+    ) -> None:
         text_priors = [
             _step(
                 f"step_{chr(ord('a') + idx)}",
@@ -3820,11 +3818,12 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues), (
+            "the old text-prior cap must not suppress a previous_step composer "
+            "that still drops structured JSON priors"
+        )
 
-    def test_fires_when_many_json_priors_under_text_cap(self) -> None:
-        # Pins 78bf7994: JSON-heavy chains still need structured fan-in.
-
+    def test_fires_when_many_json_priors_are_available(self) -> None:
         transcription = _step(
             "step_a",
             "Transkribera",
