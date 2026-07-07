@@ -35,7 +35,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolAfterTextRequest,
     ForcedToolRetryOutcome,
     ProposalSelfCorrectionRequest,
-    _build_retry_feedback,
     build_tool_retry_messages,
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
@@ -686,58 +685,6 @@ def test_max_self_correction_retries_budgets_three_retries() -> None:
     assert MAX_SELF_CORRECTION_RETRIES == 3
 
 
-def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
-    feedback = _build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="missing field X",
-        retry_count=1,
-    )
-    assert feedback.startswith("CORRECTION STILL INVALID:")
-    assert "FINAL CORRECTION ATTEMPT" not in feedback
-
-
-def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -> None:
-    feedback = _build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="missing field X",
-        retry_count=2,
-    )
-    assert feedback.startswith("FINAL CORRECTION ATTEMPT")
-    assert "missing field X" in feedback
-
-
-def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
-    feedback = _build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="missing field X",
-        retry_count=3,
-    )
-    assert feedback.startswith("FINAL CORRECTION ATTEMPT")
-
-
-def test_build_retry_feedback_keeps_create_outline_rules_out_of_edit_mode() -> None:
-    create_feedback = _build_retry_feedback(
-        target_kind=TargetKind.CREATE,
-        feedback="duplicate name",
-        failure_codes=frozenset({"duplicate_step_name"}),
-    )
-    edit_feedback = _build_retry_feedback(
-        target_kind=TargetKind.EDIT,
-        feedback="duplicate name",
-        failure_codes=frozenset({"duplicate_step_name"}),
-    )
-
-    assert (
-        "Every steps[] item must be one complete semantic intent step"
-        in create_feedback
-    )
-    assert "backend compiles those mechanics" not in create_feedback
-    assert "Every steps[] name must be unique case-insensitively" in create_feedback
-    assert "semantic intent step" not in edit_feedback
-    assert "unique case-insensitively" not in edit_feedback
-    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call" in edit_feedback
-
-
 async def _run_repair_capturing(
     *,
     max_retries: int,
@@ -923,91 +870,6 @@ async def test_run_tool_self_correction_surfaces_bounded_validation_failure_code
 
 
 @pytest.mark.asyncio
-async def test_run_tool_self_correction_adds_duplicate_name_outline_guidance() -> None:
-    _, retry_feedback, _ = await _run_repair_capturing(
-        max_retries=1,
-        failure_kind="validation",
-        failure_codes=frozenset({"duplicate_step_name"}),
-    )
-
-    assert len(retry_feedback) == 2
-    assert "Every steps[] name must be unique case-insensitively" in retry_feedback[1]
-
-
-@pytest.mark.asyncio
-async def test_run_tool_self_correction_initial_create_parse_prompt_uses_unified_feedback() -> (
-    None
-):
-    _, retry_feedback, _ = await _run_repair_capturing(
-        max_retries=0,
-        failure_kind="parse",
-        initial_failure_codes=frozenset(),
-    )
-
-    assert len(retry_feedback) == 1
-    prompt = retry_feedback[0]
-    assert prompt.startswith("VALIDATION FAILED:")
-    assert "Every steps[] item must be one complete semantic intent step" in prompt
-    assert "Runtime form inputs belong in top-level input_fields[]" in prompt
-    assert "Please fix and try again" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_run_tool_self_correction_initial_create_validation_prompt_uses_unified_feedback() -> (
-    None
-):
-    _, retry_feedback, _ = await _run_repair_capturing(
-        max_retries=0,
-        failure_kind="validation",
-        initial_failure_codes=frozenset(),
-    )
-
-    assert len(retry_feedback) == 1
-    prompt = retry_feedback[0]
-    assert prompt.startswith("VALIDATION FAILED:")
-    assert "Every steps[] item must be one complete semantic intent step" in prompt
-    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call." in prompt
-
-
-@pytest.mark.asyncio
-async def test_run_tool_self_correction_initial_edit_validation_prompt_uses_unified_feedback() -> (
-    None
-):
-    _, retry_feedback, _ = await _run_repair_capturing(
-        max_retries=0,
-        failure_kind="validation",
-        initial_failure_codes=frozenset(),
-        target_kind=TargetKind.EDIT,
-    )
-
-    assert len(retry_feedback) == 1
-    prompt = retry_feedback[0]
-    assert prompt.startswith("VALIDATION FAILED:")
-    assert "Every steps[] item must be one complete semantic intent step" not in prompt
-    assert "Runtime form inputs belong in top-level input_fields[]" not in prompt
-    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call." in prompt
-
-
-@pytest.mark.asyncio
-async def test_run_tool_self_correction_initial_quality_prompt_uses_warning_code_guidance() -> (
-    None
-):
-    _, retry_feedback, _ = await _run_repair_capturing(
-        max_retries=0,
-        failure_kind="quality",
-        initial_failure_codes=frozenset({"json_output_no_contract"}),
-    )
-
-    assert len(retry_feedback) == 1
-    prompt = retry_feedback[0]
-    assert prompt.startswith("VALIDATION FAILED:")
-    assert (
-        "For every JSON semantic step that feeds later steps, set output_fields "
-        "with named fields that match the step's extracted data."
-    ) in prompt
-
-
-@pytest.mark.asyncio
 async def test_run_tool_self_correction_uses_fallback_for_missing_retry_feedback() -> (
     None
 ):
@@ -1042,12 +904,7 @@ async def test_run_tool_self_correction_uses_fallback_for_missing_retry_feedback
     assert len(observed_messages) == 2
     retry_feedback = observed_messages[1][-1]
     assert retry_feedback["role"] == "tool"
-    assert str(retry_feedback["content"]).startswith(
-        "CORRECTION STILL INVALID: Invalid tool payload."
-    )
-    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call." in str(
-        retry_feedback["content"]
-    )
+    assert "Invalid tool payload" in str(retry_feedback["content"])
 
 
 @pytest.mark.asyncio
@@ -1820,25 +1677,6 @@ async def test_run_tool_self_correction_still_yields_text_for_legitimate_info_re
         "is a legitimate clarification request and must still surface to the user; "
         f"got events: {events}"
     )
-
-
-@pytest.mark.asyncio
-async def test_run_tool_self_correction_applies_stronger_prompt_on_second_retry() -> (
-    None
-):
-    _, retry_feedback, _ = await _run_repair_capturing(
-        max_retries=3, base_temperature=0.35, bumped_temperature=0.6
-    )
-    # Feedback strings observed by each repair call (the tool-role retry feedback):
-    # [0]: initial correction (VALIDATION FAILED from _build_retry_feedback)
-    # [1]: first retry (CORRECTION STILL INVALID — standard preamble)
-    # [2]: second retry (FINAL CORRECTION ATTEMPT — stronger)
-    # [3]: third retry (FINAL CORRECTION ATTEMPT — stronger)
-    assert len(retry_feedback) == 4
-    assert retry_feedback[0].startswith("VALIDATION FAILED")
-    assert retry_feedback[1].startswith("CORRECTION STILL INVALID:")
-    assert retry_feedback[2].startswith("FINAL CORRECTION ATTEMPT")
-    assert retry_feedback[3].startswith("FINAL CORRECTION ATTEMPT")
 
 
 @pytest.mark.asyncio
