@@ -94,11 +94,9 @@ def test_preflight_flags_form_field_declared_but_never_referenced() -> None:
     assert "form_fields_declared_must_be_referenced" in result.critic_invariant_ids
 
 
-def test_preflight_flags_architecture_issue_as_materialization_blocking() -> None:
-    # The conversation asks for a PDF, but the terminal step only produces text —
-    # a pdf_terminal_output_alignment architecture violation, which the create
-    # proposal path rejects via the architecture hard-error path (before
-    # materialization) and the planner cannot self-correct.
+def test_create_preflight_leaves_terminal_alignment_to_compiled_spec() -> None:
+    # In create mode, assembly and compiled-spec preparation own terminal
+    # output alignment. The critic should not duplicate that hard failure.
     conversation = [
         {
             "role": "user",
@@ -119,8 +117,8 @@ def test_preflight_flags_architecture_issue_as_materialization_blocking() -> Non
 
     result = _preflight(spec, conversation=conversation)
 
-    assert result.passed is False
-    assert result.blocks_materialization is True
-    assert result.can_retry is False
-    assert result.architecture_issues
-    assert "pdf_terminal_output_alignment" in result.critic_invariant_ids
+    assert result.passed is True
+    assert result.blocks_materialization is False
+    assert result.can_retry is True
+    assert result.architecture_issues == ()
+    assert "pdf_terminal_output_alignment" not in result.critic_invariant_ids

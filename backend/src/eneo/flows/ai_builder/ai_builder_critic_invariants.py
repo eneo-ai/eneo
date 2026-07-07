@@ -128,6 +128,11 @@ class CriticInvariant:
 
 # ── Shared helpers ───────────────────────────────────────────────────────
 
+
+def _is_create_context(context: CriticContext) -> bool:
+    return context.flow is None
+
+
 _SOURCE_SURFACING_INPUT_TYPES = frozenset(
     {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 )
@@ -454,6 +459,8 @@ _RICH_WORKFLOW_REQUIRES_MULTIPLE_STEPS = CriticInvariant(
 
 
 def _pdf_terminal_alignment_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
     if context.output_intent.terminal_output != "pdf_document":
         return False
     if not context.spec.steps:
@@ -477,6 +484,8 @@ _PDF_TERMINAL_OUTPUT_ALIGNMENT = CriticInvariant(
 
 
 def _docx_terminal_alignment_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
     if context.output_intent.terminal_output != "docx_document":
         return False
     if not context.spec.steps:
@@ -605,6 +614,8 @@ _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP = CriticInvariant(
 def _standalone_audio_requires_transcription_step_evidence(
     context: CriticContext,
 ) -> bool:
+    if _is_create_context(context):
+        return False
     if context.primary_runtime_input != "audio":
         return False
     if _spec_handles_audio(context.spec):
@@ -721,6 +732,8 @@ _FIELD_REUSE_REQUIRES_INPUT_BINDINGS = CriticInvariant(
 def _multi_document_compare_requires_all_previous_steps_evidence(
     context: CriticContext,
 ) -> bool:
+    if _is_create_context(context):
+        return False
     return (
         context.aggregation_intent == "compare"
         and _spec_has_multiple_content_steps(context.spec)
@@ -850,6 +863,8 @@ _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT = CriticInvariant(
 def _json_input_rejects_all_previous_steps_source_evidence(
     context: CriticContext,
 ) -> bool:
+    if _is_create_context(context):
+        return False
     return any(
         step.input_type == InputType.JSON
         and step.input_source == InputSource.ALL_PREVIOUS_STEPS

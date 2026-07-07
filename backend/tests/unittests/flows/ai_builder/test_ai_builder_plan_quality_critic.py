@@ -46,6 +46,7 @@ if TYPE_CHECKING:
         PrimaryRuntimeInput,
     )
     from eneo.flows.ai_builder.planning_state import AggregationIntent
+    from eneo.flows.domain.flow import Flow
 
 
 EXPECTED_CRITIC_INVARIANT_KINDS = {
@@ -103,6 +104,31 @@ def _step(
         output_type=output_type,
         output_contract=output_contract,
         input_bindings=input_bindings,
+    )
+
+
+def _edit_flow() -> "Flow":
+    from uuid import uuid4
+
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    return Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Existing flow",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Existing step",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+                mcp_policy="inherit",
+            )
+        ],
     )
 
 
@@ -512,7 +538,7 @@ def _pdf_mismatch_context() -> "CriticContext":
             )
         ],
     )
-    return build_conversation_critic_context(conversation, spec)
+    return build_conversation_critic_context(conversation, spec, flow=_edit_flow())
 
 
 def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
@@ -1205,7 +1231,11 @@ def test_flags_output_mismatch_against_explicit_pdf_choice() -> None:
         ],
     )
 
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        flow=_edit_flow(),
+    )
     assert feedback is not None
     assert "PDF" in feedback
 
@@ -1768,6 +1798,7 @@ def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
     feedback = build_conversation_aware_quality_feedback(
         conversation,
         spec,
+        flow=_edit_flow(),
         aggregation_intent="compare",
     )
     assert feedback is not None
@@ -1843,7 +1874,11 @@ def test_flags_missing_audio_step_when_conversation_mentions_transcription() -> 
         flow_name="Transkribering",
         steps=[_step("step_a", "Sammanfatta", "Sammanfatta texten.")],
     )
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        flow=_edit_flow(),
+    )
     assert feedback is not None
     assert "audio" in feedback.lower() or "transcribe_only" in feedback
 
@@ -2011,7 +2046,11 @@ def test_quality_feedback_prefers_confirmed_docx_output_over_pdf_input_mentions(
         ],
     )
 
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        flow=_edit_flow(),
+    )
 
     assert feedback is not None
     assert "DOCX" in feedback
@@ -2162,7 +2201,7 @@ class TestCriticInvariantLoop:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",
@@ -2203,7 +2242,7 @@ class TestCriticInvariantLoop:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",
@@ -2235,7 +2274,7 @@ class TestCriticInvariantLoop:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",
@@ -2251,10 +2290,10 @@ class TestCriticInvariantLoop:
 
 class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
     """When any step declares `input_type=json` with
-    `input_source=all_previous_steps`, the critic must surface a remediation
-    before the validator catches it. The concatenation the runtime performs on
-    `all_previous_steps` produces plain text, which is not valid JSON, so this
-    combination cannot run under any circumstance.
+    `input_source=all_previous_steps` in edit context, the critic must surface
+    a remediation before the validator catches it. The concatenation the runtime
+    performs on `all_previous_steps` produces plain text, which is not valid
+    JSON, so this combination cannot run under any circumstance.
     """
 
     def test_invariant_is_registered(self) -> None:
@@ -2311,7 +2350,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",
@@ -2365,7 +2404,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",
@@ -2419,7 +2458,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",
@@ -3951,9 +3990,9 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
 
 class TestStandaloneAudioInvariant:
-    """`standalone_audio_requires_transcription_step` fires when the slot
-    classifier has resolved the runtime input to `audio` and the spec has
-    no transcription step.
+    """In edit context, `standalone_audio_requires_transcription_step` fires when
+    the slot classifier has resolved the runtime input to `audio` and the spec
+    has no transcription step.
 
     The invariant defers to the slot classifier
     (`resolve_input_intent.primary_runtime_input`) instead of doing its
@@ -3974,6 +4013,7 @@ class TestStandaloneAudioInvariant:
         primary_runtime_input: str = "unknown",
         mixed_audio_doc_input: bool = False,
         text: str = "",
+        flow: "Flow | None" = None,
     ) -> "CriticContext":
         from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
@@ -3987,7 +4027,7 @@ class TestStandaloneAudioInvariant:
 
         return CriticContext(
             spec=spec,
-            flow=None,
+            flow=flow,
             answer_signals={},
             text=text,
             requirements_text="",
@@ -4017,6 +4057,7 @@ class TestStandaloneAudioInvariant:
                     ],
                 ),
                 primary_runtime_input="audio",
+                flow=_edit_flow(),
             )
         )
 
@@ -4279,7 +4320,7 @@ class TestCriticInvariantRegistry:
         )
         context = CriticContext(
             spec=spec,
-            flow=None,
+            flow=_edit_flow(),
             answer_signals={},
             text="",
             requirements_text="",

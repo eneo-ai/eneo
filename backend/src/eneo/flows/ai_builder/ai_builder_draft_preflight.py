@@ -1,10 +1,10 @@
 """Deterministic preflight over a parsed AI-builder draft.
 
 Evaluates the existing critic once and exposes the resulting issues as a typed
-verdict the proposal pipeline acts on before persisting. In the create proposal
-path an architecture issue is currently materialization-blocking and handled
-through the architecture error path; semantic issues are retryable quality
-feedback the planner can address on a new turn.
+verdict the proposal pipeline acts on before persisting. Semantic issues are
+retryable quality feedback; architecture issues are materialization-blocking
+only for mechanics the critic still owns, mostly edit-mode protection around an
+existing flow.
 """
 
 from __future__ import annotations
