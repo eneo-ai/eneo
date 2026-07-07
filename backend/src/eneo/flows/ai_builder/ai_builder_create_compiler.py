@@ -327,8 +327,6 @@ def _source_reader_required_fields_from_planning_state(
 
 
 def _summary_source_reader_field_name(ui_language: str | None) -> str:
-    if ui_language is None or ui_language.casefold().startswith("sv"):
-        return "sammanfattning"
     return "summary"
 
 

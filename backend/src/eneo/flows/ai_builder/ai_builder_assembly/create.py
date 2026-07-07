@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    PreviousFieldRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
@@ -36,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     source_capture_fields_from_terminal_schema,
     source_contract_shadow_form_field_names,
     source_reader_leaf_field_name,
+    structured_fields_have_document_items,
     structured_fields_have_source_leaf,
 )
 from eneo.flows.ai_builder.pattern_registry import (
@@ -352,6 +354,19 @@ def _assemble_create_intent(
         intent.steps,
         final_output_type=final_output_type,
         document_artifact_requested=document_artifact_requested,
+        ui_language=ui_language,
+    )
+    semantic_steps = _semantic_steps_with_single_source_report_reader(
+        semantic_steps,
+        runtime_input_type=runtime_input_type,
+        final_semantic_output_type=terminal_semantic_output_type,
+        source_reader_required_fields=source_reader_required_fields,
+        ui_language=ui_language,
+    )
+    semantic_steps = _semantic_steps_with_terminal_text_fields_folded(
+        semantic_steps,
+        final_semantic_output_type=terminal_semantic_output_type,
+        ui_language=ui_language,
     )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
@@ -390,6 +405,7 @@ def _assemble_create_intent(
             semantic_step_count=len(semantic_steps),
             aggregation_intent=aggregation_intent,
             has_source_prefix=has_source_prefix,
+            prior_step_count=len(planned_steps),
         )
         if input_source == InputSource.ALL_PREVIOUS_STEPS and (
             semantic_step.uses_form_fields
@@ -409,6 +425,13 @@ def _assemble_create_intent(
         previous_planned_step = (
             planned_steps[-1] if input_source == InputSource.PREVIOUS_STEP else None
         )
+        previous_field_refs = _derived_terminal_text_previous_field_refs(
+            planned_steps=tuple(planned_steps),
+            input_source=input_source,
+            input_type=input_type,
+            output_type=step_output_type,
+            is_terminal_semantic_step=is_terminal_semantic_step,
+        )
         planned_step = PlannedStep(
             role=_linear_step_role(
                 output_type=step_output_type,
@@ -425,7 +448,7 @@ def _assemble_create_intent(
                 input_source=input_source,
                 input_type=input_type,
                 previous_step=previous_planned_step,
-                previous_field_refs=(),
+                previous_field_refs=previous_field_refs,
                 previous_output_refs=(),
             ),
             runtime_required=(
@@ -439,6 +462,7 @@ def _assemble_create_intent(
                 else None
             ),
             form_field_refs=tuple(semantic_step.uses_form_fields),
+            previous_field_refs=previous_field_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
@@ -464,6 +488,10 @@ def _assemble_create_intent(
         terminal_output_schema=terminal_output_schema,
         required_fields=source_reader_required_fields,
     )
+    completed_steps = _annotate_multi_document_source_readers(
+        completed_steps,
+        ui_language=ui_language,
+    )
     completed_steps, admitted_form_fields = (
         _drop_planned_source_contract_shadow_form_fields(
             planned_steps=completed_steps,
@@ -487,6 +515,7 @@ def _semantic_steps_without_terminal_document_render_helper(
     *,
     final_output_type: OutputType,
     document_artifact_requested: bool,
+    ui_language: str | None,
 ) -> tuple[SemanticStepIntent, ...]:
     semantic_steps = tuple(steps)
     if (
@@ -506,19 +535,28 @@ def _semantic_steps_without_terminal_document_render_helper(
     )
     if previous_output_type != OutputType.TEXT:
         return semantic_steps
-    helper_output_type = _linear_step_output_type(
-        output_type=helper_candidate.output_type,
-        output_fields=helper_candidate.output_fields,
-        final_output_type=OutputType.TEXT,
-        is_terminal=True,
-    )
-    if helper_output_type != OutputType.TEXT:
+    if helper_candidate.output_type not in {None, OutputType.TEXT, final_output_type}:
         return semantic_steps
     if not _is_plain_terminal_document_helper(
         helper_candidate,
         final_output_type=final_output_type,
     ):
         return semantic_steps
+
+    retained_steps = semantic_steps[:-1]
+    if helper_candidate.output_fields:
+        retained_steps = (
+            *semantic_steps[:-2],
+            previous_step.model_copy(
+                update={
+                    "instructions": _append_terminal_helper_output_fields(
+                        previous_step.instructions,
+                        helper_candidate.output_fields,
+                        ui_language=ui_language,
+                    )
+                }
+            ),
+        )
 
     logger.info(
         "ai_builder_terminal_document_render_helper_dropped",
@@ -527,7 +565,92 @@ def _semantic_steps_without_terminal_document_render_helper(
             "final_output_type": final_output_type.value,
         },
     )
-    return semantic_steps[:-1]
+    return retained_steps
+
+
+def _semantic_steps_with_single_source_report_reader(
+    steps: Sequence[SemanticStepIntent],
+    *,
+    runtime_input_type: InputType,
+    final_semantic_output_type: OutputType,
+    source_reader_required_fields: tuple[SourceCaptureField, ...],
+    ui_language: str | None,
+) -> tuple[SemanticStepIntent, ...]:
+    semantic_steps = tuple(steps)
+    if (
+        len(semantic_steps) != 1
+        or runtime_input_type not in _FILE_INPUT_TYPES
+        or final_semantic_output_type != OutputType.TEXT
+    ):
+        return semantic_steps
+
+    semantic_step = semantic_steps[0]
+    source_fields = tuple(semantic_step.output_fields or ())
+    if not source_fields:
+        source_fields = _structured_fields_from_source_capture_fields(
+            source_reader_required_fields
+        )
+    if not source_fields:
+        return semantic_steps
+    source_fields = complete_structured_source_reader_fields(
+        source_fields,
+        required_fields=(),
+    )
+
+    reader_step = semantic_step.model_copy(
+        update={
+            "name": _source_report_reader_name(ui_language),
+            "instructions": _source_report_reader_instructions(ui_language),
+            "output_type": OutputType.JSON,
+            "output_fields": list(source_fields),
+            "uses_form_fields": [],
+        }
+    )
+    writer_step = semantic_step.model_copy(
+        update={
+            "name": _source_report_writer_name(ui_language),
+            "instructions": _append_terminal_helper_output_fields(
+                semantic_step.instructions,
+                source_fields,
+                ui_language=ui_language,
+            ),
+            "output_type": OutputType.TEXT,
+            "output_fields": None,
+        }
+    )
+    return (reader_step, writer_step)
+
+
+def _semantic_steps_with_terminal_text_fields_folded(
+    steps: Sequence[SemanticStepIntent],
+    *,
+    final_semantic_output_type: OutputType,
+    ui_language: str | None,
+) -> tuple[SemanticStepIntent, ...]:
+    semantic_steps = tuple(steps)
+    if not semantic_steps or final_semantic_output_type != OutputType.TEXT:
+        return semantic_steps
+
+    terminal_step = semantic_steps[-1]
+    if not terminal_step.output_fields or terminal_step.output_type not in {
+        None,
+        OutputType.TEXT,
+        OutputType.JSON,
+    }:
+        return semantic_steps
+
+    folded_terminal_step = terminal_step.model_copy(
+        update={
+            "instructions": _append_terminal_helper_output_fields(
+                terminal_step.instructions,
+                terminal_step.output_fields,
+                ui_language=ui_language,
+            ),
+            "output_type": OutputType.TEXT,
+            "output_fields": None,
+        }
+    )
+    return (*semantic_steps[:-1], folded_terminal_step)
 
 
 def _is_plain_terminal_document_helper(
@@ -536,8 +659,7 @@ def _is_plain_terminal_document_helper(
     final_output_type: OutputType,
 ) -> bool:
     if (
-        step.output_fields
-        or step.uses_form_fields
+        step.uses_form_fields
         or step.knowledge_refs
         or step.mcp_server_refs
         or step.mcp_tool_refs
@@ -545,10 +667,63 @@ def _is_plain_terminal_document_helper(
         or step.review_mode is not None
     ):
         return False
+    if step.output_type == final_output_type:
+        return True
     return _mentions_output_artifact_type(
         f"{step.name} {step.instructions}",
         final_output_type=final_output_type,
     )
+
+
+def _append_terminal_helper_output_fields(
+    instructions: str,
+    output_fields: Sequence[StructuredFieldDraft],
+    *,
+    ui_language: str | None,
+) -> str:
+    field_names = ", ".join(field.name for field in output_fields if field.name)
+    if not field_names:
+        return instructions
+    if ui_language == "en":
+        field_instruction = (
+            "Ensure the report body covers these fields before rendering: "
+        )
+    else:
+        field_instruction = (
+            "Säkerställ att rapporttexten täcker dessa fält innan rendering: "
+        )
+    return f"{instructions}\n\n{field_instruction}{field_names}."
+
+
+def _structured_fields_from_source_capture_fields(
+    fields: tuple[SourceCaptureField, ...],
+) -> tuple[StructuredFieldDraft, ...]:
+    return tuple(
+        StructuredFieldDraft(
+            name=field.name,
+            field_type="string",
+            description=field.description or f"Source-derived value for {field.name}.",
+        )
+        for field in fields
+    )
+
+
+def _source_report_reader_name(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return "Extract source fields"
+    return "Extrahera källfält"
+
+
+def _source_report_writer_name(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return "Write report"
+    return "Skriv rapport"
+
+
+def _source_report_reader_instructions(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return "Extract the source-derived fields needed before writing the report."
+    return "Extrahera de källbaserade fält som behövs innan rapporten skrivs."
 
 
 def _mentions_output_artifact_type(
@@ -658,6 +833,10 @@ def _assemble_docx_template_fill(
         terminal_output_schema=None,
         required_fields=source_reader_required_fields,
     )
+    completed_steps = _annotate_multi_document_source_readers(
+        completed_steps,
+        ui_language=ui_language,
+    )
     completed_steps, admitted_form_fields = (
         _drop_planned_source_contract_shadow_form_fields(
             planned_steps=completed_steps,
@@ -673,6 +852,35 @@ def _assemble_docx_template_fill(
         source_reader_required_fields=source_reader_required_fields,
         aggregation_intent="linear",
         ui_language=ui_language,
+    )
+
+
+def _derived_terminal_text_previous_field_refs(
+    *,
+    planned_steps: tuple[PlannedStep, ...],
+    input_source: InputSource,
+    input_type: InputType,
+    output_type: OutputType,
+    is_terminal_semantic_step: bool,
+) -> tuple[PreviousFieldRef, ...]:
+    if (
+        not is_terminal_semantic_step
+        or input_source != InputSource.PREVIOUS_STEP
+        or input_type != InputType.TEXT
+        or output_type != OutputType.TEXT
+    ):
+        return ()
+    json_steps = tuple(
+        (index, step)
+        for index, step in enumerate(planned_steps, start=1)
+        if step.output_type == OutputType.JSON and step.output_fields
+    )
+    if len(json_steps) < 2:
+        return ()
+    return tuple(
+        PreviousFieldRef(from_step=from_step, field_path=field.name)
+        for from_step, step in json_steps
+        for field in step.output_fields
     )
 
 
@@ -794,12 +1002,14 @@ def _linear_step_input_source(
     semantic_step_count: int,
     aggregation_intent: str,
     has_source_prefix: bool,
+    prior_step_count: int,
 ) -> InputSource:
     if step_index == 0 and not has_source_prefix:
         return InputSource.FLOW_INPUT
     if (
         aggregation_intent in {"aggregate", "compare"}
         and step_index == semantic_step_count - 1
+        and prior_step_count > 1
     ):
         return InputSource.ALL_PREVIOUS_STEPS
     return InputSource.PREVIOUS_STEP
@@ -863,11 +1073,9 @@ def _complete_planned_source_reader_contracts(
                 SourceCaptureField(name=field_name, description=ref.label)
             )
 
-    if not fields_by_index:
-        return planned_steps
-
     updated_steps = list(planned_steps)
-    for index, fields in fields_by_index.items():
+    for index in source_reader_indexes:
+        fields = fields_by_index.get(index, [])
         planned_step = planned_steps[index]
         completed_fields = complete_structured_source_reader_fields(
             planned_step.output_fields,
@@ -884,6 +1092,58 @@ def _complete_planned_source_reader_contracts(
             },
         )
     return tuple(updated_steps)
+
+
+def _annotate_multi_document_source_readers(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    ui_language: str | None,
+) -> tuple[PlannedStep, ...]:
+    updated_steps: list[PlannedStep] = []
+    changed = False
+    for planned_step in planned_steps:
+        if not (
+            planned_step_is_source_reader(planned_step)
+            and structured_fields_have_document_items(planned_step.output_fields)
+        ):
+            updated_steps.append(planned_step)
+            continue
+        annotated_step = replace(
+            planned_step,
+            instructions=_append_multi_document_source_reader_instruction(
+                planned_step.instructions,
+                ui_language=ui_language,
+            ),
+        )
+        updated_steps.append(annotated_step)
+        changed = changed or annotated_step.instructions != planned_step.instructions
+    if not changed:
+        return planned_steps
+    return tuple(updated_steps)
+
+
+def _append_multi_document_source_reader_instruction(
+    instructions: str,
+    *,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "en":
+        addition = (
+            "For documents[] output, create exactly one item per source document. "
+            "Keep every item's facts scoped to that one source only; do not merge "
+            "facts across documents. Set source_label to the file name when "
+            "available, otherwise use a stable source number."
+        )
+    else:
+        addition = (
+            "För documents[]-utdata ska du skapa exakt en post per källdokument. "
+            "Håll varje posts fakta avgränsade till just den källan; blanda inte "
+            "uppgifter mellan dokument. Sätt source_label till filnamnet om det "
+            "finns, annars ett stabilt källnummer."
+        )
+    if addition in instructions:
+        return instructions
+    return f"{instructions}\n\n{addition}"
 
 
 def _drop_planned_source_contract_shadow_form_fields(

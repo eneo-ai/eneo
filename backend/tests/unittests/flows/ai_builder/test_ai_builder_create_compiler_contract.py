@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.pattern_registry import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
+    PlanningSignal,
     PlanningState,
     ResolvedSlot,
 )
@@ -67,6 +68,58 @@ def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> No
 
     assert context is not None
     assert context.runtime_input_type == InputType.DOCUMENT
+
+
+def test_compile_context_requires_only_summary_source_reader_obligation() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "structure_key_information",
+    )
+    state.signals.append(
+        PlanningSignal(
+            question_id="result_obligation",
+            value="summary",
+            confidence="high",
+            source="model",
+        )
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert [field.name for field in context.source_reader_required_fields] == [
+        "summary"
+    ]
+
+
+def test_compile_context_does_not_turn_report_obligations_into_reader_fields() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "action_followup",
+    )
+    state.signals.append(
+        PlanningSignal(
+            question_id="result_obligation",
+            value="owners",
+            confidence="high",
+            source="model",
+        )
+    )
+    state.signals.append(
+        PlanningSignal(
+            question_id="result_obligation",
+            value="deadlines",
+            confidence="high",
+            source="model",
+        )
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.source_reader_required_fields == ()
 
 
 def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
@@ -267,6 +320,69 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag() -> None:
     write_step = compiled.steps[1]
     assert write_step.input_bindings == {
         "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+    }
+    assert validate_spec(compiled).valid
+
+
+def test_assembly_derives_terminal_writer_refs_for_multiple_json_priors() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case report",
+            "flow_description": "Extract, refine, and write a report.",
+            "plan_rationale": "The final writer needs both structured stages.",
+            "steps": [
+                {
+                    "name": "Extract facts",
+                    "instructions": "Extract source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Short summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Find gaps",
+                    "instructions": "Find missing information.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "missing_information",
+                            "field_type": "string",
+                            "description": "Missing information.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the final report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent)
+
+    assert len(compiled.steps) == 3
+    write_step = compiled.steps[2]
+    assert write_step.input_bindings == {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "summary",
+                "label": "summary",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "missing_information",
+                "label": "missing information",
+            },
+        ]
     }
     assert validate_spec(compiled).valid
 
@@ -631,6 +747,57 @@ def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in() -> Non
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
+def test_aggregate_document_body_uses_previous_step_for_single_prior_reader() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document report",
+            "flow_description": "Extract facts and render a PDF report.",
+            "plan_rationale": "The body writer consumes the single reader output.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "facts",
+                            "field_type": "array",
+                            "description": "Source facts.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the final report body from the facts.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+        ),
+    )
+
+    body_step = compiled.steps[-2]
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert body_step.input_source == InputSource.PREVIOUS_STEP
+    assert body_step.input_bindings == {
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+    }
     assert validate_spec(compiled).valid
 
 
@@ -1030,7 +1197,21 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
     assert validate_spec(compiled).valid
 
 
-def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
+@pytest.mark.parametrize(
+    ("helper_output_type", "helper_instructions"),
+    [
+        (
+            "text",
+            "Omvandla den färdiga rapporttexten till en professionell PDF "
+            "med tydlig struktur och läsbar layout.",
+        ),
+        ("pdf", "Skapa slutrapporten från den färdiga rapporttexten."),
+    ],
+)
+def test_document_artifact_drops_model_authored_pdf_render_helper(
+    helper_output_type: str,
+    helper_instructions: str,
+) -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Dokumentanalys till PDF",
@@ -1069,11 +1250,8 @@ def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
                 },
                 {
                     "name": "Skapa PDF-rapport",
-                    "instructions": (
-                        "Omvandla den färdiga rapporttexten till en professionell "
-                        "PDF med tydlig struktur och läsbar layout."
-                    ),
-                    "output_type": "text",
+                    "instructions": helper_instructions,
+                    "output_type": helper_output_type,
                 },
             ],
         }
@@ -1107,4 +1285,330 @@ def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
     assert renderer_step.input_bindings is None
     assert renderer_step.plan_step_ref != body_step.plan_step_ref
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
+def test_document_artifact_folds_terminal_helper_fields_into_body_writer() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys till PDF",
+            "plan_rationale": (
+                "Läs dokument, skriv rapportinnehåll och leverera som PDF."
+            ),
+            "steps": [
+                {
+                    "name": "Identifiera dokumentens innehåll",
+                    "instructions": "Läs dokumenten och extrahera källfakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Dokumentfakta per fil.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapportinnehåll",
+                    "instructions": "Skriv den fullständiga rapporttexten.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Skapa PDF-rapport",
+                    "instructions": "Skapa slutrapporten som PDF.",
+                    "output_type": "pdf",
+                    "output_fields": [
+                        {
+                            "name": "author_or_source",
+                            "field_type": "string",
+                            "description": "Vem som skrev dokumentet.",
+                        },
+                        {
+                            "name": "conclusions",
+                            "field_type": "array",
+                            "description": "Dokumentets slutsatser.",
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            aggregation_intent=cast(AggregationIntent, "linear"),
+        ),
+    )
+
+    assert [step.name for step in compiled.steps] == [
+        "Identifiera dokumentens innehåll",
+        "Skriv rapportinnehåll",
+        "Rendera PDF",
+    ]
+    body_step = compiled.steps[-2]
+    renderer_step = compiled.steps[-1]
+    assert body_step.output_type == OutputType.TEXT
+    assert "author_or_source" in body_step.assistant_spec.instructions
+    assert "conclusions" in body_step.assistant_spec.instructions
+    assert renderer_step.output_type == OutputType.PDF
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert validate_spec(compiled).valid
+
+
+def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys till PDF",
+            "plan_rationale": "Läs dokument och skriv en PDF-rapport.",
+            "steps": [
+                {
+                    "name": "Identifiera dokumentens innehåll",
+                    "instructions": "Läs varje dokument och strukturera fakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Dokumenttitel.",
+                                },
+                                {
+                                    "name": "date",
+                                    "field_type": "string",
+                                    "description": "Datum eller år.",
+                                },
+                                {
+                                    "name": "author",
+                                    "field_type": "string",
+                                    "description": "Författare.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                },
+                                {
+                                    "name": "sammanfattning",
+                                    "field_type": "string",
+                                    "description": "Duplicerad sammanfattning.",
+                                },
+                                {
+                                    "name": "documents",
+                                    "field_type": "string",
+                                    "description": "Felaktig nästlad container.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapportinnehåll",
+                    "instructions": "Skriv rapporten.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "linear"),
+            ui_language="sv",
+        ),
+    )
+
+    reader_step = compiled.steps[0]
+    assert reader_step.output_contract is not None
+    documents_schema = reader_step.output_contract["properties"]["documents"]
+    item_properties = documents_schema["items"]["properties"]
+    assert list(item_properties) == [
+        "source_label",
+        "title",
+        "date_or_year",
+        "author_or_sender",
+        "summary",
+    ]
+    assert "sammanfattning" not in item_properties
+    assert "documents" not in item_properties
+    assert "exakt en post per källdokument" in reader_step.assistant_spec.instructions
+    assert "blanda inte uppgifter mellan dokument" in (
+        reader_step.assistant_spec.instructions
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_bare_localized_document_array_gets_source_identity_contract() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys till PDF",
+            "plan_rationale": "Läs dokument och skriv en PDF-rapport.",
+            "steps": [
+                {
+                    "name": "Identifiera dokumentens innehåll",
+                    "instructions": "Läs varje dokument och strukturera fakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "dokument",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapportinnehåll",
+                    "instructions": "Skriv rapporten.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "linear"),
+            ui_language="sv",
+        ),
+    )
+
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    reader_step = compiled.steps[0]
+    renderer_step = compiled.steps[-1]
+    assert reader_step.output_contract is not None
+    documents_schema = reader_step.output_contract["properties"]["documents"]
+    assert documents_schema["items"]["type"] == "object"
+    assert list(documents_schema["items"]["properties"]) == ["source_label"]
+    assert documents_schema["items"]["required"] == ["source_label"]
+    assert "exakt en post per källdokument" in reader_step.assistant_spec.instructions
+    assert "blanda inte uppgifter mellan dokument" in (
+        reader_step.assistant_spec.instructions
+    )
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert validate_spec(compiled).valid
+
+
+def test_terminal_text_writer_fields_are_folded_into_instructions() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentrapport",
+            "plan_rationale": "Extrahera dokumentfakta och skriv en rapport.",
+            "steps": [
+                {
+                    "name": "Läs dokumentet",
+                    "instructions": "Extrahera dokumentfakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "document_title",
+                            "field_type": "string",
+                            "description": "Titel från dokumentet.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv den slutliga rapporttexten.",
+                    "output_type": "text",
+                    "output_fields": [
+                        {
+                            "name": "short_summary",
+                            "field_type": "string",
+                            "description": "Kort sammanfattning.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            final_output_mode=OutputMode.PASS_THROUGH,
+        ),
+    )
+
+    writer_step = compiled.steps[-1]
+    assert writer_step.output_type == OutputType.TEXT
+    assert writer_step.output_contract is None
+    assert "short_summary" in writer_step.assistant_spec.instructions
+    assert validate_spec(compiled).valid
+
+
+def test_single_source_text_report_materializes_missing_reader() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentrapport",
+            "plan_rationale": "Skriv en kort rapport från dokumentet.",
+            "steps": [
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv en rapport med titel och sammanfattning.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="document_title",
+                    description="Titel från dokumentet.",
+                ),
+                SourceCaptureField(
+                    name="short_summary",
+                    description="Kort sammanfattning från dokumentet.",
+                ),
+            ),
+            ui_language="sv",
+        ),
+    )
+
+    assert [step.name for step in compiled.steps] == [
+        "Extrahera källfält",
+        "Skriv rapport",
+    ]
+    reader_step = compiled.steps[0]
+    writer_step = compiled.steps[1]
+    assert reader_step.input_type == InputType.DOCUMENT
+    assert reader_step.output_type == OutputType.JSON
+    assert reader_step.output_contract is not None
+    assert sorted(reader_step.output_contract["properties"]) == [
+        "summary",
+        "title",
+    ]
+    assert writer_step.input_source == InputSource.PREVIOUS_STEP
+    assert writer_step.output_type == OutputType.TEXT
+    assert "title" in writer_step.assistant_spec.instructions
+    assert "summary" in writer_step.assistant_spec.instructions
     assert validate_spec(compiled).valid

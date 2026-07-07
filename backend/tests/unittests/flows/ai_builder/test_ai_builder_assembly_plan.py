@@ -216,7 +216,7 @@ def test_plan_rejects_non_first_flow_input_step() -> None:
         _plan(steps=(_text_step(), second_source_step))
 
 
-def test_plan_rejects_non_immediate_previous_field_refs() -> None:
+def test_plan_allows_earlier_previous_field_refs() -> None:
     first_step = _text_step(name="Extract facts", output_type=OutputType.JSON)
     second_step = _text_step(
         name="Write interim",
@@ -237,8 +237,29 @@ def test_plan_rejects_non_immediate_previous_field_refs() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="expected immediate previous step 2"):
-        _plan(steps=(first_step, second_step, stale_ref_step))
+    plan = _plan(steps=(first_step, second_step, stale_ref_step))
+
+    assert plan.steps[-1].previous_field_refs[0].from_step == 1
+
+
+def test_plan_rejects_future_previous_field_refs() -> None:
+    first_step = _text_step(name="Extract facts", output_type=OutputType.JSON)
+    future_ref_step = _text_step(
+        name="Write final",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="field_refs",
+        previous_field_refs=(
+            PreviousFieldRef(
+                from_step=3,
+                field_path="summary",
+                label="Summary",
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="no later than 1"):
+        _plan(steps=(first_step, future_ref_step))
 
 
 def test_plan_requires_whole_object_channel_for_json_previous_text_input() -> None:

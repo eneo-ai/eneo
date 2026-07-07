@@ -311,10 +311,10 @@ def _validate_step_order(
 
 def _validate_previous_refs(step: PlannedStep, *, expected_from_step: int) -> None:
     for ref in (*step.previous_field_refs, *step.previous_output_refs):
-        if ref.from_step != expected_from_step:
+        if ref.from_step < 1 or ref.from_step > expected_from_step:
             raise ValueError(
                 f"Planned step {step.name!r} references step {ref.from_step}; "
-                f"expected immediate previous step {expected_from_step}."
+                f"expected an earlier step no later than {expected_from_step}."
             )
 
 

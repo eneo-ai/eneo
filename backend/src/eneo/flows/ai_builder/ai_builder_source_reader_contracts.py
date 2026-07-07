@@ -55,8 +55,67 @@ _SOURCE_CONTRACT_TOKEN_ALIASES = {
     "year": "date",
 }
 _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
+    "ar": "date",
+    "author": "author",
+    "avsandare": "sender",
+    "category": "category",
+    "date": "date",
+    "datum": "date",
+    "documenttype": "document_type",
+    "dokumenttyp": "document_type",
+    "forfattare": "author",
+    "kategori": "category",
     "sammanfattning": "summary",
+    "sender": "sender",
+    "slutsats": "conclusion",
+    "slutsatser": "conclusion",
+    "titel": "title",
+    "year": "date",
+    "år": "date",
 }
+_DATE_TOKENS = frozenset({"date"})
+_AUTHOR_OR_SENDER_TOKENS = frozenset({"author", "sender"})
+_SUMMARY_TOKENS = frozenset({"summary"})
+_SUMMARY_MODIFIER_TOKENS = frozenset({"brief", "concise", "kort", "short"})
+_TITLE_TOKEN_SETS = frozenset(
+    {
+        frozenset({"title"}),
+        frozenset({"document", "title"}),
+    }
+)
+_DOCUMENT_TYPE_TOKEN_SETS = frozenset(
+    {
+        frozenset({"document_type"}),
+        frozenset({"document", "type"}),
+    }
+)
+_CATEGORY_TOKENS = frozenset({"category"})
+_CONCLUSION_TOKENS = frozenset({"conclusion"})
+_CONCLUSION_MODIFIER_TOKENS = frozenset(
+    {"central", "implication", "key", "main", "summary"}
+)
+_SOURCE_IDENTITY_TOKENS = frozenset(
+    {
+        frozenset({"file", "name"}),
+        frozenset({"filename"}),
+        frozenset({"source"}),
+        frozenset({"source", "file", "name"}),
+        frozenset({"source", "label"}),
+    }
+)
+_SOURCE_DOCUMENT_CONTAINER_KEYS = frozenset(
+    {
+        "document",
+        "documents",
+        "dokument",
+        "dokumenten",
+        "dokumentet",
+        "kalldokument",
+        "källdokument",
+        "source_document",
+        "source_documents",
+    }
+)
 
 
 def log_dropped_source_contract_shadow_fields(
@@ -165,6 +224,12 @@ def structured_fields_have_source_leaf(
     return _structured_fields_have_leaf(list(fields), required_name)
 
 
+def structured_fields_have_document_items(
+    fields: tuple[StructuredFieldDraft, ...],
+) -> bool:
+    return any(_structured_field_is_documents_array(field) for field in fields)
+
+
 def source_reader_leaf_field_name(field_path: str) -> str:
     return _leaf_field_name(field_path)
 
@@ -174,6 +239,7 @@ def _add_missing_source_reader_fields(
     *,
     required_fields: tuple[SourceCaptureField, ...],
 ) -> list[StructuredFieldDraft]:
+    fields = _normalize_source_reader_fields(fields)
     missing_fields = [
         field
         for field in required_fields
@@ -185,29 +251,162 @@ def _add_missing_source_reader_fields(
     if len(fields) == 1:
         field = fields[0]
         if field.field_type == "array" and field.item_fields:
-            return [
-                field.model_copy(
-                    update={
-                        "item_fields": _append_structured_leaf_fields(
-                            field.item_fields,
-                            missing_fields=missing_fields,
-                        )
-                    }
-                )
-            ]
+            return _normalize_source_reader_fields(
+                [
+                    field.model_copy(
+                        update={
+                            "item_fields": _append_structured_leaf_fields(
+                                field.item_fields,
+                                missing_fields=missing_fields,
+                            )
+                        }
+                    )
+                ]
+            )
         if field.field_type == "object" and field.fields:
-            return [
-                field.model_copy(
-                    update={
-                        "fields": _append_structured_leaf_fields(
-                            field.fields,
-                            missing_fields=missing_fields,
-                        )
-                    }
-                )
-            ]
+            return _normalize_source_reader_fields(
+                [
+                    field.model_copy(
+                        update={
+                            "fields": _append_structured_leaf_fields(
+                                field.fields,
+                                missing_fields=missing_fields,
+                            )
+                        }
+                    )
+                ]
+            )
 
-    return _append_structured_leaf_fields(fields, missing_fields=missing_fields)
+    return _normalize_source_reader_fields(
+        _append_structured_leaf_fields(fields, missing_fields=missing_fields)
+    )
+
+
+def _normalize_source_reader_fields(
+    fields: list[StructuredFieldDraft],
+    *,
+    parent_name: str | None = None,
+) -> list[StructuredFieldDraft]:
+    normalized_fields: list[StructuredFieldDraft] = []
+    seen: set[str] = set()
+    for field in fields:
+        if parent_name is not None and _is_self_nested_container_field(
+            field.name,
+            parent_name=parent_name,
+        ):
+            continue
+        normalized_field = _normalize_source_reader_field(field)
+        key = _source_capture_field_key(normalized_field.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_fields.append(normalized_field)
+    return normalized_fields
+
+
+def _normalize_source_reader_field(
+    field: StructuredFieldDraft,
+) -> StructuredFieldDraft:
+    field_name = _canonical_source_reader_field_name(field.name)
+    is_source_document_array = (
+        field.field_type == "array"
+        and _field_name_is_source_document_container(field.name)
+    )
+    if is_source_document_array:
+        field_name = "documents"
+    updates: dict[str, object] = {"name": field_name}
+    if field.field_type == "object" and field.fields:
+        updates["fields"] = _normalize_source_reader_fields(
+            field.fields,
+            parent_name=field_name,
+        )
+    if field.field_type == "array":
+        item_fields = (
+            _normalize_source_reader_fields(
+                field.item_fields,
+                parent_name=field_name,
+            )
+            if field.item_fields
+            else []
+        )
+        if is_source_document_array:
+            item_fields = _ensure_source_label_field(item_fields)
+        if item_fields:
+            updates["item_fields"] = item_fields
+    return field.model_copy(update=updates)
+
+
+def _canonical_source_reader_field_name(field_name: str) -> str:
+    tokens = _source_reader_field_tokens(field_name)
+    if tokens == _DATE_TOKENS:
+        return "date_or_year"
+    if tokens and tokens <= _AUTHOR_OR_SENDER_TOKENS:
+        return "author_or_sender"
+    if tokens in _TITLE_TOKEN_SETS:
+        return "title"
+    if tokens in _DOCUMENT_TYPE_TOKEN_SETS:
+        return "document_type"
+    if tokens == _CATEGORY_TOKENS:
+        return "category"
+    if "conclusion" in tokens and tokens <= (
+        _CONCLUSION_TOKENS | _CONCLUSION_MODIFIER_TOKENS
+    ):
+        return "conclusions"
+    if tokens == _SUMMARY_TOKENS or (
+        "summary" in tokens and tokens <= (_SUMMARY_MODIFIER_TOKENS | _SUMMARY_TOKENS)
+    ):
+        return "summary"
+    if tokens in _SOURCE_IDENTITY_TOKENS:
+        return "source_label"
+    return field_name
+
+
+def _source_reader_field_tokens(field_name: str) -> frozenset[str]:
+    normalized = normalize_discovery_text(
+        field_name.replace("_", " ").replace("-", " ")
+    )
+    return frozenset(
+        _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES.get(token, token)
+        for token in normalized.split()
+        if token and token != "or"
+    )
+
+
+def _is_self_nested_container_field(field_name: str, *, parent_name: str) -> bool:
+    if _field_name_is_source_document_container(
+        field_name
+    ) and _field_name_is_source_document_container(parent_name):
+        return True
+    return _field_name_match_key(field_name).rstrip("s") == _field_name_match_key(
+        parent_name
+    ).rstrip("s")
+
+
+def _ensure_source_label_field(
+    fields: list[StructuredFieldDraft],
+) -> list[StructuredFieldDraft]:
+    if any(field.name == "source_label" for field in fields):
+        return fields
+    return [
+        StructuredFieldDraft(
+            name="source_label",
+            field_type="string",
+            description=(
+                "Source file name if available, otherwise a stable source label."
+            ),
+        ),
+        *fields,
+    ]
+
+
+def _structured_field_is_documents_array(field: StructuredFieldDraft) -> bool:
+    return field.field_type == "array" and _field_name_is_source_document_container(
+        field.name
+    )
+
+
+def _field_name_is_source_document_container(field_name: str) -> bool:
+    return _field_name_match_key(field_name) in _SOURCE_DOCUMENT_CONTAINER_KEYS
 
 
 def _append_structured_leaf_fields(
@@ -275,6 +474,21 @@ def _source_capture_field_key(value: str) -> str:
         _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES.get(token, token)
         for token in normalized.split()
     )
+    token_set = frozenset(tokens)
+    if token_set in _TITLE_TOKEN_SETS:
+        return "title"
+    if token_set in _DOCUMENT_TYPE_TOKEN_SETS:
+        return "document_type"
+    if token_set == _CATEGORY_TOKENS:
+        return "category"
+    if "conclusion" in token_set and token_set <= (
+        _CONCLUSION_TOKENS | _CONCLUSION_MODIFIER_TOKENS
+    ):
+        return "conclusion"
+    if "summary" in tokens:
+        tokens = tuple(
+            token for token in tokens if token not in _SUMMARY_MODIFIER_TOKENS
+        )
     if not tokens:
         return _field_name_match_key(value)
     return " ".join(sorted(tokens))
