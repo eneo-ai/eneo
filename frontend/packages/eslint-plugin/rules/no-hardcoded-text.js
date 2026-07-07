@@ -1,9 +1,9 @@
 /**
- * Flags hardcoded human-facing text in Svelte markup so every string goes
- * through paraglide (`m.*`) instead of being typed inline.
+ * Flags hardcoded human-facing text in Svelte/JSX markup so every string goes
+ * through the app's message layer instead of being typed inline.
  *
  * What it catches:
- *  - Template text nodes that contain letters ("Detta kan inte ångras")
+ *  - Template/JSX text nodes that contain letters ("Detta kan inte ångras")
  *  - Literal values of human-facing attributes (aria-label, title, alt, …)
  *
  * What it ignores (so it stays low-noise):
@@ -42,7 +42,7 @@ const rule = {
     type: "problem",
     docs: {
       description:
-        "Disallow hardcoded human-facing text in Svelte markup; use paraglide messages (m.*) instead.",
+        "Disallow hardcoded human-facing text in Svelte/JSX markup; use the app's message layer instead.",
     },
     schema: [
       {
@@ -61,7 +61,7 @@ const rule = {
       hardcodedText:
         "Hardcoded text {{ text }}. Move it to messages/{sv,en}.json and use m.* instead.",
       hardcodedAttr:
-        "Hardcoded text in `{{ attr }}` {{ text }}. Use a paraglide message (m.*) instead.",
+        "Hardcoded text in `{{ attr }}` {{ text }}. Use the app's message layer instead.",
     },
   },
 
@@ -78,6 +78,17 @@ const rule = {
     const preview = (raw) => {
       const text = raw.trim().replace(/\s+/g, " ");
       return JSON.stringify(text.length > 40 ? text.slice(0, 40) + "…" : text);
+    };
+
+    const reportAttrLiteral = (node, attr, value) => {
+      const name = attr?.key?.name ?? attr?.name?.name;
+      if (typeof name !== "string" || !HUMAN_ATTRS.has(name)) return;
+      if (allowed(value)) return;
+      context.report({
+        node,
+        messageId: "hardcodedAttr",
+        data: { attr: name, text: preview(value) },
+      });
     };
 
     return {
@@ -102,14 +113,32 @@ const rule = {
       SvelteLiteral(node) {
         const attr = node.parent;
         if (attr?.type !== "SvelteAttribute") return;
-        const name = attr.key?.name;
-        if (typeof name !== "string" || !HUMAN_ATTRS.has(name)) return;
+        reportAttrLiteral(node, attr, node.value);
+      },
+
+      // Bare JSX text: <p>Detta kan inte ångras</p>
+      JSXText(node) {
         if (allowed(node.value)) return;
         context.report({
           node,
-          messageId: "hardcodedAttr",
-          data: { attr: name, text: preview(node.value) },
+          messageId: "hardcodedText",
+          data: { text: preview(node.value) },
         });
+      },
+
+      // JSX attribute string literals: aria-label="Tillåt …", title="…"
+      Literal(node) {
+        if (typeof node.value !== "string") return;
+        if (node.parent?.type === "JSXAttribute") {
+          reportAttrLiteral(node, node.parent, node.value);
+          return;
+        }
+        if (
+          node.parent?.type === "JSXExpressionContainer" &&
+          node.parent.parent?.type === "JSXAttribute"
+        ) {
+          reportAttrLiteral(node, node.parent.parent, node.value);
+        }
       },
     };
   },

@@ -159,9 +159,21 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
  */
 export function getErrorMessage(error: unknown, t: (key: string) => string): string {
   if (error instanceof EneoApiError) {
-    const key = error.code !== undefined ? ERROR_MESSAGE_KEYS[error.code] : undefined;
-    if (key) return t(key);
+    const message = getErrorMessageForCode(error.code, t);
+    if (message) return message;
     if (error.message) return error.message;
   }
   return t("request_failed");
+}
+
+/** Resolve a backend error code without needing a full EneoApiError instance. */
+export function getErrorMessageForCode(
+  code: number | null | undefined,
+  t: (key: string) => string
+): string | null {
+  if (code !== undefined && code !== null) {
+    const key = ERROR_MESSAGE_KEYS[code];
+    if (key) return t(key);
+  }
+  return null;
 }

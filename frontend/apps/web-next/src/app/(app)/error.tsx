@@ -24,7 +24,7 @@ export default function AppError({
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <h1 className="text-2xl font-semibold">{t("something_went_wrong")}</h1>
-      <p className="text-muted-foreground max-w-prose text-sm">{error.message}</p>
+      <p className="text-muted-foreground max-w-prose text-sm">{t("error_occurred")}</p>
       {traceId && (
         <p className="text-muted-foreground font-mono text-xs">
           {t("trace_id")}: {traceId}

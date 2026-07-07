@@ -11,6 +11,14 @@ const ruleTester = new RuleTester({
   },
 });
 
+const jsxRuleTester = new RuleTester({
+  languageOptions: {
+    ecmaVersion: 2022,
+    parserOptions: { ecmaFeatures: { jsx: true } },
+    sourceType: "module",
+  },
+});
+
 ruleTester.run("no-hardcoded-text", rule, {
   valid: [
     // Text routed through paraglide is fine.
@@ -58,6 +66,32 @@ ruleTester.run("no-hardcoded-text", rule, {
       code: "<p>Dashboard</p>",
       options: [{ ignore: ["Eneo\\.ai"] }],
       errors: [{ messageId: "hardcodedText" }],
+    },
+  ],
+});
+
+jsxRuleTester.run("no-hardcoded-text-jsx", rule, {
+  valid: [
+    { code: "<p>{t('hello')}</p>" },
+    { code: "<span>—</span>" },
+    { code: '<button aria-label={t("close")} />' },
+    {
+      code: "<title>Eneo.ai</title>",
+      options: [{ ignore: ["Eneo\\.ai"] }],
+    },
+  ],
+  invalid: [
+    {
+      code: "<p>Hello world</p>",
+      errors: [{ messageId: "hardcodedText" }],
+    },
+    {
+      code: '<button aria-label="Close" />',
+      errors: [{ messageId: "hardcodedAttr" }],
+    },
+    {
+      code: '<input placeholder={"Search users"} />',
+      errors: [{ messageId: "hardcodedAttr" }],
     },
   ],
 });

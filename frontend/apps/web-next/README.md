@@ -39,6 +39,7 @@ SESSION_SECRET=
 # OIDC_SCOPES=openid profile email offline_access
 
 # Feature flags
+SHOW_WEB_SEARCH=false
 SHOW_HELP_CENTER=false
 # HELP_CENTER_URL=
 # REQUEST_INTEGRATION_FORM_URL=

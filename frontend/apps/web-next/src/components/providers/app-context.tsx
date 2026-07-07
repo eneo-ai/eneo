@@ -8,7 +8,11 @@ export type AppContextData = {
   user: Schema<"UserPublic">;
   tenant: Schema<"TenantPublic">;
   settings: Schema<"SettingsPublic">;
+  federationStatus: Schema<"FederationStatusResponse">;
   limits: Schema<"Limits">;
+  featureFlags: {
+    showWebSearch: boolean;
+  };
   versions: { frontend: string; backend: string };
 };
 

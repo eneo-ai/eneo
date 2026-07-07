@@ -19,25 +19,48 @@ import { useSetSaveStatus } from "./save-status";
 export function useAutosave(key: string) {
   const t = useTranslations();
   const setStatus = useSetSaveStatus();
+  const state = useRef({ failed: false, pending: 0 });
 
   // Don't strand a stale status if the field unmounts mid-save.
   useEffect(() => () => setStatus?.(key, null), [setStatus, key]);
 
   return useCallback(
     async function run<T>(operation: () => Promise<T>): Promise<T | undefined> {
+      state.current.pending += 1;
       setStatus?.(key, "saving");
       try {
         const result = await operation();
-        setStatus?.(key, null);
+        state.current.failed = false;
         return result;
       } catch (error) {
-        setStatus?.(key, "error");
+        state.current.failed = true;
         toastApiError(error, t);
         return undefined;
+      } finally {
+        state.current.pending = Math.max(0, state.current.pending - 1);
+        if (state.current.failed) {
+          setStatus?.(key, "error");
+        } else if (state.current.pending > 0) {
+          setStatus?.(key, "saving");
+        } else {
+          setStatus?.(key, null);
+        }
       }
     },
     [setStatus, key, t]
   );
+}
+
+/** Report unsaved local draft state to the aggregate save indicator. */
+export function useDirtySaveStatus(key: string, dirty: boolean) {
+  const setStatus = useSetSaveStatus();
+  const dirtyKey = `${key}:dirty`;
+
+  useEffect(() => {
+    if (!setStatus) return;
+    setStatus(dirtyKey, dirty ? "dirty" : null);
+    return () => setStatus(dirtyKey, null);
+  }, [dirty, dirtyKey, setStatus]);
 }
 
 /**
@@ -52,7 +75,9 @@ export function useAutosaveField<T>({
   save,
   equals = Object.is,
   validate,
-  normalize
+  normalize,
+  commitDebounceMs,
+  commitOnVisibilityChange = false
 }: {
   key: string;
   value: T;
@@ -63,6 +88,10 @@ export function useAutosaveField<T>({
   validate?: (value: T) => boolean;
   /** Canonicalize before saving (e.g. trim); the draft adopts the result. */
   normalize?: (value: T) => T;
+  /** Commit after the draft has been idle for this many milliseconds. */
+  commitDebounceMs?: number;
+  /** Commit dirty draft state when the page is hidden. */
+  commitOnVisibilityChange?: boolean;
 }) {
   const autosave = useAutosave(key);
   const [draft, setDraft] = useState(serverValue);
@@ -76,6 +105,7 @@ export function useAutosaveField<T>({
   }, [serverValue, equals]);
 
   const dirty = !equals(draft, serverValue);
+  useDirtySaveStatus(key, dirty);
 
   const commit = useCallback(async () => {
     const next = normalize ? normalize(draft) : draft;
@@ -86,6 +116,21 @@ export function useAutosaveField<T>({
   }, [autosave, draft, equals, normalize, save, serverValue, validate]);
 
   const reset = useCallback(() => setDraft(serverValue), [serverValue]);
+
+  useEffect(() => {
+    if (!commitDebounceMs || !dirty) return;
+    const timer = window.setTimeout(() => void commit(), commitDebounceMs);
+    return () => window.clearTimeout(timer);
+  }, [commit, commitDebounceMs, dirty]);
+
+  useEffect(() => {
+    if (!commitOnVisibilityChange || !dirty) return;
+    const handler = () => {
+      if (document.visibilityState === "hidden") void commit();
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, [commit, commitOnVisibilityChange, dirty]);
 
   return { value: draft, setValue: setDraft, dirty, commit, reset };
 }

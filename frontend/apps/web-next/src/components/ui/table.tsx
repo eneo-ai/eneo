@@ -40,10 +40,39 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
   );
 }
 
-function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
+type TableRowProps = React.ComponentProps<"tr"> & {
+  onRowAction?: () => void;
+};
+
+function TableRow({
+  className,
+  onClick,
+  onKeyDown,
+  onRowAction,
+  tabIndex,
+  ...props
+}: TableRowProps) {
+  const actionable = Boolean(onRowAction);
+
+  const handleClick: React.MouseEventHandler<HTMLTableRowElement> = (event) => {
+    onClick?.(event);
+    if (!event.defaultPrevented) onRowAction?.();
+  };
+
+  const handleKeyDown: React.KeyboardEventHandler<HTMLTableRowElement> = (event) => {
+    onKeyDown?.(event);
+    if (event.defaultPrevented || !onRowAction) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onRowAction();
+  };
+
   return (
     <tr
       data-slot="table-row"
+      onClick={onClick || onRowAction ? handleClick : undefined}
+      onKeyDown={onKeyDown || onRowAction ? handleKeyDown : undefined}
+      tabIndex={tabIndex ?? (actionable ? 0 : undefined)}
       className={cn(
         "hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors",
         className

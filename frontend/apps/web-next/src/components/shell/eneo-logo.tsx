@@ -1,5 +1,6 @@
 import { useTranslations } from "next-intl";
 
+// eslint-disable-next-line eneo/no-raw-color -- fixed brand color in the SVG mark
 const ENEO_BRAND_BLUE = "#055594";
 
 const MARK_PATH =

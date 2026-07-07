@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import {
+  buildLoginDiagnosticsUrl,
+  diagnosticsFromUnknownError
+} from "@/lib/auth/login-diagnostics";
 import { isOidcEnabled, startAuthorization } from "@/lib/auth/oidc";
 import { sealTxn } from "@/lib/auth/session-codec";
 import { TXN_COOKIE } from "@/lib/auth/session";
@@ -18,8 +22,18 @@ export async function GET(request: NextRequest) {
   let authorization;
   try {
     authorization = await startAuthorization(undefined, { prompt });
-  } catch {
-    return NextResponse.redirect(new URL("/login/failed", env.APP_ORIGIN));
+  } catch (error) {
+    return NextResponse.redirect(
+      buildLoginDiagnosticsUrl(
+        "/login/failed",
+        env.APP_ORIGIN,
+        diagnosticsFromUnknownError(error, {
+          message: "oidc_login_error",
+          info: "start_failed",
+          correlation: crypto.randomUUID()
+        })
+      )
+    );
   }
 
   const txn = await sealTxn(

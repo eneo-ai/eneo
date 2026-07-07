@@ -3,6 +3,7 @@ import { EneoIcon, EneoWordMark } from "@/components/shell/eneo-logo";
 import { MainNav } from "@/components/shell/main-nav";
 import { ProfileMenu } from "@/components/shell/profile-menu";
 import { ThemeSwitcher } from "@/components/shell/theme-switcher";
+import { ExpiringKeysNotification } from "@/features/api-keys/expiring-keys-notification";
 import { JobIndicator } from "@/features/jobs/job-indicator";
 
 export function Header() {
@@ -14,6 +15,7 @@ export function Header() {
       </Link>
       <MainNav />
       <JobIndicator />
+      <ExpiringKeysNotification />
       <ThemeSwitcher />
       <ProfileMenu />
     </header>

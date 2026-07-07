@@ -27,7 +27,7 @@ const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "English" };
 
 export function ProfileMenu() {
   const t = useTranslations();
-  const { user } = useAppContext();
+  const { user, federationStatus } = useAppContext();
   const locale = useLocale();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -84,11 +84,13 @@ export function ProfileMenu() {
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <a href="/login/switch-organisation">
-            <Building2 /> {t("oidc_choose_another_org")}
-          </a>
-        </DropdownMenuItem>
+        {federationStatus.has_multi_tenant_federation && (
+          <DropdownMenuItem asChild>
+            <a href="/login/switch-organisation">
+              <Building2 /> {t("oidc_choose_another_org")}
+            </a>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem variant="destructive" asChild>
           <a href="/logout">
             <LogOut /> {t("logout")}

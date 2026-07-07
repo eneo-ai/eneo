@@ -3,12 +3,9 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/lib/i18n/request.ts");
 
-/**
- * Security response headers applied to every route. A strict nonce-based CSP
- * (`script-src 'self' 'nonce-…'`) is intentionally NOT set here yet: Next's
- * inline runtime needs per-request nonces wired through middleware, which must
- * be verified in a browser. That hardening is tracked in docs/migration/
- * CUTOVER.md; these headers are the safe, framework-agnostic baseline.
+/** Security response headers applied to every route. The nonce-based CSP is
+ * request-specific and lives in src/proxy.ts instead of static next.config
+ * headers.
  */
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
