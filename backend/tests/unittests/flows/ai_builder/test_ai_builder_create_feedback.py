@@ -7,7 +7,6 @@ from eneo.flows.ai_builder.ai_builder_create_feedback import (
     CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS,
     format_create_critic_feedback,
     format_create_intent_quality_feedback,
-    format_create_quality_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
@@ -24,30 +23,6 @@ _CREATE_FEEDBACK_MECHANICS_TOKENS = (
     "template_fill",
     "output_contract",
 )
-
-
-def test_format_create_quality_feedback_adds_terminal_artifact_rule() -> None:
-    feedback = format_create_quality_feedback(
-        "Du har valt DOCX som slutartefakt men sista steget producerar inte DOCX."
-    )
-
-    assert feedback is not None
-    assert "Create-intent quality repair rules" in feedback
-    assert "final step output_type to 'docx'" in feedback
-
-
-def test_format_create_quality_feedback_does_not_redirect_input_source_authoring() -> (
-    None
-):
-    feedback = format_create_quality_feedback(
-        "Det sista steget har "
-        '`input_source="all_previous_steps"` trots att tidigare steg producerar JSON.'
-    )
-
-    assert feedback is not None
-    assert "Create-intent quality repair rules" not in feedback
-    assert "let the backend compile the dataflow" not in feedback
-    assert "do not author input_source" not in feedback.casefold()
 
 
 def test_format_create_intent_quality_feedback_translates_contract_terms_only() -> None:

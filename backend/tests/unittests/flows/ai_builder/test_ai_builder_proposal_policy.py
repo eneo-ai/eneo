@@ -175,6 +175,42 @@ def test_format_validation_feedback_does_not_add_step_ref_guidance_for_runtime_a
     assert "Declared step refs in this draft: step_a, step_b" not in feedback
 
 
+def test_format_validation_feedback_adds_step_ref_guidance_for_input_binding_code() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Unit plan",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract",
+                assistant_spec=AssistantSpec(instructions="Extract."),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Summarize",
+                assistant_spec=AssistantSpec(instructions="Summarize."),
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    feedback = format_validation_feedback(
+        spec=spec,
+        errors=[
+            SpecValidationError(
+                step_ref="step_b",
+                code="input_binding_future_step_reference",
+                message="Input bindings may only reference outputs from earlier steps.",
+            )
+        ],
+    )
+
+    assert "Step reference rules:" in feedback
+    assert "Declared step refs in this draft: step_a, step_b" in feedback
+
+
 def test_format_validation_feedback_keeps_undeclared_step_ref_visible() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Unit plan",

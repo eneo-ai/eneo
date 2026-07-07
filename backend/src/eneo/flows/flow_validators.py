@@ -808,6 +808,7 @@ def _validate_binding_references(
         if step_ref is None:
             raise FlowStepValidationError(
                 f"Invalid step reference '{head}' in input bindings.",
+                code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,
                 step_order=current_step_order,
             )
 
@@ -815,11 +816,13 @@ def _validate_binding_references(
         if referenced_order >= current_step_order:
             raise FlowStepValidationError(
                 "Input bindings may only reference outputs from earlier steps.",
+                code=FlowGraphIssueCode.FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE.value,
                 step_order=current_step_order,
             )
         if referenced_order not in available_orders:
             raise FlowStepValidationError(
                 f"Input binding references unknown step order: {referenced_order}.",
+                code=FlowGraphIssueCode.FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER.value,
                 step_order=current_step_order,
             )
 

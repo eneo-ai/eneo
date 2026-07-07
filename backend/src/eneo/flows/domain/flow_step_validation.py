@@ -38,6 +38,13 @@ class FlowGraphIssueCode(StrEnum):
     FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = "flow_audio_transcription_model_required"
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED = "flow_audio_transcription_required"
     FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL = "flow_http_post_output_must_be_terminal"
+    FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE = (
+        "flow_input_binding_future_step_reference"
+    )
+    FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE = (
+        "flow_input_binding_invalid_step_reference"
+    )
+    FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER = "flow_input_binding_unknown_step_order"
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
     FLOW_INPUT_CONTRACT_INAPPLICABLE = "flow_input_contract_inapplicable"
     FLOW_REVIEW_POLICY_INVALID = "flow_review_policy_invalid"

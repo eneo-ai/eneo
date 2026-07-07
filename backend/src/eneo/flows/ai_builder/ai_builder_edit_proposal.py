@@ -10,9 +10,6 @@ from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     create_compile_context_from_planning_state,
 )
-from eneo.flows.ai_builder.ai_builder_create_feedback import (
-    format_create_quality_feedback,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -176,7 +173,7 @@ async def process_edit_arguments(
             target_step_ref,
         )
         return ToolProcessingResult(
-            feedback=format_create_quality_feedback(scoped_revision_feedback),
+            feedback=scoped_revision_feedback,
             failure_kind="quality",
         )
 

@@ -539,7 +539,9 @@ class TestSemanticVariableValidation:
             )
         )
         assert not result.valid
-        assert any(e.code == "future_step_reference" for e in result.errors)
+        assert any(
+            e.code == "input_binding_future_step_reference" for e in result.errors
+        )
 
     def test_declared_step_reference_requires_supported_output_path(self) -> None:
         result = validate_spec(
@@ -661,9 +663,8 @@ class TestSemanticVariableValidation:
         )
 
         assert any(
-            error.code == "flow_step_invalid"
+            error.code == "input_binding_future_step_reference"
             and error.step_ref == "step_b"
-            and "earlier steps" in error.message
             for error in result.errors
         )
 

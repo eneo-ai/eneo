@@ -63,6 +63,15 @@ _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE: dict[FlowGraphIssueCode, str] = {
     FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL: (
         "flow_http_post_output_must_be_terminal"
     ),
+    FlowGraphIssueCode.FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE: (
+        "input_binding_future_step_reference"
+    ),
+    FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE: (
+        "input_binding_invalid_step_reference"
+    ),
+    FlowGraphIssueCode.FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER: (
+        "input_binding_unknown_step_order"
+    ),
     FlowGraphIssueCode.FLOW_INPUT_CONTRACT_INAPPLICABLE: (
         "input_contract_type_mismatch"
     ),

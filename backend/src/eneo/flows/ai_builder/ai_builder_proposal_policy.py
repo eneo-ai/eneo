@@ -108,24 +108,16 @@ def format_validation_feedback(
 
 def _requires_reference_guidance(error: SpecValidationError) -> bool:
     if error.code in {
+        "input_binding_future_step_reference",
+        "input_binding_invalid_step_reference",
+        "input_binding_unknown_step_order",
         "invalid_step_reference",
         "future_step_reference",
         "structured_access_requires_json_output",
         "unknown_output_contract_field",
     }:
         return True
-
-    if error.code != "flow_step_invalid":
-        return False
-
-    message = error.message.casefold()
-    return any(
-        marker in message
-        for marker in (
-            "input bindings may only reference outputs from earlier steps",
-            "input binding references unknown step order",
-        )
-    )
+    return False
 
 
 def format_quality_feedback(

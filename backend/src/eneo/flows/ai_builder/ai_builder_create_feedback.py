@@ -62,39 +62,11 @@ CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS: frozenset[str] = frozenset(
 )
 
 
-def format_create_quality_feedback(feedback: str | None) -> str | None:
-    if feedback is None:
-        return None
-
-    normalized_feedback = feedback.casefold()
-    repair_rules: list[str] = []
-    if (
-        "valt docx som slutartefakt" in normalized_feedback
-        and "producerar inte docx" in normalized_feedback
-    ):
-        repair_rules.append(
-            "Set the final step output_type to 'docx' so the last step matches the requested final artifact."
-        )
-    if (
-        "valt pdf som slutartefakt" in normalized_feedback
-        and "producerar inte pdf" in normalized_feedback
-    ):
-        repair_rules.append(
-            "Set the final step output_type to 'pdf' so the last step matches the requested final artifact."
-        )
-    if not repair_rules:
-        return feedback
-    return f"{feedback}\n\nCreate-intent quality repair rules:\n- " + "\n- ".join(
-        repair_rules
-    )
-
-
 def format_create_intent_quality_feedback(feedback: str | None) -> str | None:
     if feedback is None:
         return None
 
-    intent_feedback = feedback.replace("output_contract", "output_fields")
-    return format_create_quality_feedback(intent_feedback)
+    return feedback.replace("output_contract", "output_fields")
 
 
 def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None:
