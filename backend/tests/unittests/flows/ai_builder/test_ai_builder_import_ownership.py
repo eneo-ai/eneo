@@ -29,8 +29,8 @@ PROPOSAL_POLICY_MODULE = ".".join(
 PROPOSAL_FINALIZATION_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_proposal_finalization")
 )
-PROPOSAL_REPAIR_MODULE = ".".join(
-    ("eneo", "flows", "ai_builder", "ai_builder_proposal_repair")
+PROPOSAL_RETRY_MODULE = ".".join(
+    ("eneo", "flows", "ai_builder", "ai_builder_proposal_retry")
 )
 PROPOSAL_SUBMISSION_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_proposal_submission")
@@ -993,7 +993,7 @@ def test_proposal_completion_has_single_request_boundary() -> None:
         "src/eneo/flows/ai_builder/ai_builder_proposal_submission.py"
     )
     proposal_callers = [
-        backend_root / Path("src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"),
+        backend_root / Path("src/eneo/flows/ai_builder/ai_builder_proposal_retry.py"),
         submission_path,
     ]
     contracts_tree = ast.parse(contracts_path.read_text(), filename=str(contracts_path))
@@ -1201,10 +1201,10 @@ def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
     assert violations == []
 
 
-def test_proposal_repair_has_typed_result_projection() -> None:
+def test_proposal_retry_has_typed_result_projection() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     repair_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_retry.py"
     )
     repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
     violations: list[str] = []
@@ -1297,21 +1297,19 @@ def test_stream_events_have_single_wire_encoder_boundary() -> None:
     assert violations == []
 
 
-def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers() -> (
-    None
-):
+def test_proposal_retry_wrapper_stays_deleted_and_retry_owns_runtime_helpers() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
     )
     repair_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_retry.py"
     )
     runtime_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_retry_runtime.py"
     )
     assert not runtime_path.exists()
-    assert importlib.util.find_spec(PROPOSAL_REPAIR_MODULE) is not None
+    assert importlib.util.find_spec(PROPOSAL_RETRY_MODULE) is not None
 
     processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
     repair_text = repair_path.read_text()
@@ -1390,7 +1388,7 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         "src/eneo/flows/ai_builder/ai_builder_proposal_submission.py"
     )
     repair_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
+        "src/eneo/flows/ai_builder/ai_builder_proposal_retry.py"
     )
     architecture_errors_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_architecture_errors.py"
@@ -1620,7 +1618,7 @@ def test_scoped_plan_revision_owns_direct_revision_without_llm_or_repair() -> No
 
     forbidden_scoped_modules = {
         "eneo.flows.ai_builder.ai_builder_litellm_completion",
-        "eneo.flows.ai_builder.ai_builder_proposal_repair",
+        "eneo.flows.ai_builder.ai_builder_proposal_retry",
     }
     for module in _imported_modules(scoped_tree):
         if module in forbidden_scoped_modules:
@@ -2300,8 +2298,8 @@ def test_create_form_field_type_has_single_ai_builder_owner() -> None:
 def test_repair_transport_facade_stays_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     repair_transport_path = backend_root / REPAIR_TRANSPORT_PATH
-    proposal_repair_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_repair.py"
+    proposal_retry_path = backend_root / Path(
+        "src/eneo/flows/ai_builder/ai_builder_proposal_retry.py"
     )
     violations: list[str] = []
 
@@ -2324,16 +2322,16 @@ def test_repair_transport_facade_stays_deleted() -> None:
                     f"{repair_transport_path}:{node.lineno} defines {node.name}"
                 )
 
-    proposal_repair_tree = ast.parse(
-        proposal_repair_path.read_text(), filename=str(proposal_repair_path)
+    proposal_retry_tree = ast.parse(
+        proposal_retry_path.read_text(), filename=str(proposal_retry_path)
     )
-    for node in ast.walk(proposal_repair_tree):
+    for node in ast.walk(proposal_retry_tree):
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == "append_retry_feedback_turn"
         ):
             violations.append(
-                f"{proposal_repair_path}:{node.lineno} defines {node.name}"
+                f"{proposal_retry_path}:{node.lineno} defines {node.name}"
             )
 
     for path in _python_files():

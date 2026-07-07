@@ -30,7 +30,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_repair import (
+from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     MAX_SELF_CORRECTION_RETRIES,
     ForcedToolAfterTextRequest,
     ForcedToolRetryOutcome,

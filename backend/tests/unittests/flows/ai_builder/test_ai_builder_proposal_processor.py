@@ -41,7 +41,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
 from eneo.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_repair import (
+from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolRetryOutcome,
     build_self_correction_error_event,
 )
