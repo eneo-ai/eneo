@@ -301,6 +301,11 @@ export class ChatService {
    * counter — only the latest in-flight call wins.
    */
   requestPreflight(question: string, fileIds: string[], tools?: ConversationTools, delayMs = 400) {
+    // Preflight estimates the NEXT send. While a stream is running it has
+    // nothing to estimate — and on the first turn it would zero the assistant
+    // baseline (the session now exists) before the real token_usage event
+    // arrives, making the bar dip to just the typed-input estimate.
+    if (this.askQuestion.isLoading) return;
     if (this.#preflightDebounce) {
       clearTimeout(this.#preflightDebounce);
     }
