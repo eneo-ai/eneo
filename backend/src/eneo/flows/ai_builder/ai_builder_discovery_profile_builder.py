@@ -3,10 +3,6 @@ from __future__ import annotations
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_metadata,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
-    implies_single_case,
-    implies_single_primary_document,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
@@ -15,7 +11,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryProfile,
     ReferenceSourceResolution,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_questions import localized_text
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
@@ -458,68 +453,6 @@ def answer_signals_from_planning_state(
             continue
         answers.setdefault(slot.name, set()).add(slot.value)
     return answers
-
-
-def default_discovery_assumptions(
-    *,
-    profile: DiscoveryProfile,
-    selected_question_ids: list[str],
-    existing_assumptions: list[str],
-) -> list[str]:
-    assumptions: list[str] = []
-    document_scope_slot = profile.planning_state.resolved_slots.get(
-        "document_material_scope"
-    )
-    document_scope_answer_is_user_or_model_owned = (
-        "document_material_scope" in profile.answers
-        and (
-            document_scope_slot is None
-            or document_scope_slot.source != "policy_default"
-        )
-    )
-    if (
-        "processing_scope" not in profile.answers
-        and "processing_scope" not in selected_question_ids
-        and implies_single_case(profile.text)
-        and not any(
-            "körning åt gången" in assumption for assumption in existing_assumptions
-        )
-    ):
-        assumptions.append(
-            localized_text(
-                profile.language,
-                "Antar en körning åt gången tills du säger att flera paket ska hanteras tillsammans.",
-                "Assuming one run at a time unless you later say multiple packages should be handled together.",
-            )
-        )
-    if (
-        not document_scope_answer_is_user_or_model_owned
-        and "document_material_scope" not in selected_question_ids
-        and profile.document_like_input
-        and implies_single_primary_document(profile.text)
-        and not any(
-            "huvuddokument" in assumption for assumption in existing_assumptions
-        )
-    ):
-        assumptions.append(
-            localized_text(
-                profile.language,
-                "Antar ett huvuddokument per körning tills du säger att ett dokumentpaket ska stödjas.",
-                "Assuming one primary document per run unless you later say a document package must be supported.",
-            )
-        )
-    if profile.prefer_structured_intermediate and not any(
-        "mellanliggande strukturerad data" in assumption.casefold()
-        for assumption in existing_assumptions
-    ):
-        assumptions.append(
-            localized_text(
-                profile.language,
-                "Antar att mellanliggande strukturerad data används i analyssteg där det förbättrar kvalitet och återanvändning.",
-                "Assuming intermediate structured data is used in analysis steps where it improves quality and reuse.",
-            )
-        )
-    return assumptions
 
 
 def expresses_task_intent(text: str) -> bool:

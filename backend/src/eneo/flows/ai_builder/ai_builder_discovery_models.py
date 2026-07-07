@@ -103,7 +103,6 @@ class ReferenceSourceResolution:
 class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
     mvs_met: bool = True
-    assumptions: tuple[str, ...] = ()
     selected_question_ids: tuple[str, ...] = ()
 
     @property

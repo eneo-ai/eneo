@@ -338,12 +338,6 @@ class TestQuestionBudget:
         assert "document_material_scope" not in blocking_ids
         assert "final_output_mode" not in blocking_ids
         assert len(blocking_ids) <= 2
-        assert any(
-            "en körning åt gången" in assumption for assumption in analysis.assumptions
-        )
-        assert any(
-            "ett huvuddokument" in assumption for assumption in analysis.assumptions
-        )
 
     def test_vague_prompt_allows_high_value_questions(self) -> None:
         """A short vague prompt should still allow high_value questions."""

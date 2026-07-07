@@ -2693,28 +2693,6 @@ class TestExtendedClarificationHints:
 
         assert "structured_analysis_need" not in question_ids
 
-    def test_complex_pdf_analysis_prompt_records_structured_intermediate_assumption(
-        self,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Bygg ett flöde som tar emot officiella ärendedokument, extraherar centrala fakta, "
-                    "gör en sociologisk och psykologisk analys och genererar en strukturerad PDF-rapport."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        analysis = analyze_discovery(conversation)
-
-        assert any(
-            "strukturerad" in assumption.lower()
-            and "mellanliggande" in assumption.lower()
-            for assumption in analysis.assumptions
-        )
-
     def test_docx_create_prompt_with_pdf_input_does_not_emit_pdf_assumption(
         self,
     ) -> None:
@@ -2741,49 +2719,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "final_pdf_type" not in question_ids
-        assert all(
-            "slut-pdf" not in assumption.casefold()
-            for assumption in analysis.assumptions
-        )
-
-    def test_explicit_plain_text_preference_disables_structured_intermediate_assumption(
-        self,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Bygg ett flöde som analyserar officiella dokument och genererar en PDF-rapport, "
-                    "men håll analysen som vanlig text och undvik extra struktur."
-                ),
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        analysis = analyze_discovery(conversation)
-
-        assert all(
-            "mellanliggande" not in assumption.lower()
-            for assumption in analysis.assumptions
-        )
-
-    def test_simple_single_verb_summary_prompt_does_not_assume_structured_intermediate(
-        self,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content="Bygg ett flöde som sammanfattar ett dokument och genererar en PDF.",
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        analysis = analyze_discovery(conversation)
-
-        assert all(
-            "mellanliggande" not in assumption.lower()
-            for assumption in analysis.assumptions
-        )
 
     def test_pending_question_is_reoffered_even_when_latest_turn_is_short(self) -> None:
         conversation = [

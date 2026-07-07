@@ -81,9 +81,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile as _build_discovery_profile,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    default_discovery_assumptions as _default_discovery_assumptions,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     expresses_task_intent as _expresses_task_intent,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
@@ -177,7 +174,7 @@ def analyze_discovery(
 
     (
         selected_issues,
-        assumptions,
+        _assumptions,
         selected_question_ids,
     ) = _apply_discovery_decision_engine(
         issues=_dedupe_issues(raw_issues),
@@ -185,18 +182,10 @@ def analyze_discovery(
         conversation=conversation,
         slot_classification_result=slot_classification_result,
     )
-    assumptions.extend(
-        _default_discovery_assumptions(
-            profile=profile,
-            selected_question_ids=selected_question_ids,
-            existing_assumptions=assumptions,
-        )
-    )
 
     return DiscoveryAnalysis(
         issues=tuple(selected_issues),
         mvs_met=mvs_met,
-        assumptions=tuple(dict.fromkeys(assumptions)),
         selected_question_ids=tuple(selected_question_ids),
     )
 
