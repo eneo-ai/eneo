@@ -34,6 +34,9 @@ from eneo.flows.flow_capability_manifest import (
     resolve_capability_for_tuple,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.input_binding_contract_rules import (
+    field_refs_cover_whole_structured_object,
+)
 from eneo.json_types import JsonObject
 
 PlannedStepRole = Literal[
@@ -217,9 +220,13 @@ def derive_underlag_channel(
     if input_source == InputSource.ALL_PREVIOUS_STEPS:
         return "fan_in"
     if previous_field_refs:
-        if previous_step is not None and _previous_field_refs_collapse_to_whole_object(
-            previous_field_refs=previous_field_refs,
-            previous_step=previous_step,
+        if (
+            previous_step is not None
+            and previous_step.output_type == OutputType.JSON
+            and field_refs_cover_whole_structured_object(
+                field_paths=(ref.field_path for ref in previous_field_refs),
+                property_names=(field.name for field in previous_step.output_fields),
+            )
         ):
             return "whole_object"
         return "field_refs"
@@ -232,30 +239,6 @@ def derive_underlag_channel(
     ):
         return "whole_object"
     return "implicit_previous"
-
-
-def _previous_field_refs_collapse_to_whole_object(
-    *,
-    previous_field_refs: tuple[PreviousFieldRef, ...],
-    previous_step: PlannedStep,
-) -> bool:
-    if previous_step.output_type != OutputType.JSON:
-        return False
-    property_names = {
-        field.name for field in previous_step.output_fields if "." not in field.name
-    }
-    if not property_names:
-        return False
-    field_names = {
-        ref.field_path
-        for ref in previous_field_refs
-        if "." not in ref.field_path and ref.field_path in property_names
-    }
-    return (
-        len(field_names) > 1
-        and len(property_names) > 1
-        and len(field_names) * 2 >= len(property_names)
-    )
 
 
 def _step_capabilities_are_supported(step: PlannedStep) -> bool:

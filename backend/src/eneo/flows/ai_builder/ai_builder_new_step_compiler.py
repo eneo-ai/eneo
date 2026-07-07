@@ -30,6 +30,7 @@ from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     SourceRefBinding,
     dedupe_source_refs,
+    field_refs_cover_whole_structured_object,
     lower_source_refs_to_question_binding,
 )
 
@@ -736,13 +737,9 @@ def _collapsible_previous_field_ref_steps(
         property_names = _output_contract_top_level_property_names(source_step)
         if not property_names:
             continue
-        if not field_names.issubset(property_names):
-            continue
-        # Broad coverage is cheaper and clearer as one typed structured ref.
-        if (
-            len(field_names) > 1
-            and len(property_names) > 1
-            and (len(field_names) * 2 >= len(property_names))
+        if field_refs_cover_whole_structured_object(
+            field_paths=field_names,
+            property_names=property_names,
         ):
             collapsed_steps.add(from_step)
     return collapsed_steps

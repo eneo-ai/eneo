@@ -7,6 +7,7 @@ from eneo.flows.input_binding_contract_rules import (
     SourceRefBinding,
     dedupe_source_refs,
     effective_question_binding,
+    field_refs_cover_whole_structured_object,
     input_contract_conflicts_with_question_binding,
     lower_source_refs_to_question_binding,
     question_binding,
@@ -66,6 +67,25 @@ def test_input_contract_conflicts_only_when_question_binding_supplies_input() ->
             "source_refs": [{"step_ref": "step_a", "output": "structured"}]
         },
         input_contract=contract,
+    )
+
+
+def test_field_refs_cover_whole_structured_object_requires_broad_top_level_coverage() -> (
+    None
+):
+    property_names = {"summary", "details", "decision", "metadata.created_at"}
+
+    assert field_refs_cover_whole_structured_object(
+        field_paths={"summary", "details"},
+        property_names=property_names,
+    )
+    assert not field_refs_cover_whole_structured_object(
+        field_paths={"summary"},
+        property_names=property_names,
+    )
+    assert not field_refs_cover_whole_structured_object(
+        field_paths={"metadata.created_at", "unknown"},
+        property_names=property_names,
     )
 
 

@@ -65,6 +65,26 @@ def dedupe_source_refs(
     return tuple(deduped)
 
 
+def field_refs_cover_whole_structured_object(
+    *,
+    field_paths: Iterable[str],
+    property_names: Iterable[str],
+) -> bool:
+    top_level_properties = {
+        property_name for property_name in property_names if "." not in property_name
+    }
+    if len(top_level_properties) <= 1:
+        return False
+    selected_fields = {
+        field_path
+        for field_path in field_paths
+        if "." not in field_path and field_path in top_level_properties
+    }
+    return len(selected_fields) > 1 and len(selected_fields) * 2 >= len(
+        top_level_properties
+    )
+
+
 def duplicate_source_ref_expressions(input_bindings: object) -> tuple[str, ...]:
     source_refs = source_ref_bindings(input_bindings)
     seen: set[str] = set()
