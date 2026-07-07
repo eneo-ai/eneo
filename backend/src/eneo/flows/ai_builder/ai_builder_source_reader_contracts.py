@@ -4,9 +4,6 @@ import logging
 from copy import deepcopy
 from typing import Any, cast
 
-from eneo.flows.ai_builder.ai_builder_architecture_errors import (
-    AIBuilderArchitectureError,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
@@ -31,9 +28,6 @@ from eneo.json_types import JsonObject
 logger = logging.getLogger(__name__)
 
 _SOURCE_CAPTURE_INPUT_TYPES = frozenset(
-    {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
-)
-_SOURCE_CONTRACT_INPUT_TYPES = frozenset(
     {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
 )
 _SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS = frozenset(
@@ -65,120 +59,6 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
 }
 
 
-def complete_source_reader_contracts(
-    *,
-    steps: list[NewStepDraft],
-    terminal_output_schema: JsonObject | None,
-    required_fields: tuple[SourceCaptureField, ...],
-) -> list[NewStepDraft]:
-    source_reader_indexes = tuple(
-        index for index, step in enumerate(steps) if _is_source_json_contract_step(step)
-    )
-    if not source_reader_indexes:
-        return steps
-
-    fields_by_index: dict[int, list[SourceCaptureField]] = {}
-    terminal_fields = (
-        _capture_fields_from_terminal_schema(terminal_output_schema)
-        if terminal_output_schema is not None
-        else ()
-    )
-    global_fields = _dedupe_capture_fields([*required_fields, *terminal_fields])
-    missing_global_fields = [
-        field
-        for field in global_fields
-        if not any(
-            _structured_fields_have_leaf(steps[index].output_fields or [], field.name)
-            for index in source_reader_indexes
-        )
-    ]
-    if missing_global_fields:
-        if len(source_reader_indexes) != 1:
-            raise AIBuilderArchitectureError(
-                public_code="architecture_materialization_failed",
-                detail=(
-                    "Source-reader contract completion found required fields "
-                    "but could not attribute them to exactly one reader."
-                ),
-                log_context={
-                    "source_reader_count": len(source_reader_indexes),
-                    "required_fields": ",".join(
-                        field.name for field in missing_global_fields
-                    ),
-                },
-            )
-        fields_by_index.setdefault(source_reader_indexes[0], []).extend(
-            missing_global_fields
-        )
-
-    for step in steps:
-        for ref in step.uses_previous_fields:
-            source_index = ref.from_step - 1
-            if source_index < 0 or source_index >= len(steps):
-                continue
-            source_step = steps[source_index]
-            if not _is_source_json_contract_step(source_step):
-                continue
-            field_name = _leaf_field_name(ref.field_path)
-            if not field_name or _structured_fields_have_leaf(
-                source_step.output_fields or [], field_name
-            ):
-                continue
-            fields_by_index.setdefault(source_index, []).append(
-                SourceCaptureField(name=field_name, description=ref.label)
-            )
-
-    if not fields_by_index:
-        return steps
-
-    updated_steps = list(steps)
-    for index, fields in fields_by_index.items():
-        step = steps[index]
-        output_fields = step.output_fields or []
-        completed_fields = _add_missing_source_reader_fields(
-            output_fields,
-            required_fields=_dedupe_capture_fields(fields),
-        )
-        if completed_fields == output_fields:
-            continue
-        updated_steps[index] = step.model_copy(
-            update={"output_fields": completed_fields}
-        )
-        logger.info(
-            "ai_builder_source_reader_contract_completed",
-            extra={
-                "step_index": index + 1,
-                "field_names": [field.name for field in fields],
-            },
-        )
-
-    return updated_steps
-
-
-def drop_source_contract_shadow_form_fields(
-    *,
-    steps: list[NewStepDraft],
-    form_fields: list[FormFieldSpec],
-) -> tuple[list[NewStepDraft], list[FormFieldSpec], list[str]]:
-    dropped_names = set(
-        source_contract_shadow_form_field_names(
-            output_fields_by_step=tuple(
-                tuple(step.output_fields or ())
-                for step in steps
-                if _is_source_json_contract_step(step)
-            ),
-            form_fields=tuple(form_fields),
-        )
-    )
-    if not dropped_names:
-        return steps, form_fields, []
-    return (
-        [_without_form_field_refs(step, dropped_names=dropped_names) for step in steps],
-        [field for field in form_fields if field.name not in dropped_names],
-        sorted(dropped_names),
-    )
-
-
 def log_dropped_source_contract_shadow_fields(
     *,
     field_names: list[str],
@@ -208,21 +88,6 @@ def source_capture_fields_by_step_index(
         if fields:
             fields_by_index[index] = fields
     return fields_by_index
-
-
-def clear_terminal_schema_output_fields(
-    *,
-    steps: list[NewStepDraft],
-    terminal_output_schema: JsonObject | None,
-) -> list[NewStepDraft]:
-    if (
-        terminal_output_schema is None
-        or not steps
-        or steps[-1].output_type != OutputType.JSON
-        or steps[-1].output_fields is None
-    ):
-        return steps
-    return [*steps[:-1], steps[-1].model_copy(update={"output_fields": None})]
 
 
 def apply_terminal_output_schema(
@@ -426,15 +291,6 @@ def _leaf_field_name(field_path: str) -> str:
     )
 
 
-def _is_source_json_contract_step(step: NewStepDraft) -> bool:
-    return (
-        step.input_source == InputSource.FLOW_INPUT
-        and step.input_type in _SOURCE_CONTRACT_INPUT_TYPES
-        and step.output_type == OutputType.JSON
-        and bool(step.output_fields)
-    )
-
-
 def _structured_field_token_sets(
     fields: list[StructuredFieldDraft] | None,
 ) -> set[frozenset[str]]:
@@ -490,23 +346,6 @@ def _source_contract_name_token_set(
     while tokens and tokens[0] in _SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS:
         tokens = tokens[1:]
     return frozenset(token for token in tokens if token not in ignored_tokens)
-
-
-def _without_form_field_refs(
-    step: NewStepDraft,
-    *,
-    dropped_names: set[str],
-) -> NewStepDraft:
-    if not step.uses_form_fields:
-        return step
-    uses_form_fields = [
-        field_name
-        for field_name in step.uses_form_fields
-        if field_name not in dropped_names
-    ]
-    if uses_form_fields == step.uses_form_fields:
-        return step
-    return step.model_copy(update={"uses_form_fields": uses_form_fields})
 
 
 def _is_source_capture_step(step: NewStepDraft) -> bool:
