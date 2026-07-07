@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
     StructuredFieldType,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    SourceCaptureField,
     complete_structured_source_reader_fields,
     structured_fields_have_document_items,
 )

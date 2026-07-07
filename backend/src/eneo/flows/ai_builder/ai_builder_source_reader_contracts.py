@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, cast
 
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
@@ -10,7 +11,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
@@ -116,6 +116,12 @@ _SOURCE_DOCUMENT_CONTAINER_KEYS = frozenset(
         "source_documents",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SourceCaptureField:
+    name: str
+    description: str | None = None
 
 
 def log_dropped_source_contract_shadow_fields(

@@ -20,9 +20,6 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     derive_underlag_channel,
     planned_step_is_source_reader,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
-    SourceCaptureField,
-)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     StructuredFieldDraft,
@@ -32,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    SourceCaptureField,
     complete_structured_source_reader_fields,
     log_dropped_source_contract_shadow_fields,
     source_capture_fields_from_terminal_schema,

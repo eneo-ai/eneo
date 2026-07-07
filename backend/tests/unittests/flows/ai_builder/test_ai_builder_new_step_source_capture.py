@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
-    SourceCaptureField,
     _source_ref_payloads_if_valid,
     compile_input_reference_instruction_hint,
     compile_new_step_draft,
@@ -13,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputType
 from eneo.flows.input_binding_contract_rules import SourceRefBinding
 

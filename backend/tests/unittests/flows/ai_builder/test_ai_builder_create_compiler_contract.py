@@ -12,13 +12,13 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,

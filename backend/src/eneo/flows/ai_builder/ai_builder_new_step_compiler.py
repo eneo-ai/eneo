@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import string
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any, cast
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
@@ -13,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -39,12 +39,6 @@ _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 MAX_SOURCE_CAPTURE_FIELDS = 8
 MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS = 96
 MAX_SOURCE_CAPTURE_BLOCK_CHARS = 900
-
-
-@dataclass(frozen=True, slots=True)
-class SourceCaptureField:
-    name: str
-    description: str | None = None
 
 
 def derive_position_input_source(step_index: int) -> InputSource:

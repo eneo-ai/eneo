@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     PreviousFieldRef,
@@ -11,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    SourceCaptureField,
     source_capture_fields_from_terminal_schema,
     source_reader_leaf_field_name,
     structured_fields_have_source_leaf,

@@ -19,9 +19,6 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
     CreateAssemblyRejection,
     try_compile_create_intent_with_assembly,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
-    SourceCaptureField,
-)
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
@@ -40,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_metadata_allows_input_fields,
     runtime_metadata_disables_declared_input_fields,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,

@@ -16,12 +16,12 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     PlannedStep,
     UnderlagChannel,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     PreviousOutputRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
