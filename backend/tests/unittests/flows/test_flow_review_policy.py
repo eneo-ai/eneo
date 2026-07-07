@@ -168,6 +168,7 @@ def test_output_mode_outbound_delivery_predicate_classifies_every_mode() -> None
         FlowOutputMode.HTTP_POST: True,
         FlowOutputMode.TRANSCRIBE_ONLY: False,
         FlowOutputMode.TEMPLATE_FILL: False,
+        FlowOutputMode.RENDER_VERBATIM: False,
     }
 
 
