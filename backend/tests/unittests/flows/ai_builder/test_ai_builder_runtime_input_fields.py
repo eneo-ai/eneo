@@ -301,6 +301,22 @@ def test_runtime_input_field_extraction_keeps_explicit_secondary_fields() -> Non
     )
 
 
+def test_runtime_input_field_extraction_handles_optional_checklist_or_rule() -> None:
+    text = (
+        "Vid körning laddar jag upp en ansökan och kan också ange vilken "
+        "checklista eller regel som ska användas."
+    )
+
+    assert [
+        (hint.variable_name, hint.label)
+        for hint in extract_runtime_input_field_hints(text)
+    ] == [
+        ("checklista", "checklista"),
+        ("regel", "regel"),
+    ]
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+
+
 def test_runtime_input_field_extraction_stops_before_report_writing_clause() -> None:
     hints = extract_runtime_input_field_hints(
         "Bygg ett flöde som använder inmatningsfält för målgrupp vid körning "

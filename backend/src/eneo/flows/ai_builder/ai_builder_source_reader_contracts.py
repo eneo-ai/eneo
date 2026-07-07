@@ -59,14 +59,32 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
     "author": "author",
     "avsandare": "sender",
     "category": "category",
+    "checklista": "checklist",
+    "confidential": "confidentiality",
+    "confidentiality": "confidentiality",
     "date": "date",
     "datum": "date",
     "documenttype": "document_type",
     "dokumenttyp": "document_type",
     "forfattare": "author",
+    "fraga": "question",
+    "fragor": "question",
     "kategori": "category",
+    "krav": "requirement",
+    "regel": "rule",
+    "regler": "rule",
+    "requirement": "requirement",
+    "requirements": "requirement",
+    "rule": "rule",
+    "rules": "rule",
     "sammanfattning": "summary",
+    "secret": "confidentiality",
+    "secrecy": "confidentiality",
+    "sekretess": "confidentiality",
+    "sekretesskansliga": "confidentiality",
+    "sekretesskänsliga": "confidentiality",
     "sender": "sender",
+    "sensitive": "confidentiality",
     "slutsats": "conclusion",
     "slutsatser": "conclusion",
     "titel": "title",
@@ -76,7 +94,11 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
 _DATE_TOKENS = frozenset({"date"})
 _AUTHOR_OR_SENDER_TOKENS = frozenset({"author", "sender"})
 _SUMMARY_TOKENS = frozenset({"summary"})
-_SUMMARY_MODIFIER_TOKENS = frozenset({"brief", "concise", "kort", "short"})
+_SUMMARY_MODIFIER_TOKENS = frozenset({"brief", "concise", "kort", "short", "topic"})
+_REQUIREMENT_TOKENS = frozenset({"requirement"})
+_REQUIREMENT_MODIFIER_TOKENS = frozenset({"key", "main", "rule"})
+_CONFIDENTIALITY_TOKENS = frozenset({"confidentiality"})
+_CONFIDENTIALITY_MODIFIER_TOKENS = frozenset({"part", "parts", "note"})
 _TITLE_TOKEN_SETS = frozenset(
     {
         frozenset({"title"}),
@@ -362,6 +384,14 @@ def _canonical_source_reader_field_name(field_name: str) -> str:
         "summary" in tokens and tokens <= (_SUMMARY_MODIFIER_TOKENS | _SUMMARY_TOKENS)
     ):
         return "summary"
+    if "requirement" in tokens and tokens <= (
+        _REQUIREMENT_TOKENS | _REQUIREMENT_MODIFIER_TOKENS
+    ):
+        return "requirements"
+    if "confidentiality" in tokens and tokens <= (
+        _CONFIDENTIALITY_TOKENS | _CONFIDENTIALITY_MODIFIER_TOKENS
+    ):
+        return "confidentiality"
     if tokens in _SOURCE_IDENTITY_TOKENS:
         return "source_label"
     return field_name
@@ -491,6 +521,14 @@ def _source_capture_field_key(value: str) -> str:
         _CONCLUSION_TOKENS | _CONCLUSION_MODIFIER_TOKENS
     ):
         return "conclusion"
+    if "requirement" in token_set and token_set <= (
+        _REQUIREMENT_TOKENS | _REQUIREMENT_MODIFIER_TOKENS
+    ):
+        return "requirement"
+    if "confidentiality" in token_set and token_set <= (
+        _CONFIDENTIALITY_TOKENS | _CONFIDENTIALITY_MODIFIER_TOKENS
+    ):
+        return "confidentiality"
     if "summary" in tokens:
         tokens = tuple(
             token for token in tokens if token not in _SUMMARY_MODIFIER_TOKENS

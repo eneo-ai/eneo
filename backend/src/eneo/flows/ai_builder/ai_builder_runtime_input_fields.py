@@ -205,9 +205,12 @@ _CLAUSE_BOUNDARIES: tuple[str, ...] = (
     " som slutresultat ",
     " as final output ",
 )
-_FIELD_SPLIT_RE = re.compile(r"\s*(?:,|/|\boch\b|\band\b|\bsamt\b)\s*", re.IGNORECASE)
+_FIELD_SPLIT_RE = re.compile(
+    r"\s*(?:,|/|\boch\b|\band\b|\bsamt\b|\beller\b|\bor\b)\s*",
+    re.IGNORECASE,
+)
 _TRAILING_CONTEXT_RE = re.compile(
-    r"\s*(?:vid körning|vid korning|at runtime|runtime)$",
+    r"\s*(?:vid körning|vid korning|at runtime|runtime|som ska användas|som ska anvandas|that should be used|to use)$",
     re.IGNORECASE,
 )
 _SWEDISH_NAME_OF_RE = re.compile(r"^namn\s+p[åa]\s+(.+)$", re.IGNORECASE)
@@ -671,6 +674,9 @@ def _simplify_field_label(label: str) -> str:
             or "occupation" in token_set
         ):
             return "yrke" if "yrke" in token_set else "profession"
+        words = label.split()
+        if len(words) >= 2:
+            return words[1].strip(" .,:;-")
 
     if tokens[0] in {"vad", "what"} and ("lön" in token_set or "lon" in token_set):
         return "lön"

@@ -80,6 +80,31 @@ def test_source_reader_completion_canonicalizes_source_item_fields() -> None:
     ]
 
 
+def test_source_reader_completion_canonicalizes_obligation_variants() -> None:
+    completed = complete_structured_source_reader_fields(
+        (
+            _field(
+                "documents",
+                "array",
+                item_fields=[
+                    _field("topic_summary"),
+                    _field("key_requirements"),
+                    _field("sensitive_parts"),
+                ],
+            ),
+        ),
+        required_fields=(),
+    )
+
+    documents_field = completed[0]
+    assert [field.name for field in documents_field.item_fields or []] == [
+        "source_label",
+        "summary",
+        "requirements",
+        "confidentiality",
+    ]
+
+
 def test_source_reader_completion_materializes_bare_document_array_items() -> None:
     completed = complete_structured_source_reader_fields(
         (_field("documents", "array"),),
