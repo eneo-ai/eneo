@@ -1386,6 +1386,15 @@ def _quality_report(
             summary.get("terminal_output_mode"),
             expected_output_mode,
         )
+        renderer_is_previous_step_bound = _source_context_metrics(summary)[
+            "renderer_is_previous_step_bound"
+        ]
+        add_check(
+            "renderer_previous_step_bound",
+            renderer_is_previous_step_bound is True,
+            renderer_is_previous_step_bound,
+            True,
+        )
     if (minimum_json := _int_value(expected.get("min_json_steps"))) is not None:
         actual_json = _int_value(summary.get("json_step_count"))
         add_check(
@@ -1413,6 +1422,22 @@ def _quality_report(
             actual_all_previous is not None and actual_all_previous <= max_all_previous,
             actual_all_previous,
             max_all_previous,
+        )
+    if (
+        max_post_json_text := _int_value(
+            expected.get("max_post_json_text_cleanup_steps")
+        )
+    ) is not None:
+        metrics = _source_context_metrics(summary)
+        actual_post_json_text = _int_value(
+            metrics.get("post_json_text_cleanup_step_count")
+        )
+        add_check(
+            "max_post_json_text_cleanup_steps",
+            actual_post_json_text is not None
+            and actual_post_json_text <= max_post_json_text,
+            actual_post_json_text,
+            max_post_json_text,
         )
 
     duplicate_steps = summary.get("duplicate_source_ref_steps")

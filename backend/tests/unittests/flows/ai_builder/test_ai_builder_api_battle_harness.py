@@ -57,6 +57,54 @@ def _document_plan(*, terminal_mode: str, terminal_input_source: str) -> dict[st
     }
 
 
+def _document_plan_with_extra_text_helper() -> dict[str, Any]:
+    return {
+        "proposal": {
+            "spec": {
+                "flow_name": "Document report",
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Read source",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                        "output_contract": {
+                            "type": "object",
+                            "properties": {"summary": {"type": "string"}},
+                        },
+                    },
+                    {
+                        "plan_step_ref": "step_b",
+                        "name": "Write report body",
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "plan_step_ref": "step_c",
+                        "name": "Make PDF",
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "plan_step_ref": "step_d",
+                        "name": "Render PDF",
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "pdf",
+                        "output_mode": "render_verbatim",
+                    },
+                ],
+            }
+        }
+    }
+
+
 def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     harness = _battle_harness()
     plan = _document_plan(
@@ -75,6 +123,7 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     checks = {check["name"]: check for check in report["checks"]}
     assert checks["terminal_document_output_mode"]["passed"] is True
     assert checks["terminal_document_output_mode"]["expected"] == "render_verbatim"
+    assert checks["renderer_previous_step_bound"]["passed"] is True
     assert report["metrics"]["renderer_is_previous_step_bound"] is True
 
     bad_plan = _document_plan(
@@ -91,7 +140,29 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
 
     bad_checks = {check["name"]: check for check in bad_report["checks"]}
     assert bad_checks["terminal_document_output_mode"]["passed"] is False
+    assert bad_checks["renderer_previous_step_bound"]["passed"] is False
     assert bad_report["metrics"]["renderer_is_previous_step_bound"] is False
+
+
+def test_harness_can_fail_extra_post_json_text_helper() -> None:
+    harness = _battle_harness()
+    plan = _document_plan_with_extra_text_helper()
+
+    summary = harness._summarize_plan(plan)
+    report = harness._quality_report(
+        plan=plan,
+        summary=summary,
+        expected={
+            "terminal_output_type": "pdf",
+            "max_post_json_text_cleanup_steps": 1,
+        },
+        event_summary={},
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["max_post_json_text_cleanup_steps"]["passed"] is False
+    assert checks["max_post_json_text_cleanup_steps"]["actual"] == 2
+    assert report["metrics"]["post_json_text_cleanup_step_count"] == 2
 
 
 def test_suite_reliability_counts_invalid_plan_errors() -> None:
