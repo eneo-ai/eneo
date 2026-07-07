@@ -798,6 +798,25 @@ def _targeted_underlag_binding_mode(
     ):
         return "skip"
 
+    text_priors_count = sum(
+        1 for _, step in priors if step.output_type == OutputType.TEXT
+    )
+    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
+        input_source_value = (
+            composer.input_source.value if composer.input_source is not None else None
+        )
+        logger.warning(
+            "ai_builder_create_dataflow_targeted_underlag_soft_cap_bound",
+            extra={
+                "soft_cap": TARGETED_UNDERLAG_SOFT_CAP,
+                "composer_index": composer_index,
+                "text_prior_count": text_priors_count,
+                "json_prior_count": len(json_priors),
+                "input_source": input_source_value,
+            },
+        )
+        return "skip"
+
     if composer.input_source == InputSource.ALL_PREVIOUS_STEPS:
         return (
             "with_text_priors"
@@ -809,11 +828,6 @@ def _targeted_underlag_binding_mode(
     if composer.input_type not in {InputType.JSON, InputType.TEXT}:
         return "skip"
 
-    text_priors_count = sum(
-        1 for _, step in priors if step.output_type == OutputType.TEXT
-    )
-    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
-        return "skip"
     if len(json_priors) >= 2:
         return "with_text_priors"
     if _single_json_prior_needs_source_material(

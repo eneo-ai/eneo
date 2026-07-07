@@ -98,6 +98,7 @@ from tests.unittests.flows.ai_builder.authoring_command_assertions import (
 
 PROPOSAL_INTENT_LOGGER = "eneo.flows.ai_builder.ai_builder_proposal_intent"
 CREATE_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_create_compiler"
+CREATE_DATAFLOW_LOGGER = "eneo.flows.ai_builder.ai_builder_create_dataflow"
 NEW_STEP_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_new_step_compiler"
 SOURCE_CAPTURE_HEADING = "Bevara följande uppgifter eftersom senare steg behöver dem:"
 
@@ -5270,11 +5271,15 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
     assert composer.uses_previous_outputs == []
 
 
-def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() -> None:
+def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     # Pins 78bf7994: the soft cap counts text priors, not JSON priors.
     from eneo.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
+
+    caplog.set_level(logging.WARNING, logger=CREATE_DATAFLOW_LOGGER)
 
     text_priors: list[NewStepDraft] = []
     for index in range(TARGETED_UNDERLAG_SOFT_CAP + 1):
@@ -5311,6 +5316,18 @@ def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() ->
     assert result is draft
     assert result == steps_before, "over-cap text priors should bail out"
     assert result[-1].input_source.value == "all_previous_steps"
+    cap_records = [
+        record
+        for record in caplog.records
+        if record.message
+        == "ai_builder_create_dataflow_targeted_underlag_soft_cap_bound"
+    ]
+    assert len(cap_records) == 1
+    assert cap_records[0].soft_cap == TARGETED_UNDERLAG_SOFT_CAP
+    assert cap_records[0].composer_index == len(steps_before) - 1
+    assert cap_records[0].text_prior_count == TARGETED_UNDERLAG_SOFT_CAP + 1
+    assert cap_records[0].json_prior_count == 1
+    assert cap_records[0].input_source == "all_previous_steps"
 
 
 def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_priors() -> (
