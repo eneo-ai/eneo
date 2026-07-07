@@ -26,6 +26,9 @@ class Questions(BasePublic):
     answer: Mapped[str] = mapped_column()
     num_tokens_question: Mapped[int] = mapped_column()
     num_tokens_answer: Mapped[int] = mapped_column()
+    # Final LLM call's prompt tokens (context-window occupancy). Nullable:
+    # num_tokens_question sums all calls of a tool turn and predates this.
+    num_tokens_context: Mapped[Optional[int]] = mapped_column(nullable=True)
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
     reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
 

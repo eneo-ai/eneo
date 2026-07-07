@@ -12481,6 +12481,8 @@ export interface components {
        * @default 0
        */
       num_tokens_answer?: number;
+      /** Num Tokens Context */
+      num_tokens_context?: number | null;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -12526,6 +12528,8 @@ export interface components {
        * @default 0
        */
       num_tokens_answer?: number;
+      /** Num Tokens Context */
+      num_tokens_context?: number | null;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -18385,6 +18389,8 @@ export interface components {
       completion_tokens: number;
       /** Turn Tokens */
       turn_tokens: number;
+      /** Context Prompt Tokens */
+      context_prompt_tokens: number;
     };
     /** SSETokenUsage */
     SSETokenUsage: {

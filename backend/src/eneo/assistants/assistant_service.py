@@ -1417,11 +1417,15 @@ class AssistantService:
                         f"output={num_tokens_answer} ({output_source})"
                     )
 
+                    num_tokens_context = (
+                        stream_usage.context_prompt_tokens if stream_usage else None
+                    )
                     await self.session_service.complete_question_with_answer(
                         question_id=question_id,
                         answer=response_string,
                         num_tokens_question=num_tokens_question,
                         num_tokens_answer=num_tokens_answer,
+                        num_tokens_context=num_tokens_context,
                         completion_model=cast("AICompletionModel", completion_model),
                         info_blob_chunks=reference_chunks,
                         generated_files=generated_files,
@@ -1441,6 +1445,7 @@ class AssistantService:
                         usage=TokenUsage(
                             prompt_tokens=num_tokens_question,
                             completion_tokens=num_tokens_answer,
+                            context_prompt_tokens=num_tokens_context,
                         ),
                     )
                 finally:
@@ -1543,6 +1548,9 @@ class AssistantService:
                 answer=final_answer,
                 num_tokens_question=num_tokens_question,
                 num_tokens_answer=num_tokens_answer,
+                num_tokens_context=(
+                    response.usage.context_prompt_tokens if response.usage else None
+                ),
                 generated_files=generated_files,
                 completion_model=cast("AICompletionModel", completion_model),
                 info_blob_chunks=reference_chunks,

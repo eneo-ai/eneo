@@ -173,6 +173,9 @@ class TokenUsageEvent(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     turn_tokens: int
+    # Final LLM call's prompt alone: context-window occupancy, as opposed to
+    # prompt_tokens which sums every call of a multi-round tool turn.
+    context_prompt_tokens: int
 
 
 class SSETokenUsage(SSEBase):

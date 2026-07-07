@@ -172,6 +172,10 @@ class Message(QuestionBase, InDB):
     # context usage. Fix requires a backfill migration, out of scope here.
     num_tokens_question: int = 0
     num_tokens_answer: int = 0
+    # Final LLM call's prompt tokens (context-window occupancy) for turns with
+    # tool rounds, where num_tokens_question sums every call. None on rows
+    # persisted before this was measured.
+    num_tokens_context: Optional[int] = None
 
     @field_validator("tool_calls", mode="before")
     @classmethod

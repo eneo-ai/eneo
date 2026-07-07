@@ -28,11 +28,17 @@ if TYPE_CHECKING:
 
 
 class TokenUsage(BaseModel):
-    """Actual token usage as reported by the LLM provider."""
+    """Actual token usage as reported by the LLM provider.
+
+    A turn with tool calls makes several LLM calls; ``prompt_tokens`` sums
+    them (what the turn cost), while ``context_prompt_tokens`` is the final
+    call's prompt alone (how full the context window actually is).
+    """
 
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     reasoning_tokens: Optional[int] = None
+    context_prompt_tokens: Optional[int] = None
 
 
 class ResponseType(str, Enum):

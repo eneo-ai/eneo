@@ -267,7 +267,10 @@ export class ChatService {
     // context fill — fixed when the user sends their next message and we
     // receive a fresh token_usage SSE event.
     const last = messages[messages.length - 1];
-    this.lockedInputTokens = last.num_tokens_question ?? 0;
+    // Window occupancy, not spend: prefer the final-call prompt size; turns
+    // persisted before it was measured fall back to the (possibly summed)
+    // per-turn prompt tokens.
+    this.lockedInputTokens = last.num_tokens_context ?? last.num_tokens_question ?? 0;
     this.lockedOutputTokens = last.num_tokens_answer ?? 0;
   }
 
@@ -652,15 +655,23 @@ export class ChatService {
                 // expose the running context fill for the UI bar.
                 const usage = (
                   event as unknown as {
-                    usage?: { prompt_tokens: number; completion_tokens: number };
+                    usage?: {
+                      prompt_tokens: number;
+                      completion_tokens: number;
+                      context_prompt_tokens?: number;
+                    };
                   }
                 ).usage;
                 if (!usage) return;
                 if (ref) {
                   ref.num_tokens_question = usage.prompt_tokens;
                   ref.num_tokens_answer = usage.completion_tokens;
+                  ref.num_tokens_context = usage.context_prompt_tokens ?? null;
                 }
-                this.lockedInputTokens = usage.prompt_tokens;
+                // The bar shows window occupancy: the final LLM call's prompt,
+                // not the multi-round sum (that one feeds the cumulative-spend
+                // summary instead).
+                this.lockedInputTokens = usage.context_prompt_tokens ?? usage.prompt_tokens;
                 this.lockedOutputTokens = usage.completion_tokens;
                 this.assistantPromptTokens = 0;
                 this.assistantAttachmentTokens = 0;

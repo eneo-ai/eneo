@@ -318,12 +318,14 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
     elif chunk.response_type == ResponseType.TOKEN_USAGE:
         prompt = chunk.usage.prompt_tokens or 0 if chunk.usage else 0
         completion = chunk.usage.completion_tokens or 0 if chunk.usage else 0
+        context = chunk.usage.context_prompt_tokens or 0 if chunk.usage else 0
         data = SSETokenUsage(
             session_id=session_id,
             usage=TokenUsageEvent(
                 prompt_tokens=prompt,
                 completion_tokens=completion,
                 turn_tokens=prompt + completion,
+                context_prompt_tokens=context or prompt,
             ),
         )
 

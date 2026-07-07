@@ -167,6 +167,7 @@ class QuestionRepository:
         answer: str,
         num_tokens_question: int | None = None,
         num_tokens_answer: int | None = None,
+        num_tokens_context: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
         reasoning: str | None = None,
@@ -200,6 +201,8 @@ class QuestionRepository:
             update_values["num_tokens_question"] = num_tokens_question
         if num_tokens_answer is not None:
             update_values["num_tokens_answer"] = num_tokens_answer
+        if num_tokens_context is not None:
+            update_values["num_tokens_context"] = num_tokens_context
         if completion_model_id is not None:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:

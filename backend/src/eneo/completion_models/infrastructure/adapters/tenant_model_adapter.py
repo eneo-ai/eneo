@@ -529,10 +529,12 @@ class TenantModelAdapter(CompletionModelAdapter):
         if details:
             reasoning_tokens = getattr(details, "reasoning_tokens", None)
 
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
         return TokenUsage(
-            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            prompt_tokens=prompt_tokens,
             completion_tokens=getattr(usage, "completion_tokens", None),
             reasoning_tokens=reasoning_tokens,
+            context_prompt_tokens=prompt_tokens,
         )
 
     def _accumulate_usage(
@@ -554,6 +556,12 @@ class TenantModelAdapter(CompletionModelAdapter):
             prompt_tokens=_add(existing.prompt_tokens, new.prompt_tokens),
             completion_tokens=_add(existing.completion_tokens, new.completion_tokens),
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
+            # Window occupancy is the LATEST call's prompt, never a sum.
+            context_prompt_tokens=(
+                new.context_prompt_tokens
+                if new.context_prompt_tokens is not None
+                else existing.context_prompt_tokens
+            ),
         )
 
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
