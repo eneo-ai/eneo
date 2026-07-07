@@ -6,7 +6,6 @@ from uuid import uuid4
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
-    compile_create_steps_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
@@ -16,10 +15,6 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
 from eneo.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
-from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    NewStepDraft,
-    StructuredFieldDraft,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -35,7 +30,6 @@ from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
-    FormFieldSpec,
     InputType,
     OutputType,
 )
@@ -184,45 +178,59 @@ def test_single_step_outline_unreferenced_form_field_stays_unused_for_repair() -
     assert any(warning.code == "unused_form_field" for warning in validation.warnings)
 
 
-def test_intermediate_form_field_use_flows_through_structured_previous_field() -> None:
-    form_fields = [_form_field(variable_name="case_id", label="Case ID")]
-    steps = [
-        NewStepDraft(
-            name="Score case",
-            instructions="Score the case using the runtime identifier.",
-            input_source="flow_input",
-            input_type="text",
-            output_type="json",
-            uses_form_fields=["case_id"],
-            output_fields=[
-                _structured_field(
-                    name="risk_score",
-                    field_type="number",
-                    description="Risk score.",
-                )
-            ],
-        ),
-        NewStepDraft(
-            name="Write assessment",
-            instructions="Write the assessment from the structured score.",
-            input_source="previous_step",
-            input_type="json",
-            output_type="text",
-            uses_previous_fields=[
+def test_intermediate_form_field_use_flows_through_structured_previous_field(
+    monkeypatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("form-field source chain should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case assessment",
+            "plan_rationale": "Score the case before writing the assessment.",
+            "input_fields": [
                 {
-                    "from_step": 1,
-                    "field_path": "risk_score",
-                    "label": "Risk score",
+                    "variable_name": "case_id",
+                    "label": "Case ID",
+                    "field_type": "text",
+                    "required": True,
                 }
             ],
-        ),
-    ]
-
-    compiled = compile_create_steps_to_spec(
-        flow_name="Case assessment",
-        form_fields=form_fields,
-        steps=steps,
+            "steps": [
+                {
+                    "name": "Score case",
+                    "instructions": "Score the case using the runtime identifier.",
+                    "output_type": "json",
+                    "uses_form_fields": ["case_id"],
+                    "output_fields": [
+                        {
+                            "name": "risk_score",
+                            "field_type": "number",
+                            "description": "Risk score.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write assessment",
+                    "instructions": "Write the assessment from the structured score.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "risk_score",
+                            "label": "Risk score",
+                        }
+                    ],
+                },
+            ],
+        }
     )
+
+    compiled = compile_create_intent_to_spec(outline)
     first_question = _question_binding(compiled.steps[0].input_bindings)
     final_question = _question_binding(compiled.steps[-1].input_bindings)
 
@@ -330,28 +338,6 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
     assert first_question.count("{{ flow_input.audience }}") == 1
     assert final_question.count("{{ flow_input.audience }}") == 1
     assert validate_spec(result.spec).valid
-
-
-def _form_field(*, variable_name: str, label: str) -> FormFieldSpec:
-    return FormFieldSpec(
-        name=variable_name,
-        label=label,
-        type="text",
-        required=True,
-    )
-
-
-def _structured_field(
-    *,
-    name: str,
-    field_type: str,
-    description: str,
-) -> StructuredFieldDraft:
-    return StructuredFieldDraft(
-        name=name,
-        field_type=field_type,
-        description=description,
-    )
 
 
 def _question_binding(input_bindings: dict[str, object] | None) -> str:
