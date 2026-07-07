@@ -21,10 +21,6 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
 from eneo.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
-    contains_any_token_prefix,
-    normalize_discovery_text,
-)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
     compile_new_step_draft,
@@ -32,8 +28,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
-    PreviousFieldRef,
-    PreviousOutputRef,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -41,7 +35,6 @@ from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     FlowInputFieldIntent,
-    SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
@@ -62,16 +55,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     log_dropped_source_contract_shadow_fields,
     source_capture_fields_by_step_index,
 )
-from eneo.flows.ai_builder.ai_builder_step_skeleton import (
-    StepSkeletonOutputTypeDrift,
-    StepSkeletonSemanticContent,
-    materialize_step_skeleton,
-    resolve_step_skeleton_patterns,
-)
-from eneo.flows.ai_builder.pattern_registry import (
-    FLOW_INPUT_AUDIO_TRANSCRIPTION,
-    PATTERN_REGISTRY,
-)
+from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
@@ -82,17 +66,14 @@ from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
-    InputSource,
     InputType,
     OutputMode,
     OutputType,
     StepSpec,
 )
-from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
-_DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
 ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
 
@@ -126,12 +107,6 @@ class CreateCompileContext:
             raise ValueError("CreateCompileContext.runtime_input_type cannot be ANY")
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
             raise ValueError("runtime_max_files must be at least 1 when provided")
-
-
-@dataclass(frozen=True, slots=True)
-class SemanticStepRewrite:
-    steps: list[SemanticStepIntent]
-    original_to_current_step: dict[int, int]
 
 
 def compile_create_intent_to_spec(
@@ -177,6 +152,10 @@ def compile_create_intent_to_spec(
             field_names=server_owned_fields_requiring_placement,
         )
     )
+    _raise_for_unplaced_create_form_fields(
+        intent_with_server_owned_field_placement,
+        field_order=known_field_order,
+    )
 
     final_output_mode = context.final_output_mode if context is not None else None
     pattern_ids = context.pattern_ids if context is not None else ()
@@ -206,144 +185,46 @@ def compile_create_intent_to_spec(
         )
         return assembly_spec
 
-    pattern_resolution = resolve_step_skeleton_patterns(
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        final_output_mode=final_output_mode,
-        pattern_ids=pattern_ids,
-        chain_steps=chain_steps,
-    )
-    backend_audio_transcription_inserted = _backend_audio_transcription_inserted(
-        pattern_ids=pattern_resolution.pattern_ids,
-        chain_steps=pattern_resolution.chain_steps,
-    )
-    semantic_steps_original = list(intent_with_server_owned_field_placement.steps)
-    semantic_step_rewrite = _normalize_leading_audio_transcription_step(
-        steps=semantic_steps_original,
-        runtime_input_type=runtime_input_type,
-        backend_audio_transcription_inserted=backend_audio_transcription_inserted,
-    )
-    backend_audio_transcription_review_mode = (
-        _redundant_leading_audio_transcription_review_mode(
-            steps=semantic_steps_original,
-            runtime_input_type=runtime_input_type,
-            backend_audio_transcription_inserted=backend_audio_transcription_inserted,
-        )
-    )
-    semantic_step_rewrite = _fold_leading_zero_contract_text_steps(
-        rewrite=semantic_step_rewrite,
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-    )
-    semantic_steps_input = _remap_declared_previous_refs_after_semantic_rewrite(
-        rewrite=semantic_step_rewrite,
-        original_steps=semantic_steps_original,
-    )
-
-    semantic_steps: list[StepSkeletonSemanticContent] = []
-    for semantic_step in semantic_steps_input:
-        uses_form_fields = [
-            field_name
-            for field_name in semantic_step.uses_form_fields
-            if field_name in known_field_names
-        ]
-        dropped_primary_input_field_names.extend(
-            [
-                field_name
-                for field_name in semantic_step.uses_form_fields
-                if field_name not in known_field_names
-                and is_primary_runtime_input_shadow_field(
-                    variable_name=field_name,
-                    field_type="text",
-                    runtime_input_type=runtime_input_type,
-                )
-            ]
-        )
-        semantic_steps.append(
-            _semantic_content_from_intent_step(
-                semantic_step,
-                uses_form_fields=uses_form_fields,
-            )
-        )
-
-    try:
-        skeleton_plan = materialize_step_skeleton(
-            runtime_input_type=runtime_input_type,
-            final_output_type=final_output_type,
-            final_output_mode=final_output_mode,
-            pattern_ids=pattern_ids,
-            chain_steps=chain_steps,
-            aggregation_intent=aggregation_intent,
-            runtime_required=context.runtime_required if context is not None else True,
-            runtime_max_files=(
-                context.runtime_max_files if context is not None else None
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail="FlowAssemblyPlan did not support this create intent.",
+        log_context={
+            "runtime_input_type": runtime_input_type.value,
+            "final_output_type": final_output_type.value,
+            "final_output_mode": (
+                final_output_mode.value if final_output_mode is not None else None
             ),
-            ui_language=context.ui_language if context is not None else None,
-        )
-        composition = skeleton_plan.compose(semantic_steps)
-    except ValueError as error:
-        raise AIBuilderArchitectureError(
-            public_code="architecture_materialization_failed",
-            detail=str(error),
-            log_context={
-                "runtime_input_type": runtime_input_type.value,
-                "final_output_type": final_output_type.value,
-                "final_output_mode": (
-                    final_output_mode.value if final_output_mode is not None else None
-                ),
-                "pattern_ids": ",".join(pattern_ids),
-                "chain_steps": ",".join(chain_steps),
-                "semantic_step_count": len(semantic_steps),
-            },
-        ) from error
-    _log_skeleton_output_type_drifts(composition.output_type_drifts)
-    steps = list(composition.steps)
-    if backend_audio_transcription_review_mode is not None:
-        steps = _apply_backend_audio_transcription_review_mode(
-            steps=steps,
-            review_mode=backend_audio_transcription_review_mode,
-        )
-    terminal_output_schema = context.terminal_output_schema if context else None
-    _log_dropped_primary_input_shadow_fields(
-        field_names=dropped_primary_input_field_names,
-        runtime_input_type=runtime_input_type,
-    )
-    return compile_create_steps_to_spec(
-        flow_name=intent.flow_name,
-        flow_description=intent.flow_description,
-        form_fields=form_fields,
-        steps=steps,
-        document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
-        aggregation_intent=aggregation_intent,
-        terminal_output_schema=terminal_output_schema,
-        source_reader_required_fields=(
-            context.source_reader_required_fields if context is not None else ()
-        ),
-        ui_language=context.ui_language if context is not None else None,
+            "pattern_ids": ",".join(pattern_ids),
+            "chain_steps": ",".join(chain_steps),
+            "semantic_step_count": len(intent_with_server_owned_field_placement.steps),
+        },
     )
 
 
-def _semantic_content_from_intent_step(
-    step: SemanticStepIntent,
+def _raise_for_unplaced_create_form_fields(
+    intent: CreateFlowIntent,
     *,
-    uses_form_fields: list[str],
-) -> StepSkeletonSemanticContent:
-    return StepSkeletonSemanticContent(
-        name=step.name,
-        instructions=step.instructions,
-        requested_output_type=(
-            OutputType(step.output_type) if step.output_type is not None else None
-        ),
-        output_fields=tuple(step.output_fields or ()),
-        uses_form_fields=tuple(uses_form_fields),
-        uses_previous_fields=tuple(step.uses_previous_fields),
-        uses_previous_outputs=tuple(step.uses_previous_outputs),
-        model_ref=step.model_ref,
-        knowledge_refs=tuple(step.knowledge_refs),
-        mcp_server_refs=tuple(step.mcp_server_refs),
-        mcp_tool_refs=tuple(step.mcp_tool_refs),
-        citations_requested=step.citations_requested,
-        review_mode=step.review_mode,
+    field_order: list[str],
+) -> None:
+    if not field_order:
+        return
+    placed_field_names = {
+        field_name
+        for semantic_step in intent.steps
+        for field_name in semantic_step.uses_form_fields
+    }
+    unplaced_field_names = [
+        field_name for field_name in field_order if field_name not in placed_field_names
+    ]
+    if not unplaced_field_names:
+        return
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail="Create-flow input fields must be referenced by at least one step.",
+        log_context={
+            "reason": "unplaced_form_fields",
+            "field_names": ",".join(unplaced_field_names),
+        },
     )
 
 
@@ -372,92 +253,6 @@ def _intent_with_server_owned_form_field_placement(
             ]
         }
     )
-
-
-def _remap_declared_previous_refs_after_semantic_rewrite(
-    *,
-    rewrite: SemanticStepRewrite,
-    original_steps: list["SemanticStepIntent"],
-) -> list["SemanticStepIntent"]:
-    if rewrite.steps == original_steps:
-        return rewrite.steps
-
-    updated: list[SemanticStepIntent] = []
-    for current_step_number, step in enumerate(rewrite.steps, start=1):
-        if not step.uses_previous_fields and not step.uses_previous_outputs:
-            updated.append(step)
-            continue
-        remapped_fields = _remap_declared_previous_field_refs(
-            step.uses_previous_fields,
-            original_to_current_step=rewrite.original_to_current_step,
-            current_step_number=current_step_number,
-        )
-        remapped_outputs = _remap_declared_previous_output_refs(
-            step.uses_previous_outputs,
-            original_to_current_step=rewrite.original_to_current_step,
-            current_step_number=current_step_number,
-        )
-        if (
-            remapped_fields == step.uses_previous_fields
-            and remapped_outputs == step.uses_previous_outputs
-        ):
-            updated.append(step)
-            continue
-        updated.append(
-            step.model_copy(
-                update={
-                    "uses_previous_fields": remapped_fields,
-                    "uses_previous_outputs": remapped_outputs,
-                }
-            )
-        )
-    return updated
-
-
-def _remap_declared_previous_field_refs(
-    refs: list[PreviousFieldRef],
-    *,
-    original_to_current_step: dict[int, int],
-    current_step_number: int,
-) -> list[PreviousFieldRef]:
-    remapped: list[PreviousFieldRef] = []
-    for ref in refs:
-        current_source_step = original_to_current_step.get(ref.from_step)
-        if current_source_step is None or current_source_step >= current_step_number:
-            continue
-        remapped.append(ref.model_copy(update={"from_step": current_source_step}))
-    return remapped
-
-
-def _remap_declared_previous_output_refs(
-    refs: list[PreviousOutputRef],
-    *,
-    original_to_current_step: dict[int, int],
-    current_step_number: int,
-) -> list[PreviousOutputRef]:
-    remapped: list[PreviousOutputRef] = []
-    for ref in refs:
-        current_source_step = original_to_current_step.get(ref.from_step)
-        if current_source_step is None or current_source_step >= current_step_number:
-            continue
-        remapped.append(ref.model_copy(update={"from_step": current_source_step}))
-    return remapped
-
-
-def _log_skeleton_output_type_drifts(
-    output_type_drifts: tuple[StepSkeletonOutputTypeDrift, ...],
-) -> None:
-    for drift in output_type_drifts:
-        logger.info(
-            "ai_builder_skeleton_semantic_output_type_drift",
-            extra={
-                "slot_id": drift.slot_id,
-                "slot_ordinal": drift.slot_ordinal,
-                "requested_output_type": drift.requested_output_type.value,
-                "enforced_output_type": drift.enforced_output_type.value,
-                "dropped_output_fields": drift.dropped_output_fields,
-            },
-        )
 
 
 def compile_create_steps_to_spec(
@@ -943,311 +738,6 @@ def _log_dropped_primary_input_shadow_fields(
             "runtime_input_type": runtime_input_type.value,
         },
     )
-
-
-def _fold_leading_zero_contract_text_steps(
-    *,
-    rewrite: SemanticStepRewrite,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-) -> SemanticStepRewrite:
-    """Fold low-value leading text hops without interpreting their wording.
-
-    Small models sometimes emit a first step whose only job is "receive/use the
-    user text" before the first real step. For text runtime input that hop adds
-    latency and token cost but no Flow contract. We fold only a leading
-    structural no-op into the next semantic target and preserve its instructions
-    verbatim by concatenation.
-    """
-
-    steps = rewrite.steps
-    if runtime_input_type != InputType.TEXT or len(steps) < 2:
-        return rewrite
-
-    target_index = _leading_fold_target_index(
-        steps=steps,
-        final_output_type=final_output_type,
-    )
-    if target_index is None or target_index == 0:
-        return rewrite
-
-    folded_steps = steps[:target_index]
-    target_step = steps[target_index]
-    merged_instructions = "\n\n".join(
-        [*(step.instructions for step in folded_steps), target_step.instructions]
-    )
-    merged = target_step.model_copy(update={"instructions": merged_instructions})
-
-    logger.info(
-        "ai_builder_create_intent_zero_contract_steps_folded",
-        extra={
-            "folded_count": len(folded_steps),
-            "folded_step_names": [step.name for step in folded_steps],
-            "target_step_name": target_step.name,
-            "runtime_input_type": runtime_input_type.value,
-            "final_output_type": final_output_type.value,
-        },
-    )
-    current_to_original_step = {
-        current_step: original_step
-        for original_step, current_step in rewrite.original_to_current_step.items()
-    }
-    original_to_current_step = {
-        original_step: current_step - target_index
-        for current_step, original_step in current_to_original_step.items()
-        if current_step >= target_index + 1
-    }
-    return SemanticStepRewrite(
-        steps=[merged, *steps[target_index + 1 :]],
-        original_to_current_step=original_to_current_step,
-    )
-
-
-def _normalize_leading_audio_transcription_step(
-    *,
-    steps: list["SemanticStepIntent"],
-    runtime_input_type: InputType,
-    backend_audio_transcription_inserted: bool,
-) -> SemanticStepRewrite:
-    unchanged = SemanticStepRewrite(
-        steps=steps,
-        original_to_current_step={
-            step_number: step_number for step_number in range(1, len(steps) + 1)
-        },
-    )
-    if (
-        runtime_input_type != InputType.AUDIO
-        or not backend_audio_transcription_inserted
-        or len(steps) < 2
-    ):
-        return unchanged
-    first_step = steps[0]
-    if not _is_redundant_audio_transcription_step(first_step):
-        return unchanged
-    if not _has_no_external_step_refs(first_step):
-        return unchanged
-    if not _is_plain_text_semantic_step(first_step):
-        rewritten = first_step.model_copy(
-            update={
-                "name": _structured_transcript_step_name(first_step),
-                "instructions": _structured_transcript_step_instructions(first_step),
-            }
-        )
-        logger.info(
-            "ai_builder_redundant_audio_transcription_semantic_step_rewritten",
-            extra={"step_name": first_step.name},
-        )
-        return SemanticStepRewrite(
-            steps=[rewritten, *steps[1:]],
-            original_to_current_step=unchanged.original_to_current_step,
-        )
-
-    logger.info(
-        "ai_builder_redundant_audio_transcription_semantic_step_dropped",
-        extra={"step_name": first_step.name},
-    )
-    return SemanticStepRewrite(
-        steps=steps[1:],
-        original_to_current_step={
-            step_number: step_number - 1 for step_number in range(2, len(steps) + 1)
-        },
-    )
-
-
-def _redundant_leading_audio_transcription_review_mode(
-    *,
-    steps: list["SemanticStepIntent"],
-    runtime_input_type: InputType,
-    backend_audio_transcription_inserted: bool,
-) -> FlowStepReviewMode | None:
-    if (
-        runtime_input_type != InputType.AUDIO
-        or not backend_audio_transcription_inserted
-        or len(steps) < 2
-    ):
-        return None
-    first_step = steps[0]
-    if first_step.review_mode is None:
-        return None
-    if not _is_redundant_audio_transcription_step(first_step):
-        return None
-    if not _has_no_external_step_refs(first_step):
-        return None
-    if not _is_plain_text_semantic_step(first_step):
-        return None
-    return first_step.review_mode
-
-
-def _apply_backend_audio_transcription_review_mode(
-    *,
-    steps: list[NewStepDraft],
-    review_mode: FlowStepReviewMode,
-) -> list[NewStepDraft]:
-    if not steps:
-        return steps
-    first_step = steps[0]
-    if (
-        first_step.input_type != InputType.AUDIO
-        or first_step.output_type != OutputType.TEXT
-        or first_step.input_source != InputSource.FLOW_INPUT
-    ):
-        return steps
-    return [
-        first_step.model_copy(update={"review_mode": review_mode}),
-        *steps[1:],
-    ]
-
-
-def _backend_audio_transcription_inserted(
-    *,
-    pattern_ids: tuple[str, ...],
-    chain_steps: tuple[str, ...],
-) -> bool:
-    return (
-        "audio_to_artifact_report" in pattern_ids
-        or FLOW_INPUT_AUDIO_TRANSCRIPTION in chain_steps
-    )
-
-
-def _is_redundant_audio_transcription_step(step: "SemanticStepIntent") -> bool:
-    normalized_name = normalize_discovery_text(step.name)
-    if contains_any_token_prefix(normalized_name, ("transkrib", "transcrib")):
-        return True
-
-    normalized = normalize_discovery_text(f"{step.name} {step.instructions}")
-    if contains_any_token_prefix(normalized, ("transkrib", "transcrib")) and any(
-        phrase in normalized
-        for phrase in (
-            "till text",
-            "to text",
-            "into text",
-        )
-    ):
-        return True
-
-    return contains_any_token_prefix(
-        normalized,
-        ("audio", "ljud", "tal", "speech"),
-    ) and any(
-        phrase in normalized
-        for phrase in (
-            "audio to text",
-            "speech to text",
-            "ljud till text",
-            "tal till text",
-        )
-    )
-
-
-def _structured_transcript_step_name(step: "SemanticStepIntent") -> str:
-    normalized = normalize_discovery_text(f"{step.name} {step.instructions}")
-    if contains_any_token_prefix(normalized, ("transkrib", "ljud", "möte")):
-        return "Strukturera transkription"
-    return "Structure transcript"
-
-
-def _structured_transcript_step_instructions(step: "SemanticStepIntent") -> str:
-    normalized = normalize_discovery_text(f"{step.name} {step.instructions}")
-    if contains_any_token_prefix(normalized, ("transkrib", "ljud", "möte")):
-        prefix = (
-            "Strukturera den redan transkriberade texten från föregående steg. "
-            "Begär inte en ny ljudtranskribering; bevara tider och talarbyten "
-            "endast när de finns i texten."
-        )
-    else:
-        prefix = (
-            "Structure the already transcribed text from the previous step. "
-            "Do not request a new audio transcription; preserve timestamps and "
-            "speaker turns only when they are present in the text."
-        )
-    return f"{prefix}\n\n{step.instructions}"
-
-
-def _is_plain_text_semantic_step(step: "SemanticStepIntent") -> bool:
-    return (
-        _declared_output_type(step) == OutputType.TEXT
-        and not step.output_fields
-        and not step.uses_form_fields
-        and _has_no_external_step_refs(step)
-    )
-
-
-def _has_no_external_step_refs(step: "SemanticStepIntent") -> bool:
-    return (
-        not step.knowledge_refs
-        and not step.mcp_server_refs
-        and not step.mcp_tool_refs
-        and not step.uses_previous_fields
-        and not step.uses_previous_outputs
-        and not step.citations_requested
-    )
-
-
-def _leading_fold_target_index(
-    *,
-    steps: list["SemanticStepIntent"],
-    final_output_type: OutputType,
-) -> int | None:
-    folded_count = 0
-    for index, step in enumerate(steps[:-1]):
-        if not _is_zero_contract_text_step(step):
-            break
-        candidate_index = index + 1
-        candidate = steps[candidate_index]
-        if not _can_absorb_leading_zero_contract_step(
-            candidate=candidate,
-            candidate_index=candidate_index,
-            step_count=len(steps),
-            final_output_type=final_output_type,
-        ):
-            break
-        folded_count += 1
-
-    return folded_count if folded_count else None
-
-
-def _can_absorb_leading_zero_contract_step(
-    *,
-    candidate: "SemanticStepIntent",
-    candidate_index: int,
-    step_count: int,
-    final_output_type: OutputType,
-) -> bool:
-    if (
-        candidate.output_fields
-        or candidate.uses_form_fields
-        or candidate.mcp_server_refs
-        or candidate.mcp_tool_refs
-    ):
-        return True
-    if candidate.citations_requested:
-        return True
-    if _declared_output_type(candidate) in _DOCUMENT_OUTPUT_TYPES | {OutputType.JSON}:
-        return True
-    return candidate_index == step_count - 1 and final_output_type != OutputType.TEXT
-
-
-def _is_zero_contract_text_step(step: "SemanticStepIntent") -> bool:
-    return (
-        _declared_output_type(step) == OutputType.TEXT
-        and not step.output_fields
-        and not step.uses_form_fields
-        and not step.model_ref
-        and not step.knowledge_refs
-        and not step.mcp_server_refs
-        and not step.mcp_tool_refs
-        and not step.uses_previous_fields
-        and not step.uses_previous_outputs
-        and not step.citations_requested
-        and step.review_mode is None
-    )
-
-
-def _declared_output_type(step: "SemanticStepIntent") -> OutputType:
-    try:
-        return OutputType(step.output_type) if step.output_type else OutputType.TEXT
-    except ValueError:
-        return OutputType.TEXT
 
 
 def _compile_input_field(field: FlowInputFieldIntent) -> FormFieldSpec:

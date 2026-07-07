@@ -45,7 +45,7 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow(
         raise AssertionError("single-step linear flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -97,7 +97,7 @@ def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underla
         raise AssertionError("linear derived-underlag flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -171,7 +171,7 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag(
         raise AssertionError("broad previous-field flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -237,7 +237,7 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
         raise AssertionError("generated document flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -290,7 +290,7 @@ def test_compiler_uses_assembly_path_with_structural_pattern_hint(
         raise AssertionError("structural pattern hint should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -333,7 +333,7 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain(
         raise AssertionError("document source-reader flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -410,7 +410,7 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
         )
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -501,7 +501,7 @@ def test_assembly_places_server_owned_runtime_field_hints(
         raise AssertionError("server-owned runtime fields should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -575,7 +575,7 @@ def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in(
         raise AssertionError("aggregate document flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -655,7 +655,7 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves(
         )
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     required_properties = {f"field_{index}": {"type": "string"} for index in range(10)}
@@ -718,7 +718,7 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription(
         raise AssertionError("pure audio transcription should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -769,7 +769,7 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
         raise AssertionError("audio derived-underlag flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -857,7 +857,7 @@ def test_compiler_uses_assembly_path_for_docx_template_fill(
         raise AssertionError("DOCX template fill should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     intent = parse_create_flow_intent_arguments(
@@ -941,7 +941,7 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag(
         )
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     outline = parse_create_flow_intent_arguments(
@@ -1022,7 +1022,7 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
         raise AssertionError("document artifact flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     outline = parse_create_flow_intent_arguments(
@@ -1099,7 +1099,7 @@ def test_document_artifact_drops_model_authored_pdf_render_helper(
         )
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     outline = parse_create_flow_intent_arguments(

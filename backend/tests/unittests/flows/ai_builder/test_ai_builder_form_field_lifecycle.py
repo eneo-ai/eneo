@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
+import pytest
+
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
@@ -13,7 +18,6 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_critic_invariants,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
-from eneo.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
 from eneo.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -40,9 +44,7 @@ def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
     return OrderedEditProposal(plan_rationale="Update the flow.", **kwargs)
 
 
-def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repair() -> (
-    None
-):
+def test_declared_input_field_without_step_use_fails_create_compilation() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Priority review",
@@ -76,18 +78,15 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
         }
     )
 
-    compiled = compile_create_intent_to_spec(outline)
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(outline)
 
-    assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == ["priority"]
-    assert compiled.steps[-1].input_bindings is None
-    assert find_unused_form_fields(compiled) == ["priority"]
-    validation = validate_spec(compiled)
-    assert validation.valid
-    assert any(warning.code == "unused_form_field" for warning in validation.warnings)
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "unplaced_form_fields"
+    assert exc_info.value.log_context["field_names"] == "priority"
 
 
-def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_field() -> (
+def test_renderer_terminal_form_field_without_step_use_fails_create_compilation() -> (
     None
 ):
     outline = parse_create_flow_intent_arguments(
@@ -128,22 +127,21 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
         }
     )
 
-    compiled = compile_create_intent_to_spec(
-        outline,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-        ),
-    )
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            outline,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.PDF,
+            ),
+        )
 
-    assert find_unused_form_fields(compiled) == ["focus_area"]
-    assert "form_fields_declared_must_be_referenced" in _critic_issue_ids(compiled)
-    validation = validate_spec(compiled)
-    assert validation.valid
-    assert any(warning.code == "unused_form_field" for warning in validation.warnings)
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "unplaced_form_fields"
+    assert exc_info.value.log_context["field_names"] == "focus_area"
 
 
-def test_single_step_outline_unreferenced_form_field_stays_unused_for_repair() -> None:
+def test_single_step_outline_unreferenced_form_field_fails_create_compilation() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "PDF report",
@@ -166,16 +164,15 @@ def test_single_step_outline_unreferenced_form_field_stays_unused_for_repair() -
         }
     )
 
-    compiled = compile_create_intent_to_spec(
-        outline,
-        context=CreateCompileContext(final_output_type=OutputType.PDF),
-    )
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            outline,
+            context=CreateCompileContext(final_output_type=OutputType.PDF),
+        )
 
-    assert find_unused_form_fields(compiled) == ["report_title"]
-    assert "form_fields_declared_must_be_referenced" in _critic_issue_ids(compiled)
-    validation = validate_spec(compiled)
-    assert validation.valid
-    assert any(warning.code == "unused_form_field" for warning in validation.warnings)
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "unplaced_form_fields"
+    assert exc_info.value.log_context["field_names"] == "report_title"
 
 
 def test_intermediate_form_field_use_flows_through_derived_structured_underlag(
@@ -185,7 +182,7 @@ def test_intermediate_form_field_use_flows_through_derived_structured_underlag(
         raise AssertionError("form-field source chain should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
         fail_old_skeleton_path,
     )
     outline = parse_create_flow_intent_arguments(
