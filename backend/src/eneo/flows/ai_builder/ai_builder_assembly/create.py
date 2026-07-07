@@ -23,8 +23,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    PreviousFieldRef,
-    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
@@ -236,7 +234,7 @@ def _assemble_create_intent(
         document_artifact_requested=document_artifact_requested,
     )
     previous_output_type: OutputType | None = None
-    source_prefix_step_count = 0
+    has_source_prefix = False
     if runtime_input_type == InputType.AUDIO:
         transcription_step = fixed_audio_transcription_step(
             runtime_required=runtime_required,
@@ -245,9 +243,9 @@ def _assemble_create_intent(
         )
         planned_steps.append(transcription_step)
         previous_output_type = OutputType.TEXT
-        source_prefix_step_count = 1
+        has_source_prefix = True
     for index, semantic_step in enumerate(semantic_steps):
-        if not _previous_refs_are_immediate(semantic_step, step_index=index):
+        if semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs:
             return None
         step_output_type = _linear_step_output_type(
             output_type=semantic_step.output_type,
@@ -267,7 +265,7 @@ def _assemble_create_intent(
             step_index=index,
             semantic_step_count=len(semantic_steps),
             aggregation_intent=aggregation_intent,
-            has_source_prefix=source_prefix_step_count > 0,
+            has_source_prefix=has_source_prefix,
         )
         if input_source == InputSource.ALL_PREVIOUS_STEPS and (
             semantic_step.uses_form_fields
@@ -280,14 +278,6 @@ def _assemble_create_intent(
             runtime_input_type=runtime_input_type,
             previous_output_type=previous_output_type,
             output_type=step_output_type,
-        )
-        previous_field_refs = _offset_previous_field_refs(
-            semantic_step.uses_previous_fields,
-            compiled_step_offset=source_prefix_step_count,
-        )
-        previous_output_refs = _offset_previous_output_refs(
-            semantic_step.uses_previous_outputs,
-            compiled_step_offset=source_prefix_step_count,
         )
         previous_planned_step = (
             planned_steps[-1] if input_source == InputSource.PREVIOUS_STEP else None
@@ -308,8 +298,8 @@ def _assemble_create_intent(
                 input_source=input_source,
                 input_type=input_type,
                 previous_step=previous_planned_step,
-                previous_field_refs=previous_field_refs,
-                previous_output_refs=previous_output_refs,
+                previous_field_refs=(),
+                previous_output_refs=(),
             ),
             runtime_required=(
                 index == 0
@@ -322,8 +312,6 @@ def _assemble_create_intent(
                 else None
             ),
             form_field_refs=tuple(semantic_step.uses_form_fields),
-            previous_field_refs=previous_field_refs,
-            previous_output_refs=previous_output_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
@@ -494,8 +482,7 @@ def _assemble_docx_template_fill(
         return None
     semantic_step = intent.steps[0]
     if (
-        not _previous_refs_are_immediate(semantic_step, step_index=0)
-        or semantic_step.output_fields
+        semantic_step.output_fields
         or semantic_step.uses_previous_fields
         or semantic_step.uses_previous_outputs
         or semantic_step.output_type not in {None, OutputType.TEXT}
@@ -618,26 +605,6 @@ def _assemble_pure_audio_transcription(
     )
 
 
-def _previous_refs_are_immediate(
-    semantic_step: SemanticStepIntent,
-    *,
-    step_index: int,
-) -> bool:
-    if step_index == 0:
-        expected_from_step = 0
-    else:
-        expected_from_step = step_index
-    if semantic_step.uses_previous_fields and semantic_step.uses_previous_outputs:
-        return False
-    return all(
-        ref.from_step == expected_from_step
-        for ref in (
-            *semantic_step.uses_previous_fields,
-            *semantic_step.uses_previous_outputs,
-        )
-    )
-
-
 def _linear_step_output_type(
     *,
     output_type: OutputType | None,
@@ -706,32 +673,6 @@ def _linear_step_input_source(
     ):
         return InputSource.ALL_PREVIOUS_STEPS
     return InputSource.PREVIOUS_STEP
-
-
-def _offset_previous_field_refs(
-    refs: Sequence[PreviousFieldRef],
-    *,
-    compiled_step_offset: int,
-) -> tuple[PreviousFieldRef, ...]:
-    if compiled_step_offset == 0:
-        return tuple(refs)
-    return tuple(
-        ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
-        for ref in refs
-    )
-
-
-def _offset_previous_output_refs(
-    refs: Sequence[PreviousOutputRef],
-    *,
-    compiled_step_offset: int,
-) -> tuple[PreviousOutputRef, ...]:
-    if compiled_step_offset == 0:
-        return tuple(refs)
-    return tuple(
-        ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
-        for ref in refs
-    )
 
 
 def _complete_planned_source_reader_contracts(
