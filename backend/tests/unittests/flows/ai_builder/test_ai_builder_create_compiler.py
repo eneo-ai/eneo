@@ -7412,6 +7412,59 @@ def test_compile_create_steps_to_spec_logs_already_named_source_capture_field(
     assert validate_spec(compiled).valid
 
 
+def test_compile_create_steps_to_spec_logs_source_capture_description_truncation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger=NEW_STEP_COMPILER_LOGGER)
+
+    compiled = _compile_create_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            NewStepDraft(
+                name="Identifiera dokumentets karaktär",
+                instructions="Identifiera dokumenttyp och huvudsakligt innehåll.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Extrahera slutsats",
+                instructions="Extrahera dokumentets slutsats.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field(
+                        "slutsats",
+                        "string",
+                        description=(
+                            "En mycket detaljerad beskrivning som är avsiktligt "
+                            "lång nog för att passera gränsen för "
+                            "källfångstbeskrivningar i prompten."
+                        ),
+                    )
+                ],
+            ),
+        ],
+    )
+
+    capture_lines = _source_capture_lines(compiled.steps[0].assistant_spec.instructions)
+    assert len(capture_lines) == 1
+    assert capture_lines[0].startswith("- slutsats: En mycket detaljerad")
+    assert capture_lines[0].endswith("...")
+    truncation_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_source_capture_description_truncated"
+    ]
+    assert len(truncation_records) == 1
+    assert truncation_records[0].field_names == ["slutsats"]
+    assert truncation_records[0].description_char_cap == 96
+    assert truncation_records[0].truncated_field_count == 1
+    assert validate_spec(compiled).valid
+
+
 def test_compile_create_steps_to_spec_logs_fuzzy_source_leaf_match(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

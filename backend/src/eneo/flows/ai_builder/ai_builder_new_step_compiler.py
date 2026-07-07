@@ -487,6 +487,7 @@ def _append_source_capture_guidance(
     normalized_instructions = instructions.casefold()
     eligible_lines: list[str] = []
     suppressed_field_names: list[str] = []
+    truncated_description_field_names: list[str] = []
     for field in source_capture_fields:
         name = field.name.strip()
         if not name:
@@ -494,7 +495,11 @@ def _append_source_capture_guidance(
         if name.casefold() in normalized_instructions:
             suppressed_field_names.append(name)
             continue
-        description = _truncate_source_capture_description(field.description)
+        description, description_truncated = _truncate_source_capture_description(
+            field.description
+        )
+        if description_truncated:
+            truncated_description_field_names.append(name)
         eligible_lines.append(
             f"- {name}: {description}" if description else f"- {name}"
         )
@@ -506,6 +511,15 @@ def _append_source_capture_guidance(
                 "field_names": suppressed_field_names,
                 "source_capture_field_count": len(source_capture_fields),
                 "suppressed_field_count": len(suppressed_field_names),
+            },
+        )
+    if truncated_description_field_names:
+        logger.warning(
+            "ai_builder_source_capture_description_truncated",
+            extra={
+                "field_names": truncated_description_field_names,
+                "description_char_cap": MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS,
+                "truncated_field_count": len(truncated_description_field_names),
             },
         )
 
@@ -555,13 +569,16 @@ def _source_capture_copy(ui_language: str | None) -> tuple[str, str]:
     )
 
 
-def _truncate_source_capture_description(description: str | None) -> str:
+def _truncate_source_capture_description(description: str | None) -> tuple[str, bool]:
     if not description:
-        return ""
+        return "", False
     normalized = " ".join(description.split())
     if len(normalized) <= MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS:
-        return normalized
-    return f"{normalized[: MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS - 3].rstrip()}..."
+        return normalized, False
+    return (
+        f"{normalized[: MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS - 3].rstrip()}...",
+        True,
+    )
 
 
 def compile_output_contract(
