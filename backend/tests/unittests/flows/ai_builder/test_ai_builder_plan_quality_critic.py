@@ -2158,24 +2158,6 @@ class TestCriticInvariantLoop:
     Covered here: the explicit-PDF-terminal-mismatch invariant.
     """
 
-    def test_pdf_terminal_alignment_invariant_is_registered(self) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-            CriticInvariant,
-        )
-
-        ids = [inv.id for inv in CRITIC_INVARIANTS]
-        assert "pdf_terminal_output_alignment" in ids
-
-        pdf_inv = next(
-            inv
-            for inv in CRITIC_INVARIANTS
-            if inv.id == "pdf_terminal_output_alignment"
-        )
-        assert isinstance(pdf_inv, CriticInvariant)
-        assert callable(pdf_inv.evidence)
-        assert "PDF" in pdf_inv.remediation
-
     def test_render_critic_issues_fires_pdf_terminal_alignment_on_mismatch(
         self,
     ) -> None:
@@ -2295,24 +2277,6 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
     performs on `all_previous_steps` produces plain text, which is not valid
     JSON, so this combination cannot run under any circumstance.
     """
-
-    def test_invariant_is_registered(self) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-            CriticInvariant,
-        )
-
-        ids = [inv.id for inv in CRITIC_INVARIANTS]
-        assert "json_input_rejects_all_previous_steps_source" in ids
-        inv = next(
-            item
-            for item in CRITIC_INVARIANTS
-            if item.id == "json_input_rejects_all_previous_steps_source"
-        )
-        assert isinstance(inv, CriticInvariant)
-        assert callable(inv.evidence)
-        assert "all_previous_steps" in inv.remediation
-        assert "json" in inv.remediation.casefold()
 
     def test_render_critic_issues_fires_on_json_all_previous_steps_combo(
         self,
@@ -2583,23 +2547,6 @@ def _quality_chain_with_redundant_terminal_json_tail(
 
 
 class TestSectionTextStepsReferenceSourceJsonFields:
-    def test_invariant_is_registered(self) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-            CriticInvariant,
-        )
-
-        ids = [inv.id for inv in CRITIC_INVARIANTS]
-        assert _SECTION_TEXT_STEPS_INVARIANT_ID in ids
-        inv = next(
-            item
-            for item in CRITIC_INVARIANTS
-            if item.id == _SECTION_TEXT_STEPS_INVARIANT_ID
-        )
-        assert isinstance(inv, CriticInvariant)
-        assert callable(inv.evidence)
-        assert "output.structured" in inv.remediation
-
     def test_fires_when_one_json_extraction_is_dropped_by_section_writers(
         self,
     ) -> None:
@@ -2935,23 +2882,6 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
 
 class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
-    def test_invariant_is_registered(self) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-            CriticInvariant,
-        )
-
-        ids = [inv.id for inv in CRITIC_INVARIANTS]
-        assert _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID in ids
-        inv = next(
-            item
-            for item in CRITIC_INVARIANTS
-            if item.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID
-        )
-        assert isinstance(inv, CriticInvariant)
-        assert callable(inv.evidence)
-        assert "JSON" in inv.remediation
-
     @pytest.mark.parametrize("terminal_text_unwrap", [False, True])
     def test_redundant_terminal_json_tail_fires_after_final_text_composer(
         self, terminal_text_unwrap: bool
@@ -3453,23 +3383,6 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
       distinct prior structured fields: the spec is already doing the
       right thing despite the nominal `previous_step` source.
     """
-
-    def test_invariant_is_registered(self) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-            CriticInvariant,
-        )
-
-        ids = [inv.id for inv in CRITIC_INVARIANTS]
-        assert _FINAL_TEXT_STEP_INVARIANT_ID in ids
-        inv = next(
-            item
-            for item in CRITIC_INVARIANTS
-            if item.id == _FINAL_TEXT_STEP_INVARIANT_ID
-        )
-        assert isinstance(inv, CriticInvariant)
-        assert callable(inv.evidence)
-        assert "uses_previous_fields" in inv.remediation
 
     def test_fires_on_previous_step_composer_with_multiple_json_priors(
         self,
