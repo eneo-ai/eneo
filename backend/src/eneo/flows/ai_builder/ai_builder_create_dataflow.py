@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
@@ -68,6 +69,8 @@ _PreviousRefFailureReason = Literal[
     "previous_output_step_not_prior",
     "previous_output_source_not_text",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_create_step_mechanics(
@@ -459,6 +462,14 @@ def _merge_structured_field(
     incoming: StructuredFieldDraft,
 ) -> StructuredFieldDraft:
     if base.field_type != incoming.field_type:
+        logger.warning(
+            "ai_builder_create_dataflow_structured_field_type_conflict",
+            extra={
+                "field_name": base.name,
+                "base_field_type": base.field_type,
+                "incoming_field_type": incoming.field_type,
+            },
+        )
         return base
     if base.field_type == "object":
         return base.model_copy(

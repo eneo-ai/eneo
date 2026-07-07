@@ -908,6 +908,42 @@ def test_normalize_create_step_mechanics_preserves_model_declared_document_summa
     ]
 
 
+def test_normalize_create_step_mechanics_logs_field_type_conflict(caplog) -> None:
+    normalized = _normalize_steps(
+        flow_name="Dokumentanalys till PDF",
+        steps=[
+            {
+                "name": "Läs dokument",
+                "instructions": "Identifiera dokumentets titel.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "output_fields": [_field("documents", "array")],
+                "runtime_required": True,
+            },
+            {
+                "name": "Analysera dokumentets innehåll",
+                "instructions": "Extrahera dokumentfält.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("documents")],
+            },
+        ],
+    )
+
+    assert (normalized[0].output_fields or [])[0].field_type == "array"
+    conflict_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_create_dataflow_structured_field_type_conflict"
+    ]
+    assert len(conflict_records) == 1
+    assert conflict_records[0].field_name == "documents"
+    assert conflict_records[0].base_field_type == "array"
+    assert conflict_records[0].incoming_field_type == "string"
+
+
 def test_targeted_underlag_cap_preserves_breadth_across_wide_priors() -> None:
     def fields(prefix: str) -> list[StructuredFieldDraft]:
         return [_field(f"{prefix}_{index}") for index in range(10)]
