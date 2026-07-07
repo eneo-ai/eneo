@@ -26,6 +26,7 @@ import {
   type IntegrationPreview,
   type UserIntegration
 } from "../queries";
+import { ImportPreviewError } from "./preview-state";
 
 /** Confluence import: pick one space, then import it whole with an embedding model. */
 export function ConfluenceImportDialog({
@@ -62,6 +63,7 @@ export function ConfluenceImportDialog({
       .filter((entry) => entry.name.toLowerCase().includes(query))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [preview.data, search]);
+  const settingsHref = space.personal ? "/account/integrations" : null;
 
   const importSpace = useMutation({
     mutationFn: () => {
@@ -103,7 +105,7 @@ export function ConfluenceImportDialog({
         </DialogHeader>
 
         {space.embedding_models.length === 0 && (
-          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+          <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
             <span className="font-semibold">{t("warning")}:</span>{" "}
             {t("warning_no_embedding_models")}
           </p>
@@ -121,7 +123,20 @@ export function ConfluenceImportDialog({
             <Search className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2" />
           </div>
           <div className="max-h-[40vh] overflow-y-auto rounded-md border p-1">
-            {preview.isPending ? (
+            {userIntegrationId.length === 0 ? (
+              <ImportPreviewError
+                message={t("integration_preview_connection_missing")}
+                onBack={onBack}
+                settingsHref={settingsHref}
+              />
+            ) : preview.isError ? (
+              <ImportPreviewError
+                message={t("integration_preview_failed")}
+                onBack={onBack}
+                onRetry={() => void preview.refetch()}
+                settingsHref={settingsHref}
+              />
+            ) : preview.isPending ? (
               <div className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm">
                 <Spinner /> {t("loading_available_spaces")}
               </div>

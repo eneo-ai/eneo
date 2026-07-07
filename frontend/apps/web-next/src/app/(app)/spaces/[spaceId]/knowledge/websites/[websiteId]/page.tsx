@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { EneoApiError } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
+import { env } from "@/lib/env";
 import {
   websiteBlobsQueryOptions,
   websiteCrawlRunsQueryOptions,
@@ -32,7 +33,10 @@ export default async function WebsitePage({
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <WebsiteDetail websiteId={websiteId} />
+      <WebsiteDetail
+        websiteId={websiteId}
+        integrationRequestFormUrl={env.REQUEST_INTEGRATION_FORM_URL}
+      />
     </HydrationBoundary>
   );
 }

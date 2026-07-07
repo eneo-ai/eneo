@@ -5,41 +5,54 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { Button } from "@/components/ui/button";
+import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse } from "../knowledge";
+import { NoCreatePermissionInfo } from "../no-create-permission-info";
+import { IntegrationsBetaNotice } from "../notices";
 import { groupIntegrationRows } from "./grouping";
 import { ImportKnowledgeDialog, useImportableIntegrations } from "./import/import-dialog";
+import { integrationSetupAction } from "./setup-action";
 import { IntegrationItemsTable } from "./table";
 
 function ImportToolbar() {
   const t = useTranslations();
   const { space } = useSpace();
+  const { can } = useAppContext();
   const { integrations } = useImportableIntegrations();
   const [showImport, setShowImport] = useState(false);
+  const action = integrationSetupAction({
+    importableCount: integrations.length,
+    personal: space.personal,
+    organization: space.organization,
+    isAdmin: can("admin")
+  });
 
   return (
     <div className="flex justify-end gap-2">
-      {integrations.length > 0 ? (
+      {action.kind === "import" ? (
         <>
           <Button onClick={() => setShowImport(true)}>{t("import_knowledge")}</Button>
           {showImport && <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />}
         </>
-      ) : space.personal ? (
-        // No connected integrations yet: connecting them lives on the account page.
+      ) : action.kind === "link" ? (
         <Button asChild>
-          <Link href="/account/integrations">{t("connect_personal_integration")}</Link>
+          <Link href={action.href}>{t("configure_integrations")}</Link>
         </Button>
       ) : (
-        // Org/shared spaces need an admin-configured tenant app (admin UI is Phase 7).
-        <p className="text-muted-foreground self-center text-sm">
-          {t("no_integrations_available")}
-        </p>
+        <p className="text-muted-foreground self-center text-sm">{t(action.messageKey)}</p>
       )}
     </div>
   );
 }
 
-export function IntegrationsTab({ canCreate }: { canCreate: boolean }) {
+export function IntegrationsTab({
+  canCreate,
+  integrationRequestFormUrl
+}: {
+  canCreate: boolean;
+  integrationRequestFormUrl?: string;
+}) {
   const t = useTranslations();
   const { space } = useSpace();
 
@@ -55,7 +68,16 @@ export function IntegrationsTab({ canCreate }: { canCreate: boolean }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {canCreate && <ImportToolbar />}
+      {integrationRequestFormUrl ? (
+        <IntegrationsBetaNotice integrationRequestFormUrl={integrationRequestFormUrl} />
+      ) : null}
+      {canCreate ? (
+        <ImportToolbar />
+      ) : (
+        <div className="flex justify-end">
+          <NoCreatePermissionInfo resourceType={t("resource_integrations")} />
+        </div>
+      )}
       {items.length === 0 ? (
         <EmptyState title={t("no_results")} />
       ) : (

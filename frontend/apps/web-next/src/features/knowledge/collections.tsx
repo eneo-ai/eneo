@@ -40,6 +40,9 @@ import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";
 import { embeddingModelsInUse, type Collection } from "./knowledge";
 import { MoveResourceDialog } from "./move-dialog";
+import { NoCreatePermissionInfo } from "./no-create-permission-info";
+import { filterAndSortCollections, type CollectionSort } from "./table-controls";
+import { KnowledgeTableControls } from "./table-controls-ui";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -287,21 +290,59 @@ function CollectionRows({ collections }: { collections: Collection[] }) {
 export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<CollectionSort>("name_asc");
 
   const collections = space.knowledge.groups.items.filter(
     (collection) => collection.space_id === space.id
   );
-  const models = embeddingModelsInUse(collections, space.embedding_models);
+  const visibleCollections = filterAndSortCollections(collections, { query: filter, sort });
+  const models = embeddingModelsInUse(visibleCollections, space.embedding_models);
   const grouped =
     models.length > 1 ||
     space.embedding_models.length > 1 ||
     models.some((model) => !model.inSpace);
 
-  const toolbar = canCreate ? (
-    <div className="flex justify-end">
-      <CreateCollectionButton />
-    </div>
-  ) : null;
+  const action = canCreate ? (
+    <CreateCollectionButton />
+  ) : (
+    <NoCreatePermissionInfo resourceType={t("resource_collections")} />
+  );
+
+  const sortOptions: { value: CollectionSort; label: string }[] = [
+    { value: "name_asc", label: t("sort_name_az") },
+    { value: "name_desc", label: t("sort_name_za") },
+    { value: "files_desc", label: t("sort_files_most") },
+    { value: "files_asc", label: t("sort_files_fewest") }
+  ];
+
+  const toolbar =
+    collections.length > 0 ? (
+      <KnowledgeTableControls
+        filterValue={filter}
+        onFilterChange={setFilter}
+        filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_collections") })}
+        sortLabel={t("sort_by")}
+        sortValue={sort}
+        onSortChange={(value) => setSort(value as CollectionSort)}
+        sortOptions={sortOptions}
+      >
+        {action}
+      </KnowledgeTableControls>
+    ) : (
+      <div className="flex justify-end">{action}</div>
+    );
+
+  if (collections.length > 0 && visibleCollections.length === 0) {
+    return (
+      <div className="flex flex-col gap-4">
+        {toolbar}
+        <EmptyState
+          title={t("ui_no_items_matching", { resourceNamePlural: t("resource_collections") })}
+        />
+      </div>
+    );
+  }
 
   if (collections.length === 0) {
     return (
@@ -317,8 +358,8 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
       {toolbar}
       {(grouped ? models : [null]).map((model) => {
         const rows = model
-          ? collections.filter((collection) => collection.embedding_model.id === model.id)
-          : collections;
+          ? visibleCollections.filter((collection) => collection.embedding_model.id === model.id)
+          : visibleCollections;
         return (
           <div key={model?.id ?? "all"} className="flex flex-col gap-1">
             {model && (

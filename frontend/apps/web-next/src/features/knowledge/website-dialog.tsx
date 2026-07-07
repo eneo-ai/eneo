@@ -321,9 +321,7 @@ export function WebsiteDialog({
                   {t("credentials_encrypted_securely")}
                 </p>
                 {website?.requires_http_auth && (
-                  <p className="text-sm text-green-700 dark:text-green-500">
-                    {t("authentication_configured")}
-                  </p>
+                  <p className="text-success text-sm">{t("authentication_configured")}</p>
                 )}
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="http-auth-username">{t("username")}</Label>
@@ -455,13 +453,7 @@ export function WebsiteDialog({
               {crawlResult && (
                 <>
                   <span className="text-muted-foreground">{t("website_crawl_result")}:</span>
-                  <span
-                    className={
-                      crawlResult.hasFailures
-                        ? "text-amber-700 dark:text-amber-500"
-                        : "text-green-700 dark:text-green-500"
-                    }
-                  >
+                  <span className={crawlResult.hasFailures ? "text-warning" : "text-success"}>
                     {crawlResult.text}
                   </span>
                 </>

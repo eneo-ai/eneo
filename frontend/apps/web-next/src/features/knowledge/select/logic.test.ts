@@ -3,10 +3,13 @@ import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
 import {
   availableKnowledge,
   byOrigin,
+  collectionInfoBlobCount,
   integrationOptions,
   isOrgItem,
   isPersonalItem,
-  selectedIntegrationDisplay
+  selectedIntegrationDisplay,
+  websiteFailedPageCount,
+  websiteIndexedResultCount
 } from "./logic";
 
 const model = (id: string) => ({ id, name: `model-${id}` });
@@ -143,5 +146,23 @@ describe("availableKnowledge", () => {
     const m1 = sections.find((section) => section.modelId === "m1");
     expect(m1?.websites).toHaveLength(0);
     expect(m1?.collections.map((item) => item.id)).toEqual(["c1"]);
+  });
+});
+
+describe("selected knowledge blob counts", () => {
+  it("uses collection blob metadata", () => {
+    expect(collectionInfoBlobCount(collection("c", "m1"))).toBe(1);
+  });
+
+  it("uses crawled pages and downloaded files for websites", () => {
+    const item = website("w") as Website;
+    item.latest_crawl = {
+      pages_crawled: 3,
+      files_downloaded: 2,
+      pages_failed: 1
+    } as Website["latest_crawl"];
+
+    expect(websiteIndexedResultCount(item)).toBe(5);
+    expect(websiteFailedPageCount(item)).toBe(1);
   });
 });

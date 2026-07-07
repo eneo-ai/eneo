@@ -94,9 +94,7 @@ function JobRow({ job }: { job: Job }) {
       ) : job.status === "failed" ? (
         <span className="text-destructive min-w-fit font-medium">{t("failed")}</span>
       ) : (
-        <span className="min-w-fit font-medium text-green-600 dark:text-green-500">
-          {t("done")}
-        </span>
+        <span className="text-success min-w-fit font-medium">{t("done")}</span>
       )}
     </div>
   );

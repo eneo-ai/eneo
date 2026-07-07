@@ -26,6 +26,7 @@ function IntegrationCard({
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const tenantAppMissing = integration.tenant_app_configured === false;
 
   const disconnect = useMutation({
     mutationFn: () =>
@@ -45,10 +46,17 @@ function IntegrationCard({
           <span className="flex items-center gap-2 font-medium">
             {integration.name}
             <Badge variant={integration.connected ? "default" : "outline"}>
-              {integration.connected ? t("connected") : t("connect")}
+              {integration.connected
+                ? t("connected")
+                : tenantAppMissing
+                  ? t("integration_status_not_configured")
+                  : t("connect")}
             </Badge>
           </span>
           <p className="text-muted-foreground text-sm">{integration.description}</p>
+          {tenantAppMissing && (
+            <p className="text-warning text-sm">{t("contact_admin_to_configure")}</p>
+          )}
         </div>
         {integration.connected ? (
           <Button
@@ -59,7 +67,7 @@ function IntegrationCard({
             {t("disconnect")}
           </Button>
         ) : (
-          <Button disabled={connecting} onClick={onConnect}>
+          <Button disabled={connecting || tenantAppMissing} onClick={onConnect}>
             {t("connect")}
           </Button>
         )}

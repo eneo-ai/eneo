@@ -181,6 +181,19 @@ export type KnowledgeSelections = {
   integrationKnowledge: IntegrationKnowledge[];
 };
 
+export function collectionInfoBlobCount(collection: Pick<Collection, "metadata">): number {
+  return collection.metadata.num_info_blobs;
+}
+
+export function websiteIndexedResultCount(website: Pick<Website, "latest_crawl">): number {
+  const crawl = website.latest_crawl;
+  return (crawl?.pages_crawled ?? 0) + (crawl?.files_downloaded ?? 0);
+}
+
+export function websiteFailedPageCount(website: Pick<Website, "latest_crawl">): number {
+  return website.latest_crawl?.pages_failed ?? 0;
+}
+
 /**
  * Group the space's knowledge per embedding model, marking sections that are
  * incompatible with the dominant model of the current selection (knowledge on

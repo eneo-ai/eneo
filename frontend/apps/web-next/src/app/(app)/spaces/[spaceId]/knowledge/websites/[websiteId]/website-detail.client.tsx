@@ -28,6 +28,7 @@ import {
   websiteCrawlRunsQueryOptions,
   websiteQueryOptions
 } from "@/features/knowledge/knowledge";
+import { CrawlLimitationsBanner } from "@/features/knowledge/notices";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 
@@ -90,7 +91,13 @@ function SyncNowButton({
   );
 }
 
-export function WebsiteDetail({ websiteId }: { websiteId: string }) {
+export function WebsiteDetail({
+  websiteId,
+  integrationRequestFormUrl
+}: {
+  websiteId: string;
+  integrationRequestFormUrl?: string;
+}) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
 
@@ -131,9 +138,19 @@ export function WebsiteDetail({ websiteId }: { websiteId: string }) {
           <TabsTrigger value="blobs">{t("indexed_content")}</TabsTrigger>
         </TabsList>
         <TabsContent value="crawls" className="pt-4">
+          {integrationRequestFormUrl ? (
+            <div className="mb-4">
+              <CrawlLimitationsBanner integrationRequestFormUrl={integrationRequestFormUrl} />
+            </div>
+          ) : null}
           <CrawlRunsTable runs={runs} />
         </TabsContent>
         <TabsContent value="blobs" className="pt-4">
+          {integrationRequestFormUrl ? (
+            <div className="mb-4">
+              <CrawlLimitationsBanner integrationRequestFormUrl={integrationRequestFormUrl} />
+            </div>
+          ) : null}
           <BlobTable blobs={blobs} canEdit={false} />
         </TabsContent>
       </Tabs>

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -40,6 +40,9 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse, formatWebsiteName, type Website } from "./knowledge";
 import { MoveResourceDialog } from "./move-dialog";
+import { NoCreatePermissionInfo } from "./no-create-permission-info";
+import { KnowledgeTableControls } from "./table-controls-ui";
+import { filterAndSortWebsites, type WebsiteSort } from "./table-controls";
 import { WebsiteDialog } from "./website-dialog";
 
 const SKIPPED_PREFIX = "skipped duplicate crawl";
@@ -47,13 +50,10 @@ const SKIPPED_PREFIX = "skipped duplicate crawl";
 export type LabelColor = "green" | "yellow" | "orange" | "blue" | "gray";
 
 const LABEL_CLASSES: Record<LabelColor, string> = {
-  green:
-    "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-300",
-  yellow:
-    "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
-  orange:
-    "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-900 dark:bg-orange-950 dark:text-orange-300",
-  blue: "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300",
+  green: "border-success/30 bg-success/10 text-success",
+  yellow: "border-warning/30 bg-warning/10 text-warning",
+  orange: "border-destructive/30 bg-destructive/10 text-destructive",
+  blue: "border-primary/30 bg-primary/10 text-primary",
   gray: "border-border bg-muted text-muted-foreground"
 };
 
@@ -66,12 +66,19 @@ export function KnowledgeLabel({
   color: LabelColor;
   tooltip?: string;
 }) {
+  const tooltipId = useId();
   return (
     <span
       title={tooltip}
+      aria-describedby={tooltip ? tooltipId : undefined}
       className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${LABEL_CLASSES[color]}`}
     >
       {label}
+      {tooltip ? (
+        <span id={tooltipId} className="sr-only">
+          {tooltip}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -268,11 +275,14 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
   const { trackJob } = useJobs();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<WebsiteSort>("name_asc");
 
   const websites = space.knowledge.websites.items.filter(
     (website) => website.space_id === space.id
   );
-  const models = embeddingModelsInUse(websites, space.embedding_models);
+  const visibleWebsites = filterAndSortWebsites(websites, { query: filter, sort });
+  const models = embeddingModelsInUse(visibleWebsites, space.embedding_models);
   const grouped =
     models.length > 1 ||
     space.embedding_models.length > 1 ||
@@ -292,8 +302,11 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
           .filter(Boolean)
           .join(", ");
         toast.error(
-          `${result.queued} ${t("websites").toLowerCase()} queued, ${result.failed} failed${details ? `: ${details}` : ""}`
+          t("websites_bulk_recrawl_failed", { queued: result.queued, failed: result.failed }),
+          { description: details || undefined }
         );
+      } else {
+        toast.success(t("websites_bulk_recrawl_queued", { count: result.queued }));
       }
       setSelected(new Set());
       trackJob();
@@ -311,28 +324,70 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
     });
   }
 
-  function toggleAll() {
-    setSelected((current) =>
-      current.size === websites.length && websites.length > 0
-        ? new Set()
-        : new Set(websites.map((website) => website.id))
-    );
+  function toggleRows(rowIds: string[]) {
+    setSelected((current) => {
+      const allRowsSelected = rowIds.every((id) => current.has(id));
+      const next = new Set(current);
+      for (const id of rowIds) {
+        if (allRowsSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
   }
 
-  const toolbar = (
-    <div className="flex justify-end gap-2">
-      {canCreate && selected.size > 0 && (
+  const action = (
+    <>
+      {canCreate && selected.size > 0 ? (
         <Button onClick={() => bulkRecrawl.mutate()} disabled={bulkRecrawl.isPending}>
           <RefreshCw className="size-4" />
           {bulkRecrawl.isPending ? t("syncing") : t("sync_selected", { count: selected.size })}
         </Button>
-      )}
-      {canCreate && selected.size === 0 && (
+      ) : null}
+      {canCreate && selected.size === 0 ? (
         <Button onClick={() => setShowCreate(true)}>{t("connect_website")}</Button>
-      )}
+      ) : null}
+      {!canCreate ? <NoCreatePermissionInfo resourceType={t("resource_websites")} /> : null}
       {showCreate && <WebsiteDialog open={showCreate} onOpenChange={setShowCreate} />}
-    </div>
+    </>
   );
+
+  const sortOptions: { value: WebsiteSort; label: string }[] = [
+    { value: "name_asc", label: t("sort_name_az") },
+    { value: "name_desc", label: t("sort_name_za") },
+    { value: "latest_crawl_desc", label: t("sort_latest_crawl") },
+    { value: "latest_crawl_asc", label: t("sort_oldest_crawl") },
+    { value: "status", label: t("sort_status") },
+    { value: "auto_updates", label: t("sort_auto_updates") }
+  ];
+
+  const toolbar =
+    websites.length > 0 ? (
+      <KnowledgeTableControls
+        filterValue={filter}
+        onFilterChange={setFilter}
+        filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_websites") })}
+        sortLabel={t("sort_by")}
+        sortValue={sort}
+        onSortChange={(value) => setSort(value as WebsiteSort)}
+        sortOptions={sortOptions}
+      >
+        {action}
+      </KnowledgeTableControls>
+    ) : (
+      <div className="flex justify-end gap-2">{action}</div>
+    );
+
+  if (websites.length > 0 && visibleWebsites.length === 0) {
+    return (
+      <div className="flex flex-col gap-4">
+        {toolbar}
+        <EmptyState
+          title={t("ui_no_items_matching", { resourceNamePlural: t("resource_websites") })}
+        />
+      </div>
+    );
+  }
 
   if (websites.length === 0) {
     return (
@@ -348,8 +403,16 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
       {toolbar}
       {(grouped ? models : [null]).map((model) => {
         const rows = model
-          ? websites.filter((website) => website.embedding_model.id === model.id)
-          : websites;
+          ? visibleWebsites.filter((website) => website.embedding_model.id === model.id)
+          : visibleWebsites;
+        const rowIds = rows.map((website) => website.id);
+        const selectedInGroup = rowIds.filter((id) => selected.has(id)).length;
+        const groupChecked =
+          selectedInGroup === 0
+            ? false
+            : selectedInGroup === rowIds.length
+              ? true
+              : "indeterminate";
         return (
           <div key={model?.id ?? "all"} className="flex flex-col gap-1">
             {model && (
@@ -363,9 +426,9 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
                 <TableRow>
                   <TableHead className="w-8">
                     <Checkbox
-                      checked={selected.size === websites.length && websites.length > 0}
-                      onCheckedChange={toggleAll}
-                      aria-label={t("select_all")}
+                      checked={groupChecked}
+                      onCheckedChange={() => toggleRows(rowIds)}
+                      aria-label={model ? `${t("select_all")} ${model.name}` : t("select_all")}
                     />
                   </TableHead>
                   <TableHead>{t("website")}</TableHead>

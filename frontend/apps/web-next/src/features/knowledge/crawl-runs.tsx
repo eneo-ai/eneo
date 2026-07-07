@@ -1,6 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
+import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import {
   Table,
@@ -12,6 +13,8 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime, formatDuration, formatRelativeTime } from "@/lib/format";
 import type { CrawlRun } from "./knowledge";
+import { filterAndSortCrawlRuns, type CrawlRunSort } from "./table-controls";
+import { KnowledgeTableControls } from "./table-controls-ui";
 import { KnowledgeLabel } from "./websites";
 
 const SKIPPED_PREFIX = "skipped";
@@ -148,39 +151,71 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
 export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
   const t = useTranslations();
   const locale = useLocale();
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<CrawlRunSort>("started_desc");
+  const visibleRuns = filterAndSortCrawlRuns(runs, { query: filter, sort });
+
+  const sortOptions: { value: CrawlRunSort; label: string }[] = [
+    { value: "started_desc", label: t("sort_started_newest") },
+    { value: "started_asc", label: t("sort_started_oldest") },
+    { value: "status", label: t("sort_status") },
+    { value: "results_desc", label: t("sort_results_most") },
+    { value: "duration_desc", label: t("sort_duration_longest") }
+  ];
 
   if (runs.length === 0) {
     return <EmptyState title={t("this_website_not_crawled_before")} />;
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t("started")}</TableHead>
-          <TableHead>{t("status")}</TableHead>
-          <TableHead>{t("results")}</TableHead>
-          <TableHead>{t("duration")}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {runs.map((run) => (
-          <TableRow key={run.id}>
-            <TableCell className="font-mono text-sm">{formatDateTime(run.created_at)}</TableCell>
-            <TableCell>{statusText(run, t)}</TableCell>
-            <TableCell>
-              <CrawlResultCell crawl={run} />
-            </TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {run.finished_at && run.created_at
-                ? formatDuration(run.created_at, run.finished_at)
-                : run.created_at
-                  ? t("started_time_ago", { timeAgo: formatRelativeTime(run.created_at, locale) })
-                  : "—"}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="flex flex-col gap-4">
+      <KnowledgeTableControls
+        filterValue={filter}
+        onFilterChange={setFilter}
+        filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_crawls") })}
+        sortLabel={t("sort_by")}
+        sortValue={sort}
+        onSortChange={(value) => setSort(value as CrawlRunSort)}
+        sortOptions={sortOptions}
+      />
+      {visibleRuns.length === 0 ? (
+        <EmptyState
+          title={t("ui_no_items_matching", { resourceNamePlural: t("resource_crawls") })}
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("started")}</TableHead>
+              <TableHead>{t("status")}</TableHead>
+              <TableHead>{t("results")}</TableHead>
+              <TableHead>{t("duration")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleRuns.map((run) => (
+              <TableRow key={run.id}>
+                <TableCell className="font-mono text-sm">
+                  {formatDateTime(run.created_at)}
+                </TableCell>
+                <TableCell>{statusText(run, t)}</TableCell>
+                <TableCell>
+                  <CrawlResultCell crawl={run} />
+                </TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {run.finished_at && run.created_at
+                    ? formatDuration(run.created_at, run.finished_at)
+                    : run.created_at
+                      ? t("started_time_ago", {
+                          timeAgo: formatRelativeTime(run.created_at, locale)
+                        })
+                      : "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
   );
 }

@@ -34,10 +34,10 @@ function syncSummary(log: SyncLog, t: Translate): string {
 function StatusBadge({ status }: { status: string }) {
   const className =
     status === "success"
-      ? "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-300"
+      ? "bg-success/10 text-success"
       : status === "error"
-        ? "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-300"
-        : "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300";
+        ? "bg-destructive/10 text-destructive"
+        : "bg-warning/10 text-warning";
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{status}</span>
   );
@@ -50,11 +50,11 @@ function SyncLogEntry({ log }: { log: SyncLog }) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {log.status === "success" ? (
-            <Check className="size-4 shrink-0 text-green-600 dark:text-green-400" />
+            <Check className="text-success size-4 shrink-0" />
           ) : log.status === "error" ? (
-            <X className="size-4 shrink-0 text-red-600 dark:text-red-400" />
+            <X className="text-destructive size-4 shrink-0" />
           ) : (
-            <Loader2 className="size-4 shrink-0 animate-spin text-amber-600 dark:text-amber-400" />
+            <Loader2 className="text-warning size-4 shrink-0 animate-spin" />
           )}
           <span className="text-sm font-medium">
             {log.sync_type === "full" ? t("full_sync") : t("delta_sync")}
@@ -68,7 +68,7 @@ function SyncLogEntry({ log }: { log: SyncLog }) {
       <div className="text-muted-foreground mb-1 text-xs">{syncSummary(log, t)}</div>
       {log.skipped_items > 0 && log.skipped_details.length > 0 && (
         <details className="mb-1">
-          <summary className="cursor-pointer text-xs text-amber-600 hover:underline dark:text-amber-400">
+          <summary className="text-warning cursor-pointer text-xs hover:underline">
             {t("item_s_skipped", { count: String(log.skipped_items) })}
           </summary>
           <ul className="text-muted-foreground mt-1 ml-4 flex flex-col gap-0.5 text-xs">
@@ -90,7 +90,7 @@ function SyncLogEntry({ log }: { log: SyncLog }) {
           {log.completed_at ? formatDuration(log.started_at, log.completed_at) : "—"}
         </span>
         {log.error_message && (
-          <span className="font-medium text-red-600 dark:text-red-400">
+          <span className="text-destructive font-medium">
             {t("error")}: {log.error_message}
           </span>
         )}
@@ -143,7 +143,7 @@ function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
             <Spinner />
           </div>
         ) : isError ? (
-          <div className="flex items-center gap-2 rounded-md bg-red-50 p-4 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">
+          <div className="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md p-4 text-sm">
             <X className="size-4 shrink-0" />
             <span>{error instanceof Error ? error.message : t("error")}</span>
           </div>

@@ -194,7 +194,7 @@ function AddMemberDialog() {
             <Input
               id="member-search"
               value={filter}
-              placeholder="user@example.com"
+              placeholder={t("member_search_placeholder")}
               onChange={(event) => {
                 setFilter(event.target.value);
                 setSelectedId(null);

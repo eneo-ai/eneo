@@ -30,6 +30,7 @@ import {
   type UserIntegration
 } from "../queries";
 import { SharePointFolderTree } from "./folder-tree";
+import { ImportPreviewError } from "./preview-state";
 import {
   buildBatchItems,
   buildSelectionKey,
@@ -39,11 +40,7 @@ import {
 } from "./selection";
 
 type PreviewCategory =
-  | "my_teams"
-  | "public_teams_not_member"
-  | "other_sites"
-  | "onedrive"
-  | "unknown";
+  "my_teams" | "public_teams_not_member" | "other_sites" | "onedrive" | "unknown";
 
 const CATEGORY_ORDER: PreviewCategory[] = [
   "my_teams",
@@ -127,6 +124,7 @@ export function SharePointImportDialog({
   const hasPublicTeams = (preview.data ?? []).some(
     (entry) => previewCategory(entry) === "public_teams_not_member"
   );
+  const settingsHref = space.personal ? "/account/integrations" : null;
 
   const deduped = dedupeNestedSelection(selected);
   const requiresWrapperName = deduped.effectiveEntries.length > 1;
@@ -205,7 +203,7 @@ export function SharePointImportDialog({
         </DialogHeader>
 
         {space.embedding_models.length === 0 && (
-          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+          <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
             <span className="font-semibold">{t("warning")}:</span>{" "}
             {t("warning_no_embedding_models")}
           </p>
@@ -233,7 +231,20 @@ export function SharePointImportDialog({
               </label>
             )}
             <div className="max-h-[40vh] overflow-y-auto rounded-md border p-1">
-              {preview.isPending ? (
+              {userIntegrationId.length === 0 ? (
+                <ImportPreviewError
+                  message={t("integration_preview_connection_missing")}
+                  onBack={onBack}
+                  settingsHref={settingsHref}
+                />
+              ) : preview.isError ? (
+                <ImportPreviewError
+                  message={t("integration_preview_failed")}
+                  onBack={onBack}
+                  onRetry={() => void preview.refetch()}
+                  settingsHref={settingsHref}
+                />
+              ) : preview.isPending ? (
                 <div className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm">
                   <Spinner /> {t("loading_available_sites")}
                 </div>
@@ -299,7 +310,8 @@ export function SharePointImportDialog({
                 {requiresWrapperName && (
                   <div className="flex flex-col gap-1">
                     <Label htmlFor="sharepoint-wrapper-name">
-                      {t("sharepoint_wrapper_name_label")} <span className="text-red-600">*</span>
+                      {t("sharepoint_wrapper_name_label")}{" "}
+                      <span className="text-destructive">*</span>
                     </Label>
                     <p className="text-muted-foreground text-xs">
                       {t("sharepoint_wrapper_name_required_hint")}
@@ -312,7 +324,7 @@ export function SharePointImportDialog({
                       onChange={(event) => setWrapperName(event.target.value)}
                     />
                     {wrapperNameMissing && (
-                      <p className="text-xs text-red-600 dark:text-red-400">
+                      <p className="text-destructive text-xs">
                         {t("sharepoint_wrapper_name_missing_hint")}
                       </p>
                     )}

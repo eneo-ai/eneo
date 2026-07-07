@@ -36,18 +36,18 @@ export function IntegrationStatus({
           ? {
               label: t("sharepoint_webhook_expired"),
               tooltip: t("sharepoint_webhook_expired_tooltip"),
-              className: "text-red-600 dark:text-red-400"
+              className: "text-destructive"
             }
           : hours <= 48
             ? {
                 label: t("sharepoint_webhook_expiring_soon"),
                 tooltip: t("sharepoint_webhook_auto_renewal"),
-                className: "text-amber-600 dark:text-amber-400"
+                className: "text-warning"
               }
             : {
                 label: t("sharepoint_webhook_active"),
                 tooltip: t("sharepoint_webhook_auto_renewal"),
-                className: "text-green-700 dark:text-green-400"
+                className: "text-success"
               };
     }
   }

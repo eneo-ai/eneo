@@ -1,13 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil } from "lucide-react";
+import { Bot, Check, ChevronDown, Pencil, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { iconUrl } from "@/components/composites/icon-field";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -15,6 +23,10 @@ import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import { ChatPage } from "@/features/chat/chat-page";
+import {
+  chatPartnerSwitcherItems,
+  type ChatPartnerSwitcherItem
+} from "@/features/chat/partner-switcher";
 import { useSpace } from "@/features/spaces/use-space";
 
 function toModelInfo(
@@ -94,6 +106,54 @@ function ModelSwitcher() {
   );
 }
 
+function PartnerIcon({ item }: { item: ChatPartnerSwitcherItem }) {
+  const icon = iconUrl(item.iconId);
+  if (icon) {
+    return (
+      // Backend-served upload behind the auth proxy; next/image cannot optimize it.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={icon} alt="" className="size-7 rounded-md object-cover" />
+    );
+  }
+  const Icon =
+    item.type === "default-assistant" ? Sparkles : item.type === "group-chat" ? Users : Bot;
+  return (
+    <span className="bg-muted text-muted-foreground grid size-7 place-items-center rounded-md">
+      <Icon className="size-4" />
+    </span>
+  );
+}
+
+function ChatPartnerSwitcher({ items }: { items: ChatPartnerSwitcherItem[] }) {
+  const t = useTranslations();
+  const active = items.find((item) => item.active) ?? items[0];
+  if (!active) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className="-ml-2 max-w-[min(24rem,60vw)] min-w-0 justify-start">
+          <PartnerIcon item={active} />
+          <span className="truncate text-sm font-semibold">{active.name}</span>
+          <ChevronDown className="text-muted-foreground ml-1 size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel>{t("select_an_assistant")}</DropdownMenuLabel>
+        {items.map((item) => (
+          <DropdownMenuItem key={`${item.type}:${item.id}`} asChild>
+            <Link href={item.href} className="flex min-w-0 items-center gap-2">
+              <PartnerIcon item={item} />
+              <span className="min-w-0 flex-1 truncate">{item.name}</span>
+              {item.active && <Check className="text-primary size-4" />}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function SpaceChat() {
   const t = useTranslations();
   const { space, routeId } = useSpace();
@@ -124,6 +184,8 @@ export function SpaceChat() {
       type: "group-chat",
       id: groupChat.id,
       name: groupChat.name,
+      allowedAttachments: groupChat.allowed_attachments,
+      insightEnabled: groupChat.insight_enabled,
       showResponseLabel: groupChat.show_response_label,
       mentionableAssistants: groupChat.allow_mentions
         ? groupChat.tools.assistants.map((assistant) => ({
@@ -138,6 +200,10 @@ export function SpaceChat() {
       type: "assistant",
       id: assistant.id,
       name: assistant.name,
+      allowedAttachments: assistant.allowed_attachments,
+      insightEnabled: assistant.insight_enabled,
+      mcpServers: assistant.mcp_servers ?? [],
+      effectiveConfig: assistant.effective_config ?? null,
       completionModel: toModelInfo(assistant.completion_model)
     };
   } else if (type === "default-assistant" || !partnerId) {
@@ -147,6 +213,10 @@ export function SpaceChat() {
         type: "default-assistant",
         id: assistant.id,
         name: assistant.name,
+        allowedAttachments: assistant.allowed_attachments,
+        insightEnabled: false,
+        mcpServers: assistant.mcp_servers ?? [],
+        effectiveConfig: assistant.effective_config ?? null,
         completionModel: toModelInfo(assistant.completion_model)
       };
     }
@@ -181,6 +251,16 @@ export function SpaceChat() {
       key={`${partner.type}:${partner.id}`}
       partner={partner}
       initialSessionId={sessionId}
+      partnerSwitcher={
+        <ChatPartnerSwitcher
+          items={chatPartnerSwitcherItems({
+            space,
+            routeId,
+            activeType: partner.type,
+            activeId: partner.id
+          })}
+        />
+      }
       modelSelector={partner.type === "default-assistant" ? <ModelSwitcher /> : undefined}
       actions={
         editHref ? (

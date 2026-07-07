@@ -128,8 +128,11 @@ export function UploadBlobsDialog({
             />
             {files.length > 0 && (
               <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">
-                {files.map((file) => (
-                  <li key={file.name} className="flex justify-between gap-4 truncate py-0.5">
+                {files.map((file, index) => (
+                  <li
+                    key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                    className="flex justify-between gap-4 truncate py-0.5"
+                  >
                     <span className="truncate">{file.name}</span>
                     <span className="text-muted-foreground shrink-0">{formatBytes(file.size)}</span>
                   </li>
@@ -138,8 +141,8 @@ export function UploadBlobsDialog({
             )}
             {errors.length > 0 && (
               <div className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
-                {errors.map((error) => (
-                  <p key={`${error.fileName}-${error.message}`}>{error.message}</p>
+                {errors.map((error, index) => (
+                  <p key={`${error.fileName}-${error.message}-${index}`}>{error.message}</p>
                 ))}
               </div>
             )}

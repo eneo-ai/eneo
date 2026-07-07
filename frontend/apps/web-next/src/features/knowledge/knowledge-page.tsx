@@ -15,7 +15,11 @@ import { WebsitesTab } from "./websites";
  * gated by the corresponding read permission. The active tab lives in ?tab=
  * so links can target one directly.
  */
-export function KnowledgePage() {
+export function KnowledgePage({
+  integrationRequestFormUrl
+}: {
+  integrationRequestFormUrl?: string;
+}) {
   const t = useTranslations();
   const { can } = useSpace();
   const searchParams = useSearchParams();
@@ -63,7 +67,10 @@ export function KnowledgePage() {
         )}
         {can("read", "integrationKnowledge") && (
           <TabsContent value="integrations" className="pt-4">
-            <IntegrationsTab canCreate={can("create", "integrationKnowledge")} />
+            <IntegrationsTab
+              canCreate={can("create", "integrationKnowledge")}
+              integrationRequestFormUrl={integrationRequestFormUrl}
+            />
           </TabsContent>
         )}
       </Tabs>

@@ -52,7 +52,7 @@ function useInvalidateBlobs() {
 }
 
 /** Dialog that lazily loads and renders a blob's text content. */
-function BlobPreviewDialog({
+export function BlobPreviewDialog({
   blob,
   open,
   onOpenChange

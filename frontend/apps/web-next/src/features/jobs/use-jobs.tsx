@@ -118,6 +118,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
 
   const fastPollUntil = useRef(0);
+  const [announcement, setAnnouncement] = useState<{ id: number; message: string } | null>(null);
+  const announce = useCallback((message: string) => {
+    setAnnouncement({ id: Date.now(), message });
+  }, []);
 
   const { data: jobs = [] } = useQuery({
     queryKey: ["jobs"],
@@ -141,16 +145,29 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     const previous = previousJobs.current;
     previousJobs.current = next;
 
-    const completed = [...next.values()].some((job) => {
+    let completed = false;
+    const announcements: string[] = [];
+    for (const job of next.values()) {
       const old = previous.get(job.id);
-      return old !== undefined && isJobActive(old) && job.status === "complete";
-    });
+      if (old === undefined || !isJobActive(old)) continue;
+      const name = job.name ?? job.id;
+      if (job.status === "complete") {
+        completed = true;
+        announcements.push(t("job_completed_announcement", { name }));
+      } else if (job.status === "failed") {
+        announcements.push(t("job_failed_announcement", { name }));
+      }
+    }
     if (completed || next.size < previous.size) {
       for (const queryKey of JOB_INVALIDATION_KEYS) {
         void queryClient.invalidateQueries({ queryKey });
       }
     }
-  }, [jobs, queryClient]);
+    const timeoutIds = announcements.map((message) =>
+      window.setTimeout(() => announce(message), 0)
+    );
+    return () => timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+  }, [announce, jobs, queryClient, t]);
 
   const trackJob = useCallback(() => {
     fastPollUntil.current = Date.now() + FAST_POLL_WINDOW_MS;
@@ -192,12 +209,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           .then(() => {
             runningRef.current.delete(id);
             uploadsRef.current.delete(id);
+            announce(t("upload_completed_announcement", { name: upload.file.name }));
+            toast.success(t("file_uploaded"), { description: upload.file.name });
             trackJob();
           })
           .catch((error: unknown) => {
             runningRef.current.delete(id);
             const message = getErrorMessage(error, t);
             patchUpload(id, { status: "failed", errorMessage: message, progress: 0 });
+            announce(t("upload_failed_announcement", { name: upload.file.name, message }));
             toast.error(`${t("file_upload_error")}: ${upload.file.name}: ${message}`);
           })
           .finally(() => {
@@ -208,7 +228,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       sync();
     };
     pump();
-  }, [patchUpload, sync, t, trackJob]);
+  }, [announce, patchUpload, sync, t, trackJob]);
 
   const queueUploads = useCallback(
     (collectionId: string, files: File[]) => {
@@ -223,9 +243,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         });
         waitingRef.current.push(id);
       }
+      toast.success(t("uploads_queued", { count: files.length }));
+      announce(t("uploads_queued", { count: files.length }));
       pumpQueue();
     },
-    [pumpQueue]
+    [announce, pumpQueue, t]
   );
 
   const clearFinishedUploads = useCallback(() => {
@@ -246,7 +268,16 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [jobs, uploads, runningCount, trackJob, queueUploads, clearFinishedUploads]
   );
 
-  return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>;
+  return (
+    <JobsContext.Provider value={value}>
+      {children}
+      {announcement ? (
+        <span key={announcement.id} className="sr-only" role="status" aria-live="polite">
+          {announcement.message}
+        </span>
+      ) : null}
+    </JobsContext.Provider>
+  );
 }
 
 export function useJobs(): JobsContextValue {
