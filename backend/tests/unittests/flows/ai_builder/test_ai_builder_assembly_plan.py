@@ -8,7 +8,11 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     UnderlagChannel,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
-from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    PreviousFieldRef,
+    PreviousOutputRef,
+    StructuredFieldDraft,
+)
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
@@ -29,6 +33,8 @@ def _text_step(
     underlag_channel: UnderlagChannel = "flow_input",
     form_field_refs: tuple[str, ...] = (),
     previous_field_refs: tuple[PreviousFieldRef, ...] = (),
+    previous_output_refs: tuple[PreviousOutputRef, ...] = (),
+    output_fields: tuple[StructuredFieldDraft, ...] = (),
 ) -> PlannedStep:
     return PlannedStep(
         role="transform",
@@ -41,6 +47,16 @@ def _text_step(
         underlag_channel=underlag_channel,
         form_field_refs=form_field_refs,
         previous_field_refs=previous_field_refs,
+        previous_output_refs=previous_output_refs,
+        output_fields=output_fields,
+    )
+
+
+def _field(name: str) -> StructuredFieldDraft:
+    return StructuredFieldDraft(
+        name=name,
+        field_type="string",
+        description=f"{name} field.",
     )
 
 
@@ -98,6 +114,7 @@ def test_plan_rejects_non_immediate_previous_field_refs() -> None:
     second_step = _text_step(
         name="Write interim",
         input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
         underlag_channel="implicit_previous",
     )
     stale_ref_step = _text_step(
@@ -115,6 +132,68 @@ def test_plan_rejects_non_immediate_previous_field_refs() -> None:
 
     with pytest.raises(ValueError, match="expected immediate previous step 2"):
         _plan(steps=(first_step, second_step, stale_ref_step))
+
+
+def test_plan_requires_whole_object_channel_for_json_previous_text_input() -> None:
+    first_step = _text_step(
+        name="Extract facts",
+        output_type=OutputType.JSON,
+        output_fields=(_field("summary"),),
+    )
+    implicit_step = _text_step(
+        name="Write from structured facts",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="implicit_previous",
+    )
+
+    with pytest.raises(ValueError, match="expected 'whole_object'"):
+        _plan(steps=(first_step, implicit_step))
+
+    whole_object_step = _text_step(
+        name="Write from structured facts",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="whole_object",
+    )
+
+    plan = _plan(steps=(first_step, whole_object_step))
+
+    assert plan.steps[-1].underlag_channel == "whole_object"
+
+
+def test_plan_requires_whole_object_channel_for_broad_previous_field_refs() -> None:
+    first_step = _text_step(
+        name="Extract facts",
+        output_type=OutputType.JSON,
+        output_fields=(_field("summary"), _field("details")),
+    )
+    broad_field_refs = (
+        PreviousFieldRef(from_step=1, field_path="summary"),
+        PreviousFieldRef(from_step=1, field_path="details"),
+    )
+    field_ref_step = _text_step(
+        name="Write from all facts",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="field_refs",
+        previous_field_refs=broad_field_refs,
+    )
+
+    with pytest.raises(ValueError, match="expected 'whole_object'"):
+        _plan(steps=(first_step, field_ref_step))
+
+    whole_object_step = _text_step(
+        name="Write from all facts",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="whole_object",
+        previous_field_refs=broad_field_refs,
+    )
+
+    plan = _plan(steps=(first_step, whole_object_step))
+
+    assert plan.steps[-1].underlag_channel == "whole_object"
 
 
 def test_plan_rejects_linear_fan_in() -> None:

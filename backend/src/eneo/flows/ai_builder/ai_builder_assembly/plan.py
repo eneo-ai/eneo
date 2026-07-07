@@ -40,7 +40,12 @@ PlannedStepRole = Literal[
     "template_fill",
 ]
 UnderlagChannel = Literal[
-    "flow_input", "implicit_previous", "field_refs", "text_anchor", "fan_in"
+    "flow_input",
+    "implicit_previous",
+    "whole_object",
+    "field_refs",
+    "text_anchor",
+    "fan_in",
 ]
 
 
@@ -74,13 +79,7 @@ class PlannedStep:
                 f"Planned step {self.name!r} cannot mix previous field refs "
                 "and previous output refs."
             )
-        expected_underlag_channel = _expected_underlag_channel(self)
-        if self.underlag_channel != expected_underlag_channel:
-            raise ValueError(
-                f"Planned step {self.name!r} declares underlag_channel "
-                f"{self.underlag_channel!r}; expected "
-                f"{expected_underlag_channel!r}."
-            )
+        _validate_underlag_channel_shape(self)
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
             raise ValueError(
                 f"Planned step {self.name!r} has runtime_max_files below 1."
@@ -134,15 +133,25 @@ class FlowAssemblyPlan:
             )
 
 
-def _expected_underlag_channel(step: PlannedStep) -> UnderlagChannel:
+def _validate_underlag_channel_shape(step: PlannedStep) -> None:
     if step.input_source == InputSource.FLOW_INPUT:
+        if step.underlag_channel != "flow_input":
+            raise ValueError(
+                f"Planned step {step.name!r} declares underlag_channel "
+                f"{step.underlag_channel!r}; expected 'flow_input'."
+            )
         if step.previous_field_refs or step.previous_output_refs:
             raise ValueError(
                 f"Planned step {step.name!r} cannot reference previous output "
                 "while reading flow input."
             )
-        return "flow_input"
+        return
     if step.input_source == InputSource.ALL_PREVIOUS_STEPS:
+        if step.underlag_channel != "fan_in":
+            raise ValueError(
+                f"Planned step {step.name!r} declares underlag_channel "
+                f"{step.underlag_channel!r}; expected 'fan_in'."
+            )
         if (
             step.form_field_refs
             or step.previous_field_refs
@@ -152,12 +161,80 @@ def _expected_underlag_channel(step: PlannedStep) -> UnderlagChannel:
                 f"Planned step {step.name!r} cannot combine fan-in with "
                 "explicit form fields or previous refs."
             )
-        return "fan_in"
+        return
     if step.previous_field_refs:
-        return "field_refs"
+        if step.underlag_channel not in {"field_refs", "whole_object"}:
+            raise ValueError(
+                f"Planned step {step.name!r} declares underlag_channel "
+                f"{step.underlag_channel!r}; expected field refs or whole object."
+            )
+        return
     if step.previous_output_refs:
+        if step.underlag_channel != "text_anchor":
+            raise ValueError(
+                f"Planned step {step.name!r} declares underlag_channel "
+                f"{step.underlag_channel!r}; expected 'text_anchor'."
+            )
+        return
+    if step.underlag_channel not in {"implicit_previous", "whole_object"}:
+        raise ValueError(
+            f"Planned step {step.name!r} declares underlag_channel "
+            f"{step.underlag_channel!r}; expected implicit previous or whole object."
+        )
+
+
+def derive_underlag_channel(
+    *,
+    input_source: InputSource,
+    input_type: InputType,
+    previous_step: PlannedStep | None,
+    previous_field_refs: tuple[PreviousFieldRef, ...],
+    previous_output_refs: tuple[PreviousOutputRef, ...],
+) -> UnderlagChannel:
+    if input_source == InputSource.FLOW_INPUT:
+        return "flow_input"
+    if input_source == InputSource.ALL_PREVIOUS_STEPS:
+        return "fan_in"
+    if previous_field_refs:
+        if previous_step is not None and _previous_field_refs_collapse_to_whole_object(
+            previous_field_refs=previous_field_refs,
+            previous_step=previous_step,
+        ):
+            return "whole_object"
+        return "field_refs"
+    if previous_output_refs:
         return "text_anchor"
+    if (
+        previous_step is not None
+        and previous_step.output_type == OutputType.JSON
+        and input_type == InputType.TEXT
+    ):
+        return "whole_object"
     return "implicit_previous"
+
+
+def _previous_field_refs_collapse_to_whole_object(
+    *,
+    previous_field_refs: tuple[PreviousFieldRef, ...],
+    previous_step: PlannedStep,
+) -> bool:
+    if previous_step.output_type != OutputType.JSON:
+        return False
+    property_names = {
+        field.name for field in previous_step.output_fields if "." not in field.name
+    }
+    if not property_names:
+        return False
+    field_names = {
+        ref.field_path
+        for ref in previous_field_refs
+        if "." not in ref.field_path and ref.field_path in property_names
+    }
+    return (
+        len(field_names) > 1
+        and len(property_names) > 1
+        and len(field_names) * 2 >= len(property_names)
+    )
 
 
 def _step_capabilities_are_supported(step: PlannedStep) -> bool:
@@ -196,9 +273,26 @@ def _validate_step_order(
                 "FlowAssemblyPlan fan-in requires aggregate or compare intent."
             )
         _validate_previous_refs(step, expected_from_step=index)
+        previous_step = steps[index - 1]
+        expected_underlag_channel = derive_underlag_channel(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            previous_step=(
+                previous_step
+                if step.input_source == InputSource.PREVIOUS_STEP
+                else None
+            ),
+            previous_field_refs=step.previous_field_refs,
+            previous_output_refs=step.previous_output_refs,
+        )
+        if step.underlag_channel != expected_underlag_channel:
+            raise ValueError(
+                f"Planned step {step.name!r} declares underlag_channel "
+                f"{step.underlag_channel!r}; expected "
+                f"{expected_underlag_channel!r}."
+            )
         if step.input_source != InputSource.PREVIOUS_STEP:
             continue
-        previous_step = steps[index - 1]
         if not is_chain_compatible(
             output_type=FlowOutputType(previous_step.output_type.value),
             input_type=FlowInputType(step.input_type.value),

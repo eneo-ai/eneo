@@ -181,6 +181,70 @@ def test_compiler_uses_assembly_path_for_linear_previous_field_flow(
     assert validate_spec(compiled).valid
 
 
+def test_compiler_uses_assembly_path_for_whole_object_underlag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("broad previous-field flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case report",
+            "flow_description": "Extract facts and write a report.",
+            "plan_rationale": "The writer needs the full extracted object.",
+            "steps": [
+                {
+                    "name": "Extract facts",
+                    "instructions": "Extract the relevant facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Short summary.",
+                        },
+                        {
+                            "name": "details",
+                            "field_type": "string",
+                            "description": "Important details.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the final report.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "summary",
+                            "label": "Summary",
+                        },
+                        {
+                            "from_step": 1,
+                            "field_path": "details",
+                            "label": "Details",
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent)
+
+    assert len(compiled.steps) == 2
+    write_step = compiled.steps[1]
+    assert write_step.input_bindings == {
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+    }
+    assert validate_spec(compiled).valid
+
+
 @pytest.mark.parametrize("final_output_type", [OutputType.PDF, OutputType.DOCX])
 def test_compiler_uses_assembly_path_for_generated_document_renderer(
     monkeypatch: pytest.MonkeyPatch,

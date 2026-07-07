@@ -13,7 +13,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
     PlannedStepRole,
-    UnderlagChannel,
+    derive_underlag_channel,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
@@ -274,6 +274,9 @@ def _assemble_create_intent(
             semantic_step.uses_previous_outputs,
             compiled_step_offset=source_prefix_step_count,
         )
+        previous_planned_step = (
+            planned_steps[-1] if input_source == InputSource.PREVIOUS_STEP else None
+        )
         planned_step = PlannedStep(
             role=_linear_step_role(
                 output_type=step_output_type,
@@ -286,8 +289,10 @@ def _assemble_create_intent(
             input_type=input_type,
             output_type=step_output_type,
             output_mode=semantic_output_mode,
-            underlag_channel=_linear_underlag_channel(
+            underlag_channel=derive_underlag_channel(
                 input_source=input_source,
+                input_type=input_type,
+                previous_step=previous_planned_step,
                 previous_field_refs=previous_field_refs,
                 previous_output_refs=previous_output_refs,
             ),
@@ -399,15 +404,24 @@ def _assemble_docx_template_fill(
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,
     )
+    content_input_type = (
+        InputType.TEXT if semantic_step.uses_form_fields else InputType.JSON
+    )
     content_step = PlannedStep(
         role="transform",
         name=semantic_step.name,
         instructions=semantic_step.instructions,
         input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT if semantic_step.uses_form_fields else InputType.JSON,
+        input_type=content_input_type,
         output_type=OutputType.TEXT,
         output_mode=OutputMode.PASS_THROUGH,
-        underlag_channel="implicit_previous",
+        underlag_channel=derive_underlag_channel(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=content_input_type,
+            previous_step=reader_step,
+            previous_field_refs=(),
+            previous_output_refs=(),
+        ),
         form_field_refs=tuple(semantic_step.uses_form_fields),
         model_ref=semantic_step.model_ref,
         knowledge_refs=tuple(semantic_step.knowledge_refs),
@@ -575,23 +589,6 @@ def _linear_step_input_source(
     ):
         return InputSource.ALL_PREVIOUS_STEPS
     return InputSource.PREVIOUS_STEP
-
-
-def _linear_underlag_channel(
-    *,
-    input_source: InputSource,
-    previous_field_refs: Sequence[PreviousFieldRef],
-    previous_output_refs: Sequence[PreviousOutputRef],
-) -> UnderlagChannel:
-    if input_source == InputSource.FLOW_INPUT:
-        return "flow_input"
-    if input_source == InputSource.ALL_PREVIOUS_STEPS:
-        return "fan_in"
-    if previous_field_refs:
-        return "field_refs"
-    if previous_output_refs:
-        return "text_anchor"
-    return "implicit_previous"
 
 
 def _offset_previous_field_refs(
