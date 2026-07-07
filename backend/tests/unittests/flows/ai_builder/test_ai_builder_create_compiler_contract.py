@@ -233,6 +233,49 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
     assert validate_spec(compiled).valid
 
 
+def test_compiler_uses_assembly_path_with_structural_pattern_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("structural pattern hint should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "PDF briefing",
+            "flow_description": "Create a generated PDF from text input.",
+            "plan_rationale": "The pattern hint is architecture evidence only.",
+            "steps": [
+                {
+                    "name": "Write briefing",
+                    "instructions": "Write the briefing body.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            pattern_ids=("text_to_artifact_report",),
+        ),
+    )
+
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert compiled.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_uses_assembly_path_for_document_source_reader_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -82,6 +82,21 @@ _DOCX_TEMPLATE_PATTERN_CHAIN_STEPS = frozenset(
         TEMPLATE_FILL_DOCX_STEP,
     }
 )
+_SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
+    {
+        "comparison",
+        "document_to_pdf_report",
+        "document_to_structured_report",
+        "extract_structured_fields",
+        "form_field_runtime_inputs",
+        "json_to_artifact_report",
+        "json_to_structured_payload",
+        "json_to_text_summary",
+        "mcp_tool_step",
+        "summarize_text",
+        "text_to_artifact_report",
+    }
+)
 
 PlannedStepRole = Literal[
     "reader",
@@ -397,6 +412,8 @@ def _architecture_hints_are_supported(
     chain_steps: tuple[str, ...],
 ) -> bool:
     if not pattern_ids and not chain_steps:
+        return True
+    if not chain_steps and set(pattern_ids) <= _SUPPORTED_STRUCTURAL_PATTERN_IDS:
         return True
     if runtime_input_type == InputType.AUDIO:
         return set(pattern_ids) <= _AUDIO_PATTERN_IDS and set(chain_steps) <= set(
