@@ -7,6 +7,7 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
+    create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
@@ -22,7 +23,11 @@ from eneo.flows.ai_builder.pattern_registry import (
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
-from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.ai_builder.planning_state import (
+    AggregationIntent,
+    PlanningState,
+    ResolvedSlot,
+)
 from eneo.flows.flow_authoring_spec import (
     InputSource,
     InputType,
@@ -36,6 +41,28 @@ def _question(input_bindings: dict[str, object] | None) -> str:
     question = effective_question_binding(input_bindings)
     assert question is not None
     return question
+
+
+def _slot(name: str, value: str) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source="structured_answer",
+        confidence="high",
+    )
+
+
+def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_type == InputType.DOCUMENT
 
 
 def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
