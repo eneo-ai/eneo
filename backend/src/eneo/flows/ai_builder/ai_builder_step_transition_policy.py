@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
@@ -41,11 +39,6 @@ from eneo.flows.template_reference_analyzer import (
 _TEMPLATE_FILL_ONLY_KEYS = frozenset(
     {"bindings", "template_asset_id", "template_file_id"}
 )
-_UNFOLDABLE = object()
-_TERMINAL_HELPER_FOLD_OUTPUT_TYPES = frozenset(
-    {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
-)
-_TERMINAL_ARTIFACT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
 _ARTIFACT_GENERATION_PREFIXES = (
     "create",
     "generate",
@@ -111,14 +104,6 @@ def normalize_ai_builder_step_topology(
     steps can see only metadata JSON and lose the transcript or source file text.
     """
 
-    spec, artifact_tail_changes = _normalize_terminal_artifact_tail(
-        spec,
-        terminal_output_type=terminal_output_type,
-    )
-    spec, terminal_artifact_changes = _normalize_terminal_artifact_contract(
-        spec,
-        terminal_output_type=terminal_output_type,
-    )
     spec, artifact_body_changes = _normalize_pre_terminal_artifact_body_step(
         spec,
         terminal_output_type=terminal_output_type,
@@ -137,8 +122,6 @@ def normalize_ai_builder_step_topology(
     )
     normalized_steps: list[StepSpec] = []
     changes: list[tuple[StepSpec, StepNormalizationChange]] = [
-        *artifact_tail_changes,
-        *terminal_artifact_changes,
         *artifact_body_changes,
     ]
     mutated = bool(changes)
@@ -265,12 +248,11 @@ def _normalize_source_material_underlag(
             if candidate is boundary.step
         )
         normalized_bindings = source_material_bindings_for_boundary(boundary)
-        normalized_step = boundary.step.model_copy(
-            update={
-                "input_type": InputType.TEXT,
-                "input_bindings": normalized_bindings,
-            }
-        )
+        updates: dict[str, Any] = {
+            "input_type": InputType.TEXT,
+            "input_bindings": normalized_bindings,
+        }
+        normalized_step = boundary.step.model_copy(update=updates)
         updated_steps[step_index] = normalized_step
         changes.append(
             (
@@ -443,320 +425,6 @@ def _artifact_body_step_instruction_prefix(
 
 def _step_instruction_text(step: StepSpec) -> str:
     return f"{step.name} {step.assistant_spec.instructions}"
-
-
-def _normalize_terminal_artifact_tail(
-    spec: FlowDraftSpecCore,
-    *,
-    terminal_output_type: OutputType | None,
-) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
-    """Keep strict-output plans terminal on the requested output type.
-
-    LLMs often satisfy "make the final output JSON/PDF/DOCX" by inserting a new
-    output-producing helper step before an existing "create final result"
-    text step. That is semantically close, but the Flow runtime returns the
-    final step. Fold that helper into the terminal text step instead of asking
-    the model to retry, preserving scoped-edit target refs and reducing repair
-    loops.
-    """
-
-    if terminal_output_type not in _TERMINAL_HELPER_FOLD_OUTPUT_TYPES:
-        return spec, []
-    output_type = cast(OutputType, terminal_output_type)
-    if len(spec.steps) < 2:
-        return spec, []
-
-    artifact_step = spec.steps[-2]
-    terminal_step = spec.steps[-1]
-    if terminal_step.output_type == output_type:
-        return spec, []
-    if artifact_step.output_type != output_type:
-        return spec, []
-    if terminal_step.output_type != OutputType.TEXT:
-        return spec, []
-    if terminal_step.output_mode != OutputMode.PASS_THROUGH:
-        return spec, []
-    if terminal_step.input_source != InputSource.PREVIOUS_STEP:
-        return spec, []
-
-    folded_input_bindings = _fold_artifact_helper_input_bindings(
-        spec=spec,
-        artifact_step=artifact_step,
-        terminal_step=terminal_step,
-    )
-    if folded_input_bindings is _UNFOLDABLE:
-        return spec, []
-
-    promoted_terminal = terminal_step.model_copy(
-        update={
-            "assistant_spec": _fold_artifact_helper_assistant(
-                artifact_step=artifact_step,
-                terminal_step=terminal_step,
-            ),
-            "input_source": artifact_step.input_source,
-            "input_type": artifact_step.input_type,
-            "input_bindings": folded_input_bindings,
-            "input_contract": artifact_step.input_contract,
-            "input_config": artifact_step.input_config,
-            "output_type": output_type,
-            "output_mode": artifact_step.output_mode,
-            "output_contract": artifact_step.output_contract,
-            "output_config": artifact_step.output_config,
-        }
-    )
-    normalized_steps = [*spec.steps[:-2], promoted_terminal]
-    change = StepNormalizationChange(
-        code="terminal_artifact_helper_folded",
-        field_suffix="steps",
-        message=(
-            "Folded an inserted artifact helper into the terminal step so the "
-            "flow returns the requested final artifact."
-        ),
-    )
-    return spec.model_copy(update={"steps": normalized_steps}), [
-        (promoted_terminal, change)
-    ]
-
-
-def _normalize_terminal_artifact_contract(
-    spec: FlowDraftSpecCore,
-    *,
-    terminal_output_type: OutputType | None,
-) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
-    if terminal_output_type not in _TERMINAL_ARTIFACT_OUTPUT_TYPES:
-        return spec, []
-    output_type = cast(OutputType, terminal_output_type)
-    if not spec.steps:
-        return spec, []
-
-    terminal_step = spec.steps[-1]
-    if terminal_step.output_type == output_type:
-        return spec, []
-    if terminal_step.output_type != OutputType.TEXT:
-        return spec, []
-    if terminal_step.output_mode != OutputMode.PASS_THROUGH:
-        return spec, []
-    if _previous_step_is_requested_artifact(spec, output_type=output_type):
-        return spec, []
-
-    promoted_terminal = terminal_step.model_copy(
-        update={
-            "assistant_spec": _terminal_artifact_assistant(
-                step=terminal_step,
-                output_type=output_type,
-            ),
-            "output_type": output_type,
-            "output_contract": None,
-            "output_config": None,
-        }
-    )
-    normalized_steps = [*spec.steps[:-1], promoted_terminal]
-    change = StepNormalizationChange(
-        code="terminal_artifact_contract_promoted",
-        field_suffix="output_type",
-        message=(
-            "Promoted the terminal text step to the requested artifact output type "
-            "because the framework owns strict final DOCX/PDF contracts."
-        ),
-    )
-    return spec.model_copy(update={"steps": normalized_steps}), [
-        (promoted_terminal, change)
-    ]
-
-
-def _previous_step_is_requested_artifact(
-    spec: FlowDraftSpecCore,
-    *,
-    output_type: OutputType,
-) -> bool:
-    if len(spec.steps) < 2:
-        return False
-    return spec.steps[-2].output_type == output_type
-
-
-def _terminal_artifact_assistant(
-    *,
-    step: StepSpec,
-    output_type: OutputType,
-) -> AssistantSpec:
-    source_text = _step_instruction_text(step)
-    instructions = step.assistant_spec.instructions.strip()
-    if _looks_like_artifact_instruction(source_text, output_type=output_type):
-        return step.assistant_spec
-
-    prefix = _terminal_artifact_instruction_prefix(
-        output_type=output_type,
-        source_text=source_text,
-    )
-    return step.assistant_spec.model_copy(
-        update={
-            "instructions": (f"{prefix}\n\n{instructions}" if instructions else prefix)
-        }
-    )
-
-
-def _looks_like_artifact_instruction(
-    text: str,
-    *,
-    output_type: OutputType,
-) -> bool:
-    normalized = normalize_discovery_text(text)
-    if not _mentions_artifact_type(normalized, output_type=output_type):
-        return False
-    return contains_any_token_prefix(normalized, _ARTIFACT_GENERATION_PREFIXES)
-
-
-def _terminal_artifact_instruction_prefix(
-    *,
-    output_type: OutputType,
-    source_text: str,
-) -> str:
-    artifact_name = output_type.value.upper()
-    normalized = normalize_discovery_text(source_text)
-    if contains_any_token_prefix(normalized, _SWEDISH_ARTIFACT_GENERATION_PREFIXES):
-        return (
-            f"Skapa den slutliga {artifact_name}-filen från föregående steg. "
-            "Bevara rapportens struktur, rubriker och punktlistor."
-        )
-    return (
-        f"Create the final {artifact_name} file from the previous step. "
-        "Preserve the report structure, headings, and bullet lists."
-    )
-
-
-def _fold_artifact_helper_assistant(
-    *,
-    artifact_step: StepSpec,
-    terminal_step: StepSpec,
-) -> AssistantSpec:
-    helper_instructions = artifact_step.assistant_spec.instructions.strip()
-    terminal_instructions = terminal_step.assistant_spec.instructions.strip()
-    if helper_instructions and terminal_instructions:
-        instructions = f"{terminal_instructions}\n\n{helper_instructions}"
-    else:
-        instructions = terminal_instructions or helper_instructions
-
-    updates: dict[str, Any] = {"instructions": instructions}
-    if not terminal_step.assistant_spec.model_ref:
-        updates["model_ref"] = artifact_step.assistant_spec.model_ref
-    if (
-        not terminal_step.assistant_spec.knowledge_refs
-        and not terminal_step.assistant_spec.mcp_server_refs
-        and not terminal_step.assistant_spec.mcp_tool_refs
-    ):
-        updates.update(
-            {
-                "knowledge_refs": artifact_step.assistant_spec.knowledge_refs,
-                "mcp_server_refs": artifact_step.assistant_spec.mcp_server_refs,
-                "mcp_tool_refs": artifact_step.assistant_spec.mcp_tool_refs,
-            }
-        )
-    return terminal_step.assistant_spec.model_copy(update=updates)
-
-
-def _fold_artifact_helper_input_bindings(
-    *,
-    spec: FlowDraftSpecCore,
-    artifact_step: StepSpec,
-    terminal_step: StepSpec,
-) -> dict[str, Any] | None | object:
-    if terminal_step.input_bindings is None:
-        return artifact_step.input_bindings
-
-    replacement = _artifact_helper_source_binding(
-        spec=spec,
-        artifact_step=artifact_step,
-    )
-    if replacement is None and _bindings_reference_step(
-        terminal_step.input_bindings,
-        artifact_step.plan_step_ref,
-    ):
-        return _UNFOLDABLE
-    if replacement is None:
-        return terminal_step.input_bindings
-    return cast(
-        dict[str, Any],
-        _rewrite_binding_step_references(
-            terminal_step.input_bindings,
-            step_ref=artifact_step.plan_step_ref,
-            replacement=replacement,
-        ),
-    )
-
-
-def _artifact_helper_source_binding(
-    *,
-    spec: FlowDraftSpecCore,
-    artifact_step: StepSpec,
-) -> str | None:
-    question = effective_question_binding(artifact_step.input_bindings)
-    if question:
-        return question
-    if artifact_step.input_source != InputSource.PREVIOUS_STEP:
-        return None
-    artifact_index = spec.steps.index(artifact_step)
-    if artifact_index == 0:
-        return None
-    previous_step = spec.steps[artifact_index - 1]
-    output_path = (
-        "structured" if previous_step.output_type == OutputType.JSON else "text"
-    )
-    return f"{{{{ {previous_step.plan_step_ref}.output.{output_path} }}}}"
-
-
-def _bindings_reference_step(value: Any, step_ref: str) -> bool:
-    if isinstance(value, str):
-        return _step_output_reference_pattern(step_ref).search(value) is not None
-    if isinstance(value, dict):
-        mapping = cast(Mapping[Any, Any], value)
-        return any(
-            _bindings_reference_step(child, step_ref) for child in mapping.values()
-        )
-    if isinstance(value, list):
-        children = cast(list[Any], value)
-        return any(_bindings_reference_step(child, step_ref) for child in children)
-    return False
-
-
-def _rewrite_binding_step_references(
-    value: Any,
-    *,
-    step_ref: str,
-    replacement: str,
-) -> Any:
-    if isinstance(value, str):
-        return _step_output_reference_pattern(step_ref).sub(replacement, value)
-    if isinstance(value, dict):
-        mapping = cast(Mapping[Any, Any], value)
-        rewritten: dict[Any, Any] = {}
-        for key, child in mapping.items():
-            rewritten[key] = _rewrite_binding_step_references(
-                child,
-                step_ref=step_ref,
-                replacement=replacement,
-            )
-        return rewritten
-    if isinstance(value, list):
-        children = cast(list[Any], value)
-        rewritten_list: list[Any] = []
-        for child in children:
-            rewritten_list.append(
-                _rewrite_binding_step_references(
-                    child,
-                    step_ref=step_ref,
-                    replacement=replacement,
-                )
-            )
-        return rewritten_list
-    return value
-
-
-def _step_output_reference_pattern(step_ref: str) -> re.Pattern[str]:
-    return re.compile(
-        r"{{\s*"
-        + re.escape(step_ref)
-        + r"\.output\.(?:text|structured|json|document|file|pdf|docx)\s*}}"
-    )
 
 
 def _can_rewire_all_previous_to_previous_step(

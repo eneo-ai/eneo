@@ -19,9 +19,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
 )
-from eneo.main.logging import get_logger
-
-logger = get_logger(__name__)
 
 _STRICT_TERMINAL_OUTPUT_TYPES = frozenset(
     {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
@@ -44,29 +41,11 @@ def prepare_compiled_spec_for_session(
     resource_catalog: AIBuilderResourceCatalog | None,
     terminal_output_type: OutputType | None = None,
 ) -> PreparedCompiledSpecResult:
-    prepared_spec, normalization_changes = normalize_ai_builder_spec(
+    prepared_spec, _normalization_changes = normalize_ai_builder_spec(
         spec,
         terminal_output_type=terminal_output_type,
         disambiguate_duplicate_step_names=target_kind == TargetKind.EDIT,
     )
-    terminal_contract_changes = [
-        {
-            "step_ref": step.plan_step_ref,
-            "code": change.code,
-            "field": change.field_suffix,
-        }
-        for step, change in normalization_changes
-        if change.code
-        in {"terminal_artifact_helper_folded", "terminal_artifact_contract_promoted"}
-    ]
-    if terminal_contract_changes:
-        logger.info(
-            "ai_builder_terminal_artifact_contract_normalized "
-            "target_kind=%s terminal_output_type=%s changes=%s",
-            target_kind,
-            terminal_output_type,
-            terminal_contract_changes,
-        )
     if resource_catalog is not None:
         prepared_spec, resolution_issues = canonicalize_flow_spec_resources(
             prepared_spec,

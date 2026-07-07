@@ -30,8 +30,6 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 
-_DEFAULT_HELPER_INPUT_BINDINGS = object()
-
 
 def _make_spec() -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
@@ -83,18 +81,7 @@ def _duplicate_step_name_spec() -> FlowDraftSpecCore:
     )
 
 
-def _json_helper_before_text_terminal_spec(
-    *,
-    helper_input_source: InputSource = InputSource.PREVIOUS_STEP,
-    helper_input_bindings: dict[str, object] | None | object = (
-        _DEFAULT_HELPER_INPUT_BINDINGS
-    ),
-    terminal_input_source: InputSource = InputSource.PREVIOUS_STEP,
-    terminal_output_mode: OutputMode = OutputMode.PASS_THROUGH,
-) -> FlowDraftSpecCore:
-    if helper_input_bindings is _DEFAULT_HELPER_INPUT_BINDINGS:
-        helper_input_bindings = {"question": "{{ step_a.output.structured }}"}
-
+def _json_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Structured comparison",
         steps=[
@@ -116,11 +103,11 @@ def _json_helper_before_text_terminal_spec(
                 assistant_spec=AssistantSpec(
                     instructions="Create the final structured JSON object.",
                 ),
-                input_source=helper_input_source,
+                input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.JSON,
-                input_bindings=helper_input_bindings,
+                input_bindings={"question": "{{ step_a.output.structured }}"},
                 mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
@@ -129,9 +116,9 @@ def _json_helper_before_text_terminal_spec(
                 assistant_spec=AssistantSpec(
                     instructions="Return the final result.",
                 ),
-                input_source=terminal_input_source,
+                input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
-                output_mode=terminal_output_mode,
+                output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
                 input_bindings={"question": "{{ step_b.output.structured }}"},
                 mcp_policy=MCPPolicy.INHERIT,
@@ -455,7 +442,27 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
     assert result.validation.errors[0].code == "terminal_output_type_mismatch"
 
 
-def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contract() -> (
+def test_prepare_compiled_spec_for_session_rejects_terminal_text_artifact_mismatch() -> (
+    None
+):
+    result = prepare_compiled_spec_for_session(
+        spec=_make_spec(),
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert not result.validation.valid
+    terminal = result.spec.steps[-1]
+    assert terminal.output_type == OutputType.TEXT
+    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
+
+
+def test_prepare_compiled_spec_for_session_rejects_pdf_helper_before_text_terminal() -> (
     None
 ):
     with (
@@ -465,40 +472,24 @@ def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contr
         ),
     ):
         result = prepare_compiled_spec_for_session(
-            spec=_make_spec(),
+            spec=_pdf_helper_before_text_terminal_spec(),
             target_kind=TargetKind.CREATE,
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
-            terminal_output_type=OutputType.DOCX,
+            terminal_output_type=OutputType.PDF,
         )
 
     assert result.spec is not None
     assert result.validation is not None
-    assert result.validation.valid
-    terminal = result.spec.steps[-1]
-    assert terminal.output_type == OutputType.DOCX
-    assert "Create the final DOCX file" in terminal.assistant_spec.instructions
-
-
-def test_prepared_terminal_artifact_spec_is_apply_compile_stable() -> None:
-    spec = _prepare_valid_spec(
-        _make_spec(),
-        terminal_output_type=OutputType.DOCX,
-    )
-
-    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
-
-
-def test_prepared_pdf_helper_spec_is_apply_normalization_fixed_point() -> None:
-    spec = _prepare_valid_spec(
-        _pdf_helper_before_text_terminal_spec(),
-        terminal_output_type=OutputType.PDF,
-    )
-
-    assert [step.plan_step_ref for step in spec.steps] == ["step_a", "step_c"]
-    assert spec.steps[-1].output_type == OutputType.PDF
-    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
+    assert not result.validation.valid
+    assert [step.plan_step_ref for step in result.spec.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert result.spec.steps[-1].output_type == OutputType.TEXT
+    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
 
 
 def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
@@ -528,7 +519,7 @@ def test_prepared_edit_duplicate_names_are_apply_compile_stable() -> None:
     _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
 
 
-def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_terminal() -> (
+def test_prepare_compiled_spec_for_session_rejects_json_helper_before_text_terminal() -> (
     None
 ):
     with (
@@ -548,63 +539,6 @@ def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_termina
 
     assert result.spec is not None
     assert result.validation is not None
-    assert result.validation.valid
-    assert [step.plan_step_ref for step in result.spec.steps] == ["step_a", "step_c"]
-    assert result.spec.steps[-1].output_type == OutputType.JSON
-    _assert_prepared_spec_is_apply_normalization_fixed_point(result.spec)
-
-
-def test_prepared_source_material_docx_spec_is_apply_normalization_fixed_point() -> (
-    None
-):
-    spec = _prepare_valid_spec(
-        _source_material_docx_spec(),
-        terminal_output_type=OutputType.DOCX,
-    )
-
-    assert spec.steps[2].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ]
-    }
-    assert effective_question_binding(spec.steps[2].input_bindings) == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
-    assert spec.steps[3].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_c", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ]
-    }
-    assert effective_question_binding(spec.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
-    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
-
-
-def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_terminal() -> (
-    None
-):
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
-            return_value=SpecValidationResult(),
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=_json_helper_before_text_terminal_spec(
-                terminal_input_source=InputSource.ALL_PREVIOUS_STEPS,
-            ),
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            terminal_output_type=OutputType.JSON,
-        )
-
-    assert result.spec is not None
-    assert result.validation is not None
     assert not result.validation.valid
     assert [step.plan_step_ref for step in result.spec.steps] == [
         "step_a",
@@ -615,29 +549,38 @@ def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_termin
     assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
 
 
-def test_prepare_compiled_spec_for_session_rejects_unfoldable_json_text_terminal() -> (
+def test_prepare_compiled_spec_for_session_rejects_source_material_docx_pass_through() -> (
     None
 ):
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
-            return_value=SpecValidationResult(),
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=_json_helper_before_text_terminal_spec(
-                helper_input_source=InputSource.ALL_PREVIOUS_STEPS,
-                helper_input_bindings=None,
-                terminal_input_source=InputSource.ALL_PREVIOUS_STEPS,
-            ),
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            terminal_output_type=OutputType.JSON,
-        )
+    result = prepare_compiled_spec_for_session(
+        spec=_source_material_docx_spec(),
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        terminal_output_type=OutputType.DOCX,
+    )
 
     assert result.spec is not None
     assert result.validation is not None
     assert not result.validation.valid
-    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
+    assert result.spec.steps[2].input_bindings == {
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
+        ]
+    }
+    assert effective_question_binding(result.spec.steps[2].input_bindings) == (
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert result.spec.steps[3].input_bindings == {
+        "source_refs": [
+            {"step_ref": "step_c", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
+        ]
+    }
+    assert result.spec.steps[3].output_mode == OutputMode.PASS_THROUGH
+    assert effective_question_binding(result.spec.steps[3].input_bindings) == (
+        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert result.validation.errors[0].code == "flow_step_invalid"
