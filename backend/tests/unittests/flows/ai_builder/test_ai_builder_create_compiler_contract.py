@@ -310,7 +310,7 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
     assert renderer_step.input_type == InputType.TEXT
     assert renderer_step.output_type == final_output_type
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
-    expected_render_copy = f"Render {final_output_type.value.upper()}"
+    expected_render_copy = f"Rendera {final_output_type.value.upper()}"
     assert renderer_step.name == expected_render_copy
     assert renderer_step.assistant_spec.instructions == expected_render_copy
     assert renderer_step.input_bindings is None
@@ -1092,7 +1092,7 @@ def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
     assert [step.name for step in compiled.steps] == [
         "Identifiera dokumentens innehåll",
         "Skriv rapportinnehåll",
-        "Render PDF",
+        "Rendera PDF",
     ]
     assert [step.output_type for step in compiled.steps] == [
         OutputType.JSON,
