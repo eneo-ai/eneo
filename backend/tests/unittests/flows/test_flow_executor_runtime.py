@@ -2060,13 +2060,14 @@ async def test_apply_output_cap_persists_file_when_over_limit(user):
         step=step,
     )
 
-    assert persisted_text == long_text[:4096]
+    assert persisted_text == "abcde"
+    assert len(persisted_text.encode("utf-8")) <= executor.max_inline_text_bytes
     assert file_ids == [file_id]
     executor.file_repo.add.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_apply_output_cap_handles_utf8_byte_limit(user):
+async def test_apply_output_cap_preview_is_valid_utf8_within_byte_limit(user):
     executor, _, _, _ = _build_executor(user)
     executor.max_inline_text_bytes = 5
     file_id = uuid4()
@@ -2081,7 +2082,9 @@ async def test_apply_output_cap_handles_utf8_byte_limit(user):
         step=step,
     )
 
-    assert persisted_text == utf8_text[:4096]
+    assert persisted_text == "åå"
+    assert len(persisted_text.encode("utf-8")) <= executor.max_inline_text_bytes
+    assert len((persisted_text + "å").encode("utf-8")) > executor.max_inline_text_bytes
     assert file_ids == [file_id]
     create_arg = executor.file_repo.add.await_args.args[0]
     assert create_arg.owner_type == PrincipalType.USER

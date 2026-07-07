@@ -272,6 +272,10 @@ def _review_open_terminal_invariant_message(
             assert_never(exc)
 
 
+def _utf8_prefix(text: str, *, max_bytes: int) -> str:
+    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
+
+
 @dataclass(frozen=True)
 class FlowRunExecutorConfig:
     max_inline_text_bytes: int
@@ -2162,7 +2166,7 @@ class FlowRunExecutor:
                 }
             )
         )
-        return text[:4096], [file_row.id]
+        return _utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
 
     async def _apply_output_cap_positional(
         self,
