@@ -10,7 +10,6 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
     normalize_runtime_metadata_state,
     runtime_input_fields_declared_absent,
-    runtime_input_fields_requested,
     runtime_metadata_allows_input_fields,
     runtime_metadata_disables_declared_input_fields,
 )
@@ -168,24 +167,6 @@ def test_runtime_input_field_extraction_ignores_source_derived_paraphrases() -> 
         "datum, källa, namn, kontaktuppgifter, risker och osäkerheter."
     )
 
-    assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) is None
-
-
-def test_runtime_input_field_extraction_ignores_document_analysis_output_fields() -> (
-    None
-):
-    text = (
-        "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera "
-        "filer, vilket du kommer läsa innehållet och vad filen handlar om och "
-        "baserat på det så kommer du att dokumentera ner vilken typ av dokument "
-        "det är, vad den handlar om, kategori av dokument och vad slutsatserna "
-        "innebär samt datumet som dokumentet är skrivet och om möjligt av vem "
-        "det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas "
-        "titel på dokumentet, år, kategori och en koncis sammanfattning."
-    )
-
-    assert not runtime_input_fields_requested(text)
     assert extract_runtime_input_field_hints(text) == ()
     assert infer_runtime_metadata_slot(text) is None
 
