@@ -174,6 +174,58 @@ def test_compiler_uses_assembly_path_for_linear_previous_field_flow(
     assert validate_spec(compiled).valid
 
 
+@pytest.mark.parametrize("final_output_type", [OutputType.PDF, OutputType.DOCX])
+def test_compiler_uses_assembly_path_for_generated_document_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+    final_output_type: OutputType,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("generated document flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document summary",
+            "flow_description": "Write a short document from plain text input.",
+            "plan_rationale": "One writer and one zero-token renderer.",
+            "steps": [
+                {
+                    "name": "Write body",
+                    "instructions": "Write the document body.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=final_output_type,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+        ),
+    )
+
+    assert len(compiled.steps) == 2
+    body_step = compiled.steps[0]
+    renderer_step = compiled.steps[1]
+    assert body_step.input_source == InputSource.FLOW_INPUT
+    assert body_step.input_type == InputType.TEXT
+    assert body_step.output_type == OutputType.TEXT
+    assert body_step.output_mode == OutputMode.PASS_THROUGH
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.output_type == final_output_type
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() -> None:
     compiled = compile_create_steps_to_spec(
         flow_name="Dokumentanalys",
