@@ -60,6 +60,9 @@ _SOURCE_CONTRACT_TOKEN_ALIASES = {
     "ar": "date",
     "year": "date",
 }
+_SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
+    "sammanfattning": "summary",
+}
 
 
 def complete_source_reader_contracts(
@@ -365,17 +368,29 @@ def _structured_fields_have_leaf(
     fields: list[StructuredFieldDraft],
     required_name: str,
 ) -> bool:
+    return any(_structured_field_has_name(field, required_name) for field in fields)
+
+
+def _structured_field_has_name(
+    field: StructuredFieldDraft,
+    required_name: str,
+) -> bool:
+    if _field_name_matches_required_leaf(field.name, required_name):
+        return True
+    nested_fields = field.fields if field.field_type == "object" else field.item_fields
     return any(
-        _field_name_matches_required_leaf(field.name, required_name)
-        for field in _iter_output_capture_fields(fields)
+        _structured_field_has_name(nested_field, required_name)
+        for nested_field in nested_fields or []
     )
 
 
 def _field_name_matches_required_leaf(field_name: str, required_name: str) -> bool:
-    field_key = _field_name_match_key(field_name)
-    required_key = _field_name_match_key(required_name)
+    field_key = _source_capture_field_key(field_name)
+    required_key = _source_capture_field_key(required_name)
     if field_key == required_key:
         return True
+    field_key = _field_name_match_key(field_name)
+    required_key = _field_name_match_key(required_name)
     if not field_key.endswith(f"_{required_key}"):
         return False
     logger.info(
@@ -387,6 +402,17 @@ def _field_name_matches_required_leaf(field_name: str, required_name: str) -> bo
 
 def _field_name_match_key(value: str) -> str:
     return value.strip().casefold().replace("-", "_").replace(" ", "_")
+
+
+def _source_capture_field_key(value: str) -> str:
+    normalized = normalize_discovery_text(value.replace("_", " ").replace("-", " "))
+    tokens = tuple(
+        _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES.get(token, token)
+        for token in normalized.split()
+    )
+    if not tokens:
+        return _field_name_match_key(value)
+    return " ".join(sorted(tokens))
 
 
 def _leaf_field_name(field_path: str) -> str:
@@ -557,7 +583,7 @@ def _dedupe_capture_fields(
         name = field.name.strip()
         if not name:
             continue
-        key = name.casefold()
+        key = _source_capture_field_key(name)
         if key in seen:
             continue
         seen.add(key)

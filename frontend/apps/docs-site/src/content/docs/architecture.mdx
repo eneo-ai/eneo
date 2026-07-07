@@ -170,6 +170,8 @@ Generated PDF/DOCX final artifacts use a body-writer step followed by `render_ve
 
 Create-mode proposal schemas keep input/output mechanics backend-owned: the model supplies semantic step instructions, JSON `output_fields`, form-field usage, and resource refs, while assembly derives concrete output types, previous-output material, and final render steps.
 
+Builder-generated intermediate JSON contracts use stable machine keys, defaulting to canonical English names even when the conversation is Swedish. Localized language is kept in descriptions and generated prose unless the requested final public JSON output explicitly needs localized keys.
+
 See [AI Builder](/docs/ai-builder), [Eneo Flows](/docs/flows), and [Flows for Developers](/docs/flows-for-developers) for maintainer-facing details.
 
 ---
