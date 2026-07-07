@@ -5,7 +5,6 @@ from eneo.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
     create_steps_return_material_report,
     iter_compiled_source_material_boundaries,
-    primary_source_material_ref_for_steps,
     source_material_binding_status,
     source_material_bindings_for_boundary,
     source_material_label_for_language,
@@ -303,53 +302,4 @@ def test_create_steps_return_material_report_for_text_or_document_outputs() -> N
                 output_type=OutputType.JSON,
             )
         ]
-    )
-
-
-def test_primary_source_material_ref_for_steps_targets_primary_material_upload() -> (
-    None
-):
-    source_ref = primary_source_material_ref_for_steps(
-        steps=[
-            _draft(
-                name="Read notes",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-            _draft(
-                name="Transcribe audio",
-                instructions="Transcribe the uploaded audio.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-            ),
-            _draft(
-                name="Extract actions",
-                input_source=InputSource.PREVIOUS_STEP,
-                output_type=OutputType.JSON,
-            ),
-        ],
-        ui_language="sv",
-    )
-
-    assert source_ref is not None
-    assert source_ref.from_step == 2
-    assert source_ref.label == "Källmaterial"
-
-
-def test_primary_source_material_ref_for_steps_ignores_plain_text_flow_input() -> None:
-    assert (
-        primary_source_material_ref_for_steps(
-            steps=[
-                _draft(
-                    name="Read notes",
-                    input_source=InputSource.FLOW_INPUT,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.TEXT,
-                )
-            ],
-            ui_language="en",
-        )
-        is None
     )

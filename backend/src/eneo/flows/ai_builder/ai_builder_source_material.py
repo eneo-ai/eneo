@@ -6,7 +6,6 @@ from enum import Enum
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
-    PreviousOutputRef,
 )
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -313,35 +312,6 @@ def _compiled_spec_returns_material_report(spec: FlowDraftSpecCore) -> bool:
     return bool(spec.steps) and spec.steps[-1].output_type == OutputType.TEXT
 
 
-def primary_source_material_ref_for_steps(
-    *,
-    steps: Sequence[NewStepDraft],
-    ui_language: str | None = None,
-) -> PreviousOutputRef | None:
-    source_step = _primary_source_text_step(steps)
-    if source_step is None:
-        return None
-    step_index, _ = source_step
-    return PreviousOutputRef(
-        from_step=step_index,
-        label=source_material_label_for_language(ui_language),
-    )
-
-
-def _primary_source_text_step(
-    steps: Sequence[NewStepDraft],
-) -> tuple[int, NewStepDraft] | None:
-    for step_index, step in enumerate(steps, start=1):
-        if step.input_source != InputSource.FLOW_INPUT:
-            continue
-        if step.input_type not in _PRIMARY_MATERIAL_INPUT_TYPES:
-            continue
-        if step.output_type != OutputType.TEXT:
-            continue
-        return step_index, step
-    return None
-
-
 def _compiled_primary_source_text_step(
     prior_text_steps: Sequence[StepSpec],
 ) -> StepSpec | None:
@@ -375,7 +345,6 @@ __all__ = [
     "SourceMaterialBindingStatus",
     "create_steps_return_material_report",
     "iter_compiled_source_material_boundaries",
-    "primary_source_material_ref_for_steps",
     "source_material_bindings_for_boundary",
     "source_material_binding_status",
     "source_material_label_for_language",
