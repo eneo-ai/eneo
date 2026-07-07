@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Literal
 
+from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
+from eneo.flows.ai_builder.ai_builder_assembly.plan import (
+    FlowAssemblyPlan,
+    PlannedStep,
+    PlannedStepRole,
+    UnderlagChannel,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
-    compile_new_step_draft,
-    make_plan_step_ref,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    DocumentDeliveryMode,
-    NewStepDraft,
     PreviousFieldRef,
     PreviousOutputRef,
     StructuredFieldDraft,
@@ -19,14 +20,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     SemanticStepIntent,
-)
-from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
-    apply_terminal_output_schema,
-    clear_terminal_schema_output_fields,
-    complete_source_reader_contracts,
-    drop_source_contract_shadow_form_fields,
-    log_dropped_source_contract_shadow_fields,
-    source_capture_fields_by_step_index,
 )
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
@@ -41,7 +34,6 @@ from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
 )
-from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -49,7 +41,6 @@ from eneo.flows.flow_authoring_spec import (
     InputType,
     OutputMode,
     OutputType,
-    StepSpec,
 )
 from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
 from eneo.flows.flow_review_policy import FlowStepReviewMode
@@ -98,54 +89,6 @@ _SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
     }
 )
 
-PlannedStepRole = Literal[
-    "reader",
-    "transform",
-    "body_writer",
-    "renderer",
-    "transcription",
-    "template_fill",
-]
-UnderlagChannel = Literal[
-    "flow_input", "implicit_previous", "field_refs", "text_anchor", "fan_in"
-]
-
-
-@dataclass(frozen=True, slots=True)
-class PlannedStep:
-    role: PlannedStepRole
-    name: str
-    instructions: str
-    input_source: InputSource
-    input_type: InputType
-    output_type: OutputType
-    output_mode: OutputMode
-    underlag_channel: UnderlagChannel
-    document_delivery_mode: DocumentDeliveryMode = "not_applicable"
-    runtime_required: bool = False
-    runtime_max_files: int | None = None
-    form_field_refs: tuple[str, ...] = ()
-    previous_field_refs: tuple[PreviousFieldRef, ...] = ()
-    previous_output_refs: tuple[PreviousOutputRef, ...] = ()
-    output_fields: tuple[StructuredFieldDraft, ...] = ()
-    model_ref: str | None = None
-    knowledge_refs: tuple[str, ...] = ()
-    mcp_server_refs: tuple[str, ...] = ()
-    mcp_tool_refs: tuple[str, ...] = ()
-    citations_requested: bool = False
-    review_mode: FlowStepReviewMode | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class FlowAssemblyPlan:
-    flow_name: str
-    flow_description: str
-    form_fields: tuple[FormFieldSpec, ...]
-    steps: tuple[PlannedStep, ...]
-    terminal_output_schema: JsonObject | None
-    source_reader_required_fields: tuple[SourceCaptureField, ...]
-    ui_language: str | None
-
 
 def try_compile_create_intent_with_assembly(
     intent: CreateFlowIntent,
@@ -180,7 +123,7 @@ def try_compile_create_intent_with_assembly(
     )
     if plan is None:
         return None
-    return _lower_assembly_plan(plan)
+    return lower_assembly_plan(plan)
 
 
 def _assemble_create_intent(
@@ -856,83 +799,4 @@ def _capability_tuple_is_supported(step: PlannedStep) -> bool:
             output_mode=FlowOutputMode(step.output_mode.value),
         )
         is not None
-    )
-
-
-def _lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
-    step_drafts = [
-        _new_step_draft_from_planned_step(planned_step) for planned_step in plan.steps
-    ]
-    step_drafts = clear_terminal_schema_output_fields(
-        steps=step_drafts,
-        terminal_output_schema=plan.terminal_output_schema,
-    )
-    step_drafts = complete_source_reader_contracts(
-        steps=step_drafts,
-        terminal_output_schema=plan.terminal_output_schema,
-        required_fields=plan.source_reader_required_fields,
-    )
-    form_fields = list(plan.form_fields)
-    step_drafts, form_fields, dropped_source_contract_field_names = (
-        drop_source_contract_shadow_form_fields(
-            steps=step_drafts,
-            form_fields=form_fields,
-        )
-    )
-    log_dropped_source_contract_shadow_fields(
-        field_names=dropped_source_contract_field_names
-    )
-    source_capture_fields_by_index = source_capture_fields_by_step_index(
-        steps=step_drafts,
-        terminal_output_schema=plan.terminal_output_schema,
-    )
-    compiled_steps: list[StepSpec] = []
-    for index, step_draft in enumerate(step_drafts):
-        compiled_steps.append(
-            compile_new_step_draft(
-                step_draft=step_draft,
-                plan_step_ref=make_plan_step_ref(index),
-                prior_steps=compiled_steps,
-                source_capture_fields=source_capture_fields_by_index.get(index, ()),
-                ui_language=plan.ui_language,
-            )
-        )
-    compiled_steps = apply_terminal_output_schema(
-        compiled_steps,
-        terminal_output_schema=plan.terminal_output_schema,
-    )
-    document_body_writer_step_refs = tuple(
-        compiled_step.plan_step_ref
-        for planned_step, compiled_step in zip(plan.steps, compiled_steps, strict=True)
-        if planned_step.role == "body_writer"
-    )
-    return FlowDraftSpecCore(
-        flow_name=normalize_flow_name(plan.flow_name),
-        flow_description=plan.flow_description,
-        steps=compiled_steps,
-        form_fields=form_fields or None,
-        document_body_writer_step_refs=document_body_writer_step_refs or None,
-    )
-
-
-def _new_step_draft_from_planned_step(step: PlannedStep) -> NewStepDraft:
-    return NewStepDraft(
-        name=step.name,
-        instructions=step.instructions,
-        input_source=step.input_source,
-        input_type=step.input_type,
-        output_type=step.output_type,
-        model_ref=step.model_ref,
-        knowledge_refs=list(step.knowledge_refs),
-        mcp_server_refs=list(step.mcp_server_refs),
-        mcp_tool_refs=list(step.mcp_tool_refs),
-        runtime_required=step.runtime_required,
-        runtime_max_files=step.runtime_max_files,
-        uses_form_fields=list(step.form_field_refs),
-        uses_previous_fields=list(step.previous_field_refs),
-        uses_previous_outputs=list(step.previous_output_refs),
-        output_fields=list(step.output_fields),
-        document_delivery_mode=step.document_delivery_mode,
-        citations_requested=step.citations_requested,
-        review_mode=step.review_mode,
     )
