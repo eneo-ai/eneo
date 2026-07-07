@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from eneo.flows.ai_builder import ai_builder_tool_names, ai_builder_tools
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    parse_create_flow_intent_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -86,6 +89,30 @@ class TestBuildToolSchema:
         assert "runtime_input" not in properties
         assert "final_output_type" not in properties
         assert "input_fields" in properties
+
+    def test_create_parser_strips_model_authored_previous_refs(self) -> None:
+        intent = parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Report",
+                "plan_rationale": "Create the report.",
+                "steps": [
+                    {
+                        "name": "Write",
+                        "instructions": "Write the report.",
+                        "uses_previous_fields": [
+                            {"from_step": 99, "field_path": "", "label": ""}
+                        ],
+                        "uses_previous_outputs": [
+                            {"from_step": 99, "output": "structured"}
+                        ],
+                    }
+                ],
+            }
+        )
+
+        step = intent.steps[0]
+        assert step.uses_previous_fields == []
+        assert step.uses_previous_outputs == []
 
 
 class TestParseToolCallArguments:

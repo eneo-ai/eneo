@@ -178,7 +178,7 @@ def test_single_step_outline_unreferenced_form_field_stays_unused_for_repair() -
     assert any(warning.code == "unused_form_field" for warning in validation.warnings)
 
 
-def test_intermediate_form_field_use_flows_through_structured_previous_field(
+def test_intermediate_form_field_use_flows_through_derived_structured_underlag(
     monkeypatch,
 ) -> None:
     def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
@@ -235,7 +235,7 @@ def test_intermediate_form_field_use_flows_through_structured_previous_field(
     final_question = _question_binding(compiled.steps[-1].input_bindings)
 
     assert first_question.count("{{ flow_input.case_id }}") == 1
-    assert final_question == "Risk score: {{ step_a.output.structured.risk_score }}"
+    assert final_question == "{{ step_a.output.structured }}"
     assert "{{ flow_input.case_id }}" not in final_question
     assert compiled.steps[-1].input_contract is None
     assert validate_spec(compiled).valid

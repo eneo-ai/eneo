@@ -280,10 +280,6 @@ def _assemble_create_intent(
             runtime_input_type=runtime_input_type,
             previous_output_type=previous_output_type,
             output_type=step_output_type,
-            has_explicit_previous_refs=bool(
-                semantic_step.uses_previous_fields
-                or semantic_step.uses_previous_outputs
-            ),
         )
         previous_field_refs = _offset_previous_field_refs(
             semantic_step.uses_previous_fields,
@@ -670,14 +666,13 @@ def _linear_step_input_type(
     runtime_input_type: InputType,
     previous_output_type: OutputType | None,
     output_type: OutputType,
-    has_explicit_previous_refs: bool,
 ) -> InputType:
     if input_source == InputSource.FLOW_INPUT:
         return runtime_input_type
     if input_source == InputSource.ALL_PREVIOUS_STEPS:
         return InputType.TEXT
     if previous_output_type == OutputType.JSON:
-        if output_type == OutputType.TEXT and has_explicit_previous_refs:
+        if output_type == OutputType.TEXT:
             return InputType.TEXT
         return InputType.JSON
     return InputType.TEXT

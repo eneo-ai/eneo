@@ -90,11 +90,11 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_linear_previous_field_flow(
+def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("linear previous-field flow should use FlowAssemblyPlan")
+        raise AssertionError("linear derived-underlag flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
@@ -158,9 +158,9 @@ def test_compiler_uses_assembly_path_for_linear_previous_field_flow(
     assert write_step.input_type == InputType.TEXT
     assert write_step.output_type == OutputType.TEXT
     assert write_step.output_mode == OutputMode.PASS_THROUGH
-    assert _question(write_step.input_bindings) == (
-        "Summary: {{ step_a.output.structured.summary }}"
-    )
+    assert write_step.input_bindings == {
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+    }
     assert validate_spec(compiled).valid
 
 
@@ -387,8 +387,11 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain(
     assert runtime_input["max_files"] == 3
     assert runtime_input["input_format"] == "document"
     assert body_step.input_source == InputSource.PREVIOUS_STEP
-    assert body_step.input_type == InputType.JSON
+    assert body_step.input_type == InputType.TEXT
     assert body_step.output_type == OutputType.TEXT
+    assert body_step.input_bindings == {
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+    }
     assert renderer_step.input_source == InputSource.PREVIOUS_STEP
     assert renderer_step.input_type == InputType.TEXT
     assert renderer_step.output_type == OutputType.PDF
@@ -759,11 +762,11 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_audio_report_with_semantic_refs(
+def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underlag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("audio report flow should use FlowAssemblyPlan")
+        raise AssertionError("audio derived-underlag flow should use FlowAssemblyPlan")
 
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
@@ -838,9 +841,9 @@ def test_compiler_uses_assembly_path_for_audio_report_with_semantic_refs(
     assert transcription_step.input_config is not None
     assert transcription_step.input_config["runtime_input"]["input_format"] == "audio"
     assert extract_step.input_source == InputSource.PREVIOUS_STEP
-    assert _question(body_step.input_bindings) == (
-        "Summary: {{ step_b.output.structured.summary }}"
-    )
+    assert body_step.input_bindings == {
+        "source_refs": [{"step_ref": "step_b", "output": "structured"}]
+    }
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
@@ -929,11 +932,13 @@ def test_compiler_uses_assembly_path_for_docx_template_fill(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs(
+def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("field-ref document chain should use FlowAssemblyPlan")
+        raise AssertionError(
+            "document derived-underlag chain should use FlowAssemblyPlan"
+        )
 
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
@@ -1002,9 +1007,9 @@ def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs(
     assert _question(first_step.input_bindings) == (
         "{{ step_input.text }}\n\nreferensnummer: {{ flow_input.referensnummer }}"
     )
-    assert _question(compiled.steps[1].input_bindings) == (
-        "Sammanfattning: {{ step_a.output.structured.sammanfattning }}"
-    )
+    assert compiled.steps[1].input_bindings == {
+        "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+    }
     assert validate_spec(compiled).valid
 
 

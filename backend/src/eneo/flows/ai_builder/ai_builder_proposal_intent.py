@@ -71,6 +71,8 @@ _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS = frozenset(
         "plan_step_ref",
         "runtime_max_files",
         "runtime_required",
+        "uses_previous_fields",
+        "uses_previous_outputs",
     }
 )
 logger = logging.getLogger(__name__)
@@ -118,6 +120,8 @@ class SemanticStepIntent(BaseModel):
     output_type: OutputType | None = None
     output_fields: list[StructuredFieldDraft] | None = None
     uses_form_fields: list[str] = Field(default_factory=list)
+    # Create-mode parsing strips these stale mechanical keys before validation;
+    # edit mode still uses the same semantic step model and schema.
     uses_previous_fields: list[PreviousFieldRef] = Field(
         default_factory=lambda: cast(list[PreviousFieldRef], [])
     )
