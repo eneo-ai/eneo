@@ -52,7 +52,7 @@ but the broad deletion gate has been met without a weaker abstraction:
 | Planner provider boundary | Deleted for deterministic server decisions. Proposal completions still use `ai_builder_litellm_completion.py`; classifier/adjudication remain separate features. | `backend/src/eneo/flows/ai_builder/ai_builder_litellm_completion.py`, `backend/src/eneo/flows/ai_builder/ai_builder_slot_classifier.py`, `backend/src/eneo/flows/ai_builder/ai_builder_semantic_adjudication.py` |
 | Server decision owner | Added. Questions, architecture commits, and requirements confirmation dispatch directly from `BuilderTurnDecision`; the former `PlannerOutput` action runtime is gone. | `backend/src/eneo/flows/ai_builder/ai_builder_turn_controller.py`, `backend/src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py` |
 | Ask/confirm model-visible runtime | Deleted after reachability proof. Server-owned decisions now own questions and requirements confirmation; active proposal generation exposes only `propose_flow`. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:162`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:266`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` |
-| Proposal repair provider wrapper | Removed. Repair now carries `ProposalTurnContext`; the former repair runtime wrapper is gone. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:64`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:77` |
+| Proposal retry provider wrapper | Removed. Retry now carries `ProposalTurnContext`; the former repair runtime wrapper is gone. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_retry.py:64`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_retry.py:77` |
 | Proposal submission | Kept as the active proposal composition owner. | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:260` |
 | Pydantic AI / AI SDK / LangGraph / MCP | Not adopted. No framework deleted enough named code to earn the migration in Phase 4. | Completion boundary and typed turn runner are local and smaller than a framework adapter. |
 
@@ -64,7 +64,7 @@ flowchart LR
   Completion["LiteLLM proposal completion boundary"]
   Semantic["Semantic proposal validator"]
   Proposal["Proposal submission"]
-  Repair["Proposal repair"]
+  Repair["Proposal retry"]
 
   Prompt --> Decision
   Decision -->|"server decision"| ServerDispatch
@@ -163,14 +163,14 @@ failure modes behind a generic retry abstraction.
 | Loop | Canonical owner | Kept behavior | Guard tests | Disposition |
 | --- | --- | --- | --- | --- |
 | Planner structured turn semantic retry | Deleted | Server-owned decisions no longer ask an LLM to choose `ask_question`, `commit_architecture`, or `confirm_requirements`, so semantic retry is not a product behavior. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py` | Delete completed. |
-| Planner parse repair loop | Deleted | The deleted `PlannerOutput` JSON contract no longer exists. Proposal tool repair remains below. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` | Delete completed. |
-| Proposal self-correction loop | `_request_self_correction_events(...)` | Proposal tool validation feedback streams to the user, retries with bounded attempts, and preserves usage accounting. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:640`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:650`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:664`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:1234` | Keep. Product-specific streamed repair, not planner generic retry. |
-| Proposal forced-tool retry after text | `_execute_forced_tool_retry(...)` and `run_forced_tool_retry_after_text(...)` | Text-only proposal output gets one forced tool retry or direct JSON-text parsing, with visible repair events. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:281`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:398`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:434`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:905` | Keep. Distinct proposal-tool failure mode. |
+| Planner parse repair loop | Deleted | The deleted `PlannerOutput` JSON contract no longer exists. Proposal tool retry remains below. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py` | Delete completed. |
+| Proposal self-correction loop | `_request_self_correction_events(...)` | Proposal tool validation feedback streams to the user, retries with bounded attempts, and preserves usage accounting. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:640`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:650`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:664`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:1234` | Keep. Product-specific streamed retry, not planner generic retry. |
+| Proposal forced-tool retry after text | `_execute_forced_tool_retry(...)` and `run_forced_tool_retry_after_text(...)` | Text-only proposal output gets one forced tool retry or direct JSON-text parsing, with visible repair events. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:281`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:398`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:434`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_retry.py:905` | Keep. Distinct proposal-tool failure mode. |
 | Model-visible ask/confirm repair loops | Deleted | Active turns no longer expose `ask_structured_question` or `confirm_requirements`, so their parser, repair, and processor-dispatch behavior is obsolete. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py` | Delete completed. |
 
 ### Deferred Duplication
 
-`ai_builder_proposal_repair` still owns the proposal-specific retry skeleton:
+`ai_builder_proposal_retry` still owns the proposal-specific retry skeleton:
 stream a `repairing` event, build a forced proposal invocation, and translate
 proposal validation feedback into events. The former ask/confirm repair
 skeletons were deleted with the obsolete model-visible runtime, so there is no
@@ -194,7 +194,7 @@ bags if it deletes more code than it adds.
 | `ai_builder_proposal_repair_runtime.py` | Delete completed | Former proposal repair runtime wrapper no longer earns a source file. |
 | `ai_builder_proposal_tool_contracts.py` | Keep | `ProposalTurnContext` and `ProposalCompletionRequest` are the current typed boundary. `ProposalCompletionFn` remains because replacing it is lateral churn today. |
 | `ai_builder_proposal_submission.py` | Keep | Active proposal composition and first-pass proposal completion owner. |
-| `ai_builder_proposal_repair.py` | Keep | Product-specific streamed proposal repair owner. |
+| `ai_builder_proposal_retry.py` | Keep | Product-specific streamed proposal retry owner. |
 | `ai_builder_question_recovery.py` | Delete completed | Obsolete model-visible question-recovery runtime after deterministic server decisions. |
 | `ai_builder_confirm_requirements.py` | Delete completed | Obsolete model-visible requirements-confirmation runtime after deterministic server decisions. |
 
@@ -207,12 +207,12 @@ residuals are the Phase 5+ deletion target, not a reason to keep editing Phase
 | Residual | Evidence | Phase 5+ target |
 | --- | --- | --- |
 | Tool schema bags | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:88` and `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:157` | Keep unless a later slice can type JSON Schema without custom wrapper classes. |
-| Stream event dictionaries | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:108`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:109`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:51` | One typed Builder event contract if it deletes all tuple/dict event variants. |
+| Stream event dictionaries | `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:108`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py:109`, `backend/src/eneo/flows/ai_builder/ai_builder_proposal_retry.py:51` | One typed Builder event contract if it deletes all tuple/dict event variants. |
 
-Resolved after the original packet: proposal dispatch, proposal repair, and
+Resolved after the original packet: proposal dispatch, proposal retry, and
 proposal submission share the existing `RuntimeToolCall` protocol. Evidence:
 `backend/src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
-`backend/src/eneo/flows/ai_builder/ai_builder_proposal_repair.py:65`, and
+`backend/src/eneo/flows/ai_builder/ai_builder_proposal_retry.py:65`, and
 `backend/src/eneo/flows/ai_builder/ai_builder_proposal_submission.py:175`.
 Resolved after the proposal request boundary packet: proposal messages use
 `LLMMessageParam`, prompt trimming preserves typed provider messages without
@@ -235,7 +235,7 @@ The source slices were validated before this packet:
 | Ask/confirm runtime deletion validation | See [Flow Builder Ask/Confirm Runtime Deletion Packet](./flow-builder-delete-obsolete-ask-confirm-runtime-packet-2026-06-25.md). |
 
 Direct pyright is now green for the changed deterministic-turn source files.
-Broader strict-typing cleanup for proposal repair/submission remains a future
+Broader strict-typing cleanup for proposal retry/submission remains a future
 typed-residual target, not a blocker for this Phase 4 completion packet.
 
 ## Historical Phase 5A Go / No-Go Packet

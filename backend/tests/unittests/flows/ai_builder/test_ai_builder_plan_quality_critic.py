@@ -541,6 +541,126 @@ def _pdf_mismatch_context() -> "CriticContext":
     return build_conversation_critic_context(conversation, spec, flow=_edit_flow())
 
 
+_CREATE_GATED_ARCHITECTURE_INVARIANT_IDS = (
+    "pdf_terminal_output_alignment",
+    "docx_terminal_output_alignment",
+    "standalone_audio_requires_transcription_step",
+    "multi_document_compare_requires_all_previous_steps",
+    "json_input_rejects_all_previous_steps_source",
+)
+
+
+def _create_gated_architecture_context(
+    invariant_id: str,
+    *,
+    flow: "Flow | None",
+) -> "CriticContext":
+    from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticContext
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    terminal_output: str | None = None
+    primary_runtime_input = "unknown"
+    aggregation_intent = "linear"
+
+    match invariant_id:
+        case "pdf_terminal_output_alignment":
+            terminal_output = "pdf_document"
+            spec = FlowDraftSpecCore(
+                flow_name="Rapport",
+                steps=[_step("step_a", "Skriv rapport", "Skriv rapporten.")],
+            )
+        case "docx_terminal_output_alignment":
+            terminal_output = "docx_document"
+            spec = FlowDraftSpecCore(
+                flow_name="Rapport",
+                steps=[_step("step_a", "Skriv rapport", "Skriv rapporten.")],
+            )
+        case "standalone_audio_requires_transcription_step":
+            primary_runtime_input = "audio"
+            spec = FlowDraftSpecCore(
+                flow_name="Mötesrapport",
+                steps=[_step("step_a", "Sammanfatta", "Sammanfatta texten.")],
+            )
+        case "multi_document_compare_requires_all_previous_steps":
+            aggregation_intent = "compare"
+            spec = FlowDraftSpecCore(
+                flow_name="Jämför dokument",
+                steps=[
+                    _step("step_a", "Läs första dokumentet", "Extrahera första delen."),
+                    _step(
+                        "step_b",
+                        "Jämför dokument",
+                        "Jämför dokumenten.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                    ),
+                ],
+            )
+        case "json_input_rejects_all_previous_steps_source":
+            spec = FlowDraftSpecCore(
+                flow_name="Sammanställning",
+                steps=[
+                    _step(
+                        "step_a",
+                        "Hämta struktur",
+                        "Läs struktur.",
+                        input_type=InputType.DOCUMENT,
+                        output_type=OutputType.JSON,
+                    ),
+                    _step(
+                        "step_b",
+                        "Sammanfatta",
+                        "Sammanfatta tidigare JSON.",
+                        input_source=InputSource.ALL_PREVIOUS_STEPS,
+                        input_type=InputType.JSON,
+                    ),
+                ],
+            )
+        case _:
+            raise AssertionError(f"Unhandled invariant id: {invariant_id}")
+
+    return CriticContext(
+        spec=spec,
+        flow=flow,
+        answer_signals={},
+        text="",
+        requirements_text="",
+        signal_text="",
+        planner_patterns=PlannerPatternSignals(),
+        output_intent=OutputIntentResolution(terminal_output=terminal_output),
+        mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
+        primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
+        aggregation_intent=cast("AggregationIntent", aggregation_intent),
+    )
+
+
+@pytest.mark.parametrize("invariant_id", _CREATE_GATED_ARCHITECTURE_INVARIANT_IDS)
+def test_create_context_suppresses_edit_only_architecture_invariant(
+    invariant_id: str,
+) -> None:
+    context = _create_gated_architecture_context(invariant_id, flow=None)
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+
+    assert invariant_id not in issue_ids
+
+
+@pytest.mark.parametrize("invariant_id", _CREATE_GATED_ARCHITECTURE_INVARIANT_IDS)
+def test_edit_context_keeps_edit_only_architecture_invariant(
+    invariant_id: str,
+) -> None:
+    context = _create_gated_architecture_context(invariant_id, flow=_edit_flow())
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+
+    assert invariant_id in issue_ids
+
+
 def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
     payload = _requirements(requirements_version="do-not-render")
     version = build_requirements_version(payload)

@@ -4,7 +4,7 @@
 
 1. Go: deterministic server-owned decisions have made the model-visible `ask_structured_question` and `confirm_requirements` runtime obsolete.
 2. Deleted the question-recovery runtime, confirm-requirements runtime, ask/confirm schema builders, ask/confirm parsers, processor dispatch handlers, and implementation-detail tests.
-3. Preserved server-owned canonical questions, requirements summaries, MCP preflight clarification, active proposal generation, proposal repair, approval/apply, and Flow runtime behavior.
+3. Preserved server-owned canonical questions, requirements summaries, MCP preflight clarification, active proposal generation, proposal retry, approval/apply, and Flow runtime behavior.
 4. Active proposal generation now exposes only `propose_flow`; ask/confirm names remain only as persisted historical metadata constants.
 5. Stop here: the next proposal-language/preparation consolidation needs its own explicit goal.
 
@@ -110,7 +110,7 @@ plan and returned green with `MIN_SCORE: 8`; artifact:
 | Risk | Mitigation |
 | --- | --- |
 | Historical conversation metadata can still contain ask/confirm tool names. | Constants remain for persisted metadata; live dispatch is deleted and guarded. |
-| Proposal repair still used provider-shaped message dictionaries. | Resolved by [Flow Builder Proposal Request Boundary Packet](./flow-builder-proposal-request-boundary-packet-2026-06-25.md): proposal messages and forced tool choice now share one typed boundary. |
+| Proposal retry still used provider-shaped message dictionaries. | Resolved by [Flow Builder Proposal Request Boundary Packet](./flow-builder-proposal-request-boundary-packet-2026-06-25.md): proposal messages and forced tool choice now share one typed boundary. |
 | Edit-mode primary input changes rely on server planning state reaching proposal materialization. | Covered by unit and API regression tests after the deletion exposed the issue. |
 
 ## Recommendation

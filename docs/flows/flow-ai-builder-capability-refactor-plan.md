@@ -16,7 +16,7 @@ Current status: Phase 5A implemented only the Assistant-owned update command
 boundary. A later explicit capability-deduplication slice deleted the
 Builder-local step capability mirror and made the Flow Capability Manifest the
 single owner for those read-only Flow facts. A later narrow cleanup reused the
-existing `RuntimeToolCall` protocol for proposal dispatch, proposal repair, and
+existing `RuntimeToolCall` protocol for proposal dispatch, proposal retry, and
 proposal submission instead of inventing another provider adapter. A later
 deletion slice removed the obsolete model-visible ask/confirm tool runtime.
 None of these slices started shared descriptors, MCP adapters, internal
@@ -109,7 +109,7 @@ This section keeps the active plan aligned with source reality.
 | Shared planner/proposal provider completion | `ai_builder_litellm_completion.py` | Collapsed separate planner/proposal completion modules into one provider boundary. |
 | Server-owned turn decisions | `ai_builder_server_decision_dispatch.py` and `ai_builder_turn_controller.py` | Deleted the former `PlannerOutput` action runtime (`ai_builder_orchestrator.py`, `ai_builder_planner_turn.py`, `ai_builder_structured_turn.py`, `ai_builder_orchestration_pipeline.py`, and response-format/normalizer/dispatcher adapters). Deterministic questions, architecture commits, and requirements confirmation now dispatch directly. |
 | Generic repair wrapper | Deleted | Removed the broad repair wrapper module; proposal-specific repair remains under the proposal owners, and deterministic server decisions no longer use a planner repair loop. |
-| Proposal repair runtime wrapper | Deleted | Carried proposal repair through `ProposalTurnContext` instead of a parallel wrapper. |
+| Proposal repair runtime wrapper | Deleted | Carried proposal retry through `ProposalTurnContext` instead of a parallel wrapper. |
 | Model-visible ask/confirm runtime | Deleted | Removed the obsolete `ask_structured_question` and `confirm_requirements` tool schemas, parsers, processor dispatch, question-recovery runtime, and confirm-requirements runtime after server-owned decisions made them unreachable. |
 
 The current ask/confirm deletion evidence is documented in
@@ -123,7 +123,7 @@ These are candidates, not automatic work. Each requires preflight proof of a can
 | --- | --- |
 | Proposal completion callable cleanup | Skipped for Phase 4. Reassess `ProposalCompletionFn` only if replacing it reduces total production code and ownership-guard complexity. |
 | Planner orchestration repair consolidation | Completed for retry execution. Do not fold planner prompt/message helpers further unless that deletes more than it moves. |
-| Streamed repair skeleton duplication | Reduced. Proposal repair remains because malformed proposal generation is still model-owned. Ask/confirm repair skeletons were deleted with the obsolete model-visible runtime. |
+| Streamed repair skeleton duplication | Reduced. Proposal retry remains because malformed proposal generation is still model-owned. Ask/confirm repair skeletons were deleted with the obsolete model-visible runtime. |
 | Builder step capability duplicates | Completed as a Flow capability-deduplication slice: `ai_builder_step_capabilities.py` was deleted, FCM owns the read-only capability facts, and Builder consumers translate only at their own boundary. |
 | Prompt hard-rule duplication | Defer unless every touched rule stays within Builder runtime/planner ownership. Future capability work should enforce: every model-visible capability claim must have canonical enforcement. |
 | Capability projection complexity | Completed for the old planner prompt path: `ai_builder_capability_projection.py` was deleted, and surviving Builder turn/proposal paths consume server-owned state and FCM facts at their own boundary. |
@@ -140,7 +140,7 @@ worktree and recorded in the final packet.
 | Obsolete ask/confirm runtime | Deleted modules, schema builders, parsers, and processor dispatch stay absent. |
 | Usage accounting | One owner records proposal-completion usage; repair count remains preserved. |
 | Retry ownership | The final packet lists each remaining retry loop by file/function and records either the product-visible retry semantics plus guard test, or the consolidation/deletion commit. |
-| Phase 4 modules | Explicit keep/delete disposition exists for planner, question recovery, proposal repair, and orchestration pipeline. |
+| Phase 4 modules | Explicit keep/delete disposition exists for planner, question recovery, proposal retry, and orchestration pipeline. |
 | Complexity | Before/after production file count, production LOC, `dict[str, Any]` count, and direct provider-caller count are recorded. |
 | Documentation | This plan and the question-recovery boundary doc match the actual post-change symbols. |
 | Baseline failures | Any pre-existing failure claim records baseline SHA, exact command, failing node ids, and output artifact or checksum. |
