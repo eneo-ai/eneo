@@ -177,8 +177,8 @@
         ],
         "expected_leaf_output_field_groups": [
           ["requirements", "krav"],
-          ["status", "uppfylls"],
-          ["missing", "saknas"],
+          ["status", "uppfylls", "matches"],
+          ["missing", "saknas", "gaps", "missing_information"],
           ["uncertainty", "osäkerhet", "osakerhet"],
           ["recommended_action", "rekommenderad_atgard", "nästa_åtgärd"]
         ]
