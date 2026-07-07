@@ -268,7 +268,7 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         decision="`FlowAssemblyPlan` is the create-path compile contract: validate deterministic step mechanics at construction, then lower once into `FlowDraftSpecCore`.",
         consequences=(
             "Keep `FlowAssemblyPlan` compile-time only; do not persist it or make it a second Flow definition.",
-            "Validate capability support, step order, previous-output refs, form-field placement, source exposure, and source-reader obligations on the plan.",
+            "Validate capability support, step order, previous-output refs, form-field placement, source exposure, source-reader obligations, and result-contract output fields on the plan.",
             "Allow fan-in only for aggregate or compare body writers; linear plans must stay adjacent or targeted.",
             "Keep topology admission, fixed-step construction, plan validation, and lowering in their respective assembly modules.",
             "Reject new create-mode rewrites that change underlag, renderer, transcription, or template-fill mechanics after lowering.",

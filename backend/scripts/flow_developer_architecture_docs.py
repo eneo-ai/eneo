@@ -421,7 +421,7 @@ def _render_change_index_table() -> str:
 def _render_ai_builder_create_compile_spine() -> str:
     return "\n".join(
         [
-            "Create-mode AI Builder is a plugin boundary that assembles deterministic Flow mechanics before lowering. The model owns semantic intent; `FlowAssemblyPlan` owns topology, underlag channel, fixed renderer/transcription/template steps, form-field placement, source exposure, and source-reader obligations.",
+            "Create-mode AI Builder is a plugin boundary that assembles deterministic Flow mechanics before lowering. The model owns semantic intent; `FlowAssemblyPlan` owns topology, underlag channel, fixed renderer/transcription/template steps, form-field placement, source exposure, source-reader obligations, and result-contract fields that must feed the final writer.",
             "",
             render_flow_docs_mermaid_block(
                 "flowchart LR",
