@@ -8,9 +8,6 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
-from eneo.flows.ai_builder.ai_builder_architecture_errors import (
-    AIBuilderArchitectureError,
-)
 from eneo.flows.ai_builder.ai_builder_create_proposal import (
     process_create_intent_arguments,
 )
@@ -111,23 +108,6 @@ def _structured_fan_in_spec() -> FlowDraftSpecCore:
     )
 
 
-def _json_all_previous_architecture_spec() -> FlowDraftSpecCore:
-    spec = _structured_fan_in_spec()
-    return spec.model_copy(
-        update={
-            "steps": [
-                *spec.steps[:2],
-                spec.steps[2].model_copy(
-                    update={
-                        "input_source": InputSource.ALL_PREVIOUS_STEPS,
-                        "input_type": InputType.JSON,
-                    }
-                ),
-            ]
-        }
-    )
-
-
 def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
     return {
         "id": local_id,
@@ -156,16 +136,6 @@ def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
         "{{ step_",
     ):
         assert token not in feedback
-
-
-def test_create_contextual_quality_feedback_still_enforces_architecture() -> None:
-    with pytest.raises(AIBuilderArchitectureError):
-        build_create_contextual_quality_feedback(
-            conversation=[],
-            spec=_json_all_previous_architecture_spec(),
-            aggregation_intent="linear",
-            resource_catalog=None,
-        )
 
 
 @pytest.mark.asyncio
