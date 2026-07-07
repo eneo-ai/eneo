@@ -42,12 +42,14 @@ def prepare_compiled_spec_for_session(
     terminal_output_type: OutputType | None = None,
     ui_language: str | None = None,
 ) -> PreparedCompiledSpecResult:
-    prepared_spec, _normalization_changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=terminal_output_type,
-        disambiguate_duplicate_step_names=target_kind == TargetKind.EDIT,
-        ui_language=ui_language,
-    )
+    prepared_spec = spec
+    if target_kind == TargetKind.EDIT:
+        prepared_spec, _normalization_changes = normalize_ai_builder_spec(
+            spec,
+            terminal_output_type=terminal_output_type,
+            disambiguate_duplicate_step_names=True,
+            ui_language=ui_language,
+        )
     if resource_catalog is not None:
         prepared_spec, resolution_issues = canonicalize_flow_spec_resources(
             prepared_spec,

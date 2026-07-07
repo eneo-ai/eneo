@@ -37,7 +37,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import effective_question_binding
 
 
 def _make_spec() -> FlowDraftSpecCore:
@@ -223,70 +222,6 @@ def _pdf_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
     )
 
 
-def _source_material_docx_spec() -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Mötesprotokoll från ljud",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Transkribera ljud",
-                assistant_spec=AssistantSpec(
-                    instructions="Transcribe the uploaded meeting audio.",
-                ),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-                output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Strukturera transkription",
-                assistant_spec=AssistantSpec(
-                    instructions="Extract structured decisions from the transcript.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-                mcp_policy=MCPPolicy.INHERIT,
-            ),
-            StepSpec(
-                plan_step_ref="step_c",
-                name="Identifiera mötesmetadata",
-                assistant_spec=AssistantSpec(
-                    instructions="Identify agenda and meeting metadata.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-                input_contract={
-                    "type": "object",
-                    "properties": {"agenda": {"type": "array"}},
-                },
-                mcp_policy=MCPPolicy.INHERIT,
-            ),
-            StepSpec(
-                plan_step_ref="step_d",
-                name="Skapa DOCX",
-                assistant_spec=AssistantSpec(
-                    instructions="Create the final meeting protocol.",
-                ),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.DOCX,
-                input_contract={
-                    "type": "object",
-                    "properties": {"metadata": {"type": "object"}},
-                },
-                mcp_policy=MCPPolicy.INHERIT,
-            ),
-        ],
-    )
-
-
 def _assembly_document_pdf_spec() -> FlowDraftSpecCore:
     outline = parse_create_flow_intent_arguments(
         {
@@ -382,12 +317,34 @@ def _prepare_valid_spec(
     return result.spec
 
 
-def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
+def test_prepare_create_spec_does_not_run_transition_normalizer() -> None:
+    spec = _make_spec()
+
     with (
         patch(
             "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec, **_kwargs: (spec, []),
+            side_effect=AssertionError("create output must not be post-normalized"),
         ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+        )
+
+    assert result.spec == spec
+    assert result.validation is not None
+    assert result.validation.valid
+
+
+def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
+    with (
         patch(
             "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.canonicalize_flow_spec_resources",
             return_value=(_make_spec(), ["missing model ref"]),
@@ -441,10 +398,6 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
     )
 
     with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec, **_kwargs: (spec, []),
-        ),
         patch(
             "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
@@ -510,10 +463,6 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
     spec = _make_spec()
 
     with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec, **_kwargs: (spec, []),
-        ),
         patch(
             "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
@@ -640,11 +589,16 @@ def test_prepare_compiled_spec_for_session_rejects_json_helper_before_text_termi
     assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
 
 
-def test_prepare_compiled_spec_for_session_rejects_source_material_docx_pass_through() -> (
-    None
-):
+def test_prepare_compiled_spec_for_session_rejects_text_document_pass_through() -> None:
+    spec = _make_spec()
+    spec = spec.model_copy(
+        update={
+            "steps": [spec.steps[0].model_copy(update={"output_type": OutputType.DOCX})]
+        }
+    )
+
     result = prepare_compiled_spec_for_session(
-        spec=_source_material_docx_spec(),
+        spec=spec,
         target_kind=TargetKind.CREATE,
         available_model_refs=None,
         available_kb_refs=None,
@@ -655,23 +609,4 @@ def test_prepare_compiled_spec_for_session_rejects_source_material_docx_pass_thr
     assert result.spec is not None
     assert result.validation is not None
     assert not result.validation.valid
-    assert result.spec.steps[2].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ]
-    }
-    assert effective_question_binding(result.spec.steps[2].input_bindings) == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
-    assert result.spec.steps[3].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_c", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ]
-    }
-    assert result.spec.steps[3].output_mode == OutputMode.PASS_THROUGH
-    assert effective_question_binding(result.spec.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
     assert result.validation.errors[0].code == "flow_step_invalid"
