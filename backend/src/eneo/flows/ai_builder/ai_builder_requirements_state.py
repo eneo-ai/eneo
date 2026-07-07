@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 
 def _normalize_requirement_text(text: str) -> str:
@@ -160,12 +161,8 @@ def resolve_requirements_state(
     has_plan_after_confirmation = False
     for message in conversation[latest_summary_index + 1 :]:
         if message.role != "user":
-            # Track if a plan was proposed after confirmation (tool message
-            # from a stored plan submission). This means any subsequent user message is
-            # a revision request, not a requirements change.
-            if message.role == "tool" and isinstance(message.content, str):
-                if "Plan:" in message.content:
-                    has_plan_after_confirmation = True
+            if _is_plan_proposal_message(message):
+                has_plan_after_confirmation = True
             continue
 
         confirmation = requirements_confirmation_from_metadata(message.metadata)
@@ -286,3 +283,10 @@ def _is_requirements_invalidation(text: str) -> bool:
         "omformulera krav",
     )
     return any(phrase in text for phrase in invalidation_phrases)
+
+
+def _is_plan_proposal_message(message: ConversationMessage) -> bool:
+    return message.role == "assistant" and any(
+        tool_call.name == PROPOSE_FLOW_TOOL_NAME
+        for tool_call in tool_calls_from_message(message)
+    )

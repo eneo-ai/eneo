@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
     render_confirmed_requirements_system_prompt_block,
     resolve_requirements_state,
 )
+from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 
 def _summary_payload() -> RequirementsSummaryPayload:
@@ -149,6 +150,49 @@ class TestResolveRequirementsStateFromAssistantMetadata:
 
         assert state.latest_summary is not None
         assert state.confirmed is False
+
+    def test_plan_tool_call_preserves_confirmation_for_revision_requests(self) -> None:
+        payload = _summary_payload()
+        version = build_requirements_version(payload)
+        conversation = [
+            ConversationMessage(
+                role="assistant",
+                content="Summary",
+                metadata={
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Confirmed",
+                metadata={
+                    "requirements_confirmed": True,
+                    "requirements_version": version,
+                },
+            ),
+            ConversationMessage(
+                role="assistant",
+                content="Here is the draft.",
+                tool_calls=[
+                    {
+                        "id": "call_plan",
+                        "name": PROPOSE_FLOW_TOOL_NAME,
+                        "arguments": {"flow_name": "PDF extractor"},
+                    }
+                ],
+            ),
+            ConversationMessage(
+                role="tool",
+                content="Draft saved.",
+                tool_call_id="call_plan",
+            ),
+            ConversationMessage(role="user", content="Make the title shorter."),
+        ]
+
+        state = resolve_requirements_state(conversation)
+
+        assert state.confirmed is True
 
 
 class TestRenderConfirmedRequirementsBlocks:
