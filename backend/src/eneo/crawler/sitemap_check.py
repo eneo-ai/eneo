@@ -50,9 +50,12 @@ class SitemapProbe:
 
     @property
     def supports_skip(self) -> bool:
-        """Without lastmod values the fingerprint only reflects the URL set,
-        not content changes, so it must never justify skipping a crawl."""
-        return self.entry_count > 0 and self.lastmod_count > 0
+        """Every entry must carry a lastmod for the fingerprint to reflect
+        content changes. A page without lastmod is invisible to the fingerprint,
+        so a mixed sitemap (some entries lack lastmod) could change on exactly
+        those pages while the fingerprint stays identical; requiring full
+        coverage keeps such a sitemap on the full-crawl path."""
+        return self.entry_count > 0 and self.lastmod_count == self.entry_count
 
     def to_state(self, *, crawled_at: datetime) -> dict[str, Any]:
         """The jsonb payload persisted on ``websites.sitemap_state``."""

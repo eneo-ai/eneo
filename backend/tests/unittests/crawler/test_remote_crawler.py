@@ -80,6 +80,13 @@ async def service():
 
     app.router.add_get("/files/{size}/{name}", serve_file)
 
+    async def serve_slow_file(request: web.Request) -> web.Response:
+        stub.file_requests.append((request.path, request.headers.get("Authorization")))
+        await asyncio.sleep(int(request.match_info["delay_ms"]) / 1000)
+        return web.Response(body=b"x" * 8, content_type="application/pdf")
+
+    app.router.add_get("/slow/{delay_ms}/{name}", serve_slow_file)
+
     server = TestServer(app)
     await server.start_server()
     stub.base_url = str(server.make_url("")).rstrip("/")
@@ -459,6 +466,37 @@ class TestFileDownloads:
         # The off-host host was never contacted (it is unresolvable on purpose);
         # only the single on-host request was served
         assert [req[0] for req in service.file_requests] == ["/files/64/local.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_stays_live_during_file_downloads(self, service):
+        # F6: linked-file downloads run under the still-live heartbeat. A slow
+        # file with a fast heartbeat interval keeps the background heartbeat
+        # firing through the download phase; before the fix the heartbeat was
+        # torn down when the stream ended, so a long download refreshed no
+        # liveness and could invite watchdog preemption.
+        file_url = f"{service.base_url}/slow/250/rapport.pdf"
+        service.body = ndjson(
+            page(f"{service.base_url}/a", file_links=[file_url]), DONE
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+        beats = 0
+
+        async def tick():
+            nonlocal beats
+            beats += 1
+
+        async with crawler.crawl(
+            url=service.base_url,
+            download_files=True,
+            heartbeat_callback=tick,
+            heartbeat_interval=0.02,
+        ) as crawl:
+            list(crawl.pages)
+            assert [f.name for f in crawl.files] == ["rapport.pdf"]
+
+        # The instant stream alone yields ~1 beat; only a heartbeat that keeps
+        # ticking through the ~0.25s download reaches several at a 0.02s interval.
+        assert beats >= 3
 
     @pytest.mark.asyncio
     async def test_non_http_file_link_is_skipped(self, service):

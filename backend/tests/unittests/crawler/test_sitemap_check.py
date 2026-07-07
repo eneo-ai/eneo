@@ -155,6 +155,28 @@ class TestProbeSitemap:
         assert probe is not None
         assert probe.entry_count == 3
         assert probe.lastmod_count == 2
+        # One entry (from sub2) has no lastmod, so a change on that page would
+        # leave the fingerprint identical; the mixed sitemap must not skip.
+        assert probe.supports_skip is False
+
+    @pytest.mark.asyncio
+    async def test_mixed_lastmod_never_skips(self, stub):
+        # A urlset where one of two entries lacks lastmod: the fingerprint is
+        # blind to changes on the lastmod-less page, so skipping is unsound.
+        mixed = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <url><loc>https://k.se/a</loc><lastmod>2026-06-01</lastmod></url>
+          <url><loc>https://k.se/b</loc></url>
+        </urlset>
+        """
+        stub.docs["/sitemap.xml"] = mixed.encode()
+
+        probe = await probe_sitemap([f"{stub.base_url}/sitemap.xml"])
+
+        assert probe is not None
+        assert probe.entry_count == 2
+        assert probe.lastmod_count == 1
+        assert probe.supports_skip is False
 
     @pytest.mark.asyncio
     async def test_multiple_locations_combine_into_one_fingerprint(self, stub):

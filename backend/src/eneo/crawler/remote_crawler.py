@@ -555,81 +555,127 @@ class RemoteCrawler:
                     if heartbeat_callback
                     else None
                 )
+                # Heartbeat teardown is deferred to this outer finally so the
+                # background heartbeat_loop keeps refreshing liveness through the
+                # linked-file download phase, not just the stream.
                 try:
-                    async with asyncio.timeout(
-                        max_length + _CLIENT_TIMEOUT_MARGIN_SECONDS
-                    ):
-                        (
-                            pages_count,
-                            failed_count,
-                            file_links,
-                            outcome,
-                            done_status,
-                        ) = await self._stream_crawl(
-                            session,
-                            url=url,
-                            crawl_type=crawl_type,
-                            download_files=download_files,
-                            http_user=http_user,
-                            http_pass=http_pass,
-                            tenant_crawler_settings=tenant_crawler_settings,
-                            max_length=max_length,
-                            spool_path=spool_path,
-                            conditional_gets=conditional_gets,
-                            unchanged_urls=unchanged_urls,
+                    try:
+                        async with asyncio.timeout(
+                            max_length + _CLIENT_TIMEOUT_MARGIN_SECONDS
+                        ):
+                            (
+                                pages_count,
+                                failed_count,
+                                file_links,
+                                outcome,
+                                done_status,
+                            ) = await self._stream_crawl(
+                                session,
+                                url=url,
+                                crawl_type=crawl_type,
+                                download_files=download_files,
+                                http_user=http_user,
+                                http_pass=http_pass,
+                                tenant_crawler_settings=tenant_crawler_settings,
+                                max_length=max_length,
+                                spool_path=spool_path,
+                                conditional_gets=conditional_gets,
+                                unchanged_urls=unchanged_urls,
+                            )
+                        if done_status == "cancelled":
+                            # The service aborted the crawl itself (its
+                            # max_seconds wall clock); pages received so far are
+                            # valid, same salvage semantics as a local timeout
+                            is_partial = True
+                            termination_reason = "timeout"
+                        elif done_status == "failed":
+                            is_partial = True
+                            termination_reason = "error"
+                        logger.info(
+                            "Remote crawl stream finished",
+                            extra={
+                                "url": url,
+                                "pages": pages_count,
+                                "failed": failed_count,
+                                "termination_reason": termination_reason,
+                            },
                         )
-                    if done_status == "cancelled":
-                        # The service aborted the crawl itself (its
-                        # max_seconds wall clock); pages received so far are
-                        # valid, same salvage semantics as a local timeout
+                    except TimeoutError:
+                        # Client-side ceiling: service did not finish within
+                        # max_seconds + margin. Salvage whatever reached the
+                        # spool (and any 304-confirmed URLs), like any other
+                        # early termination.
+                        pages_count = self._count_spool_lines(spool_path)
+                        if pages_count == 0 and not unchanged_urls:
+                            _cleanup()
+                            raise CrawlTimeoutError(
+                                url=url,
+                                timeout_seconds=max_length,
+                                pages_collected=0,
+                                message=(
+                                    f"Remote crawl timeout: exceeded {max_length}s "
+                                    f"for {url} with no pages collected"
+                                ),
+                            )
                         is_partial = True
                         termination_reason = "timeout"
-                    elif done_status == "failed":
+                    except aiohttp.ClientError as exc:
+                        pages_count = self._count_spool_lines(spool_path)
+                        if pages_count == 0 and not unchanged_urls:
+                            _cleanup()
+                            raise CrawlerException(
+                                f"Crawler service stream failed for {url}: {exc}"
+                            )
+                        # Stream broke mid-crawl with results on disk: salvage,
+                        # same as a timeout
                         is_partial = True
-                        termination_reason = "error"
-                    logger.info(
-                        "Remote crawl stream finished",
-                        extra={
-                            "url": url,
-                            "pages": pages_count,
-                            "failed": failed_count,
-                            "termination_reason": termination_reason,
-                        },
-                    )
-                except TimeoutError:
-                    # Client-side ceiling: service did not finish within
-                    # max_seconds + margin. Salvage whatever reached the
-                    # spool (and any 304-confirmed URLs), like any other
-                    # early termination.
-                    pages_count = self._count_spool_lines(spool_path)
-                    if pages_count == 0 and not unchanged_urls:
-                        _cleanup()
-                        raise CrawlTimeoutError(
-                            url=url,
-                            timeout_seconds=max_length,
-                            pages_collected=0,
-                            message=(
-                                f"Remote crawl timeout: exceeded {max_length}s for "
-                                f"{url} with no pages collected"
-                            ),
+                        termination_reason = "stream_interrupted"
+                        logger.warning(
+                            "Crawler service stream interrupted, salvaging "
+                            "partial results",
+                            extra={
+                                "url": url,
+                                "pages": pages_count,
+                                "error": str(exc),
+                            },
                         )
-                    is_partial = True
-                    termination_reason = "timeout"
-                except aiohttp.ClientError as exc:
-                    pages_count = self._count_spool_lines(spool_path)
+
+                    # An entirely-304 crawl is a legitimate success: zero pages
+                    # streamed because nothing changed since the last crawl
                     if pages_count == 0 and not unchanged_urls:
                         _cleanup()
                         raise CrawlerException(
-                            f"Crawler service stream failed for {url}: {exc}"
+                            f"Crawl failed for {url}: crawler service at "
+                            f"{self.base_url} returned no pages "
+                            f"(failed_count={failed_count}, outcome={outcome})"
                         )
-                    # Stream broke mid-crawl with results on disk: salvage,
-                    # same as a timeout
-                    is_partial = True
-                    termination_reason = "stream_interrupted"
-                    logger.warning(
-                        "Crawler service stream interrupted, salvaging partial results",
-                        extra={"url": url, "pages": pages_count, "error": str(exc)},
-                    )
+
+                    # Linked files are fetched while the heartbeat is still
+                    # live, under a bounded budget so a large or slow file set
+                    # can never run unbounded past the crawl deadline; files are
+                    # best-effort, so an exhausted budget yields pages only.
+                    if download_files and file_links:
+                        try:
+                            async with asyncio.timeout(max_length):
+                                await self._download_files(
+                                    session,
+                                    file_links,
+                                    tmp_dir_obj.name,
+                                    crawl_host=host_of(url),
+                                    http_user=http_user,
+                                    http_pass=http_pass,
+                                    tenant_crawler_settings=tenant_crawler_settings,
+                                )
+                        except TimeoutError:
+                            logger.warning(
+                                "Linked-file downloads exceeded budget; "
+                                "proceeding with pages only",
+                                extra={
+                                    "url": url,
+                                    "budget_seconds": max_length,
+                                    "file_links": len(file_links),
+                                },
+                            )
                 finally:
                     stream_done.set()
                     if heartbeat_task is not None:
@@ -638,27 +684,6 @@ class RemoteCrawler:
                             await heartbeat_task
                         except asyncio.CancelledError:
                             pass
-
-                # An entirely-304 crawl is a legitimate success: zero pages
-                # streamed because nothing changed since the last crawl
-                if pages_count == 0 and not unchanged_urls:
-                    _cleanup()
-                    raise CrawlerException(
-                        f"Crawl failed for {url}: crawler service at "
-                        f"{self.base_url} returned no pages "
-                        f"(failed_count={failed_count}, outcome={outcome})"
-                    )
-
-                if download_files and file_links:
-                    await self._download_files(
-                        session,
-                        file_links,
-                        tmp_dir_obj.name,
-                        crawl_host=host_of(url),
-                        http_user=http_user,
-                        http_pass=http_pass,
-                        tenant_crawler_settings=tenant_crawler_settings,
-                    )
 
             def _iter_pages() -> Iterable[CrawledPage]:
                 with open(spool_path) as f:
