@@ -250,7 +250,6 @@ async def _dispatch_architecture_commit(
         session_state=session_state,
         selected_discovery_question_ids=(),
         requirements_confirmed=request.requirements_confirmed,
-        is_edit_mode=request.flow is not None,
         ui_language=request.ui_language,
     )
     if isinstance(turn_control.decision, ConfirmRequirements):

@@ -67,7 +67,6 @@ def _decision(
         session_state=state,
         selected_discovery_question_ids=(),
         requirements_confirmed=requirements_confirmed,
-        is_edit_mode=False,
         ui_language=ui_language,
     ).decision
 

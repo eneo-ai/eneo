@@ -56,7 +56,6 @@ class TurnDecisionCase:
     expected_slot_name: str | None = None
     selected_questions: tuple[str, ...] = ()
     requirements_confirmed: bool = False
-    is_edit_mode: bool = False
 
 
 def _slot(
@@ -250,13 +249,6 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
             requirements_confirmed=True,
             expected_type=GenerateProposal,
         ),
-        TurnDecisionCase(
-            id="confirmed edit revision request generates edit proposal",
-            state=committed,
-            requirements_confirmed=True,
-            is_edit_mode=True,
-            expected_type=GenerateProposal,
-        ),
     )
 
 
@@ -268,7 +260,6 @@ def test_turn_controller_returns_canonical_server_decisions(
         session_state=case.state,
         selected_discovery_question_ids=case.selected_questions,
         requirements_confirmed=case.requirements_confirmed,
-        is_edit_mode=case.is_edit_mode,
         ui_language="en",
     )
     decision = turn_control.decision
@@ -278,5 +269,3 @@ def test_turn_controller_returns_canonical_server_decisions(
     if isinstance(decision, AskCanonicalQuestion):
         assert decision.slot_name == case.expected_slot_name
         assert decision.slot_name in KNOWN_REQUIREMENT_SLOT_NAMES
-    if isinstance(decision, GenerateProposal):
-        assert decision.is_edit_mode is case.is_edit_mode

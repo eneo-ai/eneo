@@ -199,7 +199,6 @@ async def prepare_planner_request(
         session_state=rebuilt_planning_state,
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
         requirements_confirmed=requirements_state.confirmed,
-        is_edit_mode=request.flow is not None,
         ui_language=ui_language,
     )
     if not isinstance(turn_control.decision, GenerateProposal):

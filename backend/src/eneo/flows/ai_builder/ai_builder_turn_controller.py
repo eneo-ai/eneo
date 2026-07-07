@@ -66,7 +66,7 @@ class ConfirmRequirements:
 
 @dataclass(frozen=True, slots=True)
 class GenerateProposal:
-    is_edit_mode: bool
+    pass
 
 
 BuilderTurnDecision: TypeAlias = (
@@ -88,7 +88,6 @@ def resolve_turn_control(
     session_state: PlanningState,
     selected_discovery_question_ids: tuple[str, ...],
     requirements_confirmed: bool,
-    is_edit_mode: bool,
     ui_language: str | None,
 ) -> BuilderTurnControl:
     unresolved_core_slots = compute_unresolved_core_slots(session_state)
@@ -102,7 +101,6 @@ def resolve_turn_control(
         decision=_decision_from_policy(
             action_policy=action_policy,
             session_state=session_state,
-            is_edit_mode=is_edit_mode,
             ui_language=ui_language,
         ),
     )
@@ -112,7 +110,6 @@ def _decision_from_policy(
     *,
     action_policy: PlannerActionPolicy,
     session_state: PlanningState,
-    is_edit_mode: bool,
     ui_language: str | None,
 ) -> BuilderTurnDecision:
     if "ask_question" in action_policy.allowed_action_kinds:
@@ -145,7 +142,7 @@ def _decision_from_policy(
         )
 
     if action_policy.allowed_action_kinds == ("propose_plan",):
-        return GenerateProposal(is_edit_mode=is_edit_mode)
+        return GenerateProposal()
 
     raise ValueError(
         "No Builder turn decision can be derived from action policy "
