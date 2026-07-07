@@ -18,7 +18,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.pattern_registry import (
+    EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    FLOW_INPUT_DOCUMENT_UPLOAD,
+    TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
 from eneo.flows.ai_builder.planning_state import AggregationIntent
@@ -581,6 +584,88 @@ def test_compiler_uses_assembly_path_for_audio_report_with_semantic_refs(
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
+def test_compiler_uses_assembly_path_for_docx_template_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("DOCX template fill should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Template report",
+            "flow_description": "Fill a DOCX template from source documents.",
+            "plan_rationale": "Extract source facts, prepare content, fill template.",
+            "input_fields": [
+                {
+                    "variable_name": "case_id",
+                    "label": "Case ID",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Prepare template content",
+                    "instructions": "Prepare the content for the DOCX template.",
+                    "output_type": "text",
+                    "uses_form_fields": ["case_id"],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.TEMPLATE_FILL,
+            pattern_ids=("document_to_docx_template",),
+            pattern_chain_steps=(
+                FLOW_INPUT_DOCUMENT_UPLOAD,
+                EXTRACT_TEMPLATE_VARIABLES_STEP,
+                TEMPLATE_FILL_DOCX_STEP,
+            ),
+            runtime_max_files=2,
+        ),
+    )
+
+    assert len(compiled.steps) == 3
+    reader_step = compiled.steps[0]
+    content_step = compiled.steps[1]
+    template_step = compiled.steps[2]
+    assert reader_step.input_source == InputSource.FLOW_INPUT
+    assert reader_step.input_type == InputType.DOCUMENT
+    assert reader_step.output_type == OutputType.JSON
+    assert reader_step.output_contract is not None
+    assert sorted(reader_step.output_contract["properties"]) == [
+        "source_facts",
+        "uncertainties",
+    ]
+    assert reader_step.input_config is not None
+    runtime_input = reader_step.input_config["runtime_input"]
+    assert runtime_input["enabled"] is True
+    assert runtime_input["required"] is True
+    assert runtime_input["max_files"] == 2
+    assert runtime_input["input_format"] == "document"
+    assert content_step.input_source == InputSource.PREVIOUS_STEP
+    assert content_step.input_type == InputType.TEXT
+    assert content_step.output_type == OutputType.TEXT
+    question = _question(content_step.input_bindings)
+    assert "{{ step_a.output.structured }}" in question
+    assert "case_id: {{ flow_input.case_id }}" in question
+    assert template_step.input_source == InputSource.PREVIOUS_STEP
+    assert template_step.input_type == InputType.TEXT
+    assert template_step.output_type == OutputType.DOCX
+    assert template_step.output_mode == OutputMode.TEMPLATE_FILL
+    assert template_step.input_bindings is None
     assert validate_spec(compiled).valid
 
 

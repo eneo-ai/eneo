@@ -29,7 +29,10 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     source_capture_fields_by_step_index,
 )
 from eneo.flows.ai_builder.pattern_registry import (
+    EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    FLOW_INPUT_DOCUMENT_UPLOAD,
+    TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
 from eneo.flows.enums import (
@@ -71,9 +74,22 @@ _AUDIO_PATTERN_IDS = frozenset(
 _AUDIO_PATTERN_CHAIN_STEPS = frozenset(
     {FLOW_INPUT_AUDIO_TRANSCRIPTION, TERMINAL_ARTIFACT_STEP}
 )
+_DOCX_TEMPLATE_PATTERN_ID = "document_to_docx_template"
+_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS = frozenset(
+    {
+        FLOW_INPUT_DOCUMENT_UPLOAD,
+        EXTRACT_TEMPLATE_VARIABLES_STEP,
+        TEMPLATE_FILL_DOCX_STEP,
+    }
+)
 
 PlannedStepRole = Literal[
-    "reader", "transform", "body_writer", "renderer", "transcription"
+    "reader",
+    "transform",
+    "body_writer",
+    "renderer",
+    "transcription",
+    "template_fill",
 ]
 UnderlagChannel = Literal[
     "flow_input", "implicit_previous", "field_refs", "text_anchor", "fan_in"
@@ -171,6 +187,8 @@ def _assemble_create_intent(
     if (
         not _architecture_hints_are_supported(
             runtime_input_type=runtime_input_type,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
             pattern_ids=pattern_ids,
             chain_steps=chain_steps,
         )
@@ -188,7 +206,11 @@ def _assemble_create_intent(
         not in {OutputType.TEXT, OutputType.JSON} | _DOCUMENT_OUTPUT_TYPES
     ):
         return None
-    if final_output_mode == OutputMode.TEMPLATE_FILL:
+    template_fill_requested = (
+        final_output_type == OutputType.DOCX
+        and final_output_mode == OutputMode.TEMPLATE_FILL
+    )
+    if final_output_mode == OutputMode.TEMPLATE_FILL and not template_fill_requested:
         return None
     if terminal_output_schema is not None and (
         document_artifact_requested or final_output_type != OutputType.JSON
@@ -198,6 +220,17 @@ def _assemble_create_intent(
         terminal_output_schema is not None or final_output_type == OutputType.JSON
     ):
         return None
+    if template_fill_requested:
+        return _assemble_docx_template_fill(
+            intent,
+            runtime_input_type=runtime_input_type,
+            form_fields=form_fields,
+            source_reader_required_fields=source_reader_required_fields,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            aggregation_intent=aggregation_intent,
+            ui_language=ui_language,
+        )
     if _is_pure_audio_transcription_request(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
@@ -358,15 +391,93 @@ def _assemble_create_intent(
 def _architecture_hints_are_supported(
     *,
     runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
     pattern_ids: tuple[str, ...],
     chain_steps: tuple[str, ...],
 ) -> bool:
     if not pattern_ids and not chain_steps:
         return True
-    if runtime_input_type != InputType.AUDIO:
-        return False
-    return set(pattern_ids) <= _AUDIO_PATTERN_IDS and set(chain_steps) <= set(
-        _AUDIO_PATTERN_CHAIN_STEPS
+    if runtime_input_type == InputType.AUDIO:
+        return set(pattern_ids) <= _AUDIO_PATTERN_IDS and set(chain_steps) <= set(
+            _AUDIO_PATTERN_CHAIN_STEPS
+        )
+    if (
+        runtime_input_type in _FILE_INPUT_TYPES
+        and final_output_type == OutputType.DOCX
+        and final_output_mode == OutputMode.TEMPLATE_FILL
+    ):
+        return set(pattern_ids) <= {_DOCX_TEMPLATE_PATTERN_ID} and set(
+            chain_steps
+        ) <= set(_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS)
+    return False
+
+
+def _assemble_docx_template_fill(
+    intent: CreateFlowIntent,
+    *,
+    runtime_input_type: InputType,
+    form_fields: Sequence[FormFieldSpec],
+    source_reader_required_fields: tuple[SourceCaptureField, ...],
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    aggregation_intent: str,
+    ui_language: str | None,
+) -> FlowAssemblyPlan | None:
+    if (
+        runtime_input_type not in _FILE_INPUT_TYPES
+        or aggregation_intent != "linear"
+        or len(intent.steps) != 1
+    ):
+        return None
+    semantic_step = intent.steps[0]
+    if (
+        not _previous_refs_are_immediate(semantic_step, step_index=0)
+        or semantic_step.output_fields
+        or semantic_step.uses_previous_fields
+        or semantic_step.uses_previous_outputs
+        or semantic_step.output_type not in {None, OutputType.TEXT}
+    ):
+        return None
+    form_field_names = {field.name for field in form_fields}
+    if set(semantic_step.uses_form_fields) != form_field_names:
+        return None
+
+    reader_step = _template_variable_reader_step(
+        runtime_input_type=runtime_input_type,
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
+    )
+    content_step = PlannedStep(
+        role="transform",
+        name=semantic_step.name,
+        instructions=semantic_step.instructions,
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT if semantic_step.uses_form_fields else InputType.JSON,
+        output_type=OutputType.TEXT,
+        output_mode=OutputMode.PASS_THROUGH,
+        underlag_channel="implicit_previous",
+        form_field_refs=tuple(semantic_step.uses_form_fields),
+        model_ref=semantic_step.model_ref,
+        knowledge_refs=tuple(semantic_step.knowledge_refs),
+        mcp_server_refs=tuple(semantic_step.mcp_server_refs),
+        mcp_tool_refs=tuple(semantic_step.mcp_tool_refs),
+        citations_requested=semantic_step.citations_requested,
+        review_mode=semantic_step.review_mode,
+    )
+    template_fill_step = _template_fill_step(ui_language=ui_language)
+    planned_steps = (reader_step, content_step, template_fill_step)
+    if not all(_capability_tuple_is_supported(step) for step in planned_steps):
+        return None
+    return FlowAssemblyPlan(
+        flow_name=intent.flow_name,
+        flow_description=intent.flow_description or "",
+        form_fields=tuple(form_fields),
+        steps=planned_steps,
+        terminal_output_schema=None,
+        source_reader_required_fields=source_reader_required_fields,
+        ui_language=ui_language,
     )
 
 
@@ -541,6 +652,101 @@ def _planned_step_is_source_reader(step: PlannedStep) -> bool:
         and step.input_type in _FILE_INPUT_TYPES | {InputType.TEXT}
         and step.output_type == OutputType.JSON
         and bool(step.output_fields)
+    )
+
+
+def _template_variable_reader_step(
+    *,
+    runtime_input_type: InputType,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    ui_language: str | None,
+) -> PlannedStep:
+    if ui_language == "sv":
+        name = "Extrahera mallvariabler"
+        instructions = (
+            "Extrahera stabila fält och källfakta som behövs innan DOCX-mallen fylls."
+        )
+    else:
+        name = "Extract template variables"
+        instructions = (
+            "Extract the stable fields and source facts needed before filling "
+            "the DOCX template."
+        )
+    return PlannedStep(
+        role="reader",
+        name=name,
+        instructions=instructions,
+        input_source=InputSource.FLOW_INPUT,
+        input_type=runtime_input_type,
+        output_type=OutputType.JSON,
+        output_mode=OutputMode.PASS_THROUGH,
+        underlag_channel="flow_input",
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+        output_fields=tuple(_default_template_source_fields()),
+    )
+
+
+def _default_template_source_fields() -> list[StructuredFieldDraft]:
+    return [
+        StructuredFieldDraft(
+            name="source_facts",
+            field_type="array",
+            description="Important source facts extracted from the input material.",
+            item_fields=[
+                StructuredFieldDraft(
+                    name="fact",
+                    field_type="string",
+                    description="A concise source fact.",
+                ),
+                StructuredFieldDraft(
+                    name="source_note",
+                    field_type="string",
+                    description="Where the fact came from or why it matters.",
+                    required=False,
+                ),
+            ],
+        ),
+        StructuredFieldDraft(
+            name="uncertainties",
+            field_type="array",
+            description="Missing, ambiguous, or uncertain information.",
+            item_fields=[
+                StructuredFieldDraft(
+                    name="issue",
+                    field_type="string",
+                    description="A missing or uncertain point.",
+                )
+            ],
+            required=False,
+        ),
+    ]
+
+
+def _template_fill_step(*, ui_language: str | None) -> PlannedStep:
+    if ui_language == "sv":
+        name = "Fyll DOCX-mall"
+        instructions = (
+            "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens "
+            "önskade omfattning och terminologi."
+        )
+    else:
+        name = "Fill DOCX template"
+        instructions = (
+            "Fill the DOCX template from the prepared content. Preserve the "
+            "user's requested scope and terminology."
+        )
+    return PlannedStep(
+        role="template_fill",
+        name=name,
+        instructions=instructions,
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.DOCX,
+        output_mode=OutputMode.TEMPLATE_FILL,
+        underlag_channel="implicit_previous",
+        document_delivery_mode="template_fill",
     )
 
 
