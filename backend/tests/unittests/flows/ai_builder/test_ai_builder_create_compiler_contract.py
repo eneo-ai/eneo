@@ -298,6 +298,71 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain(
     assert validate_spec(compiled).valid
 
 
+def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError(
+            "terminal-schema source reader should use FlowAssemblyPlan"
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    required_properties = {f"field_{index}": {"type": "string"} for index in range(10)}
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document JSON",
+            "flow_description": "Extract source facts and emit the requested JSON.",
+            "plan_rationale": "One source reader and one JSON terminal step.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "field_0",
+                            "field_type": "string",
+                            "description": "First field.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Build JSON result",
+                    "instructions": "Build the requested JSON result.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.JSON,
+            terminal_output_schema={
+                "type": "object",
+                "properties": required_properties,
+            },
+        ),
+    )
+
+    source_contract = compiled.steps[0].output_contract
+    terminal_contract = compiled.steps[-1].output_contract
+    assert source_contract is not None
+    assert sorted(source_contract["properties"]) == [
+        f"field_{index}" for index in range(10)
+    ]
+    assert terminal_contract == {
+        "type": "object",
+        "properties": required_properties,
+    }
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() -> None:
     compiled = compile_create_steps_to_spec(
         flow_name="Dokumentanalys",
