@@ -946,7 +946,7 @@ def test_normalize_create_step_mechanics_logs_field_type_conflict(caplog) -> Non
     assert conflict_records[0].incoming_field_type == "string"
 
 
-def test_targeted_underlag_cap_preserves_breadth_across_wide_priors(caplog) -> None:
+def test_targeted_underlag_preserves_all_fields_across_wide_priors(caplog) -> None:
     def fields(prefix: str) -> list[StructuredFieldDraft]:
         return [_field(f"{prefix}_{index}") for index in range(10)]
 
@@ -981,25 +981,14 @@ def test_targeted_underlag_cap_preserves_breadth_across_wide_priors(caplog) -> N
 
     writer = normalized[2]
     assert [(ref.from_step, ref.field_path) for ref in writer.uses_previous_fields] == [
-        (1, "first_0"),
-        (2, "second_0"),
-        (1, "first_1"),
-        (2, "second_1"),
-        (1, "first_2"),
-        (2, "second_2"),
-        (1, "first_3"),
-        (2, "second_3"),
+        (step_number, f"{prefix}_{index}")
+        for index in range(10)
+        for step_number, prefix in ((1, "first"), (2, "second"))
     ]
-    cap_records = [
-        record
+    assert not any(
+        record.message == "ai_builder_create_dataflow_targeted_underlag_field_cap_bound"
         for record in caplog.records
-        if record.message
-        == "ai_builder_create_dataflow_targeted_underlag_field_cap_bound"
-    ]
-    assert len(cap_records) == 1
-    assert cap_records[0].field_cap == 8
-    assert cap_records[0].available_field_count == 20
-    assert cap_records[0].json_prior_count == 2
+    )
 
 
 def test_normalize_create_step_mechanics_binds_targeted_underlag_policy() -> None:

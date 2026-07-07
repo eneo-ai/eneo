@@ -57,7 +57,6 @@ _ARTIFACT_RENDER_ONLY_PREFIXES = (
     "convert",
     "konvertera",
 )
-TARGETED_UNDERLAG_TOTAL_FIELD_CAP = 8
 _TargetedUnderlagBindingMode = Literal["skip", "with_text_priors"]
 _PreviousRefKind = Literal["uses_previous_fields", "uses_previous_outputs"]
 _PreviousRefFailureReason = Literal[
@@ -1105,18 +1104,6 @@ def _select_targeted_underlag_field_refs(
                 continue
             field = fields[field_index]
             selected_refs.append(_field_ref_from_draft_field(predecessor_index, field))
-            if len(selected_refs) == TARGETED_UNDERLAG_TOTAL_FIELD_CAP:
-                logger.warning(
-                    "ai_builder_create_dataflow_targeted_underlag_field_cap_bound",
-                    extra={
-                        "field_cap": TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
-                        "available_field_count": sum(
-                            len(fields) for _, fields in ordered_priors
-                        ),
-                        "json_prior_count": len(ordered_priors),
-                    },
-                )
-                return selected_refs
     return selected_refs
 
 
@@ -1157,7 +1144,6 @@ def _is_renderer_draft(step: NewStepDraft) -> bool:
 
 
 __all__ = [
-    "TARGETED_UNDERLAG_TOTAL_FIELD_CAP",
     "auto_bind_targeted_underlag_for_text_composer",
     "normalize_create_step_mechanics",
 ]
