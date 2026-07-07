@@ -91,3 +91,45 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     bad_checks = {check["name"]: check for check in bad_report["checks"]}
     assert bad_checks["terminal_document_output_mode"]["passed"] is False
     assert bad_report["metrics"]["renderer_is_previous_step_bound"] is False
+
+
+def test_suite_reliability_counts_invalid_plan_errors() -> None:
+    harness = _battle_harness()
+
+    summary = harness._suite_reliability_summary(
+        [
+            {
+                "case_id": "runtime_fields_explicit_case_metadata",
+                "plan_id": None,
+                "event_summary": {
+                    "error_codes": ["self_correction_invalid_plan"],
+                    "self_correction_quality_failure_count": 0,
+                    "server_ask_question_text_only_count": 0,
+                },
+            },
+            {
+                "case_id": "runtime_fields_explicit_case_metadata",
+                "plan_id": None,
+                "event_summary": {
+                    "error_codes": ["self_correction_invalid_plan"],
+                    "self_correction_quality_failure_count": 0,
+                    "server_ask_question_text_only_count": 0,
+                },
+            },
+            {
+                "case_id": "runtime_fields_explicit_case_metadata",
+                "plan_id": "plan-1",
+                "event_summary": {
+                    "error_codes": [],
+                    "self_correction_quality_failure_count": 0,
+                    "server_ask_question_text_only_count": 0,
+                },
+            },
+        ]
+    )
+
+    case_summary = summary["runtime_fields_explicit_case_metadata"]
+    assert case_summary["run_count"] == 3
+    assert case_summary["plan_created_count"] == 1
+    assert case_summary["self_correction_invalid_plan_count"] == 2
+    assert case_summary["error_code_counts"] == {"self_correction_invalid_plan": 2}

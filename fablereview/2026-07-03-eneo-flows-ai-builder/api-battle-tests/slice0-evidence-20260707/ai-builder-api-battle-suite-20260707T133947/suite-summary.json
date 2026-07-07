@@ -5,23 +5,33 @@
   "failure_count": 0,
   "reliability": {
     "document_pdf_source_retention_balance": {
+      "error_code_counts": {},
       "plan_created_count": 3,
       "plan_rate": 1.0,
       "run_count": 3,
+      "self_correction_invalid_plan_count": 0,
       "self_correction_quality_failure_count": 0,
       "server_ask_question_text_only_count": 0
     },
     "runtime_fields_explicit_case_metadata": {
+      "error_code_counts": {
+        "self_correction_invalid_plan": 2
+      },
       "plan_created_count": 1,
       "plan_rate": 0.3333333333333333,
       "run_count": 3,
+      "self_correction_invalid_plan_count": 2,
       "self_correction_quality_failure_count": 0,
       "server_ask_question_text_only_count": 0
     },
     "source_derived_report_fields_not_runtime_fields": {
+      "error_code_counts": {
+        "self_correction_invalid_plan": 1
+      },
       "plan_created_count": 2,
       "plan_rate": 0.6666666666666666,
       "run_count": 3,
+      "self_correction_invalid_plan_count": 1,
       "self_correction_quality_failure_count": 0,
       "server_ask_question_text_only_count": 0
     }

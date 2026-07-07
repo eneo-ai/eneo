@@ -772,15 +772,21 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
         run_count = len(case_results)
         plan_count = sum(1 for result in case_results if result.get("plan_id"))
         repair_failure_count = 0
+        invalid_plan_count = 0
         text_only_question_count = 0
+        error_code_counts: dict[str, int] = {}
         for result in case_results:
             event_summary = result.get("event_summary")
             if not isinstance(event_summary, Mapping):
                 continue
+            error_codes = _string_list(event_summary.get("error_codes"))
+            for code in error_codes:
+                error_code_counts[code] = error_code_counts.get(code, 0) + 1
             repair_failure_count += (
                 _int_value(event_summary.get("self_correction_quality_failure_count"))
                 or 0
             )
+            invalid_plan_count += error_codes.count("self_correction_invalid_plan")
             text_only_question_count += (
                 _int_value(event_summary.get("server_ask_question_text_only_count"))
                 or 0
@@ -789,6 +795,8 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
             "run_count": run_count,
             "plan_created_count": plan_count,
             "plan_rate": plan_count / run_count if run_count else None,
+            "error_code_counts": error_code_counts,
+            "self_correction_invalid_plan_count": invalid_plan_count,
             "self_correction_quality_failure_count": repair_failure_count,
             "server_ask_question_text_only_count": text_only_question_count,
         }
