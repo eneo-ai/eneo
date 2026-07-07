@@ -17,6 +17,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.ai_builder.pattern_registry import (
+    FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    TERMINAL_ARTIFACT_STEP,
+)
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
@@ -438,6 +442,145 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves(
         "type": "object",
         "properties": required_properties,
     }
+    assert validate_spec(compiled).valid
+
+
+def test_compiler_uses_assembly_path_for_pure_audio_transcription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("pure audio transcription should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Meeting transcript",
+            "flow_description": "Transcribe uploaded meeting audio.",
+            "plan_rationale": "The runtime transcription step is the output.",
+            "steps": [
+                {
+                    "name": "Transcribe meeting audio",
+                    "instructions": "Transcribe the uploaded meeting audio.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.TEXT,
+            final_output_mode=OutputMode.TRANSCRIBE_ONLY,
+            pattern_ids=("audio_transcription",),
+            runtime_max_files=1,
+        ),
+    )
+
+    assert len(compiled.steps) == 1
+    step = compiled.steps[0]
+    assert step.input_source == InputSource.FLOW_INPUT
+    assert step.input_type == InputType.AUDIO
+    assert step.output_type == OutputType.TEXT
+    assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
+    assert step.input_config is not None
+    runtime_input = step.input_config["runtime_input"]
+    assert runtime_input["enabled"] is True
+    assert runtime_input["required"] is True
+    assert runtime_input["max_files"] == 1
+    assert runtime_input["input_format"] == "audio"
+    assert validate_spec(compiled).valid
+
+
+def test_compiler_uses_assembly_path_for_audio_report_with_semantic_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("audio report flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Meeting report",
+            "flow_description": "Create a DOCX report from meeting audio.",
+            "plan_rationale": "Transcribe, structure, write, and render.",
+            "steps": [
+                {
+                    "name": "Extract transcript facts",
+                    "instructions": "Extract the key facts from the transcript.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Short meeting summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the final report body.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "summary",
+                            "label": "Summary",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            pattern_ids=("audio_to_artifact_report",),
+            pattern_chain_steps=(
+                FLOW_INPUT_AUDIO_TRANSCRIPTION,
+                TERMINAL_ARTIFACT_STEP,
+            ),
+            runtime_max_files=1,
+        ),
+    )
+
+    assert [step.input_type for step in compiled.steps] == [
+        InputType.AUDIO,
+        InputType.TEXT,
+        InputType.TEXT,
+        InputType.TEXT,
+    ]
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.TEXT,
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.DOCX,
+    ]
+    transcription_step = compiled.steps[0]
+    extract_step = compiled.steps[1]
+    body_step = compiled.steps[2]
+    renderer_step = compiled.steps[3]
+    assert transcription_step.output_mode == OutputMode.TRANSCRIBE_ONLY
+    assert transcription_step.input_config is not None
+    assert transcription_step.input_config["runtime_input"]["input_format"] == "audio"
+    assert extract_step.input_source == InputSource.PREVIOUS_STEP
+    assert _question(body_step.input_bindings) == (
+        "Summary: {{ step_b.output.structured.summary }}"
+    )
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
     assert validate_spec(compiled).valid
 
 

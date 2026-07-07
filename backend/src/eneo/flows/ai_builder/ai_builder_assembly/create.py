@@ -28,6 +28,10 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     log_dropped_source_contract_shadow_fields,
     source_capture_fields_by_step_index,
 )
+from eneo.flows.ai_builder.pattern_registry import (
+    FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    TERMINAL_ARTIFACT_STEP,
+)
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -50,11 +54,27 @@ from eneo.json_types import JsonObject
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
 _SOURCE_INPUT_TYPES = frozenset(
-    {InputType.DOCUMENT, InputType.FILE, InputType.JSON, InputType.TEXT}
+    {
+        InputType.AUDIO,
+        InputType.DOCUMENT,
+        InputType.FILE,
+        InputType.JSON,
+        InputType.TEXT,
+    }
 )
 _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
+_AUDIO_TRANSCRIPTION_PATTERN_ID = "audio_transcription"
+_AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
+_AUDIO_PATTERN_IDS = frozenset(
+    {_AUDIO_TRANSCRIPTION_PATTERN_ID, _AUDIO_ARTIFACT_PATTERN_ID}
+)
+_AUDIO_PATTERN_CHAIN_STEPS = frozenset(
+    {FLOW_INPUT_AUDIO_TRANSCRIPTION, TERMINAL_ARTIFACT_STEP}
+)
 
-PlannedStepRole = Literal["reader", "transform", "body_writer", "renderer"]
+PlannedStepRole = Literal[
+    "reader", "transform", "body_writer", "renderer", "transcription"
+]
 UnderlagChannel = Literal[
     "flow_input", "implicit_previous", "field_refs", "text_anchor", "fan_in"
 ]
@@ -149,13 +169,18 @@ def _assemble_create_intent(
     ui_language: str | None,
 ) -> FlowAssemblyPlan | None:
     if (
-        pattern_ids
-        or chain_steps
+        not _architecture_hints_are_supported(
+            runtime_input_type=runtime_input_type,
+            pattern_ids=pattern_ids,
+            chain_steps=chain_steps,
+        )
         or aggregation_intent not in {"linear", "aggregate", "compare"}
         or not intent.steps
     ):
         return None
     if runtime_input_type not in _SOURCE_INPUT_TYPES:
+        return None
+    if runtime_input_type == InputType.AUDIO and aggregation_intent != "linear":
         return None
     document_artifact_requested = final_output_type in _DOCUMENT_OUTPUT_TYPES
     if (
@@ -173,6 +198,21 @@ def _assemble_create_intent(
         terminal_output_schema is not None or final_output_type == OutputType.JSON
     ):
         return None
+    if _is_pure_audio_transcription_request(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        pattern_ids=pattern_ids,
+    ):
+        if source_reader_required_fields:
+            return None
+        return _assemble_pure_audio_transcription(
+            intent,
+            form_fields=form_fields,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        )
     semantic_output_mode = OutputMode.PASS_THROUGH
     if (
         not document_artifact_requested
@@ -187,6 +227,18 @@ def _assemble_create_intent(
     placed_form_fields: set[str] = set()
     planned_steps: list[PlannedStep] = []
     previous_output_type: OutputType | None = None
+    source_prefix_step_count = 0
+    if runtime_input_type == InputType.AUDIO:
+        transcription_step = _fixed_audio_transcription_step(
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        )
+        if not _capability_tuple_is_supported(transcription_step):
+            return None
+        planned_steps.append(transcription_step)
+        previous_output_type = OutputType.TEXT
+        source_prefix_step_count = 1
     for index, semantic_step in enumerate(intent.steps):
         if not _previous_refs_are_immediate(semantic_step, step_index=index):
             return None
@@ -208,6 +260,7 @@ def _assemble_create_intent(
             step_index=index,
             semantic_step_count=len(intent.steps),
             aggregation_intent=aggregation_intent,
+            has_source_prefix=source_prefix_step_count > 0,
         )
         if input_source == InputSource.ALL_PREVIOUS_STEPS and (
             semantic_step.uses_form_fields
@@ -216,7 +269,6 @@ def _assemble_create_intent(
         ):
             return None
         input_type = _linear_step_input_type(
-            step_index=index,
             input_source=input_source,
             runtime_input_type=runtime_input_type,
             previous_output_type=previous_output_type,
@@ -225,6 +277,14 @@ def _assemble_create_intent(
                 semantic_step.uses_previous_fields
                 or semantic_step.uses_previous_outputs
             ),
+        )
+        previous_field_refs = _offset_previous_field_refs(
+            semantic_step.uses_previous_fields,
+            compiled_step_offset=source_prefix_step_count,
+        )
+        previous_output_refs = _offset_previous_output_refs(
+            semantic_step.uses_previous_outputs,
+            compiled_step_offset=source_prefix_step_count,
         )
         planned_step = PlannedStep(
             role=_linear_step_role(
@@ -240,8 +300,8 @@ def _assemble_create_intent(
             output_mode=semantic_output_mode,
             underlag_channel=_linear_underlag_channel(
                 input_source=input_source,
-                previous_field_refs=semantic_step.uses_previous_fields,
-                previous_output_refs=semantic_step.uses_previous_outputs,
+                previous_field_refs=previous_field_refs,
+                previous_output_refs=previous_output_refs,
             ),
             runtime_required=(
                 index == 0
@@ -254,8 +314,8 @@ def _assemble_create_intent(
                 else None
             ),
             form_field_refs=tuple(semantic_step.uses_form_fields),
-            previous_field_refs=tuple(semantic_step.uses_previous_fields),
-            previous_output_refs=tuple(semantic_step.uses_previous_outputs),
+            previous_field_refs=previous_field_refs,
+            previous_output_refs=previous_output_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
@@ -291,6 +351,78 @@ def _assemble_create_intent(
         steps=tuple(planned_steps),
         terminal_output_schema=terminal_output_schema,
         source_reader_required_fields=source_reader_required_fields,
+        ui_language=ui_language,
+    )
+
+
+def _architecture_hints_are_supported(
+    *,
+    runtime_input_type: InputType,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    if not pattern_ids and not chain_steps:
+        return True
+    if runtime_input_type != InputType.AUDIO:
+        return False
+    return set(pattern_ids) <= _AUDIO_PATTERN_IDS and set(chain_steps) <= set(
+        _AUDIO_PATTERN_CHAIN_STEPS
+    )
+
+
+def _is_pure_audio_transcription_request(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    pattern_ids: tuple[str, ...],
+) -> bool:
+    return (
+        runtime_input_type == InputType.AUDIO
+        and final_output_type == OutputType.TEXT
+        and (
+            final_output_mode == OutputMode.TRANSCRIBE_ONLY
+            or _AUDIO_TRANSCRIPTION_PATTERN_ID in pattern_ids
+        )
+    )
+
+
+def _assemble_pure_audio_transcription(
+    intent: CreateFlowIntent,
+    *,
+    form_fields: Sequence[FormFieldSpec],
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    ui_language: str | None,
+) -> FlowAssemblyPlan | None:
+    if len(intent.steps) != 1 or form_fields:
+        return None
+    semantic_step = intent.steps[0]
+    if (
+        semantic_step.output_fields
+        or semantic_step.uses_form_fields
+        or semantic_step.uses_previous_fields
+        or semantic_step.uses_previous_outputs
+        or semantic_step.output_type not in {None, OutputType.TEXT}
+    ):
+        return None
+    planned_step = _fixed_audio_transcription_step(
+        name=semantic_step.name,
+        instructions=semantic_step.instructions,
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
+        review_mode=semantic_step.review_mode,
+    )
+    if not _capability_tuple_is_supported(planned_step):
+        return None
+    return FlowAssemblyPlan(
+        flow_name=intent.flow_name,
+        flow_description=intent.flow_description or "",
+        form_fields=(),
+        steps=(planned_step,),
+        terminal_output_schema=None,
+        source_reader_required_fields=(),
         ui_language=ui_language,
     )
 
@@ -339,14 +471,13 @@ def _linear_step_output_type(
 
 def _linear_step_input_type(
     *,
-    step_index: int,
     input_source: InputSource,
     runtime_input_type: InputType,
     previous_output_type: OutputType | None,
     output_type: OutputType,
     has_explicit_previous_refs: bool,
 ) -> InputType:
-    if step_index == 0:
+    if input_source == InputSource.FLOW_INPUT:
         return runtime_input_type
     if input_source == InputSource.ALL_PREVIOUS_STEPS:
         return InputType.TEXT
@@ -375,8 +506,9 @@ def _linear_step_input_source(
     step_index: int,
     semantic_step_count: int,
     aggregation_intent: str,
+    has_source_prefix: bool,
 ) -> InputSource:
-    if step_index == 0:
+    if step_index == 0 and not has_source_prefix:
         return InputSource.FLOW_INPUT
     if (
         aggregation_intent in {"aggregate", "compare"}
@@ -409,6 +541,68 @@ def _planned_step_is_source_reader(step: PlannedStep) -> bool:
         and step.input_type in _FILE_INPUT_TYPES | {InputType.TEXT}
         and step.output_type == OutputType.JSON
         and bool(step.output_fields)
+    )
+
+
+def _fixed_audio_transcription_step(
+    *,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    ui_language: str | None,
+    name: str | None = None,
+    instructions: str | None = None,
+    review_mode: FlowStepReviewMode | None = None,
+) -> PlannedStep:
+    if ui_language == "sv":
+        default_name = "Transkribera ljud"
+        default_instructions = (
+            "Transkribera det uppladdade ljudet till text innan analys "
+            "eller artefaktgenerering."
+        )
+    else:
+        default_name = "Transcribe audio"
+        default_instructions = (
+            "Transcribe the uploaded audio into text before downstream analysis "
+            "or artifact generation."
+        )
+    return PlannedStep(
+        role="transcription",
+        name=name or default_name,
+        instructions=instructions or default_instructions,
+        input_source=InputSource.FLOW_INPUT,
+        input_type=InputType.AUDIO,
+        output_type=OutputType.TEXT,
+        output_mode=OutputMode.TRANSCRIBE_ONLY,
+        underlag_channel="flow_input",
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+        review_mode=review_mode,
+    )
+
+
+def _offset_previous_field_refs(
+    refs: Sequence[PreviousFieldRef],
+    *,
+    compiled_step_offset: int,
+) -> tuple[PreviousFieldRef, ...]:
+    if compiled_step_offset == 0:
+        return tuple(refs)
+    return tuple(
+        ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
+        for ref in refs
+    )
+
+
+def _offset_previous_output_refs(
+    refs: Sequence[PreviousOutputRef],
+    *,
+    compiled_step_offset: int,
+) -> tuple[PreviousOutputRef, ...]:
+    if compiled_step_offset == 0:
+        return tuple(refs)
+    return tuple(
+        ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
+        for ref in refs
     )
 
 
