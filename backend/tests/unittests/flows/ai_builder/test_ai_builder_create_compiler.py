@@ -7372,9 +7372,11 @@ def test_compile_create_steps_to_spec_uses_nested_terminal_schema_leaves_for_sou
     assert validate_spec(compiled).valid
 
 
-def test_compile_create_steps_to_spec_does_not_repeat_already_named_source_capture_field() -> (
-    None
-):
+def test_compile_create_steps_to_spec_logs_already_named_source_capture_field(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=NEW_STEP_COMPILER_LOGGER)
+
     compiled = _compile_create_steps(
         flow_name="Dokumentanalys till PDF",
         steps=[
@@ -7398,6 +7400,15 @@ def test_compile_create_steps_to_spec_does_not_repeat_already_named_source_captu
     )
 
     assert SOURCE_CAPTURE_HEADING not in compiled.steps[0].assistant_spec.instructions
+    suppression_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_source_capture_guidance_field_suppressed"
+    ]
+    assert len(suppression_records) == 1
+    assert suppression_records[0].field_names == ["titel"]
+    assert suppression_records[0].source_capture_field_count == 1
+    assert suppression_records[0].suppressed_field_count == 1
     assert validate_spec(compiled).valid
 
 

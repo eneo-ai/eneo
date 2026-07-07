@@ -486,13 +486,27 @@ def _append_source_capture_guidance(
     heading, absence_instruction = _source_capture_copy(ui_language)
     normalized_instructions = instructions.casefold()
     eligible_lines: list[str] = []
+    suppressed_field_names: list[str] = []
     for field in source_capture_fields:
         name = field.name.strip()
-        if not name or name.casefold() in normalized_instructions:
+        if not name:
+            continue
+        if name.casefold() in normalized_instructions:
+            suppressed_field_names.append(name)
             continue
         description = _truncate_source_capture_description(field.description)
         eligible_lines.append(
             f"- {name}: {description}" if description else f"- {name}"
+        )
+
+    if suppressed_field_names:
+        logger.info(
+            "ai_builder_source_capture_guidance_field_suppressed",
+            extra={
+                "field_names": suppressed_field_names,
+                "source_capture_field_count": len(source_capture_fields),
+                "suppressed_field_count": len(suppressed_field_names),
+            },
         )
 
     field_lines: list[str] = []
