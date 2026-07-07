@@ -248,6 +248,27 @@ def test_linear_artifact_skeleton_keeps_backend_terminal_artifact_slot() -> None
     assert skeleton[-1].document_delivery_mode == "generated"
 
 
+def test_linear_artifact_skeleton_does_not_fan_in_by_phase_count() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+        aggregation_intent="linear",
+    )
+
+    skeleton = plan.slots_for_semantic_count(3)
+
+    assert [slot.input_source for slot in skeleton] == [
+        InputSource.FLOW_INPUT,
+        InputSource.PREVIOUS_STEP,
+        InputSource.PREVIOUS_STEP,
+        InputSource.PREVIOUS_STEP,
+    ]
+    assert skeleton[-1].output_type == OutputType.PDF
+
+
 def test_materialize_comparison_skeleton_places_fan_in_on_last_semantic() -> None:
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,

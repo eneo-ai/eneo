@@ -61,7 +61,6 @@ _COMPILED_PATTERN_MATERIALIZER_IDS = frozenset(
 )
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
-_MIN_DOCUMENT_BODY_FAN_IN_PHASES = 3
 _LEGAL_STEP_SKELETON_POLICIES = frozenset(
     {
         ("backend_fixed", "locked", "backend_default"),
@@ -474,12 +473,6 @@ class StepSkeletonPlan:
         is_last: bool,
         semantic_count: int,
     ) -> InputSource:
-        if self._last_document_body_reads_all_prior_work(
-            ordinal=ordinal,
-            is_last=is_last,
-            semantic_count=semantic_count,
-        ):
-            return InputSource.ALL_PREVIOUS_STEPS
         if (
             self.fan_in_policy == "last_semantic"
             and is_last
@@ -489,24 +482,6 @@ class StepSkeletonPlan:
         if ordinal == 0:
             return InputSource.FLOW_INPUT
         return InputSource.PREVIOUS_STEP
-
-    def _last_document_body_reads_all_prior_work(
-        self,
-        *,
-        ordinal: int,
-        is_last: bool,
-        semantic_count: int,
-    ) -> bool:
-        if self.final_output_type not in _DOCUMENT_OUTPUT_TYPES:
-            return False
-        if self.semantic_output_policy != "text_for_all_semantic":
-            return False
-        if not is_last or ordinal == 0:
-            return False
-        # Three or more semantic phases means the last text step is a document
-        # body synthesis step; previous_step alone can drop earlier structured
-        # sections before the backend DOCX/PDF renderer runs.
-        return semantic_count >= _MIN_DOCUMENT_BODY_FAN_IN_PHASES
 
     def _semantic_input_type(
         self,
