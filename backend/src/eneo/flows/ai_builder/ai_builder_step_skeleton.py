@@ -582,7 +582,6 @@ def materialize_step_skeleton(
     if _AUDIO_ARTIFACT_PATTERN_ID in compiled_pattern_ids:
         return _materialize_audio_artifact_skeleton(
             final_output_type=final_output_type,
-            aggregation_intent=aggregation_intent,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
@@ -603,7 +602,6 @@ def materialize_step_skeleton(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
-        aggregation_intent=aggregation_intent,
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,
@@ -1212,7 +1210,6 @@ def _materialize_docx_template_skeleton(
 def _materialize_audio_artifact_skeleton(
     *,
     final_output_type: OutputType,
-    aggregation_intent: AggregationIntent,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -1360,7 +1357,6 @@ def _materialize_linear_skeleton(
     runtime_input_type: InputType,
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
-    aggregation_intent: AggregationIntent,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
