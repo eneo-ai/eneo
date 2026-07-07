@@ -242,6 +242,36 @@ def apply_terminal_output_schema(
     return [*compiled_steps[:-1], terminal_step]
 
 
+def complete_structured_source_reader_fields(
+    fields: tuple[StructuredFieldDraft, ...],
+    *,
+    required_fields: tuple[SourceCaptureField, ...],
+) -> tuple[StructuredFieldDraft, ...]:
+    return tuple(
+        _add_missing_source_reader_fields(
+            list(fields),
+            required_fields=_dedupe_capture_fields(list(required_fields)),
+        )
+    )
+
+
+def source_capture_fields_from_terminal_schema(
+    terminal_output_schema: JsonObject,
+) -> tuple[SourceCaptureField, ...]:
+    return _capture_fields_from_terminal_schema(terminal_output_schema)
+
+
+def structured_fields_have_source_leaf(
+    fields: tuple[StructuredFieldDraft, ...],
+    required_name: str,
+) -> bool:
+    return _structured_fields_have_leaf(list(fields), required_name)
+
+
+def source_reader_leaf_field_name(field_path: str) -> str:
+    return _leaf_field_name(field_path)
+
+
 def _add_missing_source_reader_fields(
     fields: list[StructuredFieldDraft],
     *,

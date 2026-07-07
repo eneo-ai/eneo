@@ -10,6 +10,11 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    source_capture_fields_from_terminal_schema,
+    source_reader_leaf_field_name,
+    structured_fields_have_source_leaf,
+)
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.enums import (
     FlowInputSource,
@@ -136,12 +141,17 @@ class FlowAssemblyPlan:
                     "terminal step."
                 )
         if self.source_reader_required_fields and not any(
-            _planned_step_is_source_reader(step) for step in self.steps
+            planned_step_is_source_reader(step) for step in self.steps
         ):
             raise ValueError(
                 "FlowAssemblyPlan source_reader_required_fields require a "
                 "source-reader planned step."
             )
+        _validate_source_reader_contracts_complete(
+            steps=self.steps,
+            terminal_output_schema=self.terminal_output_schema,
+            required_fields=self.source_reader_required_fields,
+        )
 
 
 def _validate_underlag_channel_shape(step: PlannedStep) -> None:
@@ -346,10 +356,54 @@ def _validate_form_field_placement(
         )
 
 
-def _planned_step_is_source_reader(step: PlannedStep) -> bool:
+def planned_step_is_source_reader(step: PlannedStep) -> bool:
     return (
         step.input_source == InputSource.FLOW_INPUT
         and step.input_type in {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
         and step.output_type == OutputType.JSON
         and bool(step.output_fields)
     )
+
+
+def _validate_source_reader_contracts_complete(
+    *,
+    steps: tuple[PlannedStep, ...],
+    terminal_output_schema: JsonObject | None,
+    required_fields: tuple[SourceCaptureField, ...],
+) -> None:
+    source_reader_indexes = tuple(
+        index for index, step in enumerate(steps) if planned_step_is_source_reader(step)
+    )
+    if not source_reader_indexes:
+        return
+    terminal_fields = (
+        source_capture_fields_from_terminal_schema(terminal_output_schema)
+        if terminal_output_schema is not None
+        else ()
+    )
+    missing_names: set[str] = set()
+    for field in (*required_fields, *terminal_fields):
+        if not any(
+            structured_fields_have_source_leaf(
+                steps[index].output_fields,
+                field.name,
+            )
+            for index in source_reader_indexes
+        ):
+            missing_names.add(field.name)
+    for step in steps:
+        for ref in step.previous_field_refs:
+            source_index = ref.from_step - 1
+            if source_index not in source_reader_indexes:
+                continue
+            field_name = source_reader_leaf_field_name(ref.field_path)
+            if field_name and not structured_fields_have_source_leaf(
+                steps[source_index].output_fields,
+                field_name,
+            ):
+                missing_names.add(field_name)
+    if missing_names:
+        raise ValueError(
+            "FlowAssemblyPlan source-reader output fields must be complete "
+            f"before lowering: {', '.join(sorted(missing_names))}."
+        )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
+from dataclasses import replace
 
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
@@ -14,6 +16,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     PlannedStep,
     PlannedStepRole,
     derive_underlag_channel,
+    planned_step_is_source_reader,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
@@ -26,6 +29,12 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     SemanticStepIntent,
+)
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    complete_structured_source_reader_fields,
+    source_capture_fields_from_terminal_schema,
+    source_reader_leaf_field_name,
+    structured_fields_have_source_leaf,
 )
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
@@ -44,6 +53,8 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.json_types import JsonObject
+
+logger = logging.getLogger(__name__)
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
 _SOURCE_INPUT_TYPES = frozenset(
@@ -329,11 +340,16 @@ def _assemble_create_intent(
             ui_language=ui_language,
         )
         planned_steps.append(renderer_step)
+    completed_steps = _complete_planned_source_reader_contracts(
+        tuple(planned_steps),
+        terminal_output_schema=terminal_output_schema,
+        required_fields=source_reader_required_fields,
+    )
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
         form_fields=tuple(form_fields),
-        steps=tuple(planned_steps),
+        steps=completed_steps,
         terminal_output_schema=terminal_output_schema,
         source_reader_required_fields=source_reader_required_fields,
         aggregation_intent=aggregation_intent,
@@ -432,11 +448,16 @@ def _assemble_docx_template_fill(
     )
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
     planned_steps = (reader_step, content_step, fixed_template_fill_step)
+    completed_steps = _complete_planned_source_reader_contracts(
+        planned_steps,
+        terminal_output_schema=None,
+        required_fields=source_reader_required_fields,
+    )
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
         form_fields=tuple(form_fields),
-        steps=planned_steps,
+        steps=completed_steps,
         terminal_output_schema=None,
         source_reader_required_fields=source_reader_required_fields,
         aggregation_intent="linear",
@@ -615,3 +636,84 @@ def _offset_previous_output_refs(
         ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
         for ref in refs
     )
+
+
+def _complete_planned_source_reader_contracts(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    terminal_output_schema: JsonObject | None,
+    required_fields: tuple[SourceCaptureField, ...],
+) -> tuple[PlannedStep, ...]:
+    source_reader_indexes = tuple(
+        index
+        for index, planned_step in enumerate(planned_steps)
+        if planned_step_is_source_reader(planned_step)
+    )
+    if not source_reader_indexes:
+        return planned_steps
+
+    fields_by_index: dict[int, list[SourceCaptureField]] = {}
+    terminal_fields = (
+        source_capture_fields_from_terminal_schema(terminal_output_schema)
+        if terminal_output_schema is not None
+        else ()
+    )
+    global_fields = (*required_fields, *terminal_fields)
+    missing_global_fields = [
+        field
+        for field in global_fields
+        if not any(
+            structured_fields_have_source_leaf(
+                planned_steps[index].output_fields,
+                field.name,
+            )
+            for index in source_reader_indexes
+        )
+    ]
+    if missing_global_fields:
+        if len(source_reader_indexes) != 1:
+            raise ValueError(
+                "FlowAssemblyPlan source-reader field completion requires "
+                "exactly one source reader when global fields are missing."
+            )
+        fields_by_index.setdefault(source_reader_indexes[0], []).extend(
+            missing_global_fields
+        )
+
+    source_reader_index_set = set(source_reader_indexes)
+    for planned_step in planned_steps:
+        for ref in planned_step.previous_field_refs:
+            source_index = ref.from_step - 1
+            if source_index not in source_reader_index_set:
+                continue
+            field_name = source_reader_leaf_field_name(ref.field_path)
+            if not field_name or structured_fields_have_source_leaf(
+                planned_steps[source_index].output_fields,
+                field_name,
+            ):
+                continue
+            fields_by_index.setdefault(source_index, []).append(
+                SourceCaptureField(name=field_name, description=ref.label)
+            )
+
+    if not fields_by_index:
+        return planned_steps
+
+    updated_steps = list(planned_steps)
+    for index, fields in fields_by_index.items():
+        planned_step = planned_steps[index]
+        completed_fields = complete_structured_source_reader_fields(
+            planned_step.output_fields,
+            required_fields=tuple(fields),
+        )
+        if completed_fields == planned_step.output_fields:
+            continue
+        updated_steps[index] = replace(planned_step, output_fields=completed_fields)
+        logger.info(
+            "ai_builder_source_reader_contract_completed",
+            extra={
+                "step_index": index + 1,
+                "field_names": [field.name for field in fields],
+            },
+        )
+    return tuple(updated_steps)

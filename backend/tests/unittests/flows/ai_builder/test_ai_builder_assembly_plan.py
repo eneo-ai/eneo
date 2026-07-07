@@ -271,3 +271,26 @@ def test_plan_rejects_source_reader_obligation_without_reader_step() -> None:
             aggregation_intent="linear",
             ui_language=None,
         )
+
+
+def test_plan_rejects_incomplete_source_reader_contract() -> None:
+    source_reader = _text_step(
+        name="Extract facts",
+        input_type=InputType.DOCUMENT,
+        output_type=OutputType.JSON,
+        output_fields=(_field("summary"),),
+    )
+
+    with pytest.raises(ValueError, match="must be complete before lowering"):
+        FlowAssemblyPlan(
+            flow_name="Test flow",
+            flow_description="",
+            form_fields=(),
+            steps=(source_reader,),
+            terminal_output_schema=None,
+            source_reader_required_fields=(
+                SourceCaptureField(name="case_id", description="Case ID"),
+            ),
+            aggregation_intent="linear",
+            ui_language=None,
+        )
