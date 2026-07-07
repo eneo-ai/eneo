@@ -932,6 +932,7 @@ class SpaceRepository:
                     AssistantTemplates.completion_model
                 ),
                 selectinload(Assistants.mcp_servers),
+                selectinload(Assistants.assistant_mcp_server_tools),
             )
             .order_by(Assistants.created_at)
         )
