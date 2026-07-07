@@ -28,10 +28,10 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 |---|---|---|
 | Conversation streaming (AI SDK v6 UI Message Stream, v3 backend) | PASS | |
 | History panel, attachments, tool approval | PASS | held-stream approval fallback. |
-| Markdown / references / token usage / status | PASS | Streamdown. |
+| Markdown / references / token usage / status | PASS | Streamdown; document/web/MCP references render from live stream + history. |
 | Model selector + details (chat + editors) | PASS | rich `ai-elements/model-selector`: vendor groups, logos, prices/context/capabilities, policy filtering. |
 | Mentions (group chat) | REDESIGNED | picker targeting one assistant. |
-| Group-chat answer labels | DEFERRED | v3 doesn't carry the answering assistant (RB candidate). |
+| Group-chat answer labels | PASS | `answering_assistant` is carried through the v3 stream and persisted message metadata. |
 | Reasoning chunks | DROPPED | backend strips `<think>`; never streamed. |
 
 ## Builders & knowledge (phase 6)
@@ -47,7 +47,7 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Apps: list, editor, run (text/upload/recorder), results, dashboard routes | PASS | run status via polling. |
 | Services: list, playground, editor | PASS | |
 | Assistant editor: MCP server picker + attachments | PASS | mcp_servers picker (knowledge⇄MCP exclusivity) + file attachments. |
-| Assistant editor: prompt version history / template apply on create | DEFERRED | no assistant-prompt-versions endpoint; create has no `from_template`. Backend-gated. |
+| Assistant editor: prompt version history / template apply on create | PASS | prompt-version endpoint + `from_template` create flow are wired. |
 
 ## Admin (phase 7)
 
@@ -56,7 +56,7 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Admin gate + grouped nav | PASS | server-side `hasPermission("admin")`. |
 | Feature toggles (templates / audit / provisioning) | PASS | optimistic + revert. |
 | Users: list, search, state tabs, create/edit, activate/deactivate, delete | PASS | offset pagination (RB-5a). |
-| Audit logs: justification gate, filters, table, retention, async export | PASS | RB-5(d) cookie spike in the proxy. |
+| Audit logs: justification gate, filters, table, retention, async export | PASS | includes URL-restored filters, JSON/JSONL, cancel/expired states, per-user GDPR export. |
 | Audit category config | PASS | Categories tab. |
 | Audit per-action config; actor-by-user filter | PASS | per-action drill-down + search; per-user GDPR log view. |
 | Security classifications: CRUD, enable, reorder | PASS | |
@@ -64,12 +64,12 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Model full edit (custom) + per-provider API credentials | PASS | edit dialog (PUT tenant-models) + credentials tab (set/update keys). |
 | Model add-wizard (provider + credentials + model) | PASS | capability-driven stepped dialog; POST model-providers + tenant-models. |
 | Model migration + usage impact | PASS | validate → migrate dialog with impact counts + compatibility warnings. |
-| Provider edit/delete, per-model usage-details list | DEFERRED | minor: wizard creates providers; usage shows counts (not the per-entity list). |
+| Provider edit/delete, per-model usage-details list | PASS | model detail usage tab + provider management. |
 | MCP servers: list, enable/disable, CRUD, tools panel | PASS | tools dialog (list + remote sync). |
 | Org API keys: list, create, rotate/suspend/reactivate/revoke, notification policy | PASS | expiry-alert thresholds + auto-follow policy. |
-| Tenant integrations: provider link/unlink | PASS | SharePoint Azure-AD app config is backend env (not API-exposed); webhook subscriptions list deferred (niche read-only). |
-| Usage: tokens + storage | PASS | |
-| Insights: counts + usage time-series + activity | PASS | recharts time-series (7/30/90d) + active-assistant/user cards; per-assistant deep-dive deferred. |
+| Tenant integrations: provider link/unlink | PASS | includes SharePoint Azure-AD app config + webhook subscription health/renew. |
+| Usage: tokens + users + storage | PASS | per-user detail page, model breakdown, estimated cost. |
+| Insights: counts + usage time-series + activity | PASS | recharts time-series (7/30/90d), custom range/compare, activity cards, per-assistant deep-dive. |
 | Prompt library: CRUD | PASS | |
 | Help assistants: roles + templates, install, toggles | PASS | |
 | Templates: list, create/edit, featured, soft-delete, restore/permanent-delete | PASS | full CRUD (assistant + app). |
@@ -80,11 +80,11 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 
 | Capability | Status | Note |
 |---|---|---|
-| i18n sv/en | PASS | 3684 keys, full parity (en↔sv), Swedish default. |
+| i18n sv/en | PASS | 3880 keys, full parity (en↔sv), Swedish default. |
 | Error / not-found / loading states | PASS | `(app)/error.tsx`, `not-found.tsx`, `loading.tsx`. |
 | WebSocket live updates (app-run, crawl) | REDESIGNED | replaced by adaptive polling. |
-| CSP (nonce-based strict `script-src`) | DEFERRED | safe baseline headers shipped; strict CSP needs nonce middleware + browser verification (CUTOVER.md). |
-| E2E suite on the isolated stack | DEFERRED | ops task; see CUTOVER.md. |
+| CSP (nonce-based strict `script-src`) | PASS | request nonce in `src/proxy.ts`; production `strict-dynamic`, `script-src-attr 'none'`. |
+| E2E suite on the isolated stack | PASS | Playwright smoke coverage for auth setup, chat round-trip, and space/knowledge flow. |
 
 ## Parity buildout — 2026-06-29 (branch `feat/web-next-parity-buildout`)
 
@@ -107,13 +107,9 @@ over-claimed / a gap):
 - Chat: **group-chat answer labels** (new `answering_assistant` in the v3 stream); per-tool MCP
   approval; web-search source rendering.
 
-### Still open (tracked)
+### Remaining accepted deferrals
 
-- **Per-assistant insights deep-dive** (admin) — question history + AI chat analysis (SSE).
-- **Per-conversation chat insights page** (`/chat/insights`).
-- **Inline `<inref>` citations** — blob preview popovers / web favicons / MCP snippet modal
-  (web-search references already render as chips).
-- **Account preferred copy-format** (richtext clipboard) — minor.
-- **CSP nonce middleware** and the **Playwright E2E suite** — ops tasks (CUTOVER.md).
+- **Personal-assistant governance allow-list editing** — policy enforcement and prompt locking are
+  present; allow-list editing remains a narrow admin-governance enhancement.
 
-None of the open items block a member or everyday-admin from operating the platform.
+None of the accepted deferrals block a member or everyday-admin from operating the platform.
