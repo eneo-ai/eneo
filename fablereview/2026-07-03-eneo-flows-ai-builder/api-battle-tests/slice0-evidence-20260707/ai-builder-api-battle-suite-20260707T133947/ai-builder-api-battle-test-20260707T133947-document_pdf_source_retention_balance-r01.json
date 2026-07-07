@@ -1,0 +1,1991 @@
+{
+  "base_url": "http://localhost:8123/api/v1",
+  "case": {
+    "complexity": "medium",
+    "domain": "municipality_records",
+    "expected": {
+      "expected_leaf_output_field_groups": [
+        [
+          "document_type",
+          "dokumenttyp",
+          "typ"
+        ],
+        [
+          "title",
+          "titel"
+        ],
+        [
+          "date_or_year",
+          "year",
+          "datum",
+          "år"
+        ],
+        [
+          "author_or_sender",
+          "författare",
+          "avsändare"
+        ],
+        [
+          "category",
+          "kategori"
+        ],
+        [
+          "conclusions",
+          "slutsatser"
+        ],
+        [
+          "summary",
+          "sammanfattning"
+        ]
+      ],
+      "forbid_generic_primary_reader_envelope": true,
+      "forbid_primary_material_form_fields": true,
+      "max_all_previous_steps": 1,
+      "min_json_steps": 1,
+      "min_steps": 2,
+      "terminal_output_type": "pdf"
+    },
+    "file_ids": [],
+    "id": "document_pdf_source_retention_balance",
+    "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+    "scripted_question_answers": {}
+  },
+  "created_at": "20260707T133947",
+  "event_summary": {
+    "error_codes": [],
+    "event_counts": {
+      "done": 2,
+      "plan": 1,
+      "requirements_summary": 1,
+      "status": 2,
+      "usage": 2
+    },
+    "question_event_ids": [],
+    "question_like_text_event_count": 0,
+    "question_like_text_events": [],
+    "self_correction_quality_failure_count": 0,
+    "server_ask_question_text_only_count": 0
+  },
+  "initial_session": {
+    "attachment_warnings": [],
+    "attachments": [],
+    "conversation": [],
+    "created_at": "2026-07-07T11:39:47.444192Z",
+    "flow_id": null,
+    "latest_plan_id": null,
+    "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+    "status": "chatting",
+    "target_kind": "create",
+    "telemetry": null,
+    "updated_at": "2026-07-07T11:39:47.444192Z"
+  },
+  "interactions": [
+    {
+      "events": [
+        {
+          "data": {
+            "status": "architecture_committed"
+          },
+          "event": "status"
+        },
+        {
+          "data": {
+            "assumptions": [
+              "Dokumentunderlag: Flera dokument i samma körning",
+              "PDF-resultat: Vanlig genererad PDF",
+              "Indata vid körning: Dokument",
+              "Metadata vid körning: Lägg till rikare metadatafält",
+              "Slutresultat: PDF-dokument",
+              "Planen ska följa kraven och underlaget i konversationen.",
+              "Användaren ska kunna granska och ändra planen innan den tillämpas."
+            ],
+            "input_description": "Primär indata vid körning: Dokument.",
+            "key_decisions": [
+              {
+                "decision": "Skapa PDF",
+                "topic": "Planerad bearbetning"
+              }
+            ],
+            "manual_setup_notes": [],
+            "output_description": "Huvudsakligt slutresultat: PDF-dokument.",
+            "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+            "summary": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument."
+          },
+          "event": "requirements_summary"
+        },
+        {
+          "data": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 0,
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "server_confirm_requirements",
+            "last_request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+            "last_token_usage_estimated": false,
+            "llm_calls_made_total": 0,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 1,
+            "prompt_tokens_total": 0,
+            "repair_attempts_total": 0,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 0,
+            "total_tokens_total": 0,
+            "wall_clock_ms_total": 0
+          },
+          "event": "usage"
+        },
+        {
+          "data": "",
+          "event": "done"
+        }
+      ],
+      "latest_session": {
+        "attachment_warnings": [],
+        "attachments": [],
+        "conversation": [
+          {
+            "content": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+            "message_id": "019f3c60-89dd-7402-b938-87822618d347",
+            "metadata": {
+              "slot_classification": {
+                "assumptions": [],
+                "contradictions": [],
+                "prompt_hash": "e7a7023401d395e5276a2714a6e0a2f1595df135de76d40238e2af357d98639e",
+                "secondary_obligations": [
+                  "summary",
+                  "key_facts"
+                ],
+                "slots": [
+                  {
+                    "confidence": "high",
+                    "reason": "User says they will send one or more files and the flow should read each file's content.",
+                    "slot_name": "document_material_scope",
+                    "value": "multiple_documents_case"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "They want the system to document document type, topic, category, conclusions, date, and possibly author, then produce a concise summary in a report.",
+                    "slot_name": "post_processing_goal",
+                    "value": "structure_key_information"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "They explicitly want extracted metadata such as document type, category, conclusions, date, and author if possible.",
+                    "slot_name": "runtime_metadata_fields",
+                    "value": "detailed_case_metadata"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "They want the final report delivered as a PDF file.",
+                    "slot_name": "terminal_output",
+                    "value": "pdf_document"
+                  }
+                ]
+              },
+              "ui_language": "sv"
+            },
+            "role": "user",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument.",
+            "message_id": "019f3c60-96f7-7440-b5dc-84fc80844424",
+            "metadata": {
+              "planner_telemetry": {
+                "architecture_commit_populated": false,
+                "completion_tokens": null,
+                "finish_reason": null,
+                "llm_calls_made": 0,
+                "model": "openai/gpt-5.4-mini",
+                "outcome_kind": "server_confirm_requirements",
+                "parse_repair_attempts": 0,
+                "prompt_tokens": null,
+                "repair_attempts": 0,
+                "request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+                "token_usage_estimated": false,
+                "token_usage_source": null,
+                "tool_call_count": 0,
+                "total_tokens": null,
+                "used_auxiliary_llm": false,
+                "wall_clock_ms": 0
+              },
+              "requirements_summary": {
+                "assumptions": [
+                  "Dokumentunderlag: Flera dokument i samma körning",
+                  "PDF-resultat: Vanlig genererad PDF",
+                  "Indata vid körning: Dokument",
+                  "Metadata vid körning: Lägg till rikare metadatafält",
+                  "Slutresultat: PDF-dokument",
+                  "Planen ska följa kraven och underlaget i konversationen.",
+                  "Användaren ska kunna granska och ändra planen innan den tillämpas."
+                ],
+                "input_description": "Primär indata vid körning: Dokument.",
+                "key_decisions": [
+                  {
+                    "decision": "Skapa PDF",
+                    "topic": "Planerad bearbetning"
+                  }
+                ],
+                "manual_setup_notes": [],
+                "output_description": "Huvudsakligt slutresultat: PDF-dokument.",
+                "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+                "summary": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument."
+              },
+              "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+              "session_telemetry": {
+                "architecture_commit_count": 0,
+                "auxiliary_llm_call_count": 0,
+                "clarification_question_count": 0,
+                "completion_tokens_total": 0,
+                "last_finish_reason": null,
+                "last_model": "openai/gpt-5.4-mini",
+                "last_outcome_kind": "server_confirm_requirements",
+                "last_request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+                "last_token_usage_estimated": false,
+                "last_token_usage_source": null,
+                "llm_calls_made_total": 0,
+                "parse_repair_attempts_total": 0,
+                "planner_request_count": 1,
+                "prompt_tokens_total": 0,
+                "repair_attempts_total": 0,
+                "token_usage_estimated": false,
+                "tool_call_count_total": 0,
+                "total_tokens_total": 0,
+                "wall_clock_ms_total": 0
+              }
+            },
+            "role": "assistant",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          }
+        ],
+        "created_at": "2026-07-07T11:39:47.444192Z",
+        "flow_id": null,
+        "latest_plan_id": null,
+        "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+        "status": "chatting",
+        "target_kind": "create",
+        "telemetry": {
+          "architecture_commit_count": 0,
+          "auxiliary_llm_call_count": 0,
+          "clarification_question_count": 0,
+          "completion_tokens_total": 0,
+          "last_finish_reason": null,
+          "last_model": "openai/gpt-5.4-mini",
+          "last_outcome_kind": "server_confirm_requirements",
+          "last_request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+          "last_token_usage_estimated": false,
+          "last_token_usage_source": null,
+          "llm_calls_made_total": 0,
+          "parse_repair_attempts_total": 0,
+          "planner_request_count": 1,
+          "prompt_tokens_total": 0,
+          "repair_attempts_total": 0,
+          "token_usage_estimated": false,
+          "tool_call_count_total": 0,
+          "total_tokens_total": 0,
+          "wall_clock_ms_total": 0
+        },
+        "updated_at": "2026-07-07T11:39:50.953832Z"
+      },
+      "message": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+      "plan": null,
+      "plan_id": null,
+      "plan_summary": {
+        "has_plan": false
+      },
+      "question_answer": null
+    },
+    {
+      "events": [
+        {
+          "data": {
+            "status": "repairing"
+          },
+          "event": "status"
+        },
+        {
+          "data": {
+            "plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+            "proposal": {
+              "assumptions": [
+                "Flera dokument kan skickas in i samma körning.",
+                "Slutresultatet ska vara en genererad PDF.",
+                "Rapporten ska vara koncis men ändå innehålla titel, år, kategori, dokumenttyp, ämne och slutsats för varje dokument."
+              ],
+              "description_override_manual": false,
+              "lint_warnings": [],
+              "plan_rationale": "Flödet behöver först läsa och strukturera innehållet från flera dokument, sedan sammanställa de viktigaste bibliografiska och innehållsliga uppgifterna till en tydlig rapport, och till sist rendera allt som en PDF. Eftersom slutresultatet ska vara en färdig PDF med både metadata och sammanfattning passar en flerstegsprocess bäst.",
+              "risk_acknowledgments": [],
+              "spec": {
+                "document_body_writer_step_refs": [
+                  "step_c"
+                ],
+                "flow_description": "Läser in en eller flera dokumentfiler, identifierar dokumenttyp, ämne, kategori, slutsatser, datum och eventuell författare, och bygger därefter en koncis PDF-rapport med titel, år, kategori och sammanfattning.",
+                "flow_name": "Dokumentanalys till PDF",
+                "form_fields": [
+                  {
+                    "label": "Rapporttitel",
+                    "name": "report_title",
+                    "required": false,
+                    "type": "text"
+                  },
+                  {
+                    "label": "Kategori om den är känd",
+                    "name": "document_category_hint",
+                    "options": [
+                      "sociologi",
+                      "psykologi",
+                      "IT",
+                      "ekonomi",
+                      "juridik",
+                      "medicin",
+                      "utbildning",
+                      "annan"
+                    ],
+                    "required": false,
+                    "type": "select"
+                  }
+                ],
+                "steps": [
+                  {
+                    "assistant_spec": {
+                      "instructions": "Läs igenom alla inskickade dokument och identifiera för varje dokument vad det är för typ av dokument, vad det handlar om, vilken kategori det bäst passar i, vilket datum det är skrivet och om möjligt vem som har skrivit det. Fokusera på tydliga källbaserade uppgifter och markera sådant som inte går att fastställa som ospecificerat.\n\nRequired JSON fields:\n- documents: Strukturerad information per dokument från underlaget.\nAllowed fields for items of documents: title, document_type, topic, category, document_date, author, conclusion_summary, source_notes, sammanfattning, documents. Do not emit other fields.",
+                      "knowledge_refs": [],
+                      "mcp_server_refs": [],
+                      "mcp_tool_refs": [],
+                      "model_ref": "model.gpt-5-4-mini"
+                    },
+                    "input_bindings": {
+                      "question": "{{ step_input.text }}\n\nreport_title: {{ flow_input.report_title }}\ndocument_category_hint: {{ flow_input.document_category_hint }}"
+                    },
+                    "input_config": {
+                      "runtime_input": {
+                        "description": "Ladda upp dokument som detta steg ska analysera.",
+                        "enabled": true,
+                        "input_format": "document",
+                        "required": true
+                      }
+                    },
+                    "input_source": "flow_input",
+                    "input_type": "document",
+                    "mcp_policy": "inherit",
+                    "name": "Läs dokumenten",
+                    "output_contract": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "documents": {
+                          "description": "Strukturerad information per dokument från underlaget.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "author": {
+                                "description": "Författare eller upphovsperson, om det framgår.",
+                                "title": "Author",
+                                "type": "string"
+                              },
+                              "category": {
+                                "description": "Bästa dokumentkategori, till exempel sociologi, psykologi eller IT.",
+                                "title": "Category",
+                                "type": "string"
+                              },
+                              "conclusion_summary": {
+                                "description": "Kort sammanfattning av dokumentets slutsatser eller innebörd.",
+                                "title": "Conclusion summary",
+                                "type": "string"
+                              },
+                              "document_date": {
+                                "description": "Datum eller årtal då dokumentet är skrivet, om det framgår.",
+                                "title": "Document date",
+                                "type": "string"
+                              },
+                              "document_type": {
+                                "description": "Typ av dokument, till exempel rapport, artikel, PM eller uppsats.",
+                                "title": "Document type",
+                                "type": "string"
+                              },
+                              "documents": {
+                                "description": "Strukturerad dokumentinformation",
+                                "title": "Documents",
+                                "type": "string"
+                              },
+                              "sammanfattning": {
+                                "description": "Kort sammanfattning grundad i källmaterialet.",
+                                "title": "Sammanfattning",
+                                "type": "string"
+                              },
+                              "source_notes": {
+                                "description": "Kort notering om osäkerheter eller oklarheter i källmaterialet.",
+                                "title": "Source notes",
+                                "type": "string"
+                              },
+                              "title": {
+                                "description": "Dokumentets titel eller närmaste identifierbara namn.",
+                                "title": "Title",
+                                "type": "string"
+                              },
+                              "topic": {
+                                "description": "Vad dokumentet handlar om.",
+                                "title": "Topic",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "document_type",
+                              "topic",
+                              "category",
+                              "conclusion_summary",
+                              "sammanfattning",
+                              "documents"
+                            ],
+                            "type": "object"
+                          },
+                          "title": "Documents",
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "documents"
+                      ],
+                      "type": "object"
+                    },
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "plan_step_ref": "step_a"
+                  },
+                  {
+                    "assistant_spec": {
+                      "instructions": "Skriv en sammanhållen och koncis rapporttext på svenska för alla dokument. För varje dokument ska rapporten innehålla titel, år, kategori, dokumenttyp, vad det handlar om och en kort slutsats. Håll tonen saklig och lättläst, och låt rapporten fungera som direkt underlag för en PDF.",
+                      "knowledge_refs": [],
+                      "mcp_server_refs": [],
+                      "mcp_tool_refs": [],
+                      "model_ref": "model.gpt-5-4-mini"
+                    },
+                    "input_bindings": {
+                      "question": "report_title: {{ flow_input.report_title }}",
+                      "source_refs": [
+                        {
+                          "field_path": "documents",
+                          "label": "Strukturerad dokumentinformation",
+                          "output": "structured",
+                          "step_ref": "step_a"
+                        }
+                      ]
+                    },
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "mcp_policy": "inherit",
+                    "name": "Skriv rapporten",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "plan_step_ref": "step_b"
+                  },
+                  {
+                    "assistant_spec": {
+                      "instructions": "Omvandla den färdiga rapporttexten till en komplett PDF med tydlig titel och välformaterad innehållsstruktur. Se till att slutdokumentet är komplett och redo att levereras som PDF.",
+                      "knowledge_refs": [],
+                      "mcp_server_refs": [],
+                      "mcp_tool_refs": [],
+                      "model_ref": "model.gpt-5-4-mini"
+                    },
+                    "input_bindings": {
+                      "question": "report_title: {{ flow_input.report_title }}",
+                      "source_refs": [
+                        {
+                          "label": "Färdig rapporttext",
+                          "output": "text",
+                          "step_ref": "step_b"
+                        },
+                        {
+                          "field_path": "documents",
+                          "label": "Strukturerad information per dokument från underlaget.",
+                          "output": "structured",
+                          "step_ref": "step_a"
+                        }
+                      ]
+                    },
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "mcp_policy": "inherit",
+                    "name": "Skapa PDF-dokument",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "plan_step_ref": "step_c"
+                  },
+                  {
+                    "assistant_spec": {
+                      "instructions": "Rendera PDF",
+                      "knowledge_refs": [],
+                      "mcp_server_refs": [],
+                      "mcp_tool_refs": []
+                    },
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "mcp_policy": "inherit",
+                    "name": "Skapa PDF",
+                    "output_mode": "render_verbatim",
+                    "output_type": "pdf",
+                    "plan_step_ref": "step_d"
+                  }
+                ]
+              }
+            }
+          },
+          "event": "plan"
+        },
+        {
+          "data": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 1882,
+            "last_finish_reason": "tool_calls",
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "dispatched",
+            "last_request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+            "last_token_usage_estimated": false,
+            "last_token_usage_source": "provider",
+            "llm_calls_made_total": 2,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 2,
+            "prompt_tokens_total": 6235,
+            "repair_attempts_total": 1,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 0,
+            "total_tokens_total": 8117,
+            "wall_clock_ms_total": 0
+          },
+          "event": "usage"
+        },
+        {
+          "data": "",
+          "event": "done"
+        }
+      ],
+      "latest_session": {
+        "attachment_warnings": [],
+        "attachments": [],
+        "conversation": [
+          {
+            "content": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+            "message_id": "019f3c60-89dd-7402-b938-87822618d347",
+            "metadata": {
+              "slot_classification": {
+                "assumptions": [],
+                "contradictions": [],
+                "prompt_hash": "e7a7023401d395e5276a2714a6e0a2f1595df135de76d40238e2af357d98639e",
+                "secondary_obligations": [
+                  "summary",
+                  "key_facts"
+                ],
+                "slots": [
+                  {
+                    "confidence": "high",
+                    "reason": "User says they will send one or more files and the flow should read each file's content.",
+                    "slot_name": "document_material_scope",
+                    "value": "multiple_documents_case"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "They want the system to document document type, topic, category, conclusions, date, and possibly author, then produce a concise summary in a report.",
+                    "slot_name": "post_processing_goal",
+                    "value": "structure_key_information"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "They explicitly want extracted metadata such as document type, category, conclusions, date, and author if possible.",
+                    "slot_name": "runtime_metadata_fields",
+                    "value": "detailed_case_metadata"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "They want the final report delivered as a PDF file.",
+                    "slot_name": "terminal_output",
+                    "value": "pdf_document"
+                  }
+                ]
+              },
+              "ui_language": "sv"
+            },
+            "role": "user",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument.",
+            "message_id": "019f3c60-96f7-7440-b5dc-84fc80844424",
+            "metadata": {
+              "planner_telemetry": {
+                "architecture_commit_populated": false,
+                "completion_tokens": null,
+                "finish_reason": null,
+                "llm_calls_made": 0,
+                "model": "openai/gpt-5.4-mini",
+                "outcome_kind": "server_confirm_requirements",
+                "parse_repair_attempts": 0,
+                "prompt_tokens": null,
+                "repair_attempts": 0,
+                "request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+                "token_usage_estimated": false,
+                "token_usage_source": null,
+                "tool_call_count": 0,
+                "total_tokens": null,
+                "used_auxiliary_llm": false,
+                "wall_clock_ms": 0
+              },
+              "requirements_summary": {
+                "assumptions": [
+                  "Dokumentunderlag: Flera dokument i samma körning",
+                  "PDF-resultat: Vanlig genererad PDF",
+                  "Indata vid körning: Dokument",
+                  "Metadata vid körning: Lägg till rikare metadatafält",
+                  "Slutresultat: PDF-dokument",
+                  "Planen ska följa kraven och underlaget i konversationen.",
+                  "Användaren ska kunna granska och ändra planen innan den tillämpas."
+                ],
+                "input_description": "Primär indata vid körning: Dokument.",
+                "key_decisions": [
+                  {
+                    "decision": "Skapa PDF",
+                    "topic": "Planerad bearbetning"
+                  }
+                ],
+                "manual_setup_notes": [],
+                "output_description": "Huvudsakligt slutresultat: PDF-dokument.",
+                "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+                "summary": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument."
+              },
+              "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+              "session_telemetry": {
+                "architecture_commit_count": 0,
+                "auxiliary_llm_call_count": 0,
+                "clarification_question_count": 0,
+                "completion_tokens_total": 0,
+                "last_finish_reason": null,
+                "last_model": "openai/gpt-5.4-mini",
+                "last_outcome_kind": "server_confirm_requirements",
+                "last_request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+                "last_token_usage_estimated": false,
+                "last_token_usage_source": null,
+                "llm_calls_made_total": 0,
+                "parse_repair_attempts_total": 0,
+                "planner_request_count": 1,
+                "prompt_tokens_total": 0,
+                "repair_attempts_total": 0,
+                "token_usage_estimated": false,
+                "tool_call_count_total": 0,
+                "total_tokens_total": 0,
+                "wall_clock_ms_total": 0
+              }
+            },
+            "role": "assistant",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Ja, det stämmer. Bygg planen.",
+            "message_id": "019f3c60-9761-7060-af38-b38d5c008468",
+            "metadata": {
+              "requirements_confirmed": true,
+              "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+              "slot_classification": {
+                "assumptions": [
+                  "The final deliverable is a PDF report, not JSON or another machine-readable format.",
+                  "The system should extract metadata from the documents when available, including date and author."
+                ],
+                "contradictions": [],
+                "prompt_hash": "e5b902304d90fc172d9422b233a488964f5442716a63a35a599d7a132a80383a",
+                "secondary_obligations": [
+                  "summary",
+                  "key_facts"
+                ],
+                "slots": [
+                  {
+                    "confidence": "high",
+                    "reason": "User says they will send one or more files for the system to read and analyze, so the runtime source material is uploaded documents.",
+                    "slot_name": "primary_runtime_input",
+                    "value": "documents"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "The user wants the content turned into a structured report with document type, topic, category, conclusions, date, author if possible, and a concise summary in a PDF.",
+                    "slot_name": "post_processing_goal",
+                    "value": "structure_key_information"
+                  }
+                ]
+              },
+              "ui_language": "sv"
+            },
+            "role": "user",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Här är mitt korrigerade förslag:",
+            "message_id": "019f3c60-d2c7-7661-b7dc-2d6f0d2d67e9",
+            "metadata": {
+              "planner_telemetry": {
+                "architecture_commit_populated": false,
+                "completion_tokens": 1882,
+                "finish_reason": "tool_calls",
+                "llm_calls_made": 2,
+                "model": "openai/gpt-5.4-mini",
+                "outcome_kind": "dispatched",
+                "parse_repair_attempts": 0,
+                "prompt_tokens": 6235,
+                "proposal_first_attempt_failure_kind": "validation",
+                "proposal_first_attempt_success": false,
+                "proposal_first_attempt_tool": "propose_flow",
+                "proposal_repair_invocation_count": 1,
+                "proposal_repair_invocation_reasons": [
+                  "validation"
+                ],
+                "proposal_target_kind": "create",
+                "repair_attempts": 1,
+                "request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+                "token_usage_estimated": false,
+                "token_usage_source": "provider",
+                "tool_call_count": 0,
+                "total_tokens": 8117,
+                "used_auxiliary_llm": false,
+                "wall_clock_ms": 0
+              },
+              "session_telemetry": {
+                "architecture_commit_count": 0,
+                "auxiliary_llm_call_count": 0,
+                "clarification_question_count": 0,
+                "completion_tokens_total": 1882,
+                "last_finish_reason": "tool_calls",
+                "last_model": "openai/gpt-5.4-mini",
+                "last_outcome_kind": "dispatched",
+                "last_request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+                "last_token_usage_estimated": false,
+                "last_token_usage_source": "provider",
+                "llm_calls_made_total": 2,
+                "parse_repair_attempts_total": 0,
+                "planner_request_count": 2,
+                "prompt_tokens_total": 6235,
+                "repair_attempts_total": 1,
+                "token_usage_estimated": false,
+                "tool_call_count_total": 0,
+                "total_tokens_total": 8117,
+                "wall_clock_ms_total": 0
+              }
+            },
+            "role": "assistant",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": [
+              {
+                "arguments": {
+                  "flow_name": "Dokumentanalys till PDF",
+                  "plan_rationale": "Flödet behöver först läsa och strukturera innehållet från flera dokument, sedan sammanställa de viktigaste bibliografiska och innehållsliga uppgifterna till en tydlig rapport, och till sist rendera allt som en PDF. Eftersom slutresultatet ska vara en färdig PDF med både metadata och sammanfattning passar en flerstegsprocess bäst.",
+                  "step_count": 4,
+                  "step_names": [
+                    "Läs dokumenten",
+                    "Skriv rapporten",
+                    "Skapa PDF-dokument",
+                    "Skapa PDF"
+                  ]
+                },
+                "id": "call_FXVYl0O3XzGncW92O7hRtaRQ",
+                "name": "propose_flow"
+              }
+            ]
+          },
+          {
+            "content": "Plan: Dokumentanalys till PDF\nBeskrivning: Läser in en eller flera dokumentfiler, identifierar dokumenttyp, ämne, kategori, slutsatser, datum och eventuell författare, och bygger därefter en koncis PDF-rapport med titel, år, kategori och sammanfattning.\nAntal steg: 4\n  1. Läs dokumenten [ref=step_a] (AIBuilderInputSource.FLOW_INPUT → AIBuilderInputType.DOCUMENT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.JSON)\n     Utdatakontrakt: documents\n  2. Skriv rapporten [ref=step_b] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.TEXT)\n  3. Skapa PDF-dokument [ref=step_c] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.TEXT)\n  4. Skapa PDF [ref=step_d] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.RENDER_VERBATIM → FlowOutputType.PDF)\nFormulärfält: report_title, document_category_hint\nAntaganden: Flera dokument kan skickas in i samma körning.; Slutresultatet ska vara en genererad PDF.; Rapporten ska vara koncis men ändå innehålla titel, år, kategori, dokumenttyp, ämne och slutsats för varje dokument.",
+            "message_id": "019f3c60-d2c7-7661-b7dc-2d7c0875a868",
+            "metadata": null,
+            "role": "tool",
+            "timestamp": null,
+            "tool_call_id": "call_FXVYl0O3XzGncW92O7hRtaRQ",
+            "tool_calls": null
+          }
+        ],
+        "created_at": "2026-07-07T11:39:47.444192Z",
+        "flow_id": null,
+        "latest_plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+        "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+        "status": "awaiting_approval",
+        "target_kind": "create",
+        "telemetry": {
+          "architecture_commit_count": 0,
+          "auxiliary_llm_call_count": 0,
+          "clarification_question_count": 0,
+          "completion_tokens_total": 1882,
+          "last_finish_reason": "tool_calls",
+          "last_model": "openai/gpt-5.4-mini",
+          "last_outcome_kind": "dispatched",
+          "last_request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+          "last_token_usage_estimated": false,
+          "last_token_usage_source": "provider",
+          "llm_calls_made_total": 2,
+          "parse_repair_attempts_total": 0,
+          "planner_request_count": 2,
+          "prompt_tokens_total": 6235,
+          "repair_attempts_total": 1,
+          "token_usage_estimated": false,
+          "tool_call_count_total": 0,
+          "total_tokens_total": 8117,
+          "wall_clock_ms_total": 0
+        },
+        "updated_at": "2026-07-07T11:40:06.274661Z"
+      },
+      "message": "Ja, det stämmer. Bygg planen.",
+      "plan": {
+        "created_at": "2026-07-07T11:39:50.989732Z",
+        "plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+        "proposal": {
+          "assumptions": [
+            "Flera dokument kan skickas in i samma körning.",
+            "Slutresultatet ska vara en genererad PDF.",
+            "Rapporten ska vara koncis men ändå innehålla titel, år, kategori, dokumenttyp, ämne och slutsats för varje dokument."
+          ],
+          "description_override_manual": false,
+          "lint_warnings": [],
+          "plan_rationale": "Flödet behöver först läsa och strukturera innehållet från flera dokument, sedan sammanställa de viktigaste bibliografiska och innehållsliga uppgifterna till en tydlig rapport, och till sist rendera allt som en PDF. Eftersom slutresultatet ska vara en färdig PDF med både metadata och sammanfattning passar en flerstegsprocess bäst.",
+          "risk_acknowledgments": [],
+          "spec": {
+            "document_body_writer_step_refs": [
+              "step_c"
+            ],
+            "flow_description": "Läser in en eller flera dokumentfiler, identifierar dokumenttyp, ämne, kategori, slutsatser, datum och eventuell författare, och bygger därefter en koncis PDF-rapport med titel, år, kategori och sammanfattning.",
+            "flow_name": "Dokumentanalys till PDF",
+            "form_fields": [
+              {
+                "label": "Rapporttitel",
+                "name": "report_title",
+                "required": false,
+                "type": "text"
+              },
+              {
+                "label": "Kategori om den är känd",
+                "name": "document_category_hint",
+                "options": [
+                  "sociologi",
+                  "psykologi",
+                  "IT",
+                  "ekonomi",
+                  "juridik",
+                  "medicin",
+                  "utbildning",
+                  "annan"
+                ],
+                "required": false,
+                "type": "select"
+              }
+            ],
+            "steps": [
+              {
+                "assistant_spec": {
+                  "instructions": "Läs igenom alla inskickade dokument och identifiera för varje dokument vad det är för typ av dokument, vad det handlar om, vilken kategori det bäst passar i, vilket datum det är skrivet och om möjligt vem som har skrivit det. Fokusera på tydliga källbaserade uppgifter och markera sådant som inte går att fastställa som ospecificerat.\n\nRequired JSON fields:\n- documents: Strukturerad information per dokument från underlaget.\nAllowed fields for items of documents: title, document_type, topic, category, document_date, author, conclusion_summary, source_notes, sammanfattning, documents. Do not emit other fields.",
+                  "knowledge_refs": [],
+                  "mcp_server_refs": [],
+                  "mcp_tool_refs": [],
+                  "model_ref": "model.gpt-5-4-mini"
+                },
+                "input_bindings": {
+                  "question": "{{ step_input.text }}\n\nreport_title: {{ flow_input.report_title }}\ndocument_category_hint: {{ flow_input.document_category_hint }}"
+                },
+                "input_config": {
+                  "runtime_input": {
+                    "description": "Ladda upp dokument som detta steg ska analysera.",
+                    "enabled": true,
+                    "input_format": "document",
+                    "required": true
+                  }
+                },
+                "input_source": "flow_input",
+                "input_type": "document",
+                "mcp_policy": "inherit",
+                "name": "Läs dokumenten",
+                "output_contract": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "documents": {
+                      "description": "Strukturerad information per dokument från underlaget.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "author": {
+                            "description": "Författare eller upphovsperson, om det framgår.",
+                            "title": "Author",
+                            "type": "string"
+                          },
+                          "category": {
+                            "description": "Bästa dokumentkategori, till exempel sociologi, psykologi eller IT.",
+                            "title": "Category",
+                            "type": "string"
+                          },
+                          "conclusion_summary": {
+                            "description": "Kort sammanfattning av dokumentets slutsatser eller innebörd.",
+                            "title": "Conclusion summary",
+                            "type": "string"
+                          },
+                          "document_date": {
+                            "description": "Datum eller årtal då dokumentet är skrivet, om det framgår.",
+                            "title": "Document date",
+                            "type": "string"
+                          },
+                          "document_type": {
+                            "description": "Typ av dokument, till exempel rapport, artikel, PM eller uppsats.",
+                            "title": "Document type",
+                            "type": "string"
+                          },
+                          "documents": {
+                            "description": "Strukturerad dokumentinformation",
+                            "title": "Documents",
+                            "type": "string"
+                          },
+                          "sammanfattning": {
+                            "description": "Kort sammanfattning grundad i källmaterialet.",
+                            "title": "Sammanfattning",
+                            "type": "string"
+                          },
+                          "source_notes": {
+                            "description": "Kort notering om osäkerheter eller oklarheter i källmaterialet.",
+                            "title": "Source notes",
+                            "type": "string"
+                          },
+                          "title": {
+                            "description": "Dokumentets titel eller närmaste identifierbara namn.",
+                            "title": "Title",
+                            "type": "string"
+                          },
+                          "topic": {
+                            "description": "Vad dokumentet handlar om.",
+                            "title": "Topic",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "document_type",
+                          "topic",
+                          "category",
+                          "conclusion_summary",
+                          "sammanfattning",
+                          "documents"
+                        ],
+                        "type": "object"
+                      },
+                      "title": "Documents",
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "documents"
+                  ],
+                  "type": "object"
+                },
+                "output_mode": "pass_through",
+                "output_type": "json",
+                "plan_step_ref": "step_a"
+              },
+              {
+                "assistant_spec": {
+                  "instructions": "Skriv en sammanhållen och koncis rapporttext på svenska för alla dokument. För varje dokument ska rapporten innehålla titel, år, kategori, dokumenttyp, vad det handlar om och en kort slutsats. Håll tonen saklig och lättläst, och låt rapporten fungera som direkt underlag för en PDF.",
+                  "knowledge_refs": [],
+                  "mcp_server_refs": [],
+                  "mcp_tool_refs": [],
+                  "model_ref": "model.gpt-5-4-mini"
+                },
+                "input_bindings": {
+                  "question": "report_title: {{ flow_input.report_title }}",
+                  "source_refs": [
+                    {
+                      "field_path": "documents",
+                      "label": "Strukturerad dokumentinformation",
+                      "output": "structured",
+                      "step_ref": "step_a"
+                    }
+                  ]
+                },
+                "input_source": "previous_step",
+                "input_type": "text",
+                "mcp_policy": "inherit",
+                "name": "Skriv rapporten",
+                "output_mode": "pass_through",
+                "output_type": "text",
+                "plan_step_ref": "step_b"
+              },
+              {
+                "assistant_spec": {
+                  "instructions": "Omvandla den färdiga rapporttexten till en komplett PDF med tydlig titel och välformaterad innehållsstruktur. Se till att slutdokumentet är komplett och redo att levereras som PDF.",
+                  "knowledge_refs": [],
+                  "mcp_server_refs": [],
+                  "mcp_tool_refs": [],
+                  "model_ref": "model.gpt-5-4-mini"
+                },
+                "input_bindings": {
+                  "question": "report_title: {{ flow_input.report_title }}",
+                  "source_refs": [
+                    {
+                      "label": "Färdig rapporttext",
+                      "output": "text",
+                      "step_ref": "step_b"
+                    },
+                    {
+                      "field_path": "documents",
+                      "label": "Strukturerad information per dokument från underlaget.",
+                      "output": "structured",
+                      "step_ref": "step_a"
+                    }
+                  ]
+                },
+                "input_source": "previous_step",
+                "input_type": "text",
+                "mcp_policy": "inherit",
+                "name": "Skapa PDF-dokument",
+                "output_mode": "pass_through",
+                "output_type": "text",
+                "plan_step_ref": "step_c"
+              },
+              {
+                "assistant_spec": {
+                  "instructions": "Rendera PDF",
+                  "knowledge_refs": [],
+                  "mcp_server_refs": [],
+                  "mcp_tool_refs": []
+                },
+                "input_source": "previous_step",
+                "input_type": "text",
+                "mcp_policy": "inherit",
+                "name": "Skapa PDF",
+                "output_mode": "render_verbatim",
+                "output_type": "pdf",
+                "plan_step_ref": "step_d"
+              }
+            ]
+          }
+        },
+        "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+        "spec_hash": "b6a040583dae8249c75a36fe9c4e6691536b3b5917cfd893c3d3e0597b9b9740",
+        "status": "proposed",
+        "updated_at": "2026-07-07T11:39:50.989732Z"
+      },
+      "plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+      "plan_summary": {
+        "all_previous_step_count": 0,
+        "duplicate_source_ref_steps": [],
+        "flow_name": "Dokumentanalys till PDF",
+        "form_field_names": [
+          "report_title",
+          "document_category_hint"
+        ],
+        "has_plan": true,
+        "implicit_previous_step_steps": 1,
+        "instruction_template_steps": [],
+        "json_step_count": 1,
+        "question_binding_steps": 3,
+        "source_ref_steps": 2,
+        "step_count": 4,
+        "steps": [
+          {
+            "duplicate_source_ref_expressions": [],
+            "has_question": true,
+            "implicit_previous_step": false,
+            "input_contract_properties": [],
+            "input_source": "flow_input",
+            "input_type": "document",
+            "instruction_bytes": 626,
+            "instruction_excerpt": "Läs igenom alla inskickade dokument och identifiera för varje dokument vad det är för typ av dokument, vad det handlar om, vilken kategori det bäst passar i, vilket datum det är skrivet och om möjligt vem som har skrivit det. Fokusera på tydliga källbaserade uppgifter och markera sådant som inte går att fastställa som ospecificerat. Required JSON fields: - d",
+            "instruction_has_template": false,
+            "name": "Läs dokumenten",
+            "order": 1,
+            "output_contract_leaf_properties": [
+              "title",
+              "topic",
+              "author",
+              "category",
+              "documents",
+              "source_notes",
+              "document_date",
+              "document_type",
+              "sammanfattning",
+              "conclusion_summary"
+            ],
+            "output_contract_properties": [
+              "documents"
+            ],
+            "output_mode": "pass_through",
+            "output_type": "json",
+            "plan_step_ref": "step_a",
+            "source_ref_count": 0,
+            "source_refs": []
+          },
+          {
+            "duplicate_source_ref_expressions": [],
+            "has_question": true,
+            "implicit_previous_step": false,
+            "input_contract_properties": [],
+            "input_source": "previous_step",
+            "input_type": "text",
+            "instruction_bytes": 293,
+            "instruction_excerpt": "Skriv en sammanhållen och koncis rapporttext på svenska för alla dokument. För varje dokument ska rapporten innehålla titel, år, kategori, dokumenttyp, vad det handlar om och en kort slutsats. Håll tonen saklig och lättläst, och låt rapporten fungera som direkt underlag för en PDF.",
+            "instruction_has_template": false,
+            "name": "Skriv rapporten",
+            "order": 2,
+            "output_contract_leaf_properties": [],
+            "output_contract_properties": [],
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "plan_step_ref": "step_b",
+            "source_ref_count": 1,
+            "source_refs": [
+              {
+                "field_path": "documents",
+                "label": "Strukturerad dokumentinformation",
+                "output": "structured",
+                "step_ref": "step_a"
+              }
+            ]
+          },
+          {
+            "duplicate_source_ref_expressions": [],
+            "has_question": true,
+            "implicit_previous_step": false,
+            "input_contract_properties": [],
+            "input_source": "previous_step",
+            "input_type": "text",
+            "instruction_bytes": 184,
+            "instruction_excerpt": "Omvandla den färdiga rapporttexten till en komplett PDF med tydlig titel och välformaterad innehållsstruktur. Se till att slutdokumentet är komplett och redo att levereras som PDF.",
+            "instruction_has_template": false,
+            "name": "Skapa PDF-dokument",
+            "order": 3,
+            "output_contract_leaf_properties": [],
+            "output_contract_properties": [],
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "plan_step_ref": "step_c",
+            "source_ref_count": 2,
+            "source_refs": [
+              {
+                "label": "Färdig rapporttext",
+                "output": "text",
+                "step_ref": "step_b"
+              },
+              {
+                "field_path": "documents",
+                "label": "Strukturerad information per dokument från underlaget.",
+                "output": "structured",
+                "step_ref": "step_a"
+              }
+            ]
+          },
+          {
+            "duplicate_source_ref_expressions": [],
+            "has_question": false,
+            "implicit_previous_step": true,
+            "input_contract_properties": [],
+            "input_source": "previous_step",
+            "input_type": "text",
+            "instruction_bytes": 11,
+            "instruction_excerpt": "Rendera PDF",
+            "instruction_has_template": false,
+            "name": "Skapa PDF",
+            "order": 4,
+            "output_contract_leaf_properties": [],
+            "output_contract_properties": [],
+            "output_mode": "render_verbatim",
+            "output_type": "pdf",
+            "plan_step_ref": "step_d",
+            "source_ref_count": 0,
+            "source_refs": []
+          }
+        ],
+        "terminal_output_mode": "render_verbatim",
+        "terminal_output_type": "pdf"
+      },
+      "question_answer": {
+        "kind": "requirements_confirmation",
+        "requirements_confirmed": true,
+        "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+        "ui_language": "sv"
+      }
+    }
+  ],
+  "latest_session": {
+    "attachment_warnings": [],
+    "attachments": [],
+    "conversation": [
+      {
+        "content": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+        "message_id": "019f3c60-89dd-7402-b938-87822618d347",
+        "metadata": {
+          "slot_classification": {
+            "assumptions": [],
+            "contradictions": [],
+            "prompt_hash": "e7a7023401d395e5276a2714a6e0a2f1595df135de76d40238e2af357d98639e",
+            "secondary_obligations": [
+              "summary",
+              "key_facts"
+            ],
+            "slots": [
+              {
+                "confidence": "high",
+                "reason": "User says they will send one or more files and the flow should read each file's content.",
+                "slot_name": "document_material_scope",
+                "value": "multiple_documents_case"
+              },
+              {
+                "confidence": "high",
+                "reason": "They want the system to document document type, topic, category, conclusions, date, and possibly author, then produce a concise summary in a report.",
+                "slot_name": "post_processing_goal",
+                "value": "structure_key_information"
+              },
+              {
+                "confidence": "high",
+                "reason": "They explicitly want extracted metadata such as document type, category, conclusions, date, and author if possible.",
+                "slot_name": "runtime_metadata_fields",
+                "value": "detailed_case_metadata"
+              },
+              {
+                "confidence": "high",
+                "reason": "They want the final report delivered as a PDF file.",
+                "slot_name": "terminal_output",
+                "value": "pdf_document"
+              }
+            ]
+          },
+          "ui_language": "sv"
+        },
+        "role": "user",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": null
+      },
+      {
+        "content": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument.",
+        "message_id": "019f3c60-96f7-7440-b5dc-84fc80844424",
+        "metadata": {
+          "planner_telemetry": {
+            "architecture_commit_populated": false,
+            "completion_tokens": null,
+            "finish_reason": null,
+            "llm_calls_made": 0,
+            "model": "openai/gpt-5.4-mini",
+            "outcome_kind": "server_confirm_requirements",
+            "parse_repair_attempts": 0,
+            "prompt_tokens": null,
+            "repair_attempts": 0,
+            "request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+            "token_usage_estimated": false,
+            "token_usage_source": null,
+            "tool_call_count": 0,
+            "total_tokens": null,
+            "used_auxiliary_llm": false,
+            "wall_clock_ms": 0
+          },
+          "requirements_summary": {
+            "assumptions": [
+              "Dokumentunderlag: Flera dokument i samma körning",
+              "PDF-resultat: Vanlig genererad PDF",
+              "Indata vid körning: Dokument",
+              "Metadata vid körning: Lägg till rikare metadatafält",
+              "Slutresultat: PDF-dokument",
+              "Planen ska följa kraven och underlaget i konversationen.",
+              "Användaren ska kunna granska och ändra planen innan den tillämpas."
+            ],
+            "input_description": "Primär indata vid körning: Dokument.",
+            "key_decisions": [
+              {
+                "decision": "Skapa PDF",
+                "topic": "Planerad bearbetning"
+              }
+            ],
+            "manual_setup_notes": [],
+            "output_description": "Huvudsakligt slutresultat: PDF-dokument.",
+            "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+            "summary": "Flödet ska ta emot Dokument vid körning och leverera PDF-dokument."
+          },
+          "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+          "session_telemetry": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 0,
+            "last_finish_reason": null,
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "server_confirm_requirements",
+            "last_request_id": "93929dc3-6597-49d8-8ec2-563cc2297a6e",
+            "last_token_usage_estimated": false,
+            "last_token_usage_source": null,
+            "llm_calls_made_total": 0,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 1,
+            "prompt_tokens_total": 0,
+            "repair_attempts_total": 0,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 0,
+            "total_tokens_total": 0,
+            "wall_clock_ms_total": 0
+          }
+        },
+        "role": "assistant",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": null
+      },
+      {
+        "content": "Ja, det stämmer. Bygg planen.",
+        "message_id": "019f3c60-9761-7060-af38-b38d5c008468",
+        "metadata": {
+          "requirements_confirmed": true,
+          "requirements_version": "cef99fe5d9910501f0aaa3ba3ddd2138016c483c2127051f19cfde087d9439a7",
+          "slot_classification": {
+            "assumptions": [
+              "The final deliverable is a PDF report, not JSON or another machine-readable format.",
+              "The system should extract metadata from the documents when available, including date and author."
+            ],
+            "contradictions": [],
+            "prompt_hash": "e5b902304d90fc172d9422b233a488964f5442716a63a35a599d7a132a80383a",
+            "secondary_obligations": [
+              "summary",
+              "key_facts"
+            ],
+            "slots": [
+              {
+                "confidence": "high",
+                "reason": "User says they will send one or more files for the system to read and analyze, so the runtime source material is uploaded documents.",
+                "slot_name": "primary_runtime_input",
+                "value": "documents"
+              },
+              {
+                "confidence": "high",
+                "reason": "The user wants the content turned into a structured report with document type, topic, category, conclusions, date, author if possible, and a concise summary in a PDF.",
+                "slot_name": "post_processing_goal",
+                "value": "structure_key_information"
+              }
+            ]
+          },
+          "ui_language": "sv"
+        },
+        "role": "user",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": null
+      },
+      {
+        "content": "Här är mitt korrigerade förslag:",
+        "message_id": "019f3c60-d2c7-7661-b7dc-2d6f0d2d67e9",
+        "metadata": {
+          "planner_telemetry": {
+            "architecture_commit_populated": false,
+            "completion_tokens": 1882,
+            "finish_reason": "tool_calls",
+            "llm_calls_made": 2,
+            "model": "openai/gpt-5.4-mini",
+            "outcome_kind": "dispatched",
+            "parse_repair_attempts": 0,
+            "prompt_tokens": 6235,
+            "proposal_first_attempt_failure_kind": "validation",
+            "proposal_first_attempt_success": false,
+            "proposal_first_attempt_tool": "propose_flow",
+            "proposal_repair_invocation_count": 1,
+            "proposal_repair_invocation_reasons": [
+              "validation"
+            ],
+            "proposal_target_kind": "create",
+            "repair_attempts": 1,
+            "request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+            "token_usage_estimated": false,
+            "token_usage_source": "provider",
+            "tool_call_count": 0,
+            "total_tokens": 8117,
+            "used_auxiliary_llm": false,
+            "wall_clock_ms": 0
+          },
+          "session_telemetry": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 1882,
+            "last_finish_reason": "tool_calls",
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "dispatched",
+            "last_request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+            "last_token_usage_estimated": false,
+            "last_token_usage_source": "provider",
+            "llm_calls_made_total": 2,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 2,
+            "prompt_tokens_total": 6235,
+            "repair_attempts_total": 1,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 0,
+            "total_tokens_total": 8117,
+            "wall_clock_ms_total": 0
+          }
+        },
+        "role": "assistant",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": [
+          {
+            "arguments": {
+              "flow_name": "Dokumentanalys till PDF",
+              "plan_rationale": "Flödet behöver först läsa och strukturera innehållet från flera dokument, sedan sammanställa de viktigaste bibliografiska och innehållsliga uppgifterna till en tydlig rapport, och till sist rendera allt som en PDF. Eftersom slutresultatet ska vara en färdig PDF med både metadata och sammanfattning passar en flerstegsprocess bäst.",
+              "step_count": 4,
+              "step_names": [
+                "Läs dokumenten",
+                "Skriv rapporten",
+                "Skapa PDF-dokument",
+                "Skapa PDF"
+              ]
+            },
+            "id": "call_FXVYl0O3XzGncW92O7hRtaRQ",
+            "name": "propose_flow"
+          }
+        ]
+      },
+      {
+        "content": "Plan: Dokumentanalys till PDF\nBeskrivning: Läser in en eller flera dokumentfiler, identifierar dokumenttyp, ämne, kategori, slutsatser, datum och eventuell författare, och bygger därefter en koncis PDF-rapport med titel, år, kategori och sammanfattning.\nAntal steg: 4\n  1. Läs dokumenten [ref=step_a] (AIBuilderInputSource.FLOW_INPUT → AIBuilderInputType.DOCUMENT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.JSON)\n     Utdatakontrakt: documents\n  2. Skriv rapporten [ref=step_b] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.TEXT)\n  3. Skapa PDF-dokument [ref=step_c] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.TEXT)\n  4. Skapa PDF [ref=step_d] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.RENDER_VERBATIM → FlowOutputType.PDF)\nFormulärfält: report_title, document_category_hint\nAntaganden: Flera dokument kan skickas in i samma körning.; Slutresultatet ska vara en genererad PDF.; Rapporten ska vara koncis men ändå innehålla titel, år, kategori, dokumenttyp, ämne och slutsats för varje dokument.",
+        "message_id": "019f3c60-d2c7-7661-b7dc-2d7c0875a868",
+        "metadata": null,
+        "role": "tool",
+        "timestamp": null,
+        "tool_call_id": "call_FXVYl0O3XzGncW92O7hRtaRQ",
+        "tool_calls": null
+      }
+    ],
+    "created_at": "2026-07-07T11:39:47.444192Z",
+    "flow_id": null,
+    "latest_plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+    "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+    "status": "awaiting_approval",
+    "target_kind": "create",
+    "telemetry": {
+      "architecture_commit_count": 0,
+      "auxiliary_llm_call_count": 0,
+      "clarification_question_count": 0,
+      "completion_tokens_total": 1882,
+      "last_finish_reason": "tool_calls",
+      "last_model": "openai/gpt-5.4-mini",
+      "last_outcome_kind": "dispatched",
+      "last_request_id": "604fa3ee-5807-4aea-ba5f-1b7891f704fe",
+      "last_token_usage_estimated": false,
+      "last_token_usage_source": "provider",
+      "llm_calls_made_total": 2,
+      "parse_repair_attempts_total": 0,
+      "planner_request_count": 2,
+      "prompt_tokens_total": 6235,
+      "repair_attempts_total": 1,
+      "token_usage_estimated": false,
+      "tool_call_count_total": 0,
+      "total_tokens_total": 8117,
+      "wall_clock_ms_total": 0
+    },
+    "updated_at": "2026-07-07T11:40:06.274661Z"
+  },
+  "plan": {
+    "created_at": "2026-07-07T11:39:50.989732Z",
+    "plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+    "proposal": {
+      "assumptions": [
+        "Flera dokument kan skickas in i samma körning.",
+        "Slutresultatet ska vara en genererad PDF.",
+        "Rapporten ska vara koncis men ändå innehålla titel, år, kategori, dokumenttyp, ämne och slutsats för varje dokument."
+      ],
+      "description_override_manual": false,
+      "lint_warnings": [],
+      "plan_rationale": "Flödet behöver först läsa och strukturera innehållet från flera dokument, sedan sammanställa de viktigaste bibliografiska och innehållsliga uppgifterna till en tydlig rapport, och till sist rendera allt som en PDF. Eftersom slutresultatet ska vara en färdig PDF med både metadata och sammanfattning passar en flerstegsprocess bäst.",
+      "risk_acknowledgments": [],
+      "spec": {
+        "document_body_writer_step_refs": [
+          "step_c"
+        ],
+        "flow_description": "Läser in en eller flera dokumentfiler, identifierar dokumenttyp, ämne, kategori, slutsatser, datum och eventuell författare, och bygger därefter en koncis PDF-rapport med titel, år, kategori och sammanfattning.",
+        "flow_name": "Dokumentanalys till PDF",
+        "form_fields": [
+          {
+            "label": "Rapporttitel",
+            "name": "report_title",
+            "required": false,
+            "type": "text"
+          },
+          {
+            "label": "Kategori om den är känd",
+            "name": "document_category_hint",
+            "options": [
+              "sociologi",
+              "psykologi",
+              "IT",
+              "ekonomi",
+              "juridik",
+              "medicin",
+              "utbildning",
+              "annan"
+            ],
+            "required": false,
+            "type": "select"
+          }
+        ],
+        "steps": [
+          {
+            "assistant_spec": {
+              "instructions": "Läs igenom alla inskickade dokument och identifiera för varje dokument vad det är för typ av dokument, vad det handlar om, vilken kategori det bäst passar i, vilket datum det är skrivet och om möjligt vem som har skrivit det. Fokusera på tydliga källbaserade uppgifter och markera sådant som inte går att fastställa som ospecificerat.\n\nRequired JSON fields:\n- documents: Strukturerad information per dokument från underlaget.\nAllowed fields for items of documents: title, document_type, topic, category, document_date, author, conclusion_summary, source_notes, sammanfattning, documents. Do not emit other fields.",
+              "knowledge_refs": [],
+              "mcp_server_refs": [],
+              "mcp_tool_refs": [],
+              "model_ref": "model.gpt-5-4-mini"
+            },
+            "input_bindings": {
+              "question": "{{ step_input.text }}\n\nreport_title: {{ flow_input.report_title }}\ndocument_category_hint: {{ flow_input.document_category_hint }}"
+            },
+            "input_config": {
+              "runtime_input": {
+                "description": "Ladda upp dokument som detta steg ska analysera.",
+                "enabled": true,
+                "input_format": "document",
+                "required": true
+              }
+            },
+            "input_source": "flow_input",
+            "input_type": "document",
+            "mcp_policy": "inherit",
+            "name": "Läs dokumenten",
+            "output_contract": {
+              "additionalProperties": false,
+              "properties": {
+                "documents": {
+                  "description": "Strukturerad information per dokument från underlaget.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "author": {
+                        "description": "Författare eller upphovsperson, om det framgår.",
+                        "title": "Author",
+                        "type": "string"
+                      },
+                      "category": {
+                        "description": "Bästa dokumentkategori, till exempel sociologi, psykologi eller IT.",
+                        "title": "Category",
+                        "type": "string"
+                      },
+                      "conclusion_summary": {
+                        "description": "Kort sammanfattning av dokumentets slutsatser eller innebörd.",
+                        "title": "Conclusion summary",
+                        "type": "string"
+                      },
+                      "document_date": {
+                        "description": "Datum eller årtal då dokumentet är skrivet, om det framgår.",
+                        "title": "Document date",
+                        "type": "string"
+                      },
+                      "document_type": {
+                        "description": "Typ av dokument, till exempel rapport, artikel, PM eller uppsats.",
+                        "title": "Document type",
+                        "type": "string"
+                      },
+                      "documents": {
+                        "description": "Strukturerad dokumentinformation",
+                        "title": "Documents",
+                        "type": "string"
+                      },
+                      "sammanfattning": {
+                        "description": "Kort sammanfattning grundad i källmaterialet.",
+                        "title": "Sammanfattning",
+                        "type": "string"
+                      },
+                      "source_notes": {
+                        "description": "Kort notering om osäkerheter eller oklarheter i källmaterialet.",
+                        "title": "Source notes",
+                        "type": "string"
+                      },
+                      "title": {
+                        "description": "Dokumentets titel eller närmaste identifierbara namn.",
+                        "title": "Title",
+                        "type": "string"
+                      },
+                      "topic": {
+                        "description": "Vad dokumentet handlar om.",
+                        "title": "Topic",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "document_type",
+                      "topic",
+                      "category",
+                      "conclusion_summary",
+                      "sammanfattning",
+                      "documents"
+                    ],
+                    "type": "object"
+                  },
+                  "title": "Documents",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "documents"
+              ],
+              "type": "object"
+            },
+            "output_mode": "pass_through",
+            "output_type": "json",
+            "plan_step_ref": "step_a"
+          },
+          {
+            "assistant_spec": {
+              "instructions": "Skriv en sammanhållen och koncis rapporttext på svenska för alla dokument. För varje dokument ska rapporten innehålla titel, år, kategori, dokumenttyp, vad det handlar om och en kort slutsats. Håll tonen saklig och lättläst, och låt rapporten fungera som direkt underlag för en PDF.",
+              "knowledge_refs": [],
+              "mcp_server_refs": [],
+              "mcp_tool_refs": [],
+              "model_ref": "model.gpt-5-4-mini"
+            },
+            "input_bindings": {
+              "question": "report_title: {{ flow_input.report_title }}",
+              "source_refs": [
+                {
+                  "field_path": "documents",
+                  "label": "Strukturerad dokumentinformation",
+                  "output": "structured",
+                  "step_ref": "step_a"
+                }
+              ]
+            },
+            "input_source": "previous_step",
+            "input_type": "text",
+            "mcp_policy": "inherit",
+            "name": "Skriv rapporten",
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "plan_step_ref": "step_b"
+          },
+          {
+            "assistant_spec": {
+              "instructions": "Omvandla den färdiga rapporttexten till en komplett PDF med tydlig titel och välformaterad innehållsstruktur. Se till att slutdokumentet är komplett och redo att levereras som PDF.",
+              "knowledge_refs": [],
+              "mcp_server_refs": [],
+              "mcp_tool_refs": [],
+              "model_ref": "model.gpt-5-4-mini"
+            },
+            "input_bindings": {
+              "question": "report_title: {{ flow_input.report_title }}",
+              "source_refs": [
+                {
+                  "label": "Färdig rapporttext",
+                  "output": "text",
+                  "step_ref": "step_b"
+                },
+                {
+                  "field_path": "documents",
+                  "label": "Strukturerad information per dokument från underlaget.",
+                  "output": "structured",
+                  "step_ref": "step_a"
+                }
+              ]
+            },
+            "input_source": "previous_step",
+            "input_type": "text",
+            "mcp_policy": "inherit",
+            "name": "Skapa PDF-dokument",
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "plan_step_ref": "step_c"
+          },
+          {
+            "assistant_spec": {
+              "instructions": "Rendera PDF",
+              "knowledge_refs": [],
+              "mcp_server_refs": [],
+              "mcp_tool_refs": []
+            },
+            "input_source": "previous_step",
+            "input_type": "text",
+            "mcp_policy": "inherit",
+            "name": "Skapa PDF",
+            "output_mode": "render_verbatim",
+            "output_type": "pdf",
+            "plan_step_ref": "step_d"
+          }
+        ]
+      }
+    },
+    "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+    "spec_hash": "b6a040583dae8249c75a36fe9c4e6691536b3b5917cfd893c3d3e0597b9b9740",
+    "status": "proposed",
+    "updated_at": "2026-07-07T11:39:50.989732Z"
+  },
+  "plan_id": "78f6602b-f38c-4e4e-9eae-3885369d943a",
+  "plan_summary": {
+    "all_previous_step_count": 0,
+    "duplicate_source_ref_steps": [],
+    "flow_name": "Dokumentanalys till PDF",
+    "form_field_names": [
+      "report_title",
+      "document_category_hint"
+    ],
+    "has_plan": true,
+    "implicit_previous_step_steps": 1,
+    "instruction_template_steps": [],
+    "json_step_count": 1,
+    "question_binding_steps": 3,
+    "source_ref_steps": 2,
+    "step_count": 4,
+    "steps": [
+      {
+        "duplicate_source_ref_expressions": [],
+        "has_question": true,
+        "implicit_previous_step": false,
+        "input_contract_properties": [],
+        "input_source": "flow_input",
+        "input_type": "document",
+        "instruction_bytes": 626,
+        "instruction_excerpt": "Läs igenom alla inskickade dokument och identifiera för varje dokument vad det är för typ av dokument, vad det handlar om, vilken kategori det bäst passar i, vilket datum det är skrivet och om möjligt vem som har skrivit det. Fokusera på tydliga källbaserade uppgifter och markera sådant som inte går att fastställa som ospecificerat. Required JSON fields: - d",
+        "instruction_has_template": false,
+        "name": "Läs dokumenten",
+        "order": 1,
+        "output_contract_leaf_properties": [
+          "title",
+          "topic",
+          "author",
+          "category",
+          "documents",
+          "source_notes",
+          "document_date",
+          "document_type",
+          "sammanfattning",
+          "conclusion_summary"
+        ],
+        "output_contract_properties": [
+          "documents"
+        ],
+        "output_mode": "pass_through",
+        "output_type": "json",
+        "plan_step_ref": "step_a",
+        "source_ref_count": 0,
+        "source_refs": []
+      },
+      {
+        "duplicate_source_ref_expressions": [],
+        "has_question": true,
+        "implicit_previous_step": false,
+        "input_contract_properties": [],
+        "input_source": "previous_step",
+        "input_type": "text",
+        "instruction_bytes": 293,
+        "instruction_excerpt": "Skriv en sammanhållen och koncis rapporttext på svenska för alla dokument. För varje dokument ska rapporten innehålla titel, år, kategori, dokumenttyp, vad det handlar om och en kort slutsats. Håll tonen saklig och lättläst, och låt rapporten fungera som direkt underlag för en PDF.",
+        "instruction_has_template": false,
+        "name": "Skriv rapporten",
+        "order": 2,
+        "output_contract_leaf_properties": [],
+        "output_contract_properties": [],
+        "output_mode": "pass_through",
+        "output_type": "text",
+        "plan_step_ref": "step_b",
+        "source_ref_count": 1,
+        "source_refs": [
+          {
+            "field_path": "documents",
+            "label": "Strukturerad dokumentinformation",
+            "output": "structured",
+            "step_ref": "step_a"
+          }
+        ]
+      },
+      {
+        "duplicate_source_ref_expressions": [],
+        "has_question": true,
+        "implicit_previous_step": false,
+        "input_contract_properties": [],
+        "input_source": "previous_step",
+        "input_type": "text",
+        "instruction_bytes": 184,
+        "instruction_excerpt": "Omvandla den färdiga rapporttexten till en komplett PDF med tydlig titel och välformaterad innehållsstruktur. Se till att slutdokumentet är komplett och redo att levereras som PDF.",
+        "instruction_has_template": false,
+        "name": "Skapa PDF-dokument",
+        "order": 3,
+        "output_contract_leaf_properties": [],
+        "output_contract_properties": [],
+        "output_mode": "pass_through",
+        "output_type": "text",
+        "plan_step_ref": "step_c",
+        "source_ref_count": 2,
+        "source_refs": [
+          {
+            "label": "Färdig rapporttext",
+            "output": "text",
+            "step_ref": "step_b"
+          },
+          {
+            "field_path": "documents",
+            "label": "Strukturerad information per dokument från underlaget.",
+            "output": "structured",
+            "step_ref": "step_a"
+          }
+        ]
+      },
+      {
+        "duplicate_source_ref_expressions": [],
+        "has_question": false,
+        "implicit_previous_step": true,
+        "input_contract_properties": [],
+        "input_source": "previous_step",
+        "input_type": "text",
+        "instruction_bytes": 11,
+        "instruction_excerpt": "Rendera PDF",
+        "instruction_has_template": false,
+        "name": "Skapa PDF",
+        "order": 4,
+        "output_contract_leaf_properties": [],
+        "output_contract_properties": [],
+        "output_mode": "render_verbatim",
+        "output_type": "pdf",
+        "plan_step_ref": "step_d",
+        "source_ref_count": 0,
+        "source_refs": []
+      }
+    ],
+    "terminal_output_mode": "render_verbatim",
+    "terminal_output_type": "pdf"
+  },
+  "quality_report": {
+    "checks": [
+      {
+        "actual": true,
+        "expected": true,
+        "name": "plan_created",
+        "passed": true
+      },
+      {
+        "actual": 0,
+        "expected": 0,
+        "name": "question_event_contract",
+        "passed": true
+      },
+      {
+        "actual": 4,
+        "expected": 2,
+        "name": "min_steps",
+        "passed": true
+      },
+      {
+        "actual": "pdf",
+        "expected": "pdf",
+        "name": "terminal_output_type",
+        "passed": true
+      },
+      {
+        "actual": "render_verbatim",
+        "expected": "render_verbatim",
+        "name": "terminal_document_output_mode",
+        "passed": true
+      },
+      {
+        "actual": 1,
+        "expected": 1,
+        "name": "min_json_steps",
+        "passed": true
+      },
+      {
+        "actual": 0,
+        "expected": 1,
+        "name": "max_all_previous_steps",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_duplicate_source_refs",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_template_variables_in_instructions",
+        "passed": true
+      },
+      {
+        "actual": [
+          "documents",
+          "title",
+          "topic",
+          "author",
+          "category",
+          "source_notes",
+          "document_date",
+          "document_type",
+          "sammanfattning",
+          "conclusion_summary"
+        ],
+        "expected": [
+          [
+            "document_type",
+            "dokumenttyp",
+            "typ"
+          ],
+          [
+            "title",
+            "titel"
+          ],
+          [
+            "date_or_year",
+            "year",
+            "datum",
+            "år"
+          ],
+          [
+            "author_or_sender",
+            "författare",
+            "avsändare"
+          ],
+          [
+            "category",
+            "kategori"
+          ],
+          [
+            "conclusions",
+            "slutsatser"
+          ],
+          [
+            "summary",
+            "sammanfattning"
+          ]
+        ],
+        "name": "expected_leaf_output_fields",
+        "passed": false
+      },
+      {
+        "actual": [
+          "document_category_hint"
+        ],
+        "expected": [],
+        "name": "no_primary_material_form_fields",
+        "passed": false
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_generic_primary_reader_envelope",
+        "passed": true
+      }
+    ],
+    "metrics": {
+      "json_to_json_step_count": 0,
+      "max_instruction_bytes": 626,
+      "max_source_ref_count": 2,
+      "post_json_text_cleanup_step_count": 2,
+      "primary_reader_outputs_json": true,
+      "renderer_is_previous_step_bound": true,
+      "total_source_ref_count": 3
+    },
+    "warnings": [
+      "non-terminal text step appears to create/render the final artifact: 2, 3",
+      "primary document material is narrowed to JSON in the first step; inspect whether the source-reader captures all downstream fields",
+      "multiple text cleanup/finalization steps after structured extraction may add lossy hops and token cost: [2, 3]"
+    ]
+  },
+  "repetition": 1,
+  "session_id": "3caf3e4c-c6c2-49a2-af80-7e56d332faf6",
+  "space_id": "f2a4cfb3-48ba-4e23-9513-53065e48c6b0"
+}

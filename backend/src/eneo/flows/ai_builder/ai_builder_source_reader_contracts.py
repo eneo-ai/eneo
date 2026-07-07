@@ -46,6 +46,15 @@ _SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS = frozenset(
         "user",
     }
 )
+_SOURCE_CONTRACT_FORM_FIELD_CONTEXT_TOKENS = frozenset(
+    {
+        "document",
+        "dokument",
+        "hint",
+        "report",
+        "rapport",
+    }
+)
 _SOURCE_CONTRACT_TOKEN_ALIASES = {
     "år": "date",
     "ar": "date",
@@ -419,27 +428,42 @@ def _form_field_shadows_source_contract(
     source_contract_token_sets: frozenset[frozenset[str]],
 ) -> bool:
     candidates = (
-        _source_contract_name_tokens(field.name),
-        _source_contract_name_tokens(field.label),
+        _form_field_source_contract_tokens(field.name),
+        _form_field_source_contract_tokens(field.label),
     )
     return any(
         candidate
         and any(
-            candidate.issubset(source_tokens)
+            candidate.issubset(source_tokens) or source_tokens.issubset(candidate)
             for source_tokens in source_contract_token_sets
         )
         for candidate in candidates
     )
 
 
+def _form_field_source_contract_tokens(value: str) -> frozenset[str]:
+    return _source_contract_name_token_set(
+        value,
+        ignored_tokens=_SOURCE_CONTRACT_FORM_FIELD_CONTEXT_TOKENS,
+    )
+
+
 def _source_contract_name_tokens(value: str) -> frozenset[str]:
+    return _source_contract_name_token_set(value, ignored_tokens=frozenset())
+
+
+def _source_contract_name_token_set(
+    value: str,
+    *,
+    ignored_tokens: frozenset[str],
+) -> frozenset[str]:
     normalized = normalize_discovery_text(value.replace("_", " ").replace("-", " "))
     tokens = tuple(
         _SOURCE_CONTRACT_TOKEN_ALIASES.get(token, token) for token in normalized.split()
     )
     while tokens and tokens[0] in _SOURCE_CONTRACT_FORM_FIELD_PREFIX_TOKENS:
         tokens = tokens[1:]
-    return frozenset(tokens)
+    return frozenset(token for token in tokens if token not in ignored_tokens)
 
 
 def _without_form_field_refs(

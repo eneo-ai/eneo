@@ -438,20 +438,46 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
                     "label": "Manual case id",
                     "field_type": "text",
                     "required": True,
-                }
+                },
+                {
+                    "variable_name": "report_title",
+                    "label": "Report title",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "document_category_hint",
+                    "label": "Document category hint",
+                    "field_type": "text",
+                    "required": False,
+                },
             ],
             "steps": [
                 {
                     "name": "Extract source facts",
                     "instructions": "Extract source facts from the document.",
                     "output_type": "json",
-                    "uses_form_fields": ["manual_case_id"],
+                    "uses_form_fields": [
+                        "manual_case_id",
+                        "report_title",
+                        "document_category_hint",
+                    ],
                     "output_fields": [
                         {
                             "name": "case_id",
                             "field_type": "string",
                             "description": "Case id found in the source.",
-                        }
+                        },
+                        {
+                            "name": "title",
+                            "field_type": "string",
+                            "description": "Title found in the source.",
+                        },
+                        {
+                            "name": "category",
+                            "field_type": "string",
+                            "description": "Category found in the source.",
+                        },
                     ],
                 },
                 {
@@ -477,6 +503,8 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
     assert reader_step.input_type == InputType.DOCUMENT
     assert reader_step.output_type == OutputType.JSON
     assert "manual_case_id" not in repr(reader_step.input_bindings)
+    assert "report_title" not in repr(reader_step.input_bindings)
+    assert "document_category_hint" not in repr(reader_step.input_bindings)
     assert validate_spec(compiled).valid
 
 

@@ -1,0 +1,1602 @@
+{
+  "base_url": "http://localhost:8123/api/v1",
+  "case": {
+    "complexity": "simple",
+    "domain": "municipality_records",
+    "expected": {
+      "expected_leaf_output_field_groups": [
+        [
+          "title",
+          "titel"
+        ],
+        [
+          "year",
+          "år"
+        ],
+        [
+          "document_type",
+          "dokumenttyp"
+        ],
+        [
+          "category",
+          "kategori"
+        ],
+        [
+          "summary",
+          "sammanfattning"
+        ]
+      ],
+      "forbid_generic_primary_reader_envelope": true,
+      "forbid_primary_material_form_fields": true,
+      "forbidden_form_field_groups": [
+        [
+          "titel",
+          "title"
+        ],
+        [
+          "år",
+          "year"
+        ],
+        [
+          "dokumenttyp",
+          "document_type"
+        ],
+        [
+          "kategori",
+          "category"
+        ],
+        [
+          "avsändare",
+          "sender"
+        ]
+      ],
+      "max_all_previous_steps": 1,
+      "min_json_steps": 1,
+      "min_steps": 1,
+      "terminal_output_type": "text"
+    },
+    "file_ids": [],
+    "id": "source_derived_report_fields_not_runtime_fields",
+    "prompt": "Jag laddar upp ett dokument och vill att rapporten ska innehålla titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning. Användaren ska inte fylla i extra metadata; allt ska hämtas från dokumentet om det framgår.",
+    "scripted_question_answers": {}
+  },
+  "created_at": "20260707T134034",
+  "event_summary": {
+    "error_codes": [],
+    "event_counts": {
+      "done": 2,
+      "plan": 1,
+      "requirements_summary": 1,
+      "status": 1,
+      "usage": 2
+    },
+    "question_event_ids": [],
+    "question_like_text_event_count": 0,
+    "question_like_text_events": [],
+    "self_correction_quality_failure_count": 0,
+    "server_ask_question_text_only_count": 0
+  },
+  "initial_session": {
+    "attachment_warnings": [],
+    "attachments": [],
+    "conversation": [],
+    "created_at": "2026-07-07T11:40:34.197219Z",
+    "flow_id": null,
+    "latest_plan_id": null,
+    "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+    "status": "chatting",
+    "target_kind": "create",
+    "telemetry": null,
+    "updated_at": "2026-07-07T11:40:34.197219Z"
+  },
+  "interactions": [
+    {
+      "events": [
+        {
+          "data": {
+            "status": "architecture_committed"
+          },
+          "event": "status"
+        },
+        {
+          "data": {
+            "assumptions": [
+              "Dokumentunderlag: Ett huvuddokument per körning",
+              "Indata vid körning: Dokument",
+              "Metadata vid körning: Inga extra fält",
+              "Slutresultat: Strukturerat textresultat",
+              "Planen ska följa kraven och underlaget i konversationen.",
+              "Användaren ska kunna granska och ändra planen innan den tillämpas."
+            ],
+            "input_description": "Primär indata vid körning: Dokument.",
+            "key_decisions": [
+              {
+                "decision": "dokument till text",
+                "topic": "Planerad bearbetning"
+              }
+            ],
+            "manual_setup_notes": [],
+            "output_description": "Huvudsakligt slutresultat: Strukturerat textresultat.",
+            "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+            "summary": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat."
+          },
+          "event": "requirements_summary"
+        },
+        {
+          "data": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 0,
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "server_confirm_requirements",
+            "last_request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+            "last_token_usage_estimated": false,
+            "llm_calls_made_total": 0,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 1,
+            "prompt_tokens_total": 0,
+            "repair_attempts_total": 0,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 0,
+            "total_tokens_total": 0,
+            "wall_clock_ms_total": 0
+          },
+          "event": "usage"
+        },
+        {
+          "data": "",
+          "event": "done"
+        }
+      ],
+      "latest_session": {
+        "attachment_warnings": [],
+        "attachments": [],
+        "conversation": [
+          {
+            "content": "Jag laddar upp ett dokument och vill att rapporten ska innehålla titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning. Användaren ska inte fylla i extra metadata; allt ska hämtas från dokumentet om det framgår.",
+            "message_id": "019f3c61-404c-7163-af37-18d037dff196",
+            "metadata": {
+              "slot_classification": {
+                "assumptions": [
+                  "All requested fields should be derived from the uploaded document when present.",
+                  "No extra metadata should be requested from the user."
+                ],
+                "contradictions": [],
+                "prompt_hash": "e71230f8d39d0ffa89f19adaaf4fd37461e4e3cae7332753c48c9f75be9b0f78",
+                "secondary_obligations": [
+                  "summary",
+                  "key_facts"
+                ],
+                "slots": [
+                  {
+                    "confidence": "high",
+                    "reason": "User says they upload a document and want the report based on that document.",
+                    "slot_name": "document_material_scope",
+                    "value": "single_document_case"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "User wants a report containing title, year, document type, category, sender, main message, and a short summary extracted from the document.",
+                    "slot_name": "post_processing_goal",
+                    "value": "structure_key_information"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "The requested final deliverable is a report with readable sections, not a machine-readable payload or file artifact.",
+                    "slot_name": "terminal_output",
+                    "value": "structured_text"
+                  }
+                ]
+              },
+              "ui_language": "sv"
+            },
+            "role": "user",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat.",
+            "message_id": "019f3c61-4849-7850-af50-624bccc7fd14",
+            "metadata": {
+              "planner_telemetry": {
+                "architecture_commit_populated": false,
+                "completion_tokens": null,
+                "finish_reason": null,
+                "llm_calls_made": 0,
+                "model": "openai/gpt-5.4-mini",
+                "outcome_kind": "server_confirm_requirements",
+                "parse_repair_attempts": 0,
+                "prompt_tokens": null,
+                "repair_attempts": 0,
+                "request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+                "token_usage_estimated": false,
+                "token_usage_source": null,
+                "tool_call_count": 0,
+                "total_tokens": null,
+                "used_auxiliary_llm": false,
+                "wall_clock_ms": 0
+              },
+              "requirements_summary": {
+                "assumptions": [
+                  "Dokumentunderlag: Ett huvuddokument per körning",
+                  "Indata vid körning: Dokument",
+                  "Metadata vid körning: Inga extra fält",
+                  "Slutresultat: Strukturerat textresultat",
+                  "Planen ska följa kraven och underlaget i konversationen.",
+                  "Användaren ska kunna granska och ändra planen innan den tillämpas."
+                ],
+                "input_description": "Primär indata vid körning: Dokument.",
+                "key_decisions": [
+                  {
+                    "decision": "dokument till text",
+                    "topic": "Planerad bearbetning"
+                  }
+                ],
+                "manual_setup_notes": [],
+                "output_description": "Huvudsakligt slutresultat: Strukturerat textresultat.",
+                "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+                "summary": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat."
+              },
+              "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+              "session_telemetry": {
+                "architecture_commit_count": 0,
+                "auxiliary_llm_call_count": 0,
+                "clarification_question_count": 0,
+                "completion_tokens_total": 0,
+                "last_finish_reason": null,
+                "last_model": "openai/gpt-5.4-mini",
+                "last_outcome_kind": "server_confirm_requirements",
+                "last_request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+                "last_token_usage_estimated": false,
+                "last_token_usage_source": null,
+                "llm_calls_made_total": 0,
+                "parse_repair_attempts_total": 0,
+                "planner_request_count": 1,
+                "prompt_tokens_total": 0,
+                "repair_attempts_total": 0,
+                "token_usage_estimated": false,
+                "tool_call_count_total": 0,
+                "total_tokens_total": 0,
+                "wall_clock_ms_total": 0
+              }
+            },
+            "role": "assistant",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          }
+        ],
+        "created_at": "2026-07-07T11:40:34.197219Z",
+        "flow_id": null,
+        "latest_plan_id": null,
+        "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+        "status": "chatting",
+        "target_kind": "create",
+        "telemetry": {
+          "architecture_commit_count": 0,
+          "auxiliary_llm_call_count": 0,
+          "clarification_question_count": 0,
+          "completion_tokens_total": 0,
+          "last_finish_reason": null,
+          "last_model": "openai/gpt-5.4-mini",
+          "last_outcome_kind": "server_confirm_requirements",
+          "last_request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+          "last_token_usage_estimated": false,
+          "last_token_usage_source": null,
+          "llm_calls_made_total": 0,
+          "parse_repair_attempts_total": 0,
+          "planner_request_count": 1,
+          "prompt_tokens_total": 0,
+          "repair_attempts_total": 0,
+          "token_usage_estimated": false,
+          "tool_call_count_total": 0,
+          "total_tokens_total": 0,
+          "wall_clock_ms_total": 0
+        },
+        "updated_at": "2026-07-07T11:40:36.323457Z"
+      },
+      "message": "Jag laddar upp ett dokument och vill att rapporten ska innehålla titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning. Användaren ska inte fylla i extra metadata; allt ska hämtas från dokumentet om det framgår.",
+      "plan": null,
+      "plan_id": null,
+      "plan_summary": {
+        "has_plan": false
+      },
+      "question_answer": null
+    },
+    {
+      "events": [
+        {
+          "data": {
+            "plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+            "proposal": {
+              "assumptions": [
+                "Ett huvuddokument per körning.",
+                "Inga extra metadatafält ska fyllas i av användaren.",
+                "Slutresultatet ska vara strukturerat textresultat."
+              ],
+              "description_override_manual": false,
+              "lint_warnings": [],
+              "plan_rationale": "Flödet är utformat för ett enda dokument per körning utan extra metadatafält. Det ska identifiera och sammanställa titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning, och tydligt markera när en uppgift saknas i källmaterialet. Eftersom slutresultatet ska vara strukturerat textresultat räcker en analys- och extraktionskedja utan onödiga mellanformat.",
+              "risk_acknowledgments": [],
+              "spec": {
+                "document_body_writer_step_refs": [
+                  "step_b"
+                ],
+                "flow_description": "Läser ett uppladdat dokument och extraherar de efterfrågade uppgifterna till ett strukturerat textresultat.",
+                "flow_name": "Extrahera nyckelinformation",
+                "steps": [
+                  {
+                    "assistant_spec": {
+                      "instructions": "Läs dokumentet och identifiera titel, år, dokumenttyp, kategori, avsändare, huvudbudskap samt en kort sammanfattning. Använd endast uppgifter som stöds av källmaterialet. Om en uppgift inte framgår tydligt, markera den som saknad eller ospecificerad.\n\nRequired JSON fields:\n- avsandare: Avsändare, organisation eller upphovsman om det framgår.\n- kort_sammanfattning: En kort sammanfattning av dokumentet, grundad endast på källmaterialet.\n- saknade_uppgifter: Lista över efterfrågade uppgifter som inte kunde verifieras i dokumentet.\nAllowed fields for items of saknade_uppgifter: uppgift, status. Do not emit other fields.",
+                      "knowledge_refs": [],
+                      "mcp_server_refs": [],
+                      "mcp_tool_refs": [],
+                      "model_ref": "model.gpt-5-4-mini"
+                    },
+                    "input_bindings": {
+                      "question": "{{ step_input.text }}"
+                    },
+                    "input_config": {
+                      "runtime_input": {
+                        "description": "Ladda upp dokument som detta steg ska analysera.",
+                        "enabled": true,
+                        "input_format": "document",
+                        "required": true
+                      }
+                    },
+                    "input_source": "flow_input",
+                    "input_type": "document",
+                    "mcp_policy": "inherit",
+                    "name": "Extrahera nyckeluppgifter",
+                    "output_contract": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "ar": {
+                          "description": "År som framgår av dokumentet eller dess metadata om det finns i källmaterialet.",
+                          "title": "Ar",
+                          "type": "string"
+                        },
+                        "avsandare": {
+                          "description": "Avsändare, organisation eller upphovsman om det framgår.",
+                          "title": "Avsandare",
+                          "type": "string"
+                        },
+                        "dokumenttyp": {
+                          "description": "Dokumentets typ, till exempel rapport, policy eller PM, om det framgår.",
+                          "title": "Dokumenttyp",
+                          "type": "string"
+                        },
+                        "huvudbudskap": {
+                          "description": "Det centrala budskapet i dokumentet, grundat endast på källmaterialet.",
+                          "title": "Huvudbudskap",
+                          "type": "string"
+                        },
+                        "kategori": {
+                          "description": "Dokumentets kategori om den framgår av källmaterialet.",
+                          "title": "Kategori",
+                          "type": "string"
+                        },
+                        "kort_sammanfattning": {
+                          "description": "En kort sammanfattning av dokumentet, grundad endast på källmaterialet.",
+                          "title": "Kort sammanfattning",
+                          "type": "string"
+                        },
+                        "saknade_uppgifter": {
+                          "description": "Lista över efterfrågade uppgifter som inte kunde verifieras i dokumentet.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "status": {
+                                "description": "Anger att uppgiften saknas eller är ospecificerad.",
+                                "title": "Status",
+                                "type": "string"
+                              },
+                              "uppgift": {
+                                "description": "Namnet på den saknade eller ospecificerade uppgiften.",
+                                "title": "Uppgift",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "uppgift",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "title": "Saknade uppgifter",
+                          "type": "array"
+                        },
+                        "titel": {
+                          "description": "Dokumentets titel om den framgår i källmaterialet.",
+                          "title": "Titel",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "saknade_uppgifter"
+                      ],
+                      "type": "object"
+                    },
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "plan_step_ref": "step_a"
+                  },
+                  {
+                    "assistant_spec": {
+                      "instructions": "Skapa slutresultatet från föregående strukturerade arbete. Bevara användarens önskade omfattning, ordning och begränsningar.",
+                      "knowledge_refs": [],
+                      "mcp_server_refs": [],
+                      "mcp_tool_refs": []
+                    },
+                    "input_bindings": {
+                      "source_refs": [
+                        {
+                          "output": "structured",
+                          "step_ref": "step_a"
+                        }
+                      ]
+                    },
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "mcp_policy": "inherit",
+                    "name": "Skapa slutresultat",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "plan_step_ref": "step_b"
+                  }
+                ]
+              }
+            }
+          },
+          "event": "plan"
+        },
+        {
+          "data": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 639,
+            "last_finish_reason": "tool_calls",
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "dispatched",
+            "last_request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+            "last_token_usage_estimated": false,
+            "last_token_usage_source": "provider",
+            "llm_calls_made_total": 1,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 2,
+            "prompt_tokens_total": 2510,
+            "repair_attempts_total": 0,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 1,
+            "total_tokens_total": 3149,
+            "wall_clock_ms_total": 0
+          },
+          "event": "usage"
+        },
+        {
+          "data": "",
+          "event": "done"
+        }
+      ],
+      "latest_session": {
+        "attachment_warnings": [],
+        "attachments": [],
+        "conversation": [
+          {
+            "content": "Jag laddar upp ett dokument och vill att rapporten ska innehålla titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning. Användaren ska inte fylla i extra metadata; allt ska hämtas från dokumentet om det framgår.",
+            "message_id": "019f3c61-404c-7163-af37-18d037dff196",
+            "metadata": {
+              "slot_classification": {
+                "assumptions": [
+                  "All requested fields should be derived from the uploaded document when present.",
+                  "No extra metadata should be requested from the user."
+                ],
+                "contradictions": [],
+                "prompt_hash": "e71230f8d39d0ffa89f19adaaf4fd37461e4e3cae7332753c48c9f75be9b0f78",
+                "secondary_obligations": [
+                  "summary",
+                  "key_facts"
+                ],
+                "slots": [
+                  {
+                    "confidence": "high",
+                    "reason": "User says they upload a document and want the report based on that document.",
+                    "slot_name": "document_material_scope",
+                    "value": "single_document_case"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "User wants a report containing title, year, document type, category, sender, main message, and a short summary extracted from the document.",
+                    "slot_name": "post_processing_goal",
+                    "value": "structure_key_information"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "The requested final deliverable is a report with readable sections, not a machine-readable payload or file artifact.",
+                    "slot_name": "terminal_output",
+                    "value": "structured_text"
+                  }
+                ]
+              },
+              "ui_language": "sv"
+            },
+            "role": "user",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat.",
+            "message_id": "019f3c61-4849-7850-af50-624bccc7fd14",
+            "metadata": {
+              "planner_telemetry": {
+                "architecture_commit_populated": false,
+                "completion_tokens": null,
+                "finish_reason": null,
+                "llm_calls_made": 0,
+                "model": "openai/gpt-5.4-mini",
+                "outcome_kind": "server_confirm_requirements",
+                "parse_repair_attempts": 0,
+                "prompt_tokens": null,
+                "repair_attempts": 0,
+                "request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+                "token_usage_estimated": false,
+                "token_usage_source": null,
+                "tool_call_count": 0,
+                "total_tokens": null,
+                "used_auxiliary_llm": false,
+                "wall_clock_ms": 0
+              },
+              "requirements_summary": {
+                "assumptions": [
+                  "Dokumentunderlag: Ett huvuddokument per körning",
+                  "Indata vid körning: Dokument",
+                  "Metadata vid körning: Inga extra fält",
+                  "Slutresultat: Strukturerat textresultat",
+                  "Planen ska följa kraven och underlaget i konversationen.",
+                  "Användaren ska kunna granska och ändra planen innan den tillämpas."
+                ],
+                "input_description": "Primär indata vid körning: Dokument.",
+                "key_decisions": [
+                  {
+                    "decision": "dokument till text",
+                    "topic": "Planerad bearbetning"
+                  }
+                ],
+                "manual_setup_notes": [],
+                "output_description": "Huvudsakligt slutresultat: Strukturerat textresultat.",
+                "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+                "summary": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat."
+              },
+              "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+              "session_telemetry": {
+                "architecture_commit_count": 0,
+                "auxiliary_llm_call_count": 0,
+                "clarification_question_count": 0,
+                "completion_tokens_total": 0,
+                "last_finish_reason": null,
+                "last_model": "openai/gpt-5.4-mini",
+                "last_outcome_kind": "server_confirm_requirements",
+                "last_request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+                "last_token_usage_estimated": false,
+                "last_token_usage_source": null,
+                "llm_calls_made_total": 0,
+                "parse_repair_attempts_total": 0,
+                "planner_request_count": 1,
+                "prompt_tokens_total": 0,
+                "repair_attempts_total": 0,
+                "token_usage_estimated": false,
+                "tool_call_count_total": 0,
+                "total_tokens_total": 0,
+                "wall_clock_ms_total": 0
+              }
+            },
+            "role": "assistant",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Ja, det stämmer. Bygg planen.",
+            "message_id": "019f3c61-489c-7f73-8ea7-cfa02951bee1",
+            "metadata": {
+              "requirements_confirmed": true,
+              "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+              "slot_classification": {
+                "assumptions": [
+                  "The final report should derive all requested fields from the uploaded document when available, without requiring extra user-entered metadata."
+                ],
+                "contradictions": [],
+                "prompt_hash": "28f3334539f36381f608f115fe2b083464df3bc0565d577513128daf3c2f7740",
+                "secondary_obligations": [
+                  "summary",
+                  "key_facts"
+                ],
+                "slots": [
+                  {
+                    "confidence": "high",
+                    "reason": "User says they are uploading a document and wants the report to be based on that document.",
+                    "slot_name": "primary_runtime_input",
+                    "value": "documents"
+                  },
+                  {
+                    "confidence": "high",
+                    "reason": "The requested output is to pull specific fields from the document: title, year, document type, category, sender, main message, and a short summary.",
+                    "slot_name": "post_processing_goal",
+                    "value": "extract_key_information"
+                  }
+                ]
+              },
+              "ui_language": "sv"
+            },
+            "role": "user",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": null
+          },
+          {
+            "content": "Här är mitt förslag:",
+            "message_id": "019f3c61-7ca5-7dd3-bc41-82994976ee08",
+            "metadata": {
+              "planner_telemetry": {
+                "architecture_commit_populated": false,
+                "completion_tokens": 639,
+                "finish_reason": "tool_calls",
+                "llm_calls_made": 1,
+                "model": "openai/gpt-5.4-mini",
+                "outcome_kind": "dispatched",
+                "parse_repair_attempts": 0,
+                "prompt_tokens": 2510,
+                "proposal_first_attempt_failure_kind": null,
+                "proposal_first_attempt_success": true,
+                "proposal_first_attempt_tool": "propose_flow",
+                "proposal_repair_invocation_count": 0,
+                "proposal_repair_invocation_reasons": [],
+                "proposal_target_kind": "create",
+                "repair_attempts": 0,
+                "request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+                "token_usage_estimated": false,
+                "token_usage_source": "provider",
+                "tool_call_count": 1,
+                "total_tokens": 3149,
+                "used_auxiliary_llm": false,
+                "wall_clock_ms": 0
+              },
+              "session_telemetry": {
+                "architecture_commit_count": 0,
+                "auxiliary_llm_call_count": 0,
+                "clarification_question_count": 0,
+                "completion_tokens_total": 639,
+                "last_finish_reason": "tool_calls",
+                "last_model": "openai/gpt-5.4-mini",
+                "last_outcome_kind": "dispatched",
+                "last_request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+                "last_token_usage_estimated": false,
+                "last_token_usage_source": "provider",
+                "llm_calls_made_total": 1,
+                "parse_repair_attempts_total": 0,
+                "planner_request_count": 2,
+                "prompt_tokens_total": 2510,
+                "repair_attempts_total": 0,
+                "token_usage_estimated": false,
+                "tool_call_count_total": 1,
+                "total_tokens_total": 3149,
+                "wall_clock_ms_total": 0
+              }
+            },
+            "role": "assistant",
+            "timestamp": null,
+            "tool_call_id": null,
+            "tool_calls": [
+              {
+                "arguments": {
+                  "flow_name": "Extrahera nyckelinformation",
+                  "plan_rationale": "Flödet är utformat för ett enda dokument per körning utan extra metadatafält. Det ska identifiera och sammanställa titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning, och tydligt markera när en uppgift saknas i källmaterialet. Eftersom slutresultatet ska vara strukturerat textresultat räcker en analys- och extraktionskedja utan onödiga mellanformat.",
+                  "step_count": 2,
+                  "step_names": [
+                    "Extrahera nyckeluppgifter",
+                    "Skapa slutresultat"
+                  ]
+                },
+                "id": "call_vIPcUB3roh02Bv9VuTmz56TW",
+                "name": "propose_flow"
+              }
+            ]
+          },
+          {
+            "content": "Plan: Extrahera nyckelinformation\nBeskrivning: Läser ett uppladdat dokument och extraherar de efterfrågade uppgifterna till ett strukturerat textresultat.\nAntal steg: 2\n  1. Extrahera nyckeluppgifter [ref=step_a] (AIBuilderInputSource.FLOW_INPUT → AIBuilderInputType.DOCUMENT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.JSON)\n     Utdatakontrakt: titel, ar, dokumenttyp, kategori, avsandare, huvudbudskap, kort_sammanfattning, saknade_uppgifter\n  2. Skapa slutresultat [ref=step_b] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.TEXT)\nAntaganden: Ett huvuddokument per körning.; Inga extra metadatafält ska fyllas i av användaren.; Slutresultatet ska vara strukturerat textresultat.",
+            "message_id": "019f3c61-7ca5-7dd3-bc41-82ae7b9bf4c9",
+            "metadata": null,
+            "role": "tool",
+            "timestamp": null,
+            "tool_call_id": "call_vIPcUB3roh02Bv9VuTmz56TW",
+            "tool_calls": null
+          }
+        ],
+        "created_at": "2026-07-07T11:40:34.197219Z",
+        "flow_id": null,
+        "latest_plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+        "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+        "status": "awaiting_approval",
+        "target_kind": "create",
+        "telemetry": {
+          "architecture_commit_count": 0,
+          "auxiliary_llm_call_count": 0,
+          "clarification_question_count": 0,
+          "completion_tokens_total": 639,
+          "last_finish_reason": "tool_calls",
+          "last_model": "openai/gpt-5.4-mini",
+          "last_outcome_kind": "dispatched",
+          "last_request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+          "last_token_usage_estimated": false,
+          "last_token_usage_source": "provider",
+          "llm_calls_made_total": 1,
+          "parse_repair_attempts_total": 0,
+          "planner_request_count": 2,
+          "prompt_tokens_total": 2510,
+          "repair_attempts_total": 0,
+          "token_usage_estimated": false,
+          "tool_call_count_total": 1,
+          "total_tokens_total": 3149,
+          "wall_clock_ms_total": 0
+        },
+        "updated_at": "2026-07-07T11:40:49.736021Z"
+      },
+      "message": "Ja, det stämmer. Bygg planen.",
+      "plan": {
+        "created_at": "2026-07-07T11:40:36.359920Z",
+        "plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+        "proposal": {
+          "assumptions": [
+            "Ett huvuddokument per körning.",
+            "Inga extra metadatafält ska fyllas i av användaren.",
+            "Slutresultatet ska vara strukturerat textresultat."
+          ],
+          "description_override_manual": false,
+          "lint_warnings": [],
+          "plan_rationale": "Flödet är utformat för ett enda dokument per körning utan extra metadatafält. Det ska identifiera och sammanställa titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning, och tydligt markera när en uppgift saknas i källmaterialet. Eftersom slutresultatet ska vara strukturerat textresultat räcker en analys- och extraktionskedja utan onödiga mellanformat.",
+          "risk_acknowledgments": [],
+          "spec": {
+            "document_body_writer_step_refs": [
+              "step_b"
+            ],
+            "flow_description": "Läser ett uppladdat dokument och extraherar de efterfrågade uppgifterna till ett strukturerat textresultat.",
+            "flow_name": "Extrahera nyckelinformation",
+            "steps": [
+              {
+                "assistant_spec": {
+                  "instructions": "Läs dokumentet och identifiera titel, år, dokumenttyp, kategori, avsändare, huvudbudskap samt en kort sammanfattning. Använd endast uppgifter som stöds av källmaterialet. Om en uppgift inte framgår tydligt, markera den som saknad eller ospecificerad.\n\nRequired JSON fields:\n- avsandare: Avsändare, organisation eller upphovsman om det framgår.\n- kort_sammanfattning: En kort sammanfattning av dokumentet, grundad endast på källmaterialet.\n- saknade_uppgifter: Lista över efterfrågade uppgifter som inte kunde verifieras i dokumentet.\nAllowed fields for items of saknade_uppgifter: uppgift, status. Do not emit other fields.",
+                  "knowledge_refs": [],
+                  "mcp_server_refs": [],
+                  "mcp_tool_refs": [],
+                  "model_ref": "model.gpt-5-4-mini"
+                },
+                "input_bindings": {
+                  "question": "{{ step_input.text }}"
+                },
+                "input_config": {
+                  "runtime_input": {
+                    "description": "Ladda upp dokument som detta steg ska analysera.",
+                    "enabled": true,
+                    "input_format": "document",
+                    "required": true
+                  }
+                },
+                "input_source": "flow_input",
+                "input_type": "document",
+                "mcp_policy": "inherit",
+                "name": "Extrahera nyckeluppgifter",
+                "output_contract": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "ar": {
+                      "description": "År som framgår av dokumentet eller dess metadata om det finns i källmaterialet.",
+                      "title": "Ar",
+                      "type": "string"
+                    },
+                    "avsandare": {
+                      "description": "Avsändare, organisation eller upphovsman om det framgår.",
+                      "title": "Avsandare",
+                      "type": "string"
+                    },
+                    "dokumenttyp": {
+                      "description": "Dokumentets typ, till exempel rapport, policy eller PM, om det framgår.",
+                      "title": "Dokumenttyp",
+                      "type": "string"
+                    },
+                    "huvudbudskap": {
+                      "description": "Det centrala budskapet i dokumentet, grundat endast på källmaterialet.",
+                      "title": "Huvudbudskap",
+                      "type": "string"
+                    },
+                    "kategori": {
+                      "description": "Dokumentets kategori om den framgår av källmaterialet.",
+                      "title": "Kategori",
+                      "type": "string"
+                    },
+                    "kort_sammanfattning": {
+                      "description": "En kort sammanfattning av dokumentet, grundad endast på källmaterialet.",
+                      "title": "Kort sammanfattning",
+                      "type": "string"
+                    },
+                    "saknade_uppgifter": {
+                      "description": "Lista över efterfrågade uppgifter som inte kunde verifieras i dokumentet.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "status": {
+                            "description": "Anger att uppgiften saknas eller är ospecificerad.",
+                            "title": "Status",
+                            "type": "string"
+                          },
+                          "uppgift": {
+                            "description": "Namnet på den saknade eller ospecificerade uppgiften.",
+                            "title": "Uppgift",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "uppgift",
+                          "status"
+                        ],
+                        "type": "object"
+                      },
+                      "title": "Saknade uppgifter",
+                      "type": "array"
+                    },
+                    "titel": {
+                      "description": "Dokumentets titel om den framgår i källmaterialet.",
+                      "title": "Titel",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "saknade_uppgifter"
+                  ],
+                  "type": "object"
+                },
+                "output_mode": "pass_through",
+                "output_type": "json",
+                "plan_step_ref": "step_a"
+              },
+              {
+                "assistant_spec": {
+                  "instructions": "Skapa slutresultatet från föregående strukturerade arbete. Bevara användarens önskade omfattning, ordning och begränsningar.",
+                  "knowledge_refs": [],
+                  "mcp_server_refs": [],
+                  "mcp_tool_refs": []
+                },
+                "input_bindings": {
+                  "source_refs": [
+                    {
+                      "output": "structured",
+                      "step_ref": "step_a"
+                    }
+                  ]
+                },
+                "input_source": "previous_step",
+                "input_type": "text",
+                "mcp_policy": "inherit",
+                "name": "Skapa slutresultat",
+                "output_mode": "pass_through",
+                "output_type": "text",
+                "plan_step_ref": "step_b"
+              }
+            ]
+          }
+        },
+        "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+        "spec_hash": "21f1de80c4baf9bb1aded95166ded709dd6516032c2b736ea2edb0e3770bd3e0",
+        "status": "proposed",
+        "updated_at": "2026-07-07T11:40:36.359920Z"
+      },
+      "plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+      "plan_summary": {
+        "all_previous_step_count": 0,
+        "duplicate_source_ref_steps": [],
+        "flow_name": "Extrahera nyckelinformation",
+        "form_field_names": [],
+        "has_plan": true,
+        "implicit_previous_step_steps": 0,
+        "instruction_template_steps": [],
+        "json_step_count": 1,
+        "question_binding_steps": 1,
+        "source_ref_steps": 1,
+        "step_count": 2,
+        "steps": [
+          {
+            "duplicate_source_ref_expressions": [],
+            "has_question": true,
+            "implicit_previous_step": false,
+            "input_contract_properties": [],
+            "input_source": "flow_input",
+            "input_type": "document",
+            "instruction_bytes": 636,
+            "instruction_excerpt": "Läs dokumentet och identifiera titel, år, dokumenttyp, kategori, avsändare, huvudbudskap samt en kort sammanfattning. Använd endast uppgifter som stöds av källmaterialet. Om en uppgift inte framgår tydligt, markera den som saknad eller ospecificerad. Required JSON fields: - avsandare: Avsändare, organisation eller upphovsman om det framgår. - kort_sammanfatt",
+            "instruction_has_template": false,
+            "name": "Extrahera nyckeluppgifter",
+            "order": 1,
+            "output_contract_leaf_properties": [
+              "ar",
+              "titel",
+              "kategori",
+              "avsandare",
+              "dokumenttyp",
+              "huvudbudskap",
+              "status",
+              "uppgift",
+              "kort_sammanfattning"
+            ],
+            "output_contract_properties": [
+              "ar",
+              "titel",
+              "kategori",
+              "avsandare",
+              "dokumenttyp",
+              "huvudbudskap",
+              "saknade_uppgifter",
+              "kort_sammanfattning"
+            ],
+            "output_mode": "pass_through",
+            "output_type": "json",
+            "plan_step_ref": "step_a",
+            "source_ref_count": 0,
+            "source_refs": []
+          },
+          {
+            "duplicate_source_ref_expressions": [],
+            "has_question": false,
+            "implicit_previous_step": false,
+            "input_contract_properties": [],
+            "input_source": "previous_step",
+            "input_type": "text",
+            "instruction_bytes": 130,
+            "instruction_excerpt": "Skapa slutresultatet från föregående strukturerade arbete. Bevara användarens önskade omfattning, ordning och begränsningar.",
+            "instruction_has_template": false,
+            "name": "Skapa slutresultat",
+            "order": 2,
+            "output_contract_leaf_properties": [],
+            "output_contract_properties": [],
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "plan_step_ref": "step_b",
+            "source_ref_count": 1,
+            "source_refs": [
+              {
+                "output": "structured",
+                "step_ref": "step_a"
+              }
+            ]
+          }
+        ],
+        "terminal_output_mode": "pass_through",
+        "terminal_output_type": "text"
+      },
+      "question_answer": {
+        "kind": "requirements_confirmation",
+        "requirements_confirmed": true,
+        "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+        "ui_language": "sv"
+      }
+    }
+  ],
+  "latest_session": {
+    "attachment_warnings": [],
+    "attachments": [],
+    "conversation": [
+      {
+        "content": "Jag laddar upp ett dokument och vill att rapporten ska innehålla titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning. Användaren ska inte fylla i extra metadata; allt ska hämtas från dokumentet om det framgår.",
+        "message_id": "019f3c61-404c-7163-af37-18d037dff196",
+        "metadata": {
+          "slot_classification": {
+            "assumptions": [
+              "All requested fields should be derived from the uploaded document when present.",
+              "No extra metadata should be requested from the user."
+            ],
+            "contradictions": [],
+            "prompt_hash": "e71230f8d39d0ffa89f19adaaf4fd37461e4e3cae7332753c48c9f75be9b0f78",
+            "secondary_obligations": [
+              "summary",
+              "key_facts"
+            ],
+            "slots": [
+              {
+                "confidence": "high",
+                "reason": "User says they upload a document and want the report based on that document.",
+                "slot_name": "document_material_scope",
+                "value": "single_document_case"
+              },
+              {
+                "confidence": "high",
+                "reason": "User wants a report containing title, year, document type, category, sender, main message, and a short summary extracted from the document.",
+                "slot_name": "post_processing_goal",
+                "value": "structure_key_information"
+              },
+              {
+                "confidence": "high",
+                "reason": "The requested final deliverable is a report with readable sections, not a machine-readable payload or file artifact.",
+                "slot_name": "terminal_output",
+                "value": "structured_text"
+              }
+            ]
+          },
+          "ui_language": "sv"
+        },
+        "role": "user",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": null
+      },
+      {
+        "content": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat.",
+        "message_id": "019f3c61-4849-7850-af50-624bccc7fd14",
+        "metadata": {
+          "planner_telemetry": {
+            "architecture_commit_populated": false,
+            "completion_tokens": null,
+            "finish_reason": null,
+            "llm_calls_made": 0,
+            "model": "openai/gpt-5.4-mini",
+            "outcome_kind": "server_confirm_requirements",
+            "parse_repair_attempts": 0,
+            "prompt_tokens": null,
+            "repair_attempts": 0,
+            "request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+            "token_usage_estimated": false,
+            "token_usage_source": null,
+            "tool_call_count": 0,
+            "total_tokens": null,
+            "used_auxiliary_llm": false,
+            "wall_clock_ms": 0
+          },
+          "requirements_summary": {
+            "assumptions": [
+              "Dokumentunderlag: Ett huvuddokument per körning",
+              "Indata vid körning: Dokument",
+              "Metadata vid körning: Inga extra fält",
+              "Slutresultat: Strukturerat textresultat",
+              "Planen ska följa kraven och underlaget i konversationen.",
+              "Användaren ska kunna granska och ändra planen innan den tillämpas."
+            ],
+            "input_description": "Primär indata vid körning: Dokument.",
+            "key_decisions": [
+              {
+                "decision": "dokument till text",
+                "topic": "Planerad bearbetning"
+              }
+            ],
+            "manual_setup_notes": [],
+            "output_description": "Huvudsakligt slutresultat: Strukturerat textresultat.",
+            "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+            "summary": "Flödet ska ta emot Dokument vid körning och leverera Strukturerat textresultat."
+          },
+          "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+          "session_telemetry": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 0,
+            "last_finish_reason": null,
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "server_confirm_requirements",
+            "last_request_id": "9be2dd51-23a7-430d-9473-ad2e98f12716",
+            "last_token_usage_estimated": false,
+            "last_token_usage_source": null,
+            "llm_calls_made_total": 0,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 1,
+            "prompt_tokens_total": 0,
+            "repair_attempts_total": 0,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 0,
+            "total_tokens_total": 0,
+            "wall_clock_ms_total": 0
+          }
+        },
+        "role": "assistant",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": null
+      },
+      {
+        "content": "Ja, det stämmer. Bygg planen.",
+        "message_id": "019f3c61-489c-7f73-8ea7-cfa02951bee1",
+        "metadata": {
+          "requirements_confirmed": true,
+          "requirements_version": "31de65474f43a611979256260a352e1bdbe765ae9d71f714ae33928621bae71d",
+          "slot_classification": {
+            "assumptions": [
+              "The final report should derive all requested fields from the uploaded document when available, without requiring extra user-entered metadata."
+            ],
+            "contradictions": [],
+            "prompt_hash": "28f3334539f36381f608f115fe2b083464df3bc0565d577513128daf3c2f7740",
+            "secondary_obligations": [
+              "summary",
+              "key_facts"
+            ],
+            "slots": [
+              {
+                "confidence": "high",
+                "reason": "User says they are uploading a document and wants the report to be based on that document.",
+                "slot_name": "primary_runtime_input",
+                "value": "documents"
+              },
+              {
+                "confidence": "high",
+                "reason": "The requested output is to pull specific fields from the document: title, year, document type, category, sender, main message, and a short summary.",
+                "slot_name": "post_processing_goal",
+                "value": "extract_key_information"
+              }
+            ]
+          },
+          "ui_language": "sv"
+        },
+        "role": "user",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": null
+      },
+      {
+        "content": "Här är mitt förslag:",
+        "message_id": "019f3c61-7ca5-7dd3-bc41-82994976ee08",
+        "metadata": {
+          "planner_telemetry": {
+            "architecture_commit_populated": false,
+            "completion_tokens": 639,
+            "finish_reason": "tool_calls",
+            "llm_calls_made": 1,
+            "model": "openai/gpt-5.4-mini",
+            "outcome_kind": "dispatched",
+            "parse_repair_attempts": 0,
+            "prompt_tokens": 2510,
+            "proposal_first_attempt_failure_kind": null,
+            "proposal_first_attempt_success": true,
+            "proposal_first_attempt_tool": "propose_flow",
+            "proposal_repair_invocation_count": 0,
+            "proposal_repair_invocation_reasons": [],
+            "proposal_target_kind": "create",
+            "repair_attempts": 0,
+            "request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+            "token_usage_estimated": false,
+            "token_usage_source": "provider",
+            "tool_call_count": 1,
+            "total_tokens": 3149,
+            "used_auxiliary_llm": false,
+            "wall_clock_ms": 0
+          },
+          "session_telemetry": {
+            "architecture_commit_count": 0,
+            "auxiliary_llm_call_count": 0,
+            "clarification_question_count": 0,
+            "completion_tokens_total": 639,
+            "last_finish_reason": "tool_calls",
+            "last_model": "openai/gpt-5.4-mini",
+            "last_outcome_kind": "dispatched",
+            "last_request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+            "last_token_usage_estimated": false,
+            "last_token_usage_source": "provider",
+            "llm_calls_made_total": 1,
+            "parse_repair_attempts_total": 0,
+            "planner_request_count": 2,
+            "prompt_tokens_total": 2510,
+            "repair_attempts_total": 0,
+            "token_usage_estimated": false,
+            "tool_call_count_total": 1,
+            "total_tokens_total": 3149,
+            "wall_clock_ms_total": 0
+          }
+        },
+        "role": "assistant",
+        "timestamp": null,
+        "tool_call_id": null,
+        "tool_calls": [
+          {
+            "arguments": {
+              "flow_name": "Extrahera nyckelinformation",
+              "plan_rationale": "Flödet är utformat för ett enda dokument per körning utan extra metadatafält. Det ska identifiera och sammanställa titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning, och tydligt markera när en uppgift saknas i källmaterialet. Eftersom slutresultatet ska vara strukturerat textresultat räcker en analys- och extraktionskedja utan onödiga mellanformat.",
+              "step_count": 2,
+              "step_names": [
+                "Extrahera nyckeluppgifter",
+                "Skapa slutresultat"
+              ]
+            },
+            "id": "call_vIPcUB3roh02Bv9VuTmz56TW",
+            "name": "propose_flow"
+          }
+        ]
+      },
+      {
+        "content": "Plan: Extrahera nyckelinformation\nBeskrivning: Läser ett uppladdat dokument och extraherar de efterfrågade uppgifterna till ett strukturerat textresultat.\nAntal steg: 2\n  1. Extrahera nyckeluppgifter [ref=step_a] (AIBuilderInputSource.FLOW_INPUT → AIBuilderInputType.DOCUMENT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.JSON)\n     Utdatakontrakt: titel, ar, dokumenttyp, kategori, avsandare, huvudbudskap, kort_sammanfattning, saknade_uppgifter\n  2. Skapa slutresultat [ref=step_b] (AIBuilderInputSource.PREVIOUS_STEP → AIBuilderInputType.TEXT → AIBuilderOutputMode.PASS_THROUGH → FlowOutputType.TEXT)\nAntaganden: Ett huvuddokument per körning.; Inga extra metadatafält ska fyllas i av användaren.; Slutresultatet ska vara strukturerat textresultat.",
+        "message_id": "019f3c61-7ca5-7dd3-bc41-82ae7b9bf4c9",
+        "metadata": null,
+        "role": "tool",
+        "timestamp": null,
+        "tool_call_id": "call_vIPcUB3roh02Bv9VuTmz56TW",
+        "tool_calls": null
+      }
+    ],
+    "created_at": "2026-07-07T11:40:34.197219Z",
+    "flow_id": null,
+    "latest_plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+    "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+    "status": "awaiting_approval",
+    "target_kind": "create",
+    "telemetry": {
+      "architecture_commit_count": 0,
+      "auxiliary_llm_call_count": 0,
+      "clarification_question_count": 0,
+      "completion_tokens_total": 639,
+      "last_finish_reason": "tool_calls",
+      "last_model": "openai/gpt-5.4-mini",
+      "last_outcome_kind": "dispatched",
+      "last_request_id": "7e917cc3-f3b1-4b1a-a11c-d0ad8bc5d2fb",
+      "last_token_usage_estimated": false,
+      "last_token_usage_source": "provider",
+      "llm_calls_made_total": 1,
+      "parse_repair_attempts_total": 0,
+      "planner_request_count": 2,
+      "prompt_tokens_total": 2510,
+      "repair_attempts_total": 0,
+      "token_usage_estimated": false,
+      "tool_call_count_total": 1,
+      "total_tokens_total": 3149,
+      "wall_clock_ms_total": 0
+    },
+    "updated_at": "2026-07-07T11:40:49.736021Z"
+  },
+  "plan": {
+    "created_at": "2026-07-07T11:40:36.359920Z",
+    "plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+    "proposal": {
+      "assumptions": [
+        "Ett huvuddokument per körning.",
+        "Inga extra metadatafält ska fyllas i av användaren.",
+        "Slutresultatet ska vara strukturerat textresultat."
+      ],
+      "description_override_manual": false,
+      "lint_warnings": [],
+      "plan_rationale": "Flödet är utformat för ett enda dokument per körning utan extra metadatafält. Det ska identifiera och sammanställa titel, år, dokumenttyp, kategori, avsändare, huvudbudskap och en kort sammanfattning, och tydligt markera när en uppgift saknas i källmaterialet. Eftersom slutresultatet ska vara strukturerat textresultat räcker en analys- och extraktionskedja utan onödiga mellanformat.",
+      "risk_acknowledgments": [],
+      "spec": {
+        "document_body_writer_step_refs": [
+          "step_b"
+        ],
+        "flow_description": "Läser ett uppladdat dokument och extraherar de efterfrågade uppgifterna till ett strukturerat textresultat.",
+        "flow_name": "Extrahera nyckelinformation",
+        "steps": [
+          {
+            "assistant_spec": {
+              "instructions": "Läs dokumentet och identifiera titel, år, dokumenttyp, kategori, avsändare, huvudbudskap samt en kort sammanfattning. Använd endast uppgifter som stöds av källmaterialet. Om en uppgift inte framgår tydligt, markera den som saknad eller ospecificerad.\n\nRequired JSON fields:\n- avsandare: Avsändare, organisation eller upphovsman om det framgår.\n- kort_sammanfattning: En kort sammanfattning av dokumentet, grundad endast på källmaterialet.\n- saknade_uppgifter: Lista över efterfrågade uppgifter som inte kunde verifieras i dokumentet.\nAllowed fields for items of saknade_uppgifter: uppgift, status. Do not emit other fields.",
+              "knowledge_refs": [],
+              "mcp_server_refs": [],
+              "mcp_tool_refs": [],
+              "model_ref": "model.gpt-5-4-mini"
+            },
+            "input_bindings": {
+              "question": "{{ step_input.text }}"
+            },
+            "input_config": {
+              "runtime_input": {
+                "description": "Ladda upp dokument som detta steg ska analysera.",
+                "enabled": true,
+                "input_format": "document",
+                "required": true
+              }
+            },
+            "input_source": "flow_input",
+            "input_type": "document",
+            "mcp_policy": "inherit",
+            "name": "Extrahera nyckeluppgifter",
+            "output_contract": {
+              "additionalProperties": false,
+              "properties": {
+                "ar": {
+                  "description": "År som framgår av dokumentet eller dess metadata om det finns i källmaterialet.",
+                  "title": "Ar",
+                  "type": "string"
+                },
+                "avsandare": {
+                  "description": "Avsändare, organisation eller upphovsman om det framgår.",
+                  "title": "Avsandare",
+                  "type": "string"
+                },
+                "dokumenttyp": {
+                  "description": "Dokumentets typ, till exempel rapport, policy eller PM, om det framgår.",
+                  "title": "Dokumenttyp",
+                  "type": "string"
+                },
+                "huvudbudskap": {
+                  "description": "Det centrala budskapet i dokumentet, grundat endast på källmaterialet.",
+                  "title": "Huvudbudskap",
+                  "type": "string"
+                },
+                "kategori": {
+                  "description": "Dokumentets kategori om den framgår av källmaterialet.",
+                  "title": "Kategori",
+                  "type": "string"
+                },
+                "kort_sammanfattning": {
+                  "description": "En kort sammanfattning av dokumentet, grundad endast på källmaterialet.",
+                  "title": "Kort sammanfattning",
+                  "type": "string"
+                },
+                "saknade_uppgifter": {
+                  "description": "Lista över efterfrågade uppgifter som inte kunde verifieras i dokumentet.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "status": {
+                        "description": "Anger att uppgiften saknas eller är ospecificerad.",
+                        "title": "Status",
+                        "type": "string"
+                      },
+                      "uppgift": {
+                        "description": "Namnet på den saknade eller ospecificerade uppgiften.",
+                        "title": "Uppgift",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "uppgift",
+                      "status"
+                    ],
+                    "type": "object"
+                  },
+                  "title": "Saknade uppgifter",
+                  "type": "array"
+                },
+                "titel": {
+                  "description": "Dokumentets titel om den framgår i källmaterialet.",
+                  "title": "Titel",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "saknade_uppgifter"
+              ],
+              "type": "object"
+            },
+            "output_mode": "pass_through",
+            "output_type": "json",
+            "plan_step_ref": "step_a"
+          },
+          {
+            "assistant_spec": {
+              "instructions": "Skapa slutresultatet från föregående strukturerade arbete. Bevara användarens önskade omfattning, ordning och begränsningar.",
+              "knowledge_refs": [],
+              "mcp_server_refs": [],
+              "mcp_tool_refs": []
+            },
+            "input_bindings": {
+              "source_refs": [
+                {
+                  "output": "structured",
+                  "step_ref": "step_a"
+                }
+              ]
+            },
+            "input_source": "previous_step",
+            "input_type": "text",
+            "mcp_policy": "inherit",
+            "name": "Skapa slutresultat",
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "plan_step_ref": "step_b"
+          }
+        ]
+      }
+    },
+    "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+    "spec_hash": "21f1de80c4baf9bb1aded95166ded709dd6516032c2b736ea2edb0e3770bd3e0",
+    "status": "proposed",
+    "updated_at": "2026-07-07T11:40:36.359920Z"
+  },
+  "plan_id": "5cd720f9-c517-4d9e-aa97-7c822255b0e4",
+  "plan_summary": {
+    "all_previous_step_count": 0,
+    "duplicate_source_ref_steps": [],
+    "flow_name": "Extrahera nyckelinformation",
+    "form_field_names": [],
+    "has_plan": true,
+    "implicit_previous_step_steps": 0,
+    "instruction_template_steps": [],
+    "json_step_count": 1,
+    "question_binding_steps": 1,
+    "source_ref_steps": 1,
+    "step_count": 2,
+    "steps": [
+      {
+        "duplicate_source_ref_expressions": [],
+        "has_question": true,
+        "implicit_previous_step": false,
+        "input_contract_properties": [],
+        "input_source": "flow_input",
+        "input_type": "document",
+        "instruction_bytes": 636,
+        "instruction_excerpt": "Läs dokumentet och identifiera titel, år, dokumenttyp, kategori, avsändare, huvudbudskap samt en kort sammanfattning. Använd endast uppgifter som stöds av källmaterialet. Om en uppgift inte framgår tydligt, markera den som saknad eller ospecificerad. Required JSON fields: - avsandare: Avsändare, organisation eller upphovsman om det framgår. - kort_sammanfatt",
+        "instruction_has_template": false,
+        "name": "Extrahera nyckeluppgifter",
+        "order": 1,
+        "output_contract_leaf_properties": [
+          "ar",
+          "titel",
+          "kategori",
+          "avsandare",
+          "dokumenttyp",
+          "huvudbudskap",
+          "status",
+          "uppgift",
+          "kort_sammanfattning"
+        ],
+        "output_contract_properties": [
+          "ar",
+          "titel",
+          "kategori",
+          "avsandare",
+          "dokumenttyp",
+          "huvudbudskap",
+          "saknade_uppgifter",
+          "kort_sammanfattning"
+        ],
+        "output_mode": "pass_through",
+        "output_type": "json",
+        "plan_step_ref": "step_a",
+        "source_ref_count": 0,
+        "source_refs": []
+      },
+      {
+        "duplicate_source_ref_expressions": [],
+        "has_question": false,
+        "implicit_previous_step": false,
+        "input_contract_properties": [],
+        "input_source": "previous_step",
+        "input_type": "text",
+        "instruction_bytes": 130,
+        "instruction_excerpt": "Skapa slutresultatet från föregående strukturerade arbete. Bevara användarens önskade omfattning, ordning och begränsningar.",
+        "instruction_has_template": false,
+        "name": "Skapa slutresultat",
+        "order": 2,
+        "output_contract_leaf_properties": [],
+        "output_contract_properties": [],
+        "output_mode": "pass_through",
+        "output_type": "text",
+        "plan_step_ref": "step_b",
+        "source_ref_count": 1,
+        "source_refs": [
+          {
+            "output": "structured",
+            "step_ref": "step_a"
+          }
+        ]
+      }
+    ],
+    "terminal_output_mode": "pass_through",
+    "terminal_output_type": "text"
+  },
+  "quality_report": {
+    "checks": [
+      {
+        "actual": true,
+        "expected": true,
+        "name": "plan_created",
+        "passed": true
+      },
+      {
+        "actual": 0,
+        "expected": 0,
+        "name": "question_event_contract",
+        "passed": true
+      },
+      {
+        "actual": 2,
+        "expected": 1,
+        "name": "min_steps",
+        "passed": true
+      },
+      {
+        "actual": "text",
+        "expected": "text",
+        "name": "terminal_output_type",
+        "passed": true
+      },
+      {
+        "actual": 1,
+        "expected": 1,
+        "name": "min_json_steps",
+        "passed": true
+      },
+      {
+        "actual": 0,
+        "expected": 1,
+        "name": "max_all_previous_steps",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_duplicate_source_refs",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_template_variables_in_instructions",
+        "passed": true
+      },
+      {
+        "actual": [
+          "ar",
+          "titel",
+          "kategori",
+          "avsandare",
+          "dokumenttyp",
+          "huvudbudskap",
+          "saknade_uppgifter",
+          "kort_sammanfattning",
+          "status",
+          "uppgift"
+        ],
+        "expected": [
+          [
+            "title",
+            "titel"
+          ],
+          [
+            "year",
+            "år"
+          ],
+          [
+            "document_type",
+            "dokumenttyp"
+          ],
+          [
+            "category",
+            "kategori"
+          ],
+          [
+            "summary",
+            "sammanfattning"
+          ]
+        ],
+        "name": "expected_leaf_output_fields",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_forbidden_form_fields",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_primary_material_form_fields",
+        "passed": true
+      },
+      {
+        "actual": [],
+        "expected": [],
+        "name": "no_generic_primary_reader_envelope",
+        "passed": true
+      }
+    ],
+    "metrics": {
+      "json_to_json_step_count": 0,
+      "max_instruction_bytes": 636,
+      "max_source_ref_count": 1,
+      "post_json_text_cleanup_step_count": 0,
+      "primary_reader_outputs_json": true,
+      "renderer_is_previous_step_bound": false,
+      "total_source_ref_count": 1
+    },
+    "warnings": [
+      "primary document material is narrowed to JSON in the first step; inspect whether the source-reader captures all downstream fields"
+    ]
+  },
+  "repetition": 1,
+  "session_id": "cf8a9dec-0244-4f85-b509-63b5d8076a13",
+  "space_id": "f2a4cfb3-48ba-4e23-9513-53065e48c6b0"
+}
