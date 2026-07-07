@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -133,3 +134,80 @@ def test_suite_reliability_counts_invalid_plan_errors() -> None:
     assert case_summary["plan_created_count"] == 1
     assert case_summary["self_correction_invalid_plan_count"] == 2
     assert case_summary["error_code_counts"] == {"self_correction_invalid_plan": 2}
+
+
+def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "created_at": "20260707T000000",
+                "case": {
+                    "id": "document_pdf_source_retention_balance",
+                    "expected": {
+                        "expected_leaf_output_field_groups": [["date_or_year"]]
+                    },
+                },
+                "interactions": [],
+                "plan": {
+                    "proposal": {
+                        "spec": {
+                            "flow_name": "Document report",
+                            "steps": [
+                                {
+                                    "plan_step_ref": "step_a",
+                                    "name": "Read source",
+                                    "input_source": "flow_input",
+                                    "input_type": "document",
+                                    "output_type": "json",
+                                    "output_mode": "pass_through",
+                                    "output_contract": {
+                                        "type": "object",
+                                        "properties": {
+                                            "document_date": {"type": "string"}
+                                        },
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    stale_output_dir = tmp_path / "stale"
+    assert (
+        harness._reanalyze_bundles(
+            bundle_paths=[bundle_path],
+            output_dir=stale_output_dir,
+        )
+        == 0
+    )
+    stale_bundle = json.loads(next(stale_output_dir.iterdir()).read_text())
+    stale_checks = {
+        check["name"]: check for check in stale_bundle["quality_report"]["checks"]
+    }
+    assert stale_checks["expected_leaf_output_fields"]["passed"] is False
+
+    current_output_dir = tmp_path / "current"
+    assert (
+        harness._reanalyze_bundles(
+            bundle_paths=[bundle_path],
+            output_dir=current_output_dir,
+            expected_overrides_by_case_id={
+                "document_pdf_source_retention_balance": {
+                    "expected_leaf_output_field_groups": [["document_date"]]
+                }
+            },
+        )
+        == 0
+    )
+    current_bundle = json.loads(next(current_output_dir.iterdir()).read_text())
+    current_checks = {
+        check["name"]: check for check in current_bundle["quality_report"]["checks"]
+    }
+    assert current_checks["expected_leaf_output_fields"]["passed"] is True

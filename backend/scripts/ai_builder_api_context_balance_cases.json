@@ -17,10 +17,24 @@
         "expected_leaf_output_field_groups": [
           ["document_type", "dokumenttyp", "typ"],
           ["title", "titel"],
-          ["date_or_year", "year", "datum", "år"],
-          ["author_or_sender", "författare", "avsändare"],
+          [
+            "date_or_year",
+            "year",
+            "datum",
+            "år",
+            "document_date",
+            "written_date"
+          ],
+          ["author_or_sender", "author", "sender", "författare", "avsändare"],
           ["category", "kategori"],
-          ["conclusions", "slutsatser"],
+          [
+            "conclusions",
+            "conclusion",
+            "central_conclusions",
+            "key_conclusions",
+            "conclusion_summary",
+            "slutsatser"
+          ],
           ["summary", "sammanfattning"]
         ]
       }

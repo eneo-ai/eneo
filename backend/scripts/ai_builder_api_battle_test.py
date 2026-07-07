@@ -50,6 +50,7 @@ def main() -> int:
         return _reanalyze_bundles(
             bundle_paths=[Path(path) for path in args.reanalyze_bundle],
             output_dir=Path(args.output_dir),
+            expected_overrides_by_case_id=_expected_overrides_from_args(args),
         )
 
     api_key = args.api_key or os.getenv("ENEO_API_KEY")
@@ -306,6 +307,16 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             )
         )
     return cases
+
+
+def _expected_overrides_from_args(args: argparse.Namespace) -> dict[str, JsonObject]:
+    if not args.cases_file:
+        return {}
+    overrides: dict[str, JsonObject] = {}
+    for case in _read_cases_file(Path(args.cases_file)):
+        if case.expected is not None:
+            overrides[case.case_id] = dict(case.expected)
+    return overrides
 
 
 def _run_suite(
@@ -803,20 +814,33 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
     return summary
 
 
-def _reanalyze_bundles(*, bundle_paths: list[Path], output_dir: Path) -> int:
+def _reanalyze_bundles(
+    *,
+    bundle_paths: list[Path],
+    output_dir: Path,
+    expected_overrides_by_case_id: Mapping[str, Mapping[str, Any]] | None = None,
+) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     failures = 0
+    expected_overrides_by_case_id = expected_overrides_by_case_id or {}
     for bundle_path in bundle_paths:
         try:
             bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
             if not isinstance(bundle, dict):
                 raise ValueError(f"{bundle_path} did not contain a JSON object.")
             case = bundle.get("case")
+            case_id = (
+                _optional_string(case, "id") if isinstance(case, Mapping) else None
+            )
             expected = (
-                case.get("expected")
-                if isinstance(case, Mapping)
-                and isinstance(case.get("expected"), Mapping)
-                else {}
+                dict(expected_overrides_by_case_id[case_id])
+                if case_id is not None and case_id in expected_overrides_by_case_id
+                else (
+                    case.get("expected")
+                    if isinstance(case, Mapping)
+                    and isinstance(case.get("expected"), Mapping)
+                    else {}
+                )
             )
             plan = bundle.get("plan")
             plan = plan if isinstance(plan, dict) else None
