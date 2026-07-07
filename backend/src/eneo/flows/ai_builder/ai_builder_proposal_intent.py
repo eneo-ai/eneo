@@ -573,7 +573,6 @@ def build_create_flow_tool_schema(
                         "minItems": 1,
                         "maxItems": MAX_PROPOSAL_STEPS,
                         "items": build_semantic_step_schema(
-                            include_previous_refs=True,
                             model_refs=model_refs,
                             kb_refs=kb_refs,
                             mcp_server_refs=mcp_server_refs,

@@ -79,6 +79,8 @@ class TestBuildToolSchema:
         assert "input_type" not in step_properties
         assert "input_bindings" not in step_properties
         assert "output_mode" not in step_properties
+        assert "uses_previous_fields" not in step_properties
+        assert "uses_previous_outputs" not in step_properties
         assert "plan_step_ref" not in step_properties
         assert "runtime_input" not in properties
         assert "final_output_type" not in properties

@@ -164,7 +164,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     assert "assistant_ref" not in prompt
 
 
-def test_plan_proposal_prompt_allows_create_only_declared_previous_refs() -> None:
+def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
     state = _planning_state_with_architecture(
         StepTriple(
             input_type="text",
@@ -190,11 +190,11 @@ def test_plan_proposal_prompt_allows_create_only_declared_previous_refs() -> Non
         resource_catalog=_empty_catalog(),
     )
 
-    assert "uses_previous_fields" in create_prompt
-    assert "uses_previous_outputs" in create_prompt
-    assert "1-based earlier propose_flow step numbers" in create_prompt
-    assert "Do not author field-level previous-step paths" not in create_prompt
-    assert "backend-owned refs" not in create_prompt
+    assert "uses_previous_fields" not in create_prompt
+    assert "uses_previous_outputs" not in create_prompt
+    assert "1-based earlier propose_flow step numbers" not in create_prompt
+    assert "Do not author field-level previous-step paths" in create_prompt
+    assert "backend-owned refs" in create_prompt
     assert "raw input bindings" in create_prompt
     assert "step refs" in create_prompt
     assert "uses_previous_fields" not in edit_prompt

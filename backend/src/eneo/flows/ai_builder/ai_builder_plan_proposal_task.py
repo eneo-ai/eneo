@@ -70,8 +70,8 @@ def build_plan_proposal_system_prompt(
             "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription unless the user explicitly asks to review, approve, or edit the transcript itself.",
             "- For that transcript-review case, include the leading transcription step with review_mode; the backend attaches the checkpoint to its inserted transcription/upload step.",
             "- When the user explicitly asks to review, approve, or edit a step output before later steps continue, set that step's review_mode. Do not model human review as a separate AI step or as instruction prose.",
-            "- When a later create-mode step needs specific fields or full text from an earlier propose_flow step, declare `uses_previous_fields` or `uses_previous_outputs` with 1-based earlier propose_flow step numbers. Leave them empty when unsure; the backend validates and may fill gaps.",
-            "- The backend compiles step topology, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",
+            "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
+            "- The backend compiles step topology, backend-owned refs, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",
         ]
         if not is_edit_mode
         else []
