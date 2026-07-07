@@ -96,14 +96,14 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 
 ### Core step fields
 
-| Field                            | What it controls                                   | Common values                                                                | Default behavior  |
-| -------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------- |
-| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post` | Explicit per step |
-| `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `image`, `any`                  | Explicit per step |
-| `output_mode`                    | How the step produces its result                   | `pass_through`, `http_post`, `transcribe_only`, `template_fill`              | Explicit per step |
-| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                | Explicit per step |
-| `mcp_policy`                     | How MCP tool access is handled for the step        | `inherit`, `restricted`                                                      | Usually `inherit` |
-| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                    | No override       |
+| Field                            | What it controls                                   | Common values                                                                      | Default behavior  |
+| -------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------- |
+| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post`       | Explicit per step |
+| `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `image`, `any`                        | Explicit per step |
+| `output_mode`                    | How the step produces its result                   | `pass_through`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill` | Explicit per step |
+| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                      | Explicit per step |
+| `mcp_policy`                     | How MCP tool access is handled for the step        | `inherit`, `restricted`                                                            | Usually `inherit` |
+| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                          | No override       |
 
 ### Step chaining
 
@@ -157,6 +157,7 @@ If a published flow exposes form fields, the client sends those values inside `i
 | `pass_through`    | Standard LLM-backed generation                    | Historical name; the step still runs an LLM and returns the configured `output_type` |
 | `http_post`       | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config                                                  |
 | `transcribe_only` | Audio transcription                               | Requires `input_type=audio` and `output_type=text`                                   |
+| `render_verbatim` | Zero-LLM PDF/DOCX rendering from resolved text    | Requires `input_type=text` and `output_type=pdf` or `output_type=docx`               |
 | `template_fill`   | DOCX document assembly                            | Requires `output_type=docx`                                                          |
 
 ### `http_post`
@@ -193,6 +194,18 @@ Current validation rules are strict:
 - if runtime input is enabled for that step, its runtime input format must also be `audio`
 
 This is the normal starting point for flows that ingest recorded meetings, interviews, or citizen-submitted audio.
+
+### `render_verbatim`
+
+`render_verbatim` is the built-in document renderer for text-to-PDF and text-to-DOCX final steps. It renders the resolved input text directly and does not call an LLM, RAG retrieval, or MCP tools.
+
+Current validation rules are strict:
+
+- `input_type` must be `text`
+- `output_type` must be `pdf` or `docx`
+- the step should read the body-writer step through `input_source=previous_step`
+
+Use this when a previous step has already written the final document body and the final step only needs to produce a downloadable artifact.
 
 ### `template_fill`
 
@@ -250,7 +263,7 @@ When a step uses knowledge, the runtime records RAG provenance in the step-attem
 
 A step can enable `output_config.citation_mode = inline_inref_sidecar`.
 
-Current validation allows that only on **LLM-backed text steps**. It is not supported for `transcribe_only` or `template_fill` steps.
+Current validation allows that only on **LLM-backed text steps**. It is not supported for `transcribe_only`, `render_verbatim`, or `template_fill` steps.
 
 ### Highlighted source segments in the UI
 

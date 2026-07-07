@@ -19,6 +19,7 @@ flowchart LR
   api["API contract"] --> errors["FlowApiErrorCode"]
   api --> http["Authored HTTP config"]
   boundaries["Architecture boundaries"] --> imports["Import-linter"]
+  boundaries --> builder["AI Builder assembly"]
   boundaries --> principals["FlowPrincipal"]
 ```
 
@@ -135,7 +136,21 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 
 **Source refs.** Import-linter contract: `backend/.importlinter`, Package layout: `docs/flows/package-layout.md`.
 
-### 9. Review checkpoint as a revisioned state machine
+### 9. AI Builder create plans assemble before lowering
+
+**Context.** Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics.
+
+**Decision.** `FlowAssemblyPlan` is the create-path compile contract: assemble deterministic step mechanics, then lower once into `FlowDraftSpecCore`.
+
+**Consequences.**
+
+- Keep `FlowAssemblyPlan` compile-time only; do not persist it or make it a second Flow definition.
+- Keep topology admission, fixed-step construction, and lowering in their respective assembly modules.
+- Reject new create-mode rewrites that change underlag, renderer, transcription, or template-fill mechanics after lowering.
+
+**Source refs.** Assembly plan: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/plan.py`, Topology admission: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/create.py`, Fixed planned steps: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/fixed_steps.py`, Plan lowering: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py`.
+
+### 10. Review checkpoint as a revisioned state machine
 
 **Context.** Human review is a sub-lifecycle with edits, approval, rejection, expiry, and resume.
 
@@ -148,7 +163,7 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 
 **Source refs.** Checkpoint states: `backend/src/eneo/flows/enums.py`, Checkpoint table: `backend/src/eneo/database/tables/flow_tables.py`, Lifecycle docs: `frontend/apps/docs-site/src/content/docs/flows-for-developers/run-lifecycle.mdx`.
 
-### 10. Rerun lineage and invalidation ownership
+### 11. Rerun lineage and invalidation ownership
 
 **Context.** Reruns rebuild one root step and every downstream result that depends on it.
 

@@ -41,6 +41,7 @@ FLOW_DEVELOPER_KEY_DECISION_SLUGS = (
     "bounded-jsonb-policy",
     "public-flow-api-error-codes",
     "import-boundaries",
+    "ai-builder-assembly-plan",
     "review-checkpoint-state-machine",
     "rerun-lineage",
 )
@@ -261,6 +262,35 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
         ),
     ),
     _decision(
+        slug="ai-builder-assembly-plan",
+        title="AI Builder create plans assemble before lowering",
+        context="Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics.",
+        decision="`FlowAssemblyPlan` is the create-path compile contract: assemble deterministic step mechanics, then lower once into `FlowDraftSpecCore`.",
+        consequences=(
+            "Keep `FlowAssemblyPlan` compile-time only; do not persist it or make it a second Flow definition.",
+            "Keep topology admission, fixed-step construction, and lowering in their respective assembly modules.",
+            "Reject new create-mode rewrites that change underlag, renderer, transcription, or template-fill mechanics after lowering.",
+        ),
+        source_refs=(
+            _source(
+                "Assembly plan",
+                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/plan.py",
+            ),
+            _source(
+                "Topology admission",
+                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/create.py",
+            ),
+            _source(
+                "Fixed planned steps",
+                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/fixed_steps.py",
+            ),
+            _source(
+                "Plan lowering",
+                "backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py",
+            ),
+        ),
+    ),
+    _decision(
         slug="review-checkpoint-state-machine",
         title="Review checkpoint as a revisioned state machine",
         context="Human review is a sub-lifecycle with edits, approval, rejection, expiry, and resume.",
@@ -438,6 +468,7 @@ def _render_decision_map() -> str:
         '  api["API contract"] --> errors["FlowApiErrorCode"]',
         '  api --> http["Authored HTTP config"]',
         '  boundaries["Architecture boundaries"] --> imports["Import-linter"]',
+        '  boundaries --> builder["AI Builder assembly"]',
         '  boundaries --> principals["FlowPrincipal"]',
     )
 

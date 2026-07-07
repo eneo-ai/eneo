@@ -1844,8 +1844,9 @@ def test_flow_developer_docs_key_decisions_is_generated_from_decision_catalog() 
     assert "curated reviewer view" in page
     assert PLACEHOLDER_DOC_PATTERN.search(page) is None
     assert len(mermaid_blocks) == 1
-    assert len(generator.FLOW_DEVELOPER_KEY_DECISIONS) == 10
+    assert len(generator.FLOW_DEVELOPER_KEY_DECISIONS) == 11
     assert "cross-principal denial tests" in page
+    assert "`FlowAssemblyPlan`" in page
 
     for slug in generator.FLOW_DEVELOPER_KEY_DECISION_SLUGS:
         assert any(
@@ -1918,7 +1919,7 @@ def test_flow_developer_key_decision_catalog_rejects_drift() -> None:
     with pytest.raises(ValueError, match="one short sentence"):
         generator.validate_flow_developer_key_decisions((over_budget, *decisions[1:]))
 
-    with pytest.raises(ValueError, match="exactly 10 decisions"):
+    with pytest.raises(ValueError, match="exactly 11 decisions"):
         generator.validate_flow_developer_key_decisions(decisions[:-1])
 
 
