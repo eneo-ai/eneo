@@ -841,6 +841,31 @@ async def test_run_tool_self_correction_rejects_failure_after_normal_budget(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_code", "expected_message_part"),
+    [
+        ("empty_steps", "did not contain any flow steps"),
+        ("first_step_invalid_source", "connect the flow input to the first step"),
+        ("flow_input_not_first", "connect the flow input to the first step"),
+    ],
+)
+async def test_run_tool_self_correction_selects_terminal_message_from_failure_code(
+    failure_code: str,
+    expected_message_part: str,
+) -> None:
+    _, _, events = await _run_repair_capturing(
+        max_retries=0,
+        failure_kind="validation",
+        failure_codes=frozenset({failure_code}),
+    )
+
+    payload = json.loads(events[-1]["data"])
+
+    assert expected_message_part in payload["message"]
+    assert "still bad" not in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes() -> (
     None
 ):

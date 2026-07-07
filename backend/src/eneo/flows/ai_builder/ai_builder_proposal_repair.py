@@ -225,8 +225,8 @@ def build_self_correction_error_event(
     request_id: str | None = None,
 ) -> AIBuilderErrorEvent:
     message = _self_correction_user_message(
-        feedback=feedback,
         failure_kind=failure_kind,
+        failure_codes=failure_codes,
     )
     return build_ai_builder_error_event(
         message=message,
@@ -260,23 +260,24 @@ def _self_correction_error_details(
 
 def _self_correction_user_message(
     *,
-    feedback: str | None,
     failure_kind: ToolProcessingFailureKind | None,
+    failure_codes: frozenset[str],
 ) -> str:
-    details = (feedback or "").casefold()
     if failure_kind == "parse":
         return (
             "The AI Builder returned an incomplete plan configuration and could "
             "not repair it automatically. Try again, or use a more capable model "
             "if the same error repeats."
         )
-    if "flow must have at least one step" in details or "empty_steps" in details:
+    if "empty_steps" in failure_codes:
         return (
             "The corrected plan did not contain any flow steps. Ask for at least "
             "one concrete step, such as transcribing audio or summarizing text, "
             "then try again."
         )
-    if "input_source 'flow_input'" in details or "first step" in details:
+    if failure_codes.intersection(
+        {"first_step_invalid_source", "flow_input_not_first"}
+    ):
         return (
             "The corrected plan still could not connect the flow input to the "
             "first step. For audio or file flows, the first step must receive the "
