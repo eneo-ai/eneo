@@ -140,6 +140,17 @@ class TestBuildEditFlowToolSchema:
         assert "runtime_required" not in properties
         assert "runtime_max_files" not in properties
 
+    def test_add_step_payload_keeps_output_type_for_edit_mode(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        output_type = _add_step_payload_schema(schema)["properties"]["output_type"]
+
+        assert output_type["enum"] == [*builder_output_type_values(), None]
+
     def test_existing_step_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
         schema = build_edit_flow_tool_schema(

@@ -201,6 +201,34 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
     assert "uses_previous_outputs" not in edit_prompt
 
 
+def test_plan_proposal_prompt_keeps_document_rendering_backend_owned() -> None:
+    state = _planning_state_with_architecture(
+        StepTriple(
+            input_type="document",
+            output_type="json",
+            output_mode="pass_through",
+        ),
+        StepTriple(
+            input_type="text",
+            output_type="pdf",
+            output_mode="render_verbatim",
+        ),
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "final text step immediately before the renderer" in prompt
+    assert "Do not add a separate final conversion" in prompt
+    assert "the backend adds the fixed renderer" in prompt
+
+
 def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
     state = PlanningState.empty()
     state.file_roles = [

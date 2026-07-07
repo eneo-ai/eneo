@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -229,6 +230,11 @@ def _assemble_create_intent(
     form_field_names = {field.name for field in form_fields}
     placed_form_fields: set[str] = set()
     planned_steps: list[PlannedStep] = []
+    semantic_steps = _semantic_steps_without_terminal_document_render_helper(
+        intent.steps,
+        final_output_type=final_output_type,
+        document_artifact_requested=document_artifact_requested,
+    )
     previous_output_type: OutputType | None = None
     source_prefix_step_count = 0
     if runtime_input_type == InputType.AUDIO:
@@ -240,7 +246,7 @@ def _assemble_create_intent(
         planned_steps.append(transcription_step)
         previous_output_type = OutputType.TEXT
         source_prefix_step_count = 1
-    for index, semantic_step in enumerate(intent.steps):
+    for index, semantic_step in enumerate(semantic_steps):
         if not _previous_refs_are_immediate(semantic_step, step_index=index):
             return None
         step_output_type = _linear_step_output_type(
@@ -259,7 +265,7 @@ def _assemble_create_intent(
             return None
         input_source = _linear_step_input_source(
             step_index=index,
-            semantic_step_count=len(intent.steps),
+            semantic_step_count=len(semantic_steps),
             aggregation_intent=aggregation_intent,
             has_source_prefix=source_prefix_step_count > 0,
         )
@@ -362,6 +368,87 @@ def _assemble_create_intent(
         source_reader_required_fields=source_reader_required_fields,
         aggregation_intent=aggregation_intent,
         ui_language=ui_language,
+    )
+
+
+def _semantic_steps_without_terminal_document_render_helper(
+    steps: Sequence[SemanticStepIntent],
+    *,
+    final_output_type: OutputType,
+    document_artifact_requested: bool,
+) -> tuple[SemanticStepIntent, ...]:
+    semantic_steps = tuple(steps)
+    if (
+        not document_artifact_requested
+        or final_output_type not in _DOCUMENT_OUTPUT_TYPES
+        or len(semantic_steps) < 2
+    ):
+        return semantic_steps
+
+    previous_step = semantic_steps[-2]
+    helper_candidate = semantic_steps[-1]
+    previous_output_type = _linear_step_output_type(
+        output_type=previous_step.output_type,
+        output_fields=previous_step.output_fields,
+        final_output_type=OutputType.TEXT,
+        is_terminal=False,
+    )
+    if previous_output_type != OutputType.TEXT:
+        return semantic_steps
+    helper_output_type = _linear_step_output_type(
+        output_type=helper_candidate.output_type,
+        output_fields=helper_candidate.output_fields,
+        final_output_type=OutputType.TEXT,
+        is_terminal=True,
+    )
+    if helper_output_type != OutputType.TEXT:
+        return semantic_steps
+    if not _is_plain_terminal_document_helper(
+        helper_candidate,
+        final_output_type=final_output_type,
+    ):
+        return semantic_steps
+
+    logger.info(
+        "ai_builder_terminal_document_render_helper_dropped",
+        extra={
+            "step_name": helper_candidate.name,
+            "final_output_type": final_output_type.value,
+        },
+    )
+    return semantic_steps[:-1]
+
+
+def _is_plain_terminal_document_helper(
+    step: SemanticStepIntent,
+    *,
+    final_output_type: OutputType,
+) -> bool:
+    if (
+        step.output_fields
+        or step.uses_form_fields
+        or step.knowledge_refs
+        or step.mcp_server_refs
+        or step.mcp_tool_refs
+        or step.citations_requested
+        or step.review_mode is not None
+    ):
+        return False
+    return _mentions_output_artifact_type(
+        f"{step.name} {step.instructions}",
+        final_output_type=final_output_type,
+    )
+
+
+def _mentions_output_artifact_type(
+    text: str,
+    *,
+    final_output_type: OutputType,
+) -> bool:
+    artifact_type = re.escape(final_output_type.value)
+    return (
+        re.search(rf"(?<![a-z0-9]){artifact_type}(?![a-z0-9])", text.casefold())
+        is not None
     )
 
 

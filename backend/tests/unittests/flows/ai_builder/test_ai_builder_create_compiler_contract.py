@@ -1123,3 +1123,82 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
     assert validate_spec(compiled).valid
+
+
+def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys till PDF",
+            "plan_rationale": (
+                "Läs dokument, skriv rapportinnehåll och leverera som PDF."
+            ),
+            "steps": [
+                {
+                    "name": "Identifiera dokumentens innehåll",
+                    "instructions": (
+                        "Läs varje inskickat dokument och avgör vad det är för "
+                        "typ av dokument, vilket ämne det handlar om, kategori, "
+                        "datum, författare och slutsatser."
+                    ),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": (
+                                "En post per dokument i körningen med de uppgifter "
+                                "som ska användas i rapporten."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapportinnehåll",
+                    "instructions": (
+                        "Använd den extraherade informationen för att skriva den "
+                        "fullständiga rapporttexten för PDF:en. Presentera varje "
+                        "dokument tydligt med titel, år, kategori, dokumenttyp, "
+                        "författare, slutsatser och en kort sammanfattning."
+                    ),
+                    "output_type": "text",
+                },
+                {
+                    "name": "Skapa PDF-rapport",
+                    "instructions": (
+                        "Omvandla den färdiga rapporttexten till en professionell "
+                        "PDF med tydlig struktur och läsbar layout."
+                    ),
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            aggregation_intent=cast(AggregationIntent, "linear"),
+        ),
+    )
+
+    assert [step.name for step in compiled.steps] == [
+        "Identifiera dokumentens innehåll",
+        "Skriv rapportinnehåll",
+        "Render PDF",
+    ]
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    body_step = compiled.steps[-2]
+    renderer_step = compiled.steps[-1]
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.input_bindings is None
+    assert renderer_step.plan_step_ref != body_step.plan_step_ref
+    assert validate_spec(compiled).valid

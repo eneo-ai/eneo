@@ -168,6 +168,8 @@ The lowering layer is the only writer of compiled source refs and input bindings
 
 Generated PDF/DOCX final artifacts use a body-writer step followed by `render_verbatim`. Audio transcription uses `transcribe_only`, and DOCX templates use `template_fill`. These fixed runtime modes avoid unnecessary LLM calls; the semantic LLM work happens before the fixed renderer, transcriber, or filler step.
 
+Create-mode proposal schemas keep input/output mechanics backend-owned: the model supplies semantic step instructions, JSON `output_fields`, form-field usage, and resource refs, while assembly derives concrete output types, previous-output material, and final render steps.
+
 See [AI Builder](/docs/ai-builder), [Eneo Flows](/docs/flows), and [Flows for Developers](/docs/flows-for-developers) for maintainer-facing details.
 
 ---

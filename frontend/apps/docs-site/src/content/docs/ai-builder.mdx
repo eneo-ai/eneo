@@ -30,11 +30,11 @@ AI Builder separates semantic intent from Flow mechanics.
 | Layer            | Responsibility                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------- |
 | User             | Describes the outcome, constraints, source material, runtime fields, and external systems               |
-| AI Builder       | Proposes a semantic plan: fields, steps, outputs, and resource intent                                   |
+| AI Builder       | Proposes semantic fields, steps, and resource intent                                                     |
 | Backend compiler | Turns the plan into Flow mechanics: step wiring, material bindings, validation, and assistant resources |
 | Human reviewer   | Approves, changes, or rejects the plan before it becomes a draft Flow                                   |
 
-This split keeps generated plans maintainable. The model describes what each step should accomplish; the backend owns deterministic details such as how previous outputs and form fields become material for later steps.
+This split keeps generated plans maintainable. The model describes what each step should accomplish; the backend owns deterministic details such as step output mechanics, final artifact rendering, and how previous outputs and form fields become material for later steps.
 
 For create-plan compilation, supported shapes now pass through an explicit compile-time assembly spine:
 
@@ -60,6 +60,8 @@ Current assembly-backed create shapes include:
 - DOCX template-fill flows with a template-variable reader, content-preparation step, and `template_fill` step
 
 Generated document artifacts use `render_verbatim` for the final renderer. Audio transcription uses `transcribe_only`. Both are zero-LLM runtime pathways; the LLM work happens in semantic preparation steps before those fixed runtime modes.
+
+Create-mode proposal tools do not expose per-step input sources, input types, output types, output modes, previous-step refs, or raw bindings. `output_fields` describe semantic JSON fields; the compiler derives the concrete Flow output type and renderer mechanics from the committed architecture.
 
 In edit sessions, changes to a step's input source, input type, or selected form/previous fields are semantic changes. The backend re-derives the compiled input bindings, input contract, and runtime input configuration from those choices.
 

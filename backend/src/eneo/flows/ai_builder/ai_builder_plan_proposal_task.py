@@ -168,7 +168,9 @@ def _terminal_document_design_rule(planning_state: PlanningState) -> str | None:
         "renderer must output the complete document body. If the flow includes "
         "quality review or consistency checks, place that review before final "
         "assembly or make the review step rewrite the full revised final body; "
-        "do not put review notes directly before DOCX/PDF rendering."
+        "do not put review notes directly before DOCX/PDF rendering. Do not "
+        "add a separate final conversion, formatting, render, PDF, or DOCX "
+        "step; the backend adds the fixed renderer."
     )
 
 

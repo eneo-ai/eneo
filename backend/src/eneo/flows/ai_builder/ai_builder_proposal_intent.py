@@ -112,6 +112,9 @@ class SemanticStepIntent(BaseModel):
 
     name: str
     instructions: str
+    # Parser compatibility for older create payloads and current edit payloads.
+    # Create-mode schema does not advertise this; the compiler derives step
+    # output types from output_fields, terminal architecture, and assembly rules.
     output_type: OutputType | None = None
     output_fields: list[StructuredFieldDraft] | None = None
     uses_form_fields: list[str] = Field(default_factory=list)
@@ -573,6 +576,7 @@ def build_create_flow_tool_schema(
                         "minItems": 1,
                         "maxItems": MAX_PROPOSAL_STEPS,
                         "items": build_semantic_step_schema(
+                            include_output_type=False,
                             model_refs=model_refs,
                             kb_refs=kb_refs,
                             mcp_server_refs=mcp_server_refs,
@@ -610,6 +614,7 @@ def _input_field_intent_schema() -> dict[str, Any]:
 
 def build_semantic_step_schema(
     *,
+    include_output_type: bool = True,
     include_previous_refs: bool = False,
     model_refs: list[str] | None = None,
     kb_refs: list[str] | None = None,
@@ -629,10 +634,16 @@ def build_semantic_step_schema(
                     "or underlag/input_bindings syntax."
                 ),
             },
-            "output_type": {
-                "type": ["string", "null"],
-                "enum": [*builder_output_type_values(), None],
-            },
+            **(
+                {
+                    "output_type": {
+                        "type": ["string", "null"],
+                        "enum": [*builder_output_type_values(), None],
+                    },
+                }
+                if include_output_type
+                else {}
+            ),
             "output_fields": {
                 "type": ["array", "null"],
                 "description": (
