@@ -199,6 +199,60 @@ def test_field_expectations_require_explicit_aliases() -> None:
     assert explicit_checks["expected_leaf_output_fields"]["passed"] is True
 
 
+def test_field_expectations_include_nested_container_properties() -> None:
+    harness = _battle_harness()
+    plan = {
+        "proposal": {
+            "spec": {
+                "flow_name": "Nested output",
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Read source",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                        "output_contract": {
+                            "type": "object",
+                            "properties": {
+                                "saknade_uppgifter": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "punkt": {"type": "string"},
+                                        },
+                                    },
+                                }
+                            },
+                        },
+                    }
+                ],
+            }
+        }
+    }
+
+    summary = harness._summarize_plan(plan)
+    report = harness._quality_report(
+        plan=plan,
+        summary=summary,
+        expected={
+            "expected_leaf_output_field_groups": [
+                ["missing_information", "saknade_uppgifter"]
+            ]
+        },
+        event_summary={},
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert summary["steps"][0]["output_contract_nested_properties"] == [
+        "saknade_uppgifter",
+        "punkt",
+    ]
+    assert checks["expected_leaf_output_fields"]["passed"] is True
+
+
 def test_context_balance_pdf_case_sets_cleanup_cap() -> None:
     harness = _battle_harness()
     cases = harness._read_cases_file(

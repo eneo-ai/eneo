@@ -1094,6 +1094,9 @@ def _summarize_plan(plan: JsonObject | None) -> JsonObject:
                 "output_contract_properties": _schema_property_names(
                     raw_step.get("output_contract")
                 ),
+                "output_contract_nested_properties": _schema_nested_property_names(
+                    raw_step.get("output_contract")
+                ),
                 "output_contract_leaf_properties": _schema_leaf_property_names(
                     raw_step.get("output_contract")
                 ),
@@ -1213,6 +1216,26 @@ def _schema_leaf_property_names(schema: object) -> list[str]:
     names: list[str] = []
     _collect_schema_leaf_names(schema, names)
     return names
+
+
+def _schema_nested_property_names(schema: object) -> list[str]:
+    names: list[str] = []
+    _collect_schema_property_names(schema, names)
+    return list(dict.fromkeys(names))
+
+
+def _collect_schema_property_names(schema: object, names: list[str]) -> None:
+    if not isinstance(schema, Mapping):
+        return
+    properties = schema.get("properties")
+    if isinstance(properties, Mapping):
+        for name, child in properties.items():
+            names.append(str(name))
+            _collect_schema_property_names(child, names)
+        return
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        _collect_schema_property_names(items, names)
 
 
 def _collect_schema_leaf_names(schema: object, names: list[str]) -> None:
@@ -1675,7 +1698,11 @@ def _all_output_fields(summary: Mapping[str, Any]) -> list[str]:
     for step in steps:
         if not isinstance(step, Mapping):
             continue
-        for key in ("output_contract_properties", "output_contract_leaf_properties"):
+        for key in (
+            "output_contract_properties",
+            "output_contract_nested_properties",
+            "output_contract_leaf_properties",
+        ):
             raw = step.get(key)
             if isinstance(raw, list):
                 fields.extend(str(field) for field in raw)

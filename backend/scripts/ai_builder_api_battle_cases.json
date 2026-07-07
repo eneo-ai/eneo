@@ -68,8 +68,14 @@
           ["datum", "date", "date_or_year", "year"],
           ["forfattare", "author", "author_or_sender"],
           ["kategori", "category"],
-          ["slutsatser", "conclusion", "conclusions", "key_conclusions"],
-          ["sammanfattning", "summary"]
+          [
+            "slutsatser",
+            "conclusion",
+            "conclusions",
+            "key_conclusions",
+            "central_conclusions"
+          ],
+          ["sammanfattning", "summary", "short_summary"]
         ]
       }
     },
@@ -137,13 +143,76 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["beslut", "decision", "decisions"],
-          ["yrkanden", "motion", "proposal"],
-          ["reservationer", "reservation", "dissent"],
-          ["ansvariga", "owner", "responsible"],
-          ["deadlines", "deadline", "due_date"],
-          ["oppna_fragor", "open_questions"],
-          ["uppfoljning", "follow_up", "legal_follow_up"]
+          [
+            "beslut",
+            "decision",
+            "decision_points",
+            "decisions",
+            "meeting_items",
+            "meeting_points",
+            "spoken_decisions_candidates",
+            "structured_decisions"
+          ],
+          [
+            "yrkanden",
+            "motion",
+            "motions",
+            "proposal",
+            "meeting_items",
+            "meeting_points",
+            "motions_candidates",
+            "structured_motions"
+          ],
+          [
+            "reservationer",
+            "reservation",
+            "reservations",
+            "dissent",
+            "meeting_items",
+            "meeting_points",
+            "reservations_candidates",
+            "structured_reservations"
+          ],
+          [
+            "ansvariga",
+            "owner",
+            "owners",
+            "responsible",
+            "responsible_parties",
+            "responsibility_candidates",
+            "structured_responsibilities"
+          ],
+          ["deadlines", "deadline", "due_date", "deadline_candidates"],
+          [
+            "oppna_fragor",
+            "open_question",
+            "open_questions",
+            "meeting_items",
+            "meeting_points",
+            "open_questions_candidates",
+            "structured_open_questions"
+          ],
+          [
+            "uppfoljning",
+            "follow_up",
+            "legal_follow_up",
+            "legal_follow_up_basis",
+            "legal_follow_up_needed",
+            "juridical_follow_up_needed",
+            "potential_legal_followup",
+            "legal_follow_up_flags",
+            "legal_follow_up_signals",
+            "legal_review_items",
+            "guideline_conflicts",
+            "guideline_references",
+            "policy_checks",
+            "reviewed_policy_checks",
+            "validation_findings",
+            "risk",
+            "risk_or_note",
+            "actionable_conclusion",
+            "recommended_actions"
+          ]
         ]
       }
     },

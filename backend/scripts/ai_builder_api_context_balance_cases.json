@@ -17,16 +17,26 @@
         "forbid_generic_primary_reader_envelope": true,
         "expected_leaf_output_field_groups": [
           ["document_type", "dokumenttyp", "typ"],
-          ["title", "titel"],
+          ["title", "titel", "document_title"],
           [
             "date_or_year",
             "year",
+            "year_or_date",
             "datum",
             "år",
+            "date",
             "document_date",
-            "written_date"
+            "written_date",
+            "date_written"
           ],
-          ["author_or_sender", "author", "sender", "författare", "avsändare"],
+          [
+            "author_or_sender",
+            "author_or_source",
+            "author",
+            "sender",
+            "författare",
+            "avsändare"
+          ],
           ["category", "kategori"],
           [
             "conclusions",
@@ -34,6 +44,7 @@
             "central_conclusions",
             "key_conclusions",
             "conclusion_summary",
+            "conclusion_implication",
             "slutsatser"
           ],
           ["summary", "sammanfattning"]
@@ -58,9 +69,12 @@
           ["sista_svarsdatum", "svarsdatum", "deadline", "due_date"]
         ],
         "expected_leaf_output_field_groups": [
-          ["summary", "sammanfattning"],
-          ["missing_information", "saknade_uppgifter"],
-          ["case_number", "ärendenummer", "arendenummer"]
+          ["summary", "sammanfattning", "kort_sammanfattning", "arende_sammanfattning"],
+          [
+            "missing_information",
+            "saknade_uppgifter",
+            "saknade_eller_olika_uppgifter"
+          ]
         ]
       }
     },
@@ -85,10 +99,10 @@
         ],
         "expected_leaf_output_field_groups": [
           ["title", "titel"],
-          ["year", "år"],
+          ["year", "år", "ar", "date_or_year"],
           ["document_type", "dokumenttyp"],
           ["category", "kategori"],
-          ["summary", "sammanfattning"]
+          ["summary", "sammanfattning", "kort_sammanfattning"]
         ]
       }
     },
