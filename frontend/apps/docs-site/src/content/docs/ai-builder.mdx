@@ -49,6 +49,8 @@ That spine is compile-time only; it is not persisted and it is not a second Flow
 
 `FlowAssemblyPlan` is the construction-time guardrail. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering. Linear plans reject fan-in; aggregate and compare plans may use fan-in only where the body writer intentionally combines compacted prior outputs.
 
+There is no parallel create-dataflow or step-skeleton materializer for create plans. Those legacy paths were removed so new Builder work has one assembly owner to extend or delete.
+
 The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Do not add create-mode passes that rewrite underlag, renderer, transcription, or template-fill mechanics after lowering.
 
 Current assembly-backed create shapes include:

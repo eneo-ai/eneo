@@ -164,6 +164,8 @@ FlowDraftSpecCore
 
 `FlowAssemblyPlan` is not persisted. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering.
 
+Create-mode no longer has a separate create-dataflow or step-skeleton compiler path. `ai_builder_assembly` is the canonical create compiler owner.
+
 The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Later passes must not silently rewrite underlag channels, renderer modes, transcription mechanics, or template-fill mechanics.
 
 Generated PDF/DOCX final artifacts use a body-writer step followed by `render_verbatim`. Audio transcription uses `transcribe_only`, and DOCX templates use `template_fill`. These fixed runtime modes avoid unnecessary LLM calls; the semantic LLM work happens before the fixed renderer, transcriber, or filler step.
