@@ -1218,11 +1218,6 @@ def _materialize_audio_artifact_skeleton(
     ui_language: str | None,
 ) -> StepSkeletonPlan:
     terminal_artifact_needed = final_output_type in _DOCUMENT_OUTPUT_TYPES
-    terminal_input_source = (
-        InputSource.ALL_PREVIOUS_STEPS
-        if aggregation_intent in {"aggregate", "compare"}
-        else InputSource.PREVIOUS_STEP
-    )
     return _skeleton_plan(
         prefix_slots=(
             _backend_fixed_slot(
@@ -1267,7 +1262,7 @@ def _materialize_audio_artifact_skeleton(
             (
                 _terminal_artifact_slot(
                     slot_ordinal=2,
-                    input_source=terminal_input_source,
+                    input_source=InputSource.PREVIOUS_STEP,
                     final_output_type=final_output_type,
                     final_output_mode=None,
                     ui_language=ui_language,
@@ -1371,11 +1366,6 @@ def _materialize_linear_skeleton(
     ui_language: str | None,
 ) -> StepSkeletonPlan:
     terminal_artifact_needed = final_output_type in _DOCUMENT_OUTPUT_TYPES
-    terminal_input_source = (
-        InputSource.ALL_PREVIOUS_STEPS
-        if aggregation_intent in {"aggregate", "compare"}
-        else InputSource.PREVIOUS_STEP
-    )
     semantic_output_type = (
         OutputType.TEXT if terminal_artifact_needed else final_output_type
     )
@@ -1416,7 +1406,7 @@ def _materialize_linear_skeleton(
             (
                 _terminal_artifact_slot(
                     slot_ordinal=1,
-                    input_source=terminal_input_source,
+                    input_source=InputSource.PREVIOUS_STEP,
                     final_output_type=final_output_type,
                     final_output_mode=final_output_mode,
                     ui_language=ui_language,

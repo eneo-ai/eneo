@@ -270,6 +270,38 @@ def test_materialize_comparison_skeleton_places_fan_in_on_last_semantic() -> Non
     )
 
 
+def test_document_artifact_comparison_keeps_renderer_previous_step() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+        aggregation_intent="compare",
+    )
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Extract comparison facts",
+                instructions="Extract facts from the document.",
+            ),
+            StepSkeletonSemanticContent(
+                name="Write comparison body",
+                instructions="Compare all prior work and write the document body.",
+            ),
+        ]
+    )
+
+    assert [step.input_source.value for step in composition.steps] == [
+        "flow_input",
+        "all_previous_steps",
+        "previous_step",
+    ]
+    assert composition.steps[-1].output_type == OutputType.PDF
+    assert composition.steps[-1].document_delivery_mode == "generated"
+    assert composition.document_body_writer_step_indexes == (1,)
+
+
 def test_skeleton_composition_records_output_type_drift() -> None:
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
