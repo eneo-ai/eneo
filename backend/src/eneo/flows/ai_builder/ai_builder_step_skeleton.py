@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.ai_builder_render_step_copy import render_step_display_copy
 from eneo.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
 )
@@ -1028,17 +1029,6 @@ def default_final_step_instructions(*, ui_language: str | None) -> str:
     )
 
 
-def default_render_step_display_copy(
-    output_type: OutputType,
-    *,
-    ui_language: str | None,
-) -> str:
-    output_label = output_type.value.upper()
-    if ui_language == "sv":
-        return f"Rendera {output_label}"
-    return f"Render {output_label}"
-
-
 def _semantic_default_name(*, slot_id: str, ui_language: str | None) -> str:
     if ui_language == "sv":
         return {
@@ -1496,7 +1486,7 @@ def _terminal_artifact_slot(
             ui_language=ui_language,
         ),
         default_instructions=(
-            default_render_step_display_copy(
+            render_step_display_copy(
                 final_output_type,
                 ui_language=ui_language,
             )

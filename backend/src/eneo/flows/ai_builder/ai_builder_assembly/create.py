@@ -320,7 +320,7 @@ def _assemble_create_intent(
     if document_artifact_requested:
         renderer_step = render_verbatim_step(
             output_type=final_output_type,
-            body_step_name=planned_steps[-1].name,
+            ui_language=ui_language,
         )
         planned_steps.append(renderer_step)
     return FlowAssemblyPlan(

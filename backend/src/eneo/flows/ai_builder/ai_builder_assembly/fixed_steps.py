@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_assembly.plan import PlannedStep
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_render_step_copy import render_step_display_copy
 from eneo.flows.flow_authoring_spec import (
     InputSource,
     InputType,
@@ -109,12 +110,13 @@ def fixed_audio_transcription_step(
 def render_verbatim_step(
     *,
     output_type: OutputType,
-    body_step_name: str,
+    ui_language: str | None,
 ) -> PlannedStep:
+    display_copy = render_step_display_copy(output_type, ui_language=ui_language)
     return PlannedStep(
         role="renderer",
-        name=f"Render {body_step_name}",
-        instructions="Render the final document.",
+        name=display_copy,
+        instructions=display_copy,
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         output_type=output_type,

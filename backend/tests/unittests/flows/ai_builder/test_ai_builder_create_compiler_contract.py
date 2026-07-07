@@ -228,6 +228,9 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
     assert renderer_step.input_type == InputType.TEXT
     assert renderer_step.output_type == final_output_type
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    expected_render_copy = f"Render {final_output_type.value.upper()}"
+    assert renderer_step.name == expected_render_copy
+    assert renderer_step.assistant_spec.instructions == expected_render_copy
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
     assert validate_spec(compiled).valid
