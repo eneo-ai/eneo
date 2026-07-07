@@ -1752,6 +1752,13 @@ def _normalized_field_name(value: str) -> str:
     return "".join(ch for ch in ascii_value.casefold() if ch.isalnum())
 
 
+def _normalized_words(value: str) -> set[str]:
+    decomposed = unicodedata.normalize("NFKD", value)
+    ascii_value = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    normalized = "".join(ch.casefold() if ch.isalnum() else " " for ch in ascii_value)
+    return {word for word in normalized.split() if word}
+
+
 def _primary_material_form_fields(value: object) -> list[str]:
     names = _string_list(value)
     suspicious_tokens = (
@@ -1782,16 +1789,15 @@ def _non_terminal_artifact_confusion_steps(summary: Mapping[str, Any]) -> list[i
     steps = summary.get("steps")
     if not isinstance(steps, list) or len(steps) < 2:
         return []
-    artifact_tokens = {
-        str(terminal_output),
-        "dokument",
-        "document",
-        "generera",
-        "generate",
-        "rendera",
-        "render",
-        "skapa",
+    artifact_token = _normalized_field_name(str(terminal_output))
+    mechanical_tokens = {
         "create",
+        "generate",
+        "generera",
+        "make",
+        "render",
+        "rendera",
+        "skapa",
     }
     confused_steps: list[int] = []
     for raw_step in steps[:-1]:
@@ -1799,8 +1805,9 @@ def _non_terminal_artifact_confusion_steps(summary: Mapping[str, Any]) -> list[i
             continue
         haystack = " ".join(
             str(raw_step.get(key) or "") for key in ("name", "instruction_excerpt")
-        ).casefold()
-        if any(token in haystack for token in artifact_tokens):
+        )
+        words = _normalized_words(haystack)
+        if artifact_token in words and words.intersection(mechanical_tokens):
             order = raw_step.get("order")
             if isinstance(order, int):
                 confused_steps.append(order)

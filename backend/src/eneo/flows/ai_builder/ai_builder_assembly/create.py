@@ -782,13 +782,9 @@ def _append_terminal_helper_output_fields(
     if not field_names:
         return instructions
     if ui_language == "en":
-        field_instruction = (
-            "Ensure the report body covers these fields before rendering: "
-        )
+        field_instruction = "Ensure the report body covers these fields: "
     else:
-        field_instruction = (
-            "Säkerställ att rapporttexten täcker dessa fält innan rendering: "
-        )
+        field_instruction = "Säkerställ att rapporttexten täcker dessa fält: "
     return f"{instructions}\n\n{field_instruction}{field_names}."
 
 

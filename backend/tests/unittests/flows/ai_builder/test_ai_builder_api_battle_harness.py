@@ -167,6 +167,29 @@ def test_harness_can_fail_extra_post_json_text_helper() -> None:
     assert report["metrics"]["post_json_text_cleanup_step_count"] == 2
 
 
+def test_artifact_warning_allows_document_body_copy() -> None:
+    harness = _battle_harness()
+    summary = {
+        "terminal_output_type": "pdf",
+        "steps": [
+            {"order": 1, "output_type": "json", "name": "Läs dokument"},
+            {
+                "order": 2,
+                "output_type": "text",
+                "name": "Sammanställ rapport",
+                "instruction_excerpt": "Presentera resultaten dokument för dokument.",
+            },
+            {"order": 3, "output_type": "pdf", "name": "Rendera PDF"},
+        ],
+    }
+
+    assert harness._non_terminal_artifact_confusion_steps(summary) == []
+
+    summary["steps"][1]["instruction_excerpt"] = "Rendera PDF-innehållet."
+
+    assert harness._non_terminal_artifact_confusion_steps(summary) == [2]
+
+
 def test_field_expectations_require_explicit_aliases() -> None:
     harness = _battle_harness()
     summary = {
