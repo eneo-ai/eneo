@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -23,9 +23,9 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import type { AuditFilters } from "./audit";
+import { auditExportRequest, type AuditExportFormat, type AuditFilters } from "./audit";
 
 const POLL_MS = 2000;
 const RUNNING = new Set(["pending", "processing"]);
@@ -46,26 +46,27 @@ export function ExportDialog({
   filters: AuditFilters;
 }) {
   const t = useTranslations();
+  const queryClient = useQueryClient();
   const [jobId, setJobId] = useState<string | null>(null);
-  const [format, setFormat] = useState<"csv" | "json" | "jsonl">("csv");
+  const [format, setFormat] = useState<AuditExportFormat>("csv");
+  const filterWarning = filters.search.trim().length > 0 || filters.actions.length > 1;
 
   const start = useMutation({
     mutationFn: () =>
       unwrap(
         browserApi.POST("/api/v1/audit/logs/export/async", {
-          body: {
-            from_date: filters.from_date || undefined,
-            to_date: filters.to_date || undefined,
-            action: filters.actions[0] ?? undefined,
-            format
-          }
+          body: auditExportRequest(filters, format)
         })
       ),
     onSuccess: (job) => setJobId(job.job_id),
     onError: (error) => toastApiError(error, t)
   });
 
-  const { data: status } = useQuery({
+  const {
+    data: status,
+    error: statusError,
+    isError: statusIsError
+  } = useQuery({
     queryKey: ["audit-export", jobId],
     enabled: jobId !== null,
     refetchInterval: (query) => (RUNNING.has(query.state.data?.status ?? "") ? POLL_MS : false),
@@ -84,11 +85,34 @@ export function ExportDialog({
           params: { path: { job_id: jobId as string } }
         })
       ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["audit-export", jobId] });
+    },
     onError: (error) => toastApiError(error, t)
   });
 
-  const running = status ? RUNNING.has(status.status) : start.isPending;
+  const running = status
+    ? RUNNING.has(status.status)
+    : start.isPending || (jobId !== null && !statusIsError);
   const complete = status?.status === "completed";
+  const failed = status?.status === "failed";
+  const cancelled = status?.status === "cancelled";
+  const expired =
+    statusIsError && statusError instanceof EneoApiError && statusError.status === 404;
+  const terminal = complete || failed || cancelled || statusIsError;
+  const statusMessage = complete
+    ? t("audit_export_completed")
+    : cancelled
+      ? t("audit_export_cancelled")
+      : expired
+        ? t("audit_export_expired")
+        : statusIsError
+          ? t("audit_export_status_error")
+          : failed
+            ? (status.error_message ?? t("audit_export_failed"))
+            : status
+              ? t("audit_exporting")
+              : t("audit_export_preparing");
 
   function reset() {
     setJobId(null);
@@ -109,25 +133,26 @@ export function ExportDialog({
           <DialogDescription>{t("audit_logs_description")}</DialogDescription>
         </DialogHeader>
 
-        {jobId && status ? (
+        {jobId ? (
           <div className="flex flex-col gap-3">
-            <Progress value={status.progress} />
-            <p className="text-muted-foreground text-sm">
-              {complete
-                ? t("audit_export_completed")
-                : status.status === "failed"
-                  ? (status.error_message ?? t("audit_export_failed"))
-                  : t("audit_exporting")}
+            {!statusIsError && <Progress value={status?.progress ?? 0} />}
+            <p className="text-muted-foreground text-sm" role="status" aria-live="polite">
+              {statusMessage}
             </p>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">{t("audit_export_hint")}</p>
+            {filterWarning && (
+              <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
+                {t("audit_export_filter_warning")}
+              </p>
+            )}
             <div className="flex flex-col gap-2">
               <Label htmlFor="audit-export-format">{t("audit_export_format")}</Label>
               <Select
                 value={format}
-                onValueChange={(value) => setFormat(value as "csv" | "json" | "jsonl")}
+                onValueChange={(value) => setFormat(value as AuditExportFormat)}
               >
                 <SelectTrigger id="audit-export-format" className="w-full">
                   <SelectValue />
@@ -162,6 +187,13 @@ export function ExportDialog({
             >
               {t("cancel")}
             </Button>
+          ) : terminal && jobId ? (
+            <>
+              <Button variant="outline" onClick={reset}>
+                {t("close")}
+              </Button>
+              <Button onClick={() => setJobId(null)}>{t("try_again")}</Button>
+            </>
           ) : (
             <>
               <Button variant="outline" onClick={reset}>

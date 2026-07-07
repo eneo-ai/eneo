@@ -92,7 +92,7 @@ export function ApiKeyUsageDialog({
             )}
 
             {summary?.sampled_used_events && (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+              <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-xs">
                 {t("api_keys_admin_usage_sampled_notice")}
               </p>
             )}
@@ -108,7 +108,7 @@ export function ApiKeyUsageDialog({
                     <TableHead className="whitespace-nowrap">{t("audit_timestamp")}</TableHead>
                     <TableHead>{t("action")}</TableHead>
                     <TableHead>{t("api_keys_admin_usage_request")}</TableHead>
-                    <TableHead>IP</TableHead>
+                    <TableHead>{t("audit_ip_address")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -122,8 +122,8 @@ export function ApiKeyUsageDialog({
                           variant="outline"
                           className={
                             event.outcome === "used" || event.outcome === "success"
-                              ? "border-green-200 text-green-700 dark:border-green-900 dark:text-green-400"
-                              : "border-red-200 text-red-700 dark:border-red-900 dark:text-red-400"
+                              ? "border-success/40 text-success"
+                              : "border-destructive/40 text-destructive"
                           }
                         >
                           {event.action}

@@ -1,18 +1,11 @@
 "use client";
 
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { useLocale, useTranslations } from "next-intl";
-import { useId, useMemo, useState } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
+import { ExternalLink } from "lucide-react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,14 +14,23 @@ import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import {
   type InsightsRange,
+  assistantActivityRows,
   insightActivityQueryOptions,
   insightAggregatedQueryOptions,
   insightCountsQueryOptions,
-  mergeInsightSeries
+  insightMetadataQueryOptions,
+  tenantAssistantsQueryOptions
 } from "@/features/admin/insights/insights";
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
 const PRESET_DAYS = [7, 30, 90] as const;
+const UsageAreaChart = dynamic(
+  () => import("./usage-area-chart").then((module) => module.UsageAreaChart),
+  {
+    loading: () => <Skeleton className="h-[320px] w-full" />,
+    ssr: false
+  }
+);
 
 function presetRange(days: number): InsightsRange {
   const end = new Date();
@@ -56,120 +58,11 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-const SERIES = [
-  { key: "sessions", color: "var(--chart-1)", labelKey: "conversations_started" },
-  { key: "questions", color: "var(--chart-2)", labelKey: "questions_asked" },
-  { key: "assistants", color: "var(--chart-3)", labelKey: "assistants_created" }
-] as const;
-
 function UsageChart({ range }: { range: InsightsRange }) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const descriptionId = useId();
-
   const { data, isPending } = useQuery(insightAggregatedQueryOptions(browserApi, range));
-  const series = useMemo(() => (data ? mergeInsightSeries(data) : []), [data]);
-
-  const dateFmt = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale === "sv" ? "sv-SE" : "en-US", {
-        month: "short",
-        day: "numeric"
-      }),
-    [locale]
-  );
-  const formatDay = (value: string) => dateFmt.format(new Date(`${value}T00:00:00`));
-
   if (isPending) return <Skeleton className="h-[320px] w-full" />;
-  if (series.length === 0) {
-    return (
-      <div className="text-muted-foreground flex h-[320px] items-center justify-center text-sm">
-        {t("no_usage_data")}
-      </div>
-    );
-  }
-
-  return (
-    <figure aria-describedby={descriptionId}>
-      <p id={descriptionId} className="sr-only">
-        {t("assistant_usage_description")}
-      </p>
-      <ResponsiveContainer width="100%" height={320}>
-        <AreaChart data={series} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-          <defs>
-            {SERIES.map((s) => (
-              <linearGradient key={s.key} id={`fill-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={s.color} stopOpacity={0.3} />
-                <stop offset="100%" stopColor={s.color} stopOpacity={0} />
-              </linearGradient>
-            ))}
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatDay}
-            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-            tickLine={false}
-            axisLine={false}
-            minTickGap={24}
-          />
-          <YAxis
-            allowDecimals={false}
-            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-            tickLine={false}
-            axisLine={false}
-            width={48}
-          />
-          <Tooltip
-            labelFormatter={(label) => formatDay(String(label))}
-            formatter={(value, name) => [NUMBER.format(Number(value)), name]}
-            contentStyle={{
-              background: "var(--popover)",
-              border: "1px solid var(--border)",
-              borderRadius: "0.5rem",
-              color: "var(--popover-foreground)",
-              fontSize: "0.8125rem"
-            }}
-          />
-          <Legend wrapperStyle={{ fontSize: "0.8125rem" }} />
-          {SERIES.map((s) => (
-            <Area
-              key={s.key}
-              type="monotone"
-              dataKey={s.key}
-              name={t(s.labelKey)}
-              stroke={s.color}
-              fill={`url(#fill-${s.key})`}
-              strokeWidth={2}
-            />
-          ))}
-        </AreaChart>
-      </ResponsiveContainer>
-      <table className="sr-only">
-        <caption>{t("assistant_usage")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("migration_history_date")}</th>
-            {SERIES.map((s) => (
-              <th key={s.key} scope="col">
-                {t(s.labelKey)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {series.map((point) => (
-            <tr key={point.date}>
-              <th scope="row">{formatDay(point.date)}</th>
-              {SERIES.map((s) => (
-                <td key={s.key}>{NUMBER.format(Number(point[s.key] ?? 0))}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </figure>
-  );
+  if (!data) return null;
+  return <UsageAreaChart data={data} />;
 }
 
 function Delta({ current, prior }: { current: number; prior?: number }) {
@@ -178,14 +71,21 @@ function Delta({ current, prior }: { current: number; prior?: number }) {
   if (diff === 0) return <span className="text-muted-foreground text-xs">±0</span>;
   const up = diff > 0;
   return (
-    <span
-      className={
-        up ? "text-xs text-green-700 dark:text-green-400" : "text-xs text-red-700 dark:text-red-400"
-      }
-    >
+    <span className={up ? "text-success text-xs" : "text-destructive text-xs"}>
       {up ? "▲" : "▼"} {NUMBER.format(Math.abs(diff))}
     </span>
   );
+}
+
+function presetLabel(days: (typeof PRESET_DAYS)[number], t: (key: string) => string): string {
+  switch (days) {
+    case 7:
+      return t("audit_last_7_days");
+    case 30:
+      return t("audit_last_30_days");
+    case 90:
+      return t("audit_last_90_days");
+  }
 }
 
 function ActivityCards({ range, compare }: { range: InsightsRange; compare: boolean }) {
@@ -224,6 +124,56 @@ function ActivityCards({ range, compare }: { range: InsightsRange; compare: bool
   );
 }
 
+function AssistantActivityList({ range }: { range: InsightsRange }) {
+  const t = useTranslations();
+  const metadata = useQuery(insightMetadataQueryOptions(browserApi, range));
+  const assistants = useQuery(tenantAssistantsQueryOptions(browserApi));
+  const rows = useMemo(
+    () => (metadata.data ? assistantActivityRows(metadata.data) : []),
+    [metadata.data]
+  );
+  const assistantNames = useMemo(
+    () => new Map((assistants.data ?? []).map((assistant) => [assistant.id, assistant.name])),
+    [assistants.data]
+  );
+
+  if (metadata.isPending || assistants.isPending) return <Skeleton className="h-48 w-full" />;
+  if (metadata.isError || assistants.isError) {
+    return <p className="text-destructive text-sm">{t("request_failed")}</p>;
+  }
+  if (rows.length === 0)
+    return <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>;
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="divide-y">
+        {rows.map((row) => (
+          <div
+            key={row.assistantId}
+            className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+          >
+            <div className="min-w-0">
+              <p className="truncate font-medium">
+                {assistantNames.get(row.assistantId) ?? row.assistantId}
+              </p>
+              <p className="text-muted-foreground text-sm">
+                {NUMBER.format(row.questions)} {t("questions")} · {NUMBER.format(row.sessions)}{" "}
+                {t("sessions")}
+              </p>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/admin/insights/assistant/${row.assistantId}`}>
+                <ExternalLink className="size-4" />
+                {t("details")}
+              </Link>
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /**
  * Organization insights: headline totals, a usage time-series over a selectable
  * window (conversations / questions / assistants per day), and active-assistant
@@ -233,6 +183,7 @@ export function InsightsPage() {
   const t = useTranslations();
   const { data: counts } = useSuspenseQuery(insightCountsQueryOptions(browserApi));
   const [range, setRange] = useState<InsightsRange>(() => presetRange(30));
+  const [activePreset, setActivePreset] = useState<(typeof PRESET_DAYS)[number] | null>(30);
   const [compare, setCompare] = useState(false);
 
   return (
@@ -257,10 +208,14 @@ export function InsightsPage() {
                 <Button
                   key={preset}
                   size="sm"
-                  variant="outline"
-                  onClick={() => setRange(presetRange(preset))}
+                  variant={activePreset === preset ? "default" : "outline"}
+                  aria-pressed={activePreset === preset}
+                  onClick={() => {
+                    setActivePreset(preset);
+                    setRange(presetRange(preset));
+                  }}
                 >
-                  {t(`last_${preset}_days`)}
+                  {presetLabel(preset, t)}
                 </Button>
               ))}
             </div>
@@ -270,13 +225,14 @@ export function InsightsPage() {
                 type="date"
                 className="h-8 w-36"
                 value={toDateInput(range.start)}
-                onChange={(event) =>
-                  event.target.value &&
+                onChange={(event) => {
+                  if (!event.target.value) return;
+                  setActivePreset(null);
                   setRange((current) => ({
                     ...current,
                     start: new Date(`${event.target.value}T00:00:00`).toISOString()
-                  }))
-                }
+                  }));
+                }}
               />
             </label>
             <label className="flex flex-col gap-1 text-xs">
@@ -285,13 +241,14 @@ export function InsightsPage() {
                 type="date"
                 className="h-8 w-36"
                 value={toDateInput(range.end)}
-                onChange={(event) =>
-                  event.target.value &&
+                onChange={(event) => {
+                  if (!event.target.value) return;
+                  setActivePreset(null);
                   setRange((current) => ({
                     ...current,
                     end: new Date(`${event.target.value}T23:59:59`).toISOString()
-                  }))
-                }
+                  }));
+                }}
               />
             </label>
             <Button
@@ -310,6 +267,7 @@ export function InsightsPage() {
       <div className="flex flex-col gap-3">
         <h2 className="font-semibold">{t("insights_assistant_activity")}</h2>
         <ActivityCards range={range} compare={compare} />
+        <AssistantActivityList range={range} />
       </div>
     </div>
   );

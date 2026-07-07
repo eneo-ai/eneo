@@ -11,10 +11,13 @@ import {
   Pencil,
   Star,
   TriangleAlert,
+  Trash2,
   Wrench
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { toast } from "sonner";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +38,7 @@ import {
 } from "@/features/ai-models/format-model-stats";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
 import { EditModelDialog } from "./edit-model-dialog";
@@ -43,7 +46,8 @@ import { MigrateModelDialog } from "./migrate-model-dialog";
 import { ModelDetailDialog } from "./model-detail-dialog";
 import {
   type AdminModel,
-  type CompletionModelAdmin,
+  deleteTenantModel,
+  type MigratableModelKind,
   MODELS_KEY,
   modelLabel,
   type ModelKind
@@ -71,7 +75,10 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
     await unwrap(
       browserApi.POST("/api/v1/embedding-models/{id}/", {
         params: { path: { id } },
-        body: { is_org_enabled: flags.is_org_enabled ?? undefined }
+        body: {
+          is_org_enabled: flags.is_org_enabled ?? undefined,
+          security_classification: flags.security_classification ?? undefined
+        }
       })
     );
   }
@@ -239,6 +246,7 @@ export function ModelRow({
   const [showEdit, setShowEdit] = useState(false);
   const [showMigrate, setShowMigrate] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const canViewDetail = kind === "completion" || kind === "transcription";
 
   const flags = useMutation({
@@ -248,18 +256,50 @@ export function ModelRow({
   });
 
   const locked = model.is_locked ?? false;
+  const readonly = "readonly" in model && model.readonly === true;
   const isDefault = hasDefault(model) && model.is_org_default;
   const currentClassification = hasClassification(model)
     ? ((model as { security_classification?: SecurityClassification | null })
         .security_classification ?? null)
     : null;
   const supportsDefault = kind !== "embedding";
-  const supportsClassification = securityEnabled && kind !== "embedding";
-  const canEdit = kind === "completion" && !("readonly" in model && model.readonly);
+  const supportsClassification = securityEnabled;
+  const canEdit = !readonly;
   const canMigrate =
-    kind === "completion" && !("migrated_to_model_id" in model && model.migrated_to_model_id);
-  const showActions = supportsDefault || supportsClassification || canEdit || canMigrate;
+    (kind === "completion" || kind === "transcription") &&
+    !("migrated_to_model_id" in model && model.migrated_to_model_id);
+  const canDelete = !readonly;
+  const showActions =
+    supportsDefault || supportsClassification || canEdit || canMigrate || canDelete;
   const dep = getDeprecationStatus(model);
+
+  const remove = useMutation({
+    mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      toast.success(t("model_deleted_success"));
+      setShowDelete(false);
+    },
+    onError: (error) => {
+      if (
+        error instanceof EneoApiError &&
+        error.code === 9039 &&
+        (kind === "completion" || kind === "transcription")
+      ) {
+        toast.error(getErrorMessage(error, t), {
+          action: {
+            label: t("migrate"),
+            onClick: () => {
+              setShowDelete(false);
+              setShowMigrate(true);
+            }
+          }
+        });
+        return;
+      }
+      toastApiError(error, t);
+    }
+  });
 
   return (
     <TableRow
@@ -341,9 +381,13 @@ export function ModelRow({
                   <ArrowLeftRight className="size-4" /> {t("migrate")}
                 </DropdownMenuItem>
               )}
-              {(canEdit || canMigrate) && (supportsDefault || supportsClassification) && (
-                <DropdownMenuSeparator />
+              {canDelete && (
+                <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
+                  <Trash2 className="size-4" /> {t("delete")}
+                </DropdownMenuItem>
               )}
+              {(canEdit || canMigrate || canDelete) &&
+                (supportsDefault || supportsClassification) && <DropdownMenuSeparator />}
               {supportsDefault && (
                 <DropdownMenuItem
                   disabled={isDefault || !model.is_org_enabled}
@@ -388,14 +432,18 @@ export function ModelRow({
         )}
         {canEdit && (
           <EditModelDialog
-            model={model as CompletionModelAdmin}
+            model={model}
+            kind={kind}
+            classifications={classifications}
+            securityEnabled={securityEnabled}
             open={showEdit}
             onOpenChange={setShowEdit}
           />
         )}
         {canMigrate && (
           <MigrateModelDialog
-            model={model as CompletionModelAdmin}
+            model={model}
+            kind={kind as MigratableModelKind}
             open={showMigrate}
             onOpenChange={setShowMigrate}
           />
@@ -406,6 +454,17 @@ export function ModelRow({
             kind={kind as "completion" | "transcription"}
             open={showDetail}
             onOpenChange={setShowDetail}
+          />
+        )}
+        {canDelete && (
+          <ConfirmDialogControlled
+            open={showDelete}
+            onOpenChange={setShowDelete}
+            title={t("delete_model")}
+            description={`${t("delete_model_confirm", { name: modelLabel(model) })} ${t("delete_model_warning")}`}
+            confirmLabel={remove.isPending ? t("deleting") : t("delete")}
+            pending={remove.isPending}
+            onConfirm={() => remove.mutate()}
           />
         )}
       </TableCell>

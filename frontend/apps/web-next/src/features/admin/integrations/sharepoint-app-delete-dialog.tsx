@@ -57,7 +57,7 @@ export function SharePointAppDeleteDialog({
           <DialogTitle>{t("delete_sharepoint_app")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          <div className="border-destructive/30 bg-destructive/10 text-destructive flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm">
             <span className="flex items-center gap-2 font-medium">
               <AlertTriangle className="size-4" /> {t("delete_sharepoint_app_warning")}
             </span>

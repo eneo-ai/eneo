@@ -7,6 +7,8 @@ export type ApiKeyPermission = Schema<"ApiKeyPermission">;
 export type ApiKeyScopeType = Schema<"ApiKeyScopeType">;
 export type ApiKeyState = Schema<"ApiKeyState">;
 export type ApiKeyType = Schema<"ApiKeyType">;
+export type ExpiringKeySummaryItem = Schema<"ExpiringKeySummaryItem">;
+export type ExpiringKeysSummary = Schema<"ExpiringKeysSummary">;
 
 export const API_KEY_STATES: ApiKeyState[] = ["active", "suspended", "revoked", "expired"];
 
@@ -58,6 +60,30 @@ export function buildTenantApiKeyCreateBody({
     permission,
     scope_type: "tenant",
     ownership,
+    expires_at: apiKeyExpiresAt(expiryDays)
+  };
+}
+
+export function buildScopedApiKeyCreateBody({
+  name,
+  scopeType,
+  scopeId,
+  permission,
+  expiryDays
+}: {
+  name: string;
+  scopeType: Extract<ApiKeyScopeType, "space" | "assistant" | "app">;
+  scopeId: string;
+  permission: ApiKeyPermission;
+  expiryDays: ApiKeyExpiryPresetValue;
+}): ApiKeyCreateRequest {
+  return {
+    name: name.trim(),
+    key_type: "sk_",
+    permission,
+    scope_type: scopeType,
+    scope_id: scopeId,
+    ownership: "user",
     expires_at: apiKeyExpiresAt(expiryDays)
   };
 }

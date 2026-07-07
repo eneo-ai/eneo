@@ -142,21 +142,7 @@ function ProviderCard({
         </TableBody>
       </Table>
 
-      <ProviderEditDialog
-        provider={{
-          id: section.providerId,
-          name: section.name,
-          provider_type: section.providerType,
-          is_active: section.isActive,
-          masked_api_key: section.maskedKey ?? null,
-          config: {},
-          tenant_id: "",
-          created_at: "",
-          updated_at: ""
-        }}
-        open={showEdit}
-        onOpenChange={setShowEdit}
-      />
+      <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}

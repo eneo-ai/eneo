@@ -1,9 +1,12 @@
 "use client";
 
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { PageHeader } from "@/components/composites/page-header";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -20,13 +23,12 @@ import { formatBytes } from "@/lib/format";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import {
   buildRateMap,
-  estimateCost,
   formatCost,
   storageQueryOptions,
   storageSpacesQueryOptions,
   tokenUsageQueryOptions,
   userTokenUsageQueryOptions,
-  type UserTokenUsage
+  userUsageCost
 } from "@/features/admin/usage/usage";
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
@@ -121,22 +123,6 @@ function StorageTab() {
   );
 }
 
-function userCost(
-  user: UserTokenUsage["users"][number],
-  rates: ReturnType<typeof buildRateMap>
-): number | null {
-  let total: number | null = null;
-  for (const model of user.models_used) {
-    const cost = estimateCost(
-      model.input_token_usage,
-      model.output_token_usage,
-      rates.get(model.model_id)
-    );
-    if (cost != null) total = (total ?? 0) + cost;
-  }
-  return total;
-}
-
 function UsersTab() {
   const t = useTranslations();
   const { data, isPending } = useQuery(userTokenUsageQueryOptions(browserApi));
@@ -169,7 +155,14 @@ function UsersTab() {
           <TableBody>
             {data.users.map((user) => (
               <TableRow key={user.user_id}>
-                <TableCell className="font-medium">{user.username || user.email}</TableCell>
+                <TableCell>
+                  <Button variant="link" className="h-auto p-0 font-medium" asChild>
+                    <Link href={`/admin/usage/users/${user.user_id}`}>
+                      {user.username || user.email}
+                      <ExternalLink className="size-3" />
+                    </Link>
+                  </Button>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {NUMBER.format(user.total_input_tokens)}
                 </TableCell>
@@ -183,7 +176,7 @@ function UsersTab() {
                   {NUMBER.format(user.total_requests)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-right tabular-nums">
-                  {formatCost(userCost(user, rates))}
+                  {formatCost(userUsageCost(user, rates))}
                 </TableCell>
               </TableRow>
             ))}

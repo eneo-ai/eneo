@@ -1,13 +1,14 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { useAppContext } from "@/components/providers/app-context";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +37,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -194,22 +196,73 @@ function KeyActions({
     onError: (error) => toastApiError(error, t)
   });
 
-  if (apiKey.state !== "active") return null;
+  const suspendKey = useMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.POST("/api/v1/api-keys/{id}/suspend", {
+          params: { path: { id: apiKey.id } },
+          body: {}
+        })
+      ),
+    onSuccess: invalidate,
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const reactivateKey = useMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.POST("/api/v1/api-keys/{id}/reactivate", {
+          params: { path: { id: apiKey.id } }
+        })
+      ),
+    onSuccess: invalidate,
+    onError: (error) => toastApiError(error, t)
+  });
 
   return (
     <div className="flex justify-end gap-1">
-      <ConfirmDialog
-        trigger={
-          <Button variant="ghost" size="icon" aria-label={t("api_keys_action_rotate")}>
-            <RefreshCw className="size-4" />
-          </Button>
-        }
-        title={t("api_keys_rotate_confirm_title")}
-        description={t("api_keys_rotate_confirm_description")}
-        confirmLabel={t("api_keys_action_rotate")}
-        pending={rotateKey.isPending}
-        onConfirm={() => rotateKey.mutateAsync().then(() => undefined)}
-      />
+      {apiKey.state === "active" && (
+        <>
+          <ConfirmDialog
+            trigger={
+              <Button variant="ghost" size="icon" aria-label={t("api_keys_action_rotate")}>
+                <RefreshCw className="size-4" />
+              </Button>
+            }
+            title={t("api_keys_rotate_confirm_title")}
+            description={t("api_keys_rotate_confirm_description")}
+            confirmLabel={t("api_keys_action_rotate")}
+            pending={rotateKey.isPending}
+            onConfirm={() => rotateKey.mutateAsync().then(() => undefined)}
+          />
+          <ConfirmDialog
+            trigger={
+              <Button variant="ghost" size="icon" aria-label={t("api_keys_action_suspend")}>
+                <Pause className="size-4" />
+              </Button>
+            }
+            title={t("api_keys_action_suspend_title")}
+            description={t("api_keys_action_suspend_description")}
+            confirmLabel={t("api_keys_action_suspend")}
+            pending={suspendKey.isPending}
+            onConfirm={() => suspendKey.mutateAsync().then(() => undefined)}
+          />
+        </>
+      )}
+      {apiKey.state === "suspended" && (
+        <ConfirmDialog
+          trigger={
+            <Button variant="ghost" size="icon" aria-label={t("api_keys_action_reactivate")}>
+              <Play className="size-4" />
+            </Button>
+          }
+          title={t("api_keys_action_reactivate_title")}
+          description={t("api_keys_action_reactivate_description")}
+          confirmLabel={t("api_keys_action_reactivate")}
+          pending={reactivateKey.isPending}
+          onConfirm={() => reactivateKey.mutateAsync().then(() => undefined)}
+        />
+      )}
       <ConfirmDialog
         trigger={
           <Button variant="ghost" size="icon" aria-label={t("api_keys_action_revoke")}>
@@ -226,12 +279,149 @@ function KeyActions({
   );
 }
 
+function LegacyKeyBanner({ suffix, onRevoked }: { suffix: string; onRevoked: () => void }) {
+  const t = useTranslations();
+
+  const revokeLegacy = useMutation({
+    mutationFn: () => unwrap(browserApi.DELETE("/api/v1/users/api-keys/legacy")),
+    onSuccess: onRevoked,
+    onError: (error) => toastApiError(error, t)
+  });
+
+  return (
+    <Alert>
+      <AlertTitle>{t("api_keys_legacy_detected")}</AlertTitle>
+      <AlertDescription>
+        <p>
+          {t("api_keys_legacy_ending_in")} <code>****{suffix}</code>.{" "}
+          {t("api_keys_legacy_recommend")}
+        </p>
+        <ConfirmDialog
+          trigger={
+            <Button variant="outline" size="sm" className="mt-2">
+              {t("api_keys_legacy_revoke")}
+            </Button>
+          }
+          title={t("api_keys_legacy_revoke_title")}
+          description={t("api_keys_legacy_revoke_description")}
+          confirmLabel={t("api_keys_legacy_revoke")}
+          pending={revokeLegacy.isPending}
+          onConfirm={() => revokeLegacy.mutateAsync().then(() => undefined)}
+        />
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function NotificationPreferencesPanel() {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const preferences = useQuery({
+    queryKey: ["api-key-notification-preferences"],
+    queryFn: () => unwrap(browserApi.GET("/api/v1/api-keys/notification-preferences"))
+  });
+
+  const updatePreferences = useMutation({
+    mutationFn: (body: {
+      enabled?: boolean | null;
+      days_before_expiry?: number[] | null;
+      auto_follow_published_assistants?: boolean | null;
+      auto_follow_published_apps?: boolean | null;
+    }) => unwrap(browserApi.PUT("/api/v1/api-keys/notification-preferences", { body })),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["api-key-notification-preferences"], updated);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const data = preferences.data;
+  const enabled = data?.enabled ?? false;
+  const firstDay = data?.days_before_expiry?.[0] ?? 30;
+  const disabled = preferences.isPending || updatePreferences.isPending;
+
+  function saveDay(value: string) {
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 1) return;
+    updatePreferences.mutate({ days_before_expiry: [days] });
+  }
+
+  return (
+    <section className="rounded-xl border p-4">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <Bell className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0">
+              <h2 className="text-sm font-medium">{t("api_keys_notifications_settings_title")}</h2>
+              <p className="text-muted-foreground text-sm">
+                {t("api_keys_notifications_settings_description")}
+              </p>
+            </div>
+          </div>
+          <Switch
+            checked={enabled}
+            disabled={disabled}
+            aria-label={t("api_keys_notifications_settings_title")}
+            onCheckedChange={(checked) => updatePreferences.mutate({ enabled: checked })}
+          />
+        </div>
+        {enabled && (
+          <div className="grid gap-4 border-t pt-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="api-key-notification-days">
+                {t("api_keys_notifications_days_label")}
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="api-key-notification-days"
+                  type="number"
+                  min={1}
+                  defaultValue={firstDay}
+                  disabled={disabled}
+                  className="w-24"
+                  onBlur={(event) => saveDay(event.target.value)}
+                />
+                <span className="text-muted-foreground text-sm">
+                  {t("api_keys_notifications_days_unit")}
+                </span>
+              </div>
+            </div>
+            <Label className="flex items-center justify-between gap-3 rounded-lg border p-3 font-normal sm:col-span-1">
+              <span className="text-sm">
+                {t("api_keys_notifications_auto_follow_assistants_title")}
+              </span>
+              <Switch
+                checked={data?.auto_follow_published_assistants ?? false}
+                disabled={disabled}
+                onCheckedChange={(checked) =>
+                  updatePreferences.mutate({ auto_follow_published_assistants: checked })
+                }
+              />
+            </Label>
+            <Label className="flex items-center justify-between gap-3 rounded-lg border p-3 font-normal sm:col-span-1">
+              <span className="text-sm">{t("api_keys_notifications_auto_follow_apps_title")}</span>
+              <Switch
+                checked={data?.auto_follow_published_apps ?? false}
+                disabled={disabled}
+                onCheckedChange={(checked) =>
+                  updatePreferences.mutate({ auto_follow_published_apps: checked })
+                }
+              />
+            </Label>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function ApiKeys() {
   const t = useTranslations();
-  const { can } = useAppContext();
+  const { can, user } = useAppContext();
   const [stateFilter, setStateFilter] = useState<ApiKeyState>("active");
   const [secret, setSecret] = useState<string | null>(null);
   const [secretTitle, setSecretTitle] = useState("");
+  const [legacySuffix, setLegacySuffix] = useState(user.legacy_api_key_suffix ?? null);
 
   const keys = usePaginatedQuery({
     queryKey: ["api-keys", stateFilter],
@@ -262,6 +452,10 @@ export function ApiKeys() {
 
   return (
     <div className="flex flex-col gap-4">
+      <NotificationPreferencesPanel />
+      {legacySuffix ? (
+        <LegacyKeyBanner suffix={legacySuffix} onRevoked={() => setLegacySuffix(null)} />
+      ) : null}
       <div className="flex items-center justify-between gap-4">
         <Tabs value={stateFilter} onValueChange={(value) => setStateFilter(value as ApiKeyState)}>
           <TabsList>
@@ -283,7 +477,7 @@ export function ApiKeys() {
             <TableHeader>
               <TableRow>
                 <TableHead>{t("name")}</TableHead>
-                <TableHead>{t("api_keys_key_type")}</TableHead>
+                <TableHead>{t("status")}</TableHead>
                 <TableHead>{t("api_keys_permission_level")}</TableHead>
                 <TableHead>{t("api_keys_expires")}</TableHead>
                 <TableHead>{t("api_keys_created")}</TableHead>
@@ -306,7 +500,7 @@ export function ApiKeys() {
                       {stateLabels[apiKey.state]}
                     </Badge>
                   </TableCell>
-                  <TableCell className="capitalize">{apiKey.permission}</TableCell>
+                  <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
                   <TableCell>
                     {apiKey.expires_at ? formatApiKeyDate(apiKey.expires_at) : t("api_keys_never")}
                   </TableCell>

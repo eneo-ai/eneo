@@ -9,6 +9,7 @@ export interface ProviderSection {
   /** Provider type used for the logo. */
   providerType: string;
   providerId: string;
+  provider: ModelProvider;
   maskedKey?: string | null;
   hasKey: boolean;
   isActive: boolean;
@@ -47,6 +48,7 @@ export function buildProviderSections(
     name: provider.name,
     providerType: provider.provider_type,
     providerId: provider.id,
+    provider,
     maskedKey: provider.masked_api_key,
     hasKey: Boolean(provider.masked_api_key),
     isActive: provider.is_active,

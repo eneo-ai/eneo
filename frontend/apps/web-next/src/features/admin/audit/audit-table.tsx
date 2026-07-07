@@ -49,8 +49,9 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
               <Fragment key={log.id}>
                 <TableRow
                   className="cursor-pointer"
-                  onClick={() => toggle(log.id)}
+                  onRowAction={() => toggle(log.id)}
                   aria-expanded={isOpen}
+                  aria-label={t("audit_full_details")}
                 >
                   <TableCell className="w-8">
                     <Button
@@ -58,6 +59,7 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
                       size="icon"
                       className="size-6"
                       aria-label={t("audit_full_details")}
+                      aria-expanded={isOpen}
                       onClick={(event) => {
                         event.stopPropagation();
                         toggle(log.id);
@@ -92,8 +94,8 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
                       variant="outline"
                       className={
                         log.outcome === "success"
-                          ? "border-green-200 text-green-700 dark:border-green-900 dark:text-green-400"
-                          : "border-red-200 text-red-700 dark:border-red-900 dark:text-red-400"
+                          ? "border-success/40 text-success"
+                          : "border-destructive/40 text-destructive"
                       }
                     >
                       {log.outcome === "success"
@@ -153,7 +155,7 @@ function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTra
             <Field
               label={t("audit_error_message")}
               value={log.error_message}
-              className="text-red-700 sm:col-span-2 dark:text-red-400"
+              className="text-destructive sm:col-span-2"
             />
           )}
         </dl>

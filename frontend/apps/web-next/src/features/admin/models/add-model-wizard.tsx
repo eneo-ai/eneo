@@ -38,80 +38,29 @@ import {
   favoriteProvidersQueryOptions,
   modelProvidersQueryOptions,
   providerCapabilitiesQueryOptions,
+  providerConfirmFieldLabel,
   type ProviderCapabilities,
   providerDisplayName,
+  providerFieldHint,
+  providerFieldLabel,
+  providerFieldPlaceholder,
   providerFields,
   providerOptions,
   setFavoriteProviders
 } from "./model-providers";
+import type { ModelKind } from "./models";
 import { ProviderPicker } from "./provider-picker";
 
 type Step = "provider" | "credentials" | "models";
 
-function fieldLabel(t: (key: string) => string, name: string): string {
-  switch (name) {
-    case "api_key":
-      return t("api_key");
-    case "endpoint":
-      return t("endpoint_url");
-    case "api_version":
-      return t("api_version");
-    case "deployment_name":
-      return t("deployment_name");
-    default:
-      return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+function supportedModelKinds(modes: string[] | undefined): ModelKind[] {
+  const ordered: ModelKind[] = ["completion", "embedding", "transcription"];
+  const modeSet = new Set(modes ?? []);
+  const supported = ordered.filter((mode) => modeSet.has(mode));
+  return supported.length > 0 ? supported : ["completion"];
 }
-
-function confirmFieldLabel(t: (key: string) => string, name: string): string {
-  switch (name) {
-    case "api_key":
-      return t("confirm_api_key");
-    default:
-      return t("confirm_secret");
-  }
-}
-
-/** Provider-specific input hint shown inside a field (ported from the Svelte wizard). */
-function fieldPlaceholder(t: (key: string) => string, name: string, providerType: string): string {
-  switch (name) {
-    case "api_key":
-      return t("enter_api_key");
-    case "endpoint":
-      if (providerType === "azure") return "https://your-resource.openai.azure.com";
-      if (providerType === "hosted_vllm") return "https://your-vllm-server.com";
-      return "https://api.example.com/v1";
-    case "api_version":
-      return t("api_version_placeholder");
-    case "deployment_name":
-      return t("deployment_name_placeholder");
-    default:
-      return "";
-  }
-}
-
-/** Provider-specific helper text shown below a field (ported from the Svelte wizard). */
-function fieldHint(
-  t: (key: string) => string,
-  name: string,
-  required: boolean,
-  providerType: string
-): string {
-  switch (name) {
-    case "api_key":
-      return t("will_be_encrypted");
-    case "endpoint":
-      if (providerType === "azure") return t("endpoint_required_azure");
-      if (providerType === "hosted_vllm") return t("endpoint_required_vllm");
-      if (!required) return t("endpoint_optional_generic");
-      return "";
-    case "api_version":
-      return t("api_version_required");
-    case "deployment_name":
-      return t("deployment_name_required");
-    default:
-      return "";
-  }
+function defaultModelKind(modes: string[] | undefined): ModelKind {
+  return supportedModelKinds(modes)[0] ?? "completion";
 }
 
 export function AddModelWizard({
@@ -171,6 +120,7 @@ export function AddModelWizard({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [fieldConfirmations, setFieldConfirmations] = useState<Record<string, string>>({});
   const [providerId, setProviderId] = useState<string | null>(null);
+  const [modelKind, setModelKind] = useState<ModelKind>("completion");
 
   function reset() {
     const preselect = initialProviderId ?? providers.data?.[0]?.id ?? "";
@@ -184,6 +134,8 @@ export function AddModelWizard({
     setFieldValues({});
     setFieldConfirmations({});
     setProviderId(initialProviderId ?? null);
+    const provider = providers.data?.find((item) => item.id === preselect);
+    setModelKind(defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes));
   }
 
   function handleOpenChange(next: boolean) {
@@ -215,6 +167,9 @@ export function AddModelWizard({
       setFieldValues({});
       setFieldConfirmations({});
       setProviderId(provider.id);
+      setExistingId(provider.id);
+      setMode("existing");
+      setModelKind(defaultModelKind(caps?.providers[provider.provider_type]?.modes));
       setStep("models");
     },
     onError: (error) => toastApiError(error, t)
@@ -242,9 +197,17 @@ export function AddModelWizard({
 
   // Resolve the provider the model step adds to, plus its type (drives the catalog).
   const targetProviderId = mode === "existing" ? existingId : (providerId ?? "");
-  const existingProvider = providers.data?.find((provider) => provider.id === existingId);
+  const createdProvider = providerId
+    ? providers.data?.find((provider) => provider.id === providerId)
+    : undefined;
+  const existingProvider =
+    providers.data?.find((provider) => provider.id === existingId) ?? createdProvider;
   const targetProviderType =
     mode === "existing" ? (existingProvider?.provider_type ?? "") : providerType;
+  const targetProviderModes = supportedModelKinds(caps?.providers[targetProviderType]?.modes);
+  const effectiveModelKind = targetProviderModes.includes(modelKind)
+    ? modelKind
+    : (targetProviderModes[0] ?? "completion");
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -282,7 +245,16 @@ export function AddModelWizard({
               )}
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="wizard-existing-provider">{t("provider")}</Label>
-                <Select value={existingId} onValueChange={setExistingId}>
+                <Select
+                  value={existingId}
+                  onValueChange={(id) => {
+                    setExistingId(id);
+                    const provider = providers.data?.find((item) => item.id === id);
+                    setModelKind(
+                      defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes)
+                    );
+                  }}
+                >
                   <SelectTrigger id="wizard-existing-provider" className="w-full">
                     <SelectValue placeholder={t("no_providers_configured")} />
                   </SelectTrigger>
@@ -311,6 +283,7 @@ export function AddModelWizard({
                     setProviderType(type);
                     // Seed the editable name from the chosen provider, like Svelte.
                     setProviderName(providerDisplayName(type));
+                    setModelKind(defaultModelKind(caps?.providers[type]?.modes));
                     setStep("credentials");
                   }}
                   onToggleFavorite={toggleFavorite}
@@ -361,13 +334,13 @@ export function AddModelWizard({
                 <p className="text-muted-foreground text-xs">{t("provider_name_hint")}</p>
               </div>
               {fields.map((field) => {
-                const hint = fieldHint(t, field.name, field.required, providerType);
+                const hint = providerFieldHint(t, field.name, field.required, providerType);
                 return field.secret ? (
                   <ConfirmedPasswordField
                     key={field.name}
                     id={`wizard-field-${field.name}`}
-                    label={fieldLabel(t, field.name)}
-                    confirmLabel={confirmFieldLabel(t, field.name)}
+                    label={providerFieldLabel(t, field.name)}
+                    confirmLabel={providerConfirmFieldLabel(t, field.name)}
                     value={fieldValues[field.name] ?? ""}
                     confirmation={fieldConfirmations[field.name] ?? ""}
                     onValueChange={(value) =>
@@ -377,7 +350,7 @@ export function AddModelWizard({
                       setFieldConfirmations((current) => ({ ...current, [field.name]: value }))
                     }
                     errorMessage={t("secret_values_do_not_match")}
-                    placeholder={fieldPlaceholder(t, field.name, providerType)}
+                    placeholder={providerFieldPlaceholder(t, field.name, providerType)}
                     description={hint || undefined}
                     autoComplete="off"
                     required={field.required}
@@ -385,7 +358,7 @@ export function AddModelWizard({
                 ) : (
                   <div key={field.name} className="flex flex-col gap-1.5">
                     <Label htmlFor={`wizard-field-${field.name}`}>
-                      {fieldLabel(t, field.name)}
+                      {providerFieldLabel(t, field.name)}
                       {field.required && <span aria-hidden="true"> *</span>}
                     </Label>
                     <Input
@@ -393,7 +366,7 @@ export function AddModelWizard({
                       type="text"
                       autoComplete="off"
                       required={field.required}
-                      placeholder={fieldPlaceholder(t, field.name, providerType)}
+                      placeholder={providerFieldPlaceholder(t, field.name, providerType)}
                       value={fieldValues[field.name] ?? ""}
                       onChange={(event) =>
                         setFieldValues((current) => ({
@@ -427,8 +400,11 @@ export function AddModelWizard({
           <ModelCatalogStep
             providerId={targetProviderId}
             providerType={targetProviderType}
+            mode={effectiveModelKind}
+            supportedModes={targetProviderModes}
+            onModeChange={setModelKind}
             onCreated={() => onOpenChange(false)}
-            onBack={() => setStep(mode === "existing" ? "provider" : "credentials")}
+            onBack={() => setStep("provider")}
           />
         )}
       </DialogContent>

@@ -131,7 +131,14 @@ export function MigrationHistoryPanel() {
               const open = expanded.has(row.id);
               return (
                 <Fragment key={row.id}>
-                  <TableRow className="cursor-pointer" onClick={() => toggle(row.id)}>
+                  <TableRow
+                    className="cursor-pointer"
+                    onRowAction={() => toggle(row.id)}
+                    aria-expanded={open}
+                    aria-label={
+                      open ? t("migration_history_collapse") : t("migration_history_expand")
+                    }
+                  >
                     <TableCell>
                       <Button
                         variant="ghost"
@@ -223,9 +230,7 @@ function DetailRow({
               ))}
             </div>
           )}
-          {row.error_message && (
-            <p className="text-red-700 dark:text-red-400">{row.error_message}</p>
-          )}
+          {row.error_message && <p className="text-destructive">{row.error_message}</p>}
         </div>
       </TableCell>
     </TableRow>

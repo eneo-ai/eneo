@@ -62,7 +62,7 @@ function InfoTab({ model, t }: { model: AdminModel; t: ReturnType<typeof useTran
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       {model.description && (
         <div className="sm:col-span-2">
-          <dt className="text-muted-foreground text-xs">{t("name")}</dt>
+          <dt className="text-muted-foreground text-xs">{t("description")}</dt>
           <dd>{model.description}</dd>
         </div>
       )}

@@ -224,8 +224,8 @@ export function SharePointAppConfigDialog({
               <p
                 className={
                   testResult.ok
-                    ? "rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
-                    : "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400"
+                    ? "border-success/30 bg-success/10 text-success rounded-md border px-3 py-2 text-sm"
+                    : "border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm"
                 }
               >
                 {testResult.ok ? t("connection_successful") : t("connection_failed")}

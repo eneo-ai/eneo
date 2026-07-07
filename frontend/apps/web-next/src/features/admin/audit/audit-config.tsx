@@ -1,38 +1,26 @@
 "use client";
 
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
+import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
 import {
+  AUDIT_ACTION_CONFIG_KEY,
+  AUDIT_CONFIG_KEY,
   actionLabel,
   auditActionConfigQueryOptions,
+  auditConfigQueryOptions,
   categoryLabel,
   type ActionType,
   type CategoryType
 } from "./audit";
-
-type CategoryConfig = Schema<"CategoryConfig">;
-const CONFIG_KEY = ["audit-config"];
-const ACTION_CONFIG_KEY = ["audit-action-config"];
-
-export function auditConfigQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: CONFIG_KEY,
-    queryFn: async (): Promise<CategoryConfig[]> => {
-      const response = await unwrap(api.GET("/api/v1/audit/config"));
-      return response.categories;
-    }
-  });
-}
 
 /**
  * Audit logging configuration: per-category toggles, each expandable to the
@@ -50,8 +38,8 @@ export function AuditConfig() {
   const [manuallyExpanded, setManuallyExpanded] = useState<Set<CategoryType>>(new Set());
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
-    queryClient.invalidateQueries({ queryKey: ACTION_CONFIG_KEY });
+    queryClient.invalidateQueries({ queryKey: AUDIT_CONFIG_KEY });
+    queryClient.invalidateQueries({ queryKey: AUDIT_ACTION_CONFIG_KEY });
   };
 
   const toggleCategory = useMutation({

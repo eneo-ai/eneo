@@ -2,6 +2,7 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -15,6 +16,7 @@ import { auditLogsQueryOptions, type AuditFilters } from "./audit";
 import { AuditConfig } from "./audit-config";
 import { AuditFilterBar } from "./audit-filters";
 import { AuditTable } from "./audit-table";
+import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters";
 import { ExportDialog } from "./export-dialog";
 import { JustificationForm } from "./justification-form";
 import { RetentionPanel } from "./retention-panel";
@@ -23,8 +25,9 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 function LogsTab() {
   const t = useTranslations();
-  const [filters, setFilters] = useState<AuditFilters>({ page: 1, actions: [], search: "" });
-  const [searchInput, setSearchInput] = useState("");
+  const searchParams = useSearchParams();
+  const [filters, setFilters] = useState<AuditFilters>(() => parseAuditFilters(searchParams));
+  const [searchInput, setSearchInput] = useState(() => parseAuditFilters(searchParams).search);
   const [showExport, setShowExport] = useState(false);
 
   // Debounce the free-text search into the committed filters.
@@ -38,6 +41,13 @@ function LogsTab() {
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(debounce.current);
   }, [searchInput]);
+
+  useEffect(() => {
+    const query = auditFiltersSearchParams(filters).toString();
+    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) window.history.replaceState(null, "", nextUrl);
+  }, [filters]);
 
   const { data, error, isPending, isPlaceholderData } = useQuery({
     ...auditLogsQueryOptions(browserApi, filters),
@@ -59,11 +69,7 @@ function LogsTab() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex justify-end">
-        <Button
-          variant="outline"
-          disabled={Boolean(filters.userId)}
-          onClick={() => setShowExport(true)}
-        >
+        <Button variant="outline" onClick={() => setShowExport(true)}>
           <Download className="size-4" /> {t("audit_export_csv")}
         </Button>
       </div>
@@ -73,7 +79,14 @@ function LogsTab() {
       <AuditFilterBar
         filters={{ ...filters, search: searchInput }}
         onChange={({ search, ...rest }) => {
-          if (search !== undefined) setSearchInput(search);
+          if (search !== undefined) {
+            setSearchInput(search);
+            if (search === "") {
+              setFilters((current) =>
+                current.search === "" ? current : { ...current, search: "", page: 1 }
+              );
+            }
+          }
           if (Object.keys(rest).length > 0) patchFilters(rest);
         }}
       />

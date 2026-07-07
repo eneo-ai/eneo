@@ -5,7 +5,6 @@ import type { Schema } from "@/lib/api/models";
 
 export type ModelProvider = Schema<"ModelProviderPublic">;
 export type ModelProviderUpdate = Schema<"ModelProviderUpdate">;
-export type TenantCompletionModelCreate = Schema<"TenantCompletionModelCreate">;
 
 /**
  * The `/capabilities/` endpoint is free-form (`{[key]: unknown}`) in the
@@ -62,10 +61,6 @@ export function createProvider(
   return unwrap(api.POST("/api/v1/admin/model-providers/", { body }));
 }
 
-export function createCompletionModel(api: EneoClient, body: TenantCompletionModelCreate) {
-  return unwrap(api.POST("/api/v1/admin/tenant-models/completion/", { body }));
-}
-
 /** Update a custom model provider (name / active / credentials). */
 export function updateProvider(api: EneoClient, id: string, body: ModelProviderUpdate) {
   return unwrap(
@@ -88,6 +83,71 @@ export function deleteProvider(api: EneoClient, id: string) {
 /** Credential/config field definitions for a provider type (with fallback). */
 export function providerFields(caps: ProviderCapabilities, type: string): ProviderFieldDef[] {
   return caps.providers[type]?.fields ?? caps.default_fields ?? [];
+}
+
+export function providerFieldLabel(t: (key: string) => string, name: string): string {
+  switch (name) {
+    case "api_key":
+      return t("api_key");
+    case "endpoint":
+      return t("endpoint_url");
+    case "api_version":
+      return t("api_version");
+    case "deployment_name":
+      return t("deployment_name");
+    default:
+      return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+}
+
+export function providerConfirmFieldLabel(t: (key: string) => string, name: string): string {
+  return name === "api_key" ? t("confirm_api_key") : t("confirm_secret");
+}
+
+/** Provider-specific input hint shown inside a field (ported from the Svelte wizard). */
+export function providerFieldPlaceholder(
+  t: (key: string) => string,
+  name: string,
+  providerType: string
+): string {
+  switch (name) {
+    case "api_key":
+      return t("enter_api_key");
+    case "endpoint":
+      if (providerType === "azure") return "https://your-resource.openai.azure.com";
+      if (providerType === "hosted_vllm") return "https://your-vllm-server.com";
+      return "https://api.example.com/v1";
+    case "api_version":
+      return t("api_version_placeholder");
+    case "deployment_name":
+      return t("deployment_name_placeholder");
+    default:
+      return "";
+  }
+}
+
+/** Provider-specific helper text shown below a field (ported from the Svelte wizard). */
+export function providerFieldHint(
+  t: (key: string) => string,
+  name: string,
+  required: boolean,
+  providerType: string
+): string {
+  switch (name) {
+    case "api_key":
+      return t("will_be_encrypted");
+    case "endpoint":
+      if (providerType === "azure") return t("endpoint_required_azure");
+      if (providerType === "hosted_vllm") return t("endpoint_required_vllm");
+      if (!required) return t("endpoint_optional_generic");
+      return "";
+    case "api_version":
+      return t("api_version_required");
+    case "deployment_name":
+      return t("deployment_name_required");
+    default:
+      return "";
+  }
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
@@ -171,14 +231,12 @@ export interface ProviderOption {
 }
 
 /**
- * Completion-capable provider types as gallery options, sorted by display name.
- * The add-model wizard only creates completion models, so the picker mirrors the
- * old `completionProviderTypes` filter while carrying each provider's modes
- * (for capability badges/filtering) and self-hosted flag.
+ * Provider types as gallery options, sorted by display name. The wizard can add
+ * completion, embedding, and transcription tenant models, so each option keeps
+ * its supported mode list for filtering and initial model-type selection.
  */
 export function providerOptions(caps: ProviderCapabilities): ProviderOption[] {
   return Object.entries(caps.providers)
-    .filter(([, capability]) => capability.modes.includes("completion"))
     .map(([type, capability]) => ({
       type,
       name: providerDisplayName(type),

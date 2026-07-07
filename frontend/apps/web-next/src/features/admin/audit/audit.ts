@@ -7,10 +7,15 @@ export type AuditLog = Schema<"AuditLogResponse">;
 export type ActionType = Schema<"ActionType">;
 export type CategoryType = Schema<"CategoryType">;
 export type ActionConfig = Schema<"ActionConfig">;
+export type CategoryConfig = Schema<"CategoryConfig">;
 export type RetentionPolicy = Schema<"RetentionPolicyResponse">;
 export type ExportJobStatus = Schema<"ExportJobStatusResponse">;
+export type ExportJobRequest = Schema<"ExportJobRequest">;
+export type AuditExportFormat = NonNullable<ExportJobRequest["format"]>;
 
 export const AUDIT_PAGE_SIZE = 100;
+export const AUDIT_CONFIG_KEY = ["audit-config"];
+export const AUDIT_ACTION_CONFIG_KEY = ["audit-action-config"];
 
 export type AuditFilters = {
   page: number;
@@ -73,6 +78,23 @@ export function auditLogsQueryOptions(api: EneoClient, filters: AuditFilters) {
   });
 }
 
+export function auditExportRequest(
+  filters: AuditFilters,
+  format: AuditExportFormat
+): ExportJobRequest {
+  return {
+    from_date: filters.from_date || undefined,
+    to_date: filters.to_date || undefined,
+    user_id: filters.userId || undefined,
+    action: filters.userId
+      ? undefined
+      : filters.actions.length === 1
+        ? filters.actions[0]
+        : undefined,
+    format
+  };
+}
+
 export function retentionPolicyQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: ["audit-retention"],
@@ -83,10 +105,20 @@ export function retentionPolicyQueryOptions(api: EneoClient) {
 /** All action types grouped by category, for the filter's multi-select. */
 export function auditActionConfigQueryOptions(api: EneoClient) {
   return queryOptions({
-    queryKey: ["audit-action-config"],
+    queryKey: AUDIT_ACTION_CONFIG_KEY,
     queryFn: async (): Promise<ActionConfig[]> => {
       const response = await unwrap(api.GET("/api/v1/audit/config/actions"));
       return response.actions;
+    }
+  });
+}
+
+export function auditConfigQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: AUDIT_CONFIG_KEY,
+    queryFn: async (): Promise<CategoryConfig[]> => {
+      const response = await unwrap(api.GET("/api/v1/audit/config"));
+      return response.categories;
     }
   });
 }

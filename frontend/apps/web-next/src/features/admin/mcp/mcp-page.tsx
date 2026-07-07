@@ -354,7 +354,7 @@ export function McpServersPage() {
                 placeholder={t("mcp_search_placeholder")}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                aria-label={t("mcp_search_placeholder")}
+                aria-label={t("mcp_search_label")}
               />
             </div>
             <div

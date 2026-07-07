@@ -178,18 +178,12 @@ function StatusBadge({
   if (sub.is_expired) return <Badge variant="destructive">{t("sharepoint_webhook_expired")}</Badge>;
   if (sub.expires_in_hours <= 48)
     return (
-      <Badge
-        variant="outline"
-        className="border-amber-200 text-amber-800 dark:border-amber-900 dark:text-amber-300"
-      >
+      <Badge variant="outline" className="border-warning/30 text-warning">
         {t("sharepoint_webhook_expiring_soon")}
       </Badge>
     );
   return (
-    <Badge
-      variant="outline"
-      className="border-green-200 text-green-700 dark:border-green-900 dark:text-green-400"
-    >
+    <Badge variant="outline" className="border-success/30 text-success">
       {t("sharepoint_webhook_active")}
     </Badge>
   );
@@ -223,19 +217,13 @@ function HealthBadge({
   }
   if (!sub.last_webhook_received_at) {
     return (
-      <Badge
-        variant="outline"
-        className="border-amber-200 text-amber-800 dark:border-amber-900 dark:text-amber-300"
-      >
+      <Badge variant="outline" className="border-warning/30 text-warning">
         {t("sharepoint_subscription_health_waiting")}
       </Badge>
     );
   }
   return (
-    <Badge
-      variant="outline"
-      className="border-green-200 text-green-700 dark:border-green-900 dark:text-green-400"
-    >
+    <Badge variant="outline" className="border-success/30 text-success">
       {t("sharepoint_subscription_health_ok")}
     </Badge>
   );
