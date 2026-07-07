@@ -75,7 +75,6 @@ def _state_with_architecture_commit() -> PlanningState:
 def test_policy_blocks_commit_and_plan_until_core_architecture_is_resolved() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
-        unresolved_architectural_choices=frozenset({"terminal_output"}),
         selected_discovery_question_ids=("document_material_scope",),
     )
 
@@ -105,7 +104,6 @@ def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
 
     policy = build_planner_action_policy(
         session_state=state,
-        unresolved_architectural_choices=unresolved,
         selected_discovery_question_ids=(),
     )
 
@@ -133,7 +131,6 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
 
     policy = build_planner_action_policy(
         session_state=state,
-        unresolved_architectural_choices=compute_unresolved_core_slots(state),
         selected_discovery_question_ids=(),
     )
 
@@ -218,7 +215,6 @@ def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
 def test_policy_appends_missing_core_slots_after_selected_discovery_targets() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=("document_material_scope",),
     )
 
@@ -237,7 +233,6 @@ def test_policy_allows_commit_after_core_slots_and_selected_questions_resolve() 
             "terminal_output",
             "document_material_scope",
         ),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=("document_material_scope",),
     )
 
@@ -251,7 +246,6 @@ def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() ->
             "primary_runtime_input",
             "terminal_output",
         ),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
     )
 
@@ -262,7 +256,6 @@ def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() ->
 def test_policy_never_exposes_resolved_slots_as_question_targets() -> None:
     policy = build_planner_action_policy(
         session_state=_state_with_resolved_slots("primary_runtime_input"),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=("primary_runtime_input",),
     )
 
@@ -276,7 +269,6 @@ def test_policy_filters_commit_grade_terminal_output_discovery_target() -> None:
             "primary_runtime_input",
             "terminal_output",
         ),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=("final_output_mode",),
     )
 
@@ -317,7 +309,6 @@ def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> No
     )
     policy = build_planner_action_policy(
         session_state=state,
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
     )
 
@@ -363,7 +354,6 @@ def test_classifier_uncertainty_keeps_protected_output_sources_resolved(
     )
     policy = build_planner_action_policy(
         session_state=state,
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
     )
 
@@ -375,7 +365,6 @@ def test_classifier_uncertainty_keeps_protected_output_sources_resolved(
 def test_policy_asks_missing_core_slots_even_without_discovery_selection() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
     )
 
@@ -389,7 +378,6 @@ def test_policy_asks_missing_core_slots_even_without_discovery_selection() -> No
 def test_policy_normalizes_legacy_discovery_question_ids_to_slot_targets() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=("final_output_mode",),
     )
 
@@ -402,7 +390,6 @@ def test_policy_normalizes_legacy_discovery_question_ids_to_slot_targets() -> No
 def test_policy_allows_requirements_confirmation_after_architecture_commit() -> None:
     policy = build_planner_action_policy(
         session_state=_state_with_architecture_commit(),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
     )
 
@@ -426,7 +413,6 @@ def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -
 
     policy = build_planner_action_policy(
         session_state=state,
-        unresolved_architectural_choices=compute_unresolved_core_slots(state),
         selected_discovery_question_ids=(),
     )
 
@@ -445,7 +431,6 @@ def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -
 
     policy = build_planner_action_policy(
         session_state=state,
-        unresolved_architectural_choices=compute_unresolved_core_slots(state),
         selected_discovery_question_ids=(),
         requirements_confirmed=True,
     )
@@ -457,7 +442,6 @@ def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -
 def test_policy_allows_plan_after_architecture_and_requirements_confirmation() -> None:
     policy = build_planner_action_policy(
         session_state=_state_with_architecture_commit(),
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
         requirements_confirmed=True,
     )

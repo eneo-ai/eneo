@@ -15,7 +15,6 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
-    compute_unresolved_core_slots,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
@@ -955,7 +954,6 @@ class TestPolicyDefaults:
 
         policy = build_planner_action_policy(
             session_state=state,
-            unresolved_architectural_choices=compute_unresolved_core_slots(state),
             selected_discovery_question_ids=(),
         )
 

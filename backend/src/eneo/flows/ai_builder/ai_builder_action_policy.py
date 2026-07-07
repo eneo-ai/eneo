@@ -52,7 +52,6 @@ class PlannerActionPolicy:
 def build_planner_action_policy(
     *,
     session_state: PlanningState,
-    unresolved_architectural_choices: frozenset[str],
     selected_discovery_question_ids: tuple[str, ...],
     requirements_confirmed: bool = False,
 ) -> PlannerActionPolicy:
@@ -105,9 +104,7 @@ def build_planner_action_policy(
     else:
         ask_targets = _ordered_ask_targets(
             selected_discovery_question_ids=selected_discovery_question_ids,
-            architecture_required_slots=(
-                unresolved_architectural_choices | unresolved_core_slots
-            ),
+            architecture_required_slots=unresolved_core_slots,
             derived_commit_required_slots=unresolved_commit_slots,
             commit_grade_slot_names=commit_grade_slot_names,
         )
@@ -119,7 +116,7 @@ def build_planner_action_policy(
 
     if (
         not architecture_committed
-        and not (unresolved_architectural_choices - commit_grade_slot_names)
+        and not unresolved_core_slots
         and derived_commit is not None
         and not unresolved_commit_slots
     ):

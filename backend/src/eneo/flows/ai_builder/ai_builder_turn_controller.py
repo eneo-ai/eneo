@@ -14,7 +14,6 @@ from typing import TypeAlias, assert_never
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
     build_planner_action_policy,
-    compute_unresolved_core_slots,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
@@ -90,10 +89,8 @@ def resolve_turn_control(
     requirements_confirmed: bool,
     ui_language: str | None,
 ) -> BuilderTurnControl:
-    unresolved_core_slots = compute_unresolved_core_slots(session_state)
     action_policy = build_planner_action_policy(
         session_state=session_state,
-        unresolved_architectural_choices=unresolved_core_slots,
         selected_discovery_question_ids=selected_discovery_question_ids,
         requirements_confirmed=requirements_confirmed,
     )
