@@ -226,6 +226,78 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
     assert validate_spec(compiled).valid
 
 
+def test_compiler_uses_assembly_path_for_document_source_reader_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("document source-reader flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document findings",
+            "flow_description": "Extract source facts and render a PDF.",
+            "plan_rationale": "One source reader, one body writer, one renderer.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "finding",
+                            "field_type": "string",
+                            "description": "Important finding.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the report from the extracted facts.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            runtime_max_files=3,
+        ),
+    )
+
+    assert len(compiled.steps) == 3
+    reader_step = compiled.steps[0]
+    body_step = compiled.steps[1]
+    renderer_step = compiled.steps[2]
+    assert reader_step.input_source == InputSource.FLOW_INPUT
+    assert reader_step.input_type == InputType.DOCUMENT
+    assert reader_step.output_type == OutputType.JSON
+    assert reader_step.input_config is not None
+    runtime_input = reader_step.input_config["runtime_input"]
+    assert runtime_input["enabled"] is True
+    assert runtime_input["required"] is True
+    assert runtime_input["max_files"] == 3
+    assert runtime_input["input_format"] == "document"
+    assert body_step.input_source == InputSource.PREVIOUS_STEP
+    assert body_step.input_type == InputType.JSON
+    assert body_step.output_type == OutputType.TEXT
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.output_type == OutputType.PDF
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() -> None:
     compiled = compile_create_steps_to_spec(
         flow_name="Dokumentanalys",

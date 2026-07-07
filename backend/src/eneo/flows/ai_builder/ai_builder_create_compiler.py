@@ -206,6 +206,8 @@ def compile_create_intent_to_spec(
         source_reader_required_fields=(
             context.source_reader_required_fields if context is not None else ()
         ),
+        runtime_required=context.runtime_required if context is not None else True,
+        runtime_max_files=context.runtime_max_files if context is not None else None,
         ui_language=context.ui_language if context is not None else None,
     )
     if assembly_spec is not None:

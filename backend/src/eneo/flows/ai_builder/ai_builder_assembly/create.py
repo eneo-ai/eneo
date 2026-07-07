@@ -41,6 +41,10 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
+_SOURCE_INPUT_TYPES = frozenset(
+    {InputType.DOCUMENT, InputType.FILE, InputType.JSON, InputType.TEXT}
+)
+_FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 
 PlannedStepRole = Literal["reader", "transform", "body_writer", "renderer"]
 UnderlagChannel = Literal[
@@ -59,6 +63,8 @@ class PlannedStep:
     output_mode: OutputMode
     underlag_channel: UnderlagChannel
     document_delivery_mode: DocumentDeliveryMode = "not_applicable"
+    runtime_required: bool = False
+    runtime_max_files: int | None = None
     form_field_refs: tuple[str, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
     previous_output_refs: tuple[PreviousOutputRef, ...] = ()
@@ -92,6 +98,8 @@ def try_compile_create_intent_with_assembly(
     aggregation_intent: str,
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
+    runtime_required: bool,
+    runtime_max_files: int | None,
     ui_language: str | None,
 ) -> FlowDraftSpecCore | None:
     plan = _assemble_linear_create_intent(
@@ -105,6 +113,8 @@ def try_compile_create_intent_with_assembly(
         aggregation_intent=aggregation_intent,
         terminal_output_schema=terminal_output_schema,
         source_reader_required_fields=source_reader_required_fields,
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
         ui_language=ui_language,
     )
     if plan is None:
@@ -124,6 +134,8 @@ def _assemble_linear_create_intent(
     aggregation_intent: str,
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
+    runtime_required: bool,
+    runtime_max_files: int | None,
     ui_language: str | None,
 ) -> FlowAssemblyPlan | None:
     if (
@@ -135,7 +147,7 @@ def _assemble_linear_create_intent(
         or not intent.steps
     ):
         return None
-    if runtime_input_type not in {InputType.TEXT, InputType.JSON}:
+    if runtime_input_type not in _SOURCE_INPUT_TYPES:
         return None
     document_artifact_requested = final_output_type in _DOCUMENT_OUTPUT_TYPES
     if (
@@ -170,6 +182,12 @@ def _assemble_linear_create_intent(
         )
         if step_output_type is None:
             return None
+        if (
+            index == 0
+            and runtime_input_type in _FILE_INPUT_TYPES
+            and step_output_type != OutputType.JSON
+        ):
+            return None
         input_source = (
             InputSource.FLOW_INPUT if index == 0 else InputSource.PREVIOUS_STEP
         )
@@ -199,6 +217,16 @@ def _assemble_linear_create_intent(
                 step_index=index,
                 previous_field_refs=semantic_step.uses_previous_fields,
                 previous_output_refs=semantic_step.uses_previous_outputs,
+            ),
+            runtime_required=(
+                index == 0
+                and runtime_input_type in _FILE_INPUT_TYPES
+                and runtime_required
+            ),
+            runtime_max_files=(
+                runtime_max_files
+                if index == 0 and runtime_input_type in _FILE_INPUT_TYPES
+                else None
             ),
             form_field_refs=tuple(semantic_step.uses_form_fields),
             previous_field_refs=tuple(semantic_step.uses_previous_fields),
@@ -389,7 +417,8 @@ def _new_step_draft_from_planned_step(step: PlannedStep) -> NewStepDraft:
         knowledge_refs=list(step.knowledge_refs),
         mcp_server_refs=list(step.mcp_server_refs),
         mcp_tool_refs=list(step.mcp_tool_refs),
-        runtime_required=False,
+        runtime_required=step.runtime_required,
+        runtime_max_files=step.runtime_max_files,
         uses_form_fields=list(step.form_field_refs),
         uses_previous_fields=list(step.previous_field_refs),
         uses_previous_outputs=list(step.previous_output_refs),
