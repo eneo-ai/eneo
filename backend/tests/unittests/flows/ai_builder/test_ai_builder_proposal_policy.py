@@ -81,7 +81,7 @@ def _structured_fan_in_spec() -> FlowDraftSpecCore:
                 plan_step_ref="step_c",
                 name="Write report",
                 assistant_spec=AssistantSpec(instructions="Write report."),
-                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,

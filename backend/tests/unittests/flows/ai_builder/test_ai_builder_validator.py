@@ -1760,6 +1760,7 @@ class TestQualityLint:
                         name="Skapa DOCX",
                         input_source=InputSource.PREVIOUS_STEP,
                         input_type=InputType.TEXT,
+                        output_mode=OutputMode.RENDER_VERBATIM,
                         output_type=OutputType.DOCX,
                     ),
                 ]

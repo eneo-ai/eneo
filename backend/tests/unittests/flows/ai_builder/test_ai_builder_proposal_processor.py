@@ -175,6 +175,7 @@ def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message
             "Compiled edit spec validation failed: Flow must have at least one step."
         ),
         failure_kind="validation",
+        failure_codes=frozenset({"empty_steps"}),
     )
 
     payload = json.loads(encode_ai_builder_stream_event(event)["data"])
