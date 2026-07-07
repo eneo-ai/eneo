@@ -230,6 +230,7 @@ def try_compile_create_intent_with_assembly(
     aggregation_intent: AggregationIntent,
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
+    result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -246,6 +247,7 @@ def try_compile_create_intent_with_assembly(
             aggregation_intent=aggregation_intent,
             terminal_output_schema=terminal_output_schema,
             source_reader_required_fields=source_reader_required_fields,
+            result_contract_output_fields=result_contract_output_fields,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
@@ -269,6 +271,7 @@ def _assemble_create_intent(
     aggregation_intent: AggregationIntent,
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
+    result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -365,6 +368,12 @@ def _assemble_create_intent(
         semantic_steps,
         final_semantic_output_type=terminal_semantic_output_type,
         ui_language=ui_language,
+    )
+    semantic_steps = _semantic_steps_with_result_contract_fields(
+        semantic_steps,
+        runtime_input_type=runtime_input_type,
+        final_semantic_output_type=terminal_semantic_output_type,
+        result_contract_output_fields=result_contract_output_fields,
     )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
@@ -648,6 +657,97 @@ def _semantic_steps_with_terminal_text_fields_folded(
         }
     )
     return (*semantic_steps[:-1], folded_terminal_step)
+
+
+def _semantic_steps_with_result_contract_fields(
+    steps: Sequence[SemanticStepIntent],
+    *,
+    runtime_input_type: InputType,
+    final_semantic_output_type: OutputType,
+    result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+) -> tuple[SemanticStepIntent, ...]:
+    semantic_steps = tuple(steps)
+    if (
+        not result_contract_output_fields
+        or len(semantic_steps) < 2
+        or final_semantic_output_type != OutputType.TEXT
+    ):
+        return semantic_steps
+
+    terminal_step = semantic_steps[-1]
+    terminal_output_type = _linear_step_output_type(
+        output_type=terminal_step.output_type,
+        output_fields=terminal_step.output_fields,
+        final_output_type=final_semantic_output_type,
+        is_terminal=True,
+    )
+    if terminal_output_type != OutputType.TEXT:
+        return semantic_steps
+
+    for index in range(len(semantic_steps) - 2, -1, -1):
+        if index == 0 and runtime_input_type in _FILE_INPUT_TYPES:
+            continue
+        candidate = semantic_steps[index]
+        candidate_output_type = _linear_step_output_type(
+            output_type=candidate.output_type,
+            output_fields=candidate.output_fields,
+            final_output_type=final_semantic_output_type,
+            is_terminal=False,
+        )
+        if candidate_output_type != OutputType.JSON:
+            continue
+        completed_fields = _complete_result_contract_output_fields(
+            tuple(candidate.output_fields or ()),
+            required_fields=result_contract_output_fields,
+        )
+        if completed_fields == tuple(candidate.output_fields or ()):
+            return semantic_steps
+        updated_steps = list(semantic_steps)
+        updated_steps[index] = candidate.model_copy(
+            update={
+                "output_type": OutputType.JSON,
+                "output_fields": list(completed_fields),
+            }
+        )
+        return tuple(updated_steps)
+
+    return semantic_steps
+
+
+def _complete_result_contract_output_fields(
+    fields: tuple[StructuredFieldDraft, ...],
+    *,
+    required_fields: tuple[StructuredFieldDraft, ...],
+) -> tuple[StructuredFieldDraft, ...]:
+    completed_fields = list(fields)
+    for required_field in required_fields:
+        if _structured_fields_have_leaf(
+            tuple(completed_fields),
+            required_field.name,
+        ):
+            continue
+        completed_fields.append(required_field)
+    return tuple(completed_fields)
+
+
+def _structured_fields_have_leaf(
+    fields: tuple[StructuredFieldDraft, ...],
+    field_name: str,
+) -> bool:
+    for field in fields:
+        if field.name == field_name:
+            return True
+        if field.fields and _structured_fields_have_leaf(
+            tuple(field.fields),
+            field_name,
+        ):
+            return True
+        if field.item_fields and _structured_fields_have_leaf(
+            tuple(field.item_fields),
+            field_name,
+        ):
+            return True
+    return False
 
 
 def _is_plain_terminal_document_helper(

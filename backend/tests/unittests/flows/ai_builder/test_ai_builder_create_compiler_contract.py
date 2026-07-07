@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
@@ -119,6 +120,40 @@ def test_compile_context_does_not_turn_report_obligations_into_reader_fields() -
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
+    assert context.source_reader_required_fields == ()
+
+
+def test_compile_context_derives_analysis_fields_from_result_obligations() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "compare_or_validate",
+    )
+    state.signals.extend(
+        [
+            PlanningSignal(
+                question_id="result_obligation",
+                value="missing_information_policy",
+                confidence="high",
+                source="model",
+            ),
+            PlanningSignal(
+                question_id="result_obligation",
+                value="recommendations",
+                confidence="high",
+                source="model",
+            ),
+        ]
+    )
+
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+
+    assert context is not None
+    assert [field.name for field in context.result_contract_output_fields] == [
+        "missing_information",
+        "uncertainty",
+        "recommended_action",
+    ]
     assert context.source_reader_required_fields == ()
 
 
@@ -431,6 +466,110 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
     assert renderer_step.assistant_spec.instructions == expected_render_copy
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
+def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Checklist review",
+            "flow_description": "Compare an application against a checklist.",
+            "plan_rationale": "Read the source, compare requirements, then write.",
+            "steps": [
+                {
+                    "name": "Extract requirements",
+                    "instructions": "Extract the application and checklist facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "requirements",
+                            "field_type": "string",
+                            "description": "Requirements from the source material.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Compare requirements",
+                    "instructions": "Compare the application against the checklist.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "comparison_results",
+                            "field_type": "array",
+                            "description": "Per-requirement comparison results.",
+                            "item_fields": [
+                                {
+                                    "name": "requirement",
+                                    "field_type": "string",
+                                    "description": "Requirement being checked.",
+                                },
+                                {
+                                    "name": "status",
+                                    "field_type": "string",
+                                    "description": "Whether the requirement is met.",
+                                },
+                                {
+                                    "name": "reason",
+                                    "field_type": "string",
+                                    "description": "Evidence for the status.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write decision support",
+                    "instructions": "Write the final checklist review.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="missing_information",
+                    field_type="string",
+                    description="Missing information.",
+                ),
+                StructuredFieldDraft(
+                    name="uncertainty",
+                    field_type="string",
+                    description="Uncertain points.",
+                ),
+                StructuredFieldDraft(
+                    name="recommended_action",
+                    field_type="string",
+                    description="Recommended next action.",
+                ),
+            ),
+        ),
+    )
+
+    compare_contract = compiled.steps[1].output_contract
+    assert compare_contract is not None
+    assert set(compare_contract["properties"]) >= {
+        "comparison_results",
+        "missing_information",
+        "uncertainty",
+        "recommended_action",
+    }
+    assert compiled.steps[2].input_bindings == {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "requirements",
+                "label": "requirements",
+            },
+            {"step_ref": "step_b", "output": "structured"},
+        ]
+    }
     assert validate_spec(compiled).valid
 
 

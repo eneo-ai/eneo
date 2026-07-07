@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
     CreateAssemblyRejection,
     try_compile_create_intent_with_assembly,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
@@ -82,6 +83,7 @@ class CreateCompileContext:
     aggregation_intent: AggregationIntent = "linear"
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
+    result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
@@ -154,6 +156,9 @@ def compile_create_intent_to_spec(
         terminal_output_schema=context.terminal_output_schema if context else None,
         source_reader_required_fields=(
             context.source_reader_required_fields if context is not None else ()
+        ),
+        result_contract_output_fields=(
+            context.result_contract_output_fields if context is not None else ()
         ),
         runtime_required=context.runtime_required if context is not None else True,
         runtime_max_files=context.runtime_max_files if context is not None else None,
@@ -300,6 +305,12 @@ def create_compile_context_from_planning_state(
             planning_state,
             ui_language=ui_language,
         ),
+        result_contract_output_fields=(
+            _result_contract_output_fields_from_planning_state(
+                planning_state,
+                ui_language=ui_language,
+            )
+        ),
     )
 
 
@@ -332,6 +343,85 @@ def _summary_source_reader_field_description(ui_language: str | None) -> str:
     if ui_language is None or ui_language.casefold().startswith("sv"):
         return "Kort sammanfattning grundad i källmaterialet."
     return "Concise summary grounded in the source material."
+
+
+def _result_contract_output_fields_from_planning_state(
+    planning_state: PlanningState,
+    *,
+    ui_language: str | None,
+) -> tuple[StructuredFieldDraft, ...]:
+    contract = derive_result_contract(planning_state)
+    if contract is None:
+        return ()
+
+    field_names: list[str] = []
+    if "missing_information_policy" in contract.secondary_obligations:
+        field_names.extend(("missing_information", "uncertainty"))
+    if "recommendations" in contract.secondary_obligations:
+        field_names.append("recommended_action")
+    if "risks" in contract.secondary_obligations:
+        field_names.append("risks")
+    if "deviations" in contract.secondary_obligations:
+        field_names.append("deviations")
+    if "open_questions" in contract.secondary_obligations:
+        field_names.append("open_questions")
+
+    return tuple(
+        StructuredFieldDraft(
+            name=name,
+            field_type="string",
+            description=_result_contract_output_field_description(
+                name,
+                ui_language=ui_language,
+            ),
+        )
+        for name in dict.fromkeys(field_names)
+    )
+
+
+def _result_contract_output_field_description(
+    field_name: str,
+    *,
+    ui_language: str | None,
+) -> str:
+    swedish = ui_language is None or ui_language.casefold().startswith("sv")
+    if field_name == "missing_information":
+        return (
+            "Saknade uppgifter eller krav som inte kan verifieras i underlaget."
+            if swedish
+            else "Missing information or requirements that cannot be verified from the source material."
+        )
+    if field_name == "uncertainty":
+        return (
+            "Osäkra punkter där underlaget inte räcker för en säker bedömning."
+            if swedish
+            else "Uncertain points where the source material is insufficient for a confident assessment."
+        )
+    if field_name == "recommended_action":
+        return (
+            "Rekommenderad nästa åtgärd grundad i jämförelsen eller granskningen."
+            if swedish
+            else "Recommended next action grounded in the comparison or review."
+        )
+    if field_name == "risks":
+        return (
+            "Risker som är grundade i underlaget eller i de angivna reglerna."
+            if swedish
+            else "Risks grounded in the source material or provided rules."
+        )
+    if field_name == "deviations":
+        return (
+            "Avvikelser mot angivet referensmaterial, regler eller checklista."
+            if swedish
+            else "Deviations from the provided reference material, rules, or checklist."
+        )
+    if field_name == "open_questions":
+        return (
+            "Öppna frågor som behöver besvaras innan slutsatsen är komplett."
+            if swedish
+            else "Open questions that must be answered before the conclusion is complete."
+        )
+    raise ValueError(f"Unsupported result contract output field: {field_name}")
 
 
 def _runtime_metadata_state_from_planning_state(
