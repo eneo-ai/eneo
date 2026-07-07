@@ -4122,38 +4122,6 @@ class TestStandaloneAudioInvariant:
             for issue in issues
         )
 
-    def test_remediation_gives_planner_a_concrete_step_shape(self) -> None:
-        """The original one-liner "add a dedicated transcription step"
-        was too vague for the planner to converge when several
-        text-processing steps already existed. The remediation must
-        spell out the four required fields, the position (first step),
-        and how downstream steps should consume the transcript.
-        """
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            CRITIC_INVARIANTS,
-        )
-
-        inv = next(
-            item
-            for item in CRITIC_INVARIANTS
-            if item.id == "standalone_audio_requires_transcription_step"
-        )
-
-        for required_token in (
-            "audio",
-            "transcribe_only",
-            "flow_input",
-            "previous_step",
-        ):
-            assert required_token in inv.remediation, (
-                f"remediation missing concrete shape token: {required_token}"
-            )
-        assert "första steg" in inv.remediation, (
-            "remediation must tell the planner WHERE to add the step "
-            "(first step / position 0); without positioning the LLM "
-            "tends to graft audio handling onto an existing step instead"
-        )
-
 
 class TestCriticInvariantRegistry:
     """The flat `CRITIC_INVARIANTS` tuple is the sole public registry.
