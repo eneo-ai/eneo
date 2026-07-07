@@ -9,6 +9,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
@@ -43,7 +44,11 @@ def _text_step(
     )
 
 
-def _plan(*, steps: tuple[PlannedStep, ...]) -> FlowAssemblyPlan:
+def _plan(
+    *,
+    steps: tuple[PlannedStep, ...],
+    aggregation_intent: AggregationIntent = "linear",
+) -> FlowAssemblyPlan:
     return FlowAssemblyPlan(
         flow_name="Test flow",
         flow_description="",
@@ -51,6 +56,7 @@ def _plan(*, steps: tuple[PlannedStep, ...]) -> FlowAssemblyPlan:
         steps=steps,
         terminal_output_schema=None,
         source_reader_required_fields=(),
+        aggregation_intent=aggregation_intent,
         ui_language=None,
     )
 
@@ -111,6 +117,32 @@ def test_plan_rejects_non_immediate_previous_field_refs() -> None:
         _plan(steps=(first_step, second_step, stale_ref_step))
 
 
+def test_plan_rejects_linear_fan_in() -> None:
+    fan_in_step = _text_step(
+        name="Compose from all prior work",
+        input_source=InputSource.ALL_PREVIOUS_STEPS,
+        underlag_channel="fan_in",
+    )
+
+    with pytest.raises(ValueError, match="fan-in requires aggregate or compare"):
+        _plan(steps=(_text_step(), fan_in_step))
+
+
+def test_plan_allows_aggregate_fan_in() -> None:
+    fan_in_step = _text_step(
+        name="Compose from all prior work",
+        input_source=InputSource.ALL_PREVIOUS_STEPS,
+        underlag_channel="fan_in",
+    )
+
+    plan = _plan(
+        steps=(_text_step(), fan_in_step),
+        aggregation_intent="aggregate",
+    )
+
+    assert plan.steps[-1].underlag_channel == "fan_in"
+
+
 def test_plan_rejects_unplaced_form_fields() -> None:
     form_field = FormFieldSpec(
         name="tone",
@@ -127,6 +159,7 @@ def test_plan_rejects_unplaced_form_fields() -> None:
             steps=(_text_step(),),
             terminal_output_schema=None,
             source_reader_required_fields=(),
+            aggregation_intent="linear",
             ui_language=None,
         )
 
@@ -142,5 +175,6 @@ def test_plan_rejects_source_reader_obligation_without_reader_step() -> None:
             source_reader_required_fields=(
                 SourceCaptureField(name="case_id", description="Case ID"),
             ),
+            aggregation_intent="linear",
             ui_language=None,
         )

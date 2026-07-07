@@ -34,6 +34,7 @@ from eneo.flows.ai_builder.pattern_registry import (
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
+from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -97,7 +98,7 @@ def try_compile_create_intent_with_assembly(
     form_fields: Sequence[FormFieldSpec],
     pattern_ids: tuple[str, ...],
     chain_steps: tuple[str, ...],
-    aggregation_intent: str,
+    aggregation_intent: AggregationIntent,
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     runtime_required: bool,
@@ -133,7 +134,7 @@ def _assemble_create_intent(
     form_fields: Sequence[FormFieldSpec],
     pattern_ids: tuple[str, ...],
     chain_steps: tuple[str, ...],
-    aggregation_intent: str,
+    aggregation_intent: AggregationIntent,
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     runtime_required: bool,
@@ -330,6 +331,7 @@ def _assemble_create_intent(
         steps=tuple(planned_steps),
         terminal_output_schema=terminal_output_schema,
         source_reader_required_fields=source_reader_required_fields,
+        aggregation_intent=aggregation_intent,
         ui_language=ui_language,
     )
 
@@ -369,7 +371,7 @@ def _assemble_docx_template_fill(
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     runtime_required: bool,
     runtime_max_files: int | None,
-    aggregation_intent: str,
+    aggregation_intent: AggregationIntent,
     ui_language: str | None,
 ) -> FlowAssemblyPlan | None:
     if (
@@ -423,6 +425,7 @@ def _assemble_docx_template_fill(
         steps=planned_steps,
         terminal_output_schema=None,
         source_reader_required_fields=source_reader_required_fields,
+        aggregation_intent="linear",
         ui_language=ui_language,
     )
 
@@ -478,6 +481,7 @@ def _assemble_pure_audio_transcription(
         steps=(planned_step,),
         terminal_output_schema=None,
         source_reader_required_fields=(),
+        aggregation_intent="linear",
         ui_language=ui_language,
     )
 

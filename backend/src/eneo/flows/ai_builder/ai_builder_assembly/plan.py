@@ -10,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -103,12 +104,16 @@ class FlowAssemblyPlan:
     steps: tuple[PlannedStep, ...]
     terminal_output_schema: JsonObject | None
     source_reader_required_fields: tuple[SourceCaptureField, ...]
+    aggregation_intent: AggregationIntent
     ui_language: str | None
 
     def __post_init__(self) -> None:
         if not self.steps:
             raise ValueError("FlowAssemblyPlan requires at least one planned step.")
-        _validate_step_order(self.steps)
+        _validate_step_order(
+            self.steps,
+            aggregation_intent=self.aggregation_intent,
+        )
         _validate_form_field_placement(
             form_fields=self.form_fields,
             steps=self.steps,
@@ -167,7 +172,11 @@ def _step_capabilities_are_supported(step: PlannedStep) -> bool:
     )
 
 
-def _validate_step_order(steps: tuple[PlannedStep, ...]) -> None:
+def _validate_step_order(
+    steps: tuple[PlannedStep, ...],
+    *,
+    aggregation_intent: AggregationIntent,
+) -> None:
     for index, step in enumerate(steps):
         if index == 0:
             if step.input_source != InputSource.FLOW_INPUT:
@@ -178,6 +187,13 @@ def _validate_step_order(steps: tuple[PlannedStep, ...]) -> None:
         if step.input_source == InputSource.FLOW_INPUT:
             raise ValueError(
                 "Only the first FlowAssemblyPlan step may read flow input."
+            )
+        if (
+            step.input_source == InputSource.ALL_PREVIOUS_STEPS
+            and aggregation_intent == "linear"
+        ):
+            raise ValueError(
+                "FlowAssemblyPlan fan-in requires aggregate or compare intent."
             )
         _validate_previous_refs(step, expected_from_step=index)
         if step.input_source != InputSource.PREVIOUS_STEP:
