@@ -1058,8 +1058,16 @@ def test_source_reader_contract_keeps_all_terminal_schema_leaves() -> None:
 
 @pytest.mark.parametrize("final_output_type", [OutputType.PDF, OutputType.DOCX])
 def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
+    monkeypatch: pytest.MonkeyPatch,
     final_output_type: OutputType,
 ) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("document artifact flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Document artifact report",
@@ -1125,7 +1133,18 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
     assert validate_spec(compiled).valid
 
 
-def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
+def test_document_artifact_drops_model_authored_pdf_render_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError(
+            "terminal render-helper cleanup should use FlowAssemblyPlan"
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Dokumentanalys till PDF",
