@@ -59,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     BASIC_CASE_METADATA,
     DETAILED_CASE_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
+    extract_runtime_input_field_hints,
     infer_runtime_metadata_slot,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
@@ -714,7 +715,6 @@ def _model_slot_can_replace(
             return False
         if (
             existing_slot.name == "runtime_metadata_fields"
-            and existing_slot.value == NO_EXTRA_RUNTIME_METADATA
             and existing_slot.confidence == "high"
         ):
             return False
@@ -1059,12 +1059,17 @@ def _heuristic_slot_confidence(
             slot_value=slot_value,
             freeform_text=freeform_text,
         )
-    if (
-        question_id == "runtime_metadata_fields"
-        and slot_value == NO_EXTRA_RUNTIME_METADATA
-        and infer_runtime_metadata_slot(freeform_text) == NO_EXTRA_RUNTIME_METADATA
-    ):
-        return "high"
+    if question_id == "runtime_metadata_fields":
+        inferred_runtime_metadata = infer_runtime_metadata_slot(freeform_text)
+        if (
+            slot_value == NO_EXTRA_RUNTIME_METADATA
+            and inferred_runtime_metadata == NO_EXTRA_RUNTIME_METADATA
+        ):
+            return "high"
+        if slot_value == DETAILED_CASE_METADATA and extract_runtime_input_field_hints(
+            freeform_text
+        ):
+            return "high"
     if question_id == "post_processing_goal":
         return (
             "high"

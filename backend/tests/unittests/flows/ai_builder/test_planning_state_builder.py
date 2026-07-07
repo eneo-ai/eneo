@@ -763,6 +763,37 @@ class TestPolicyDefaults:
         slot = state.resolved_slots["runtime_metadata_fields"]
         assert slot.value == "detailed_case_metadata"
         assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+
+    def test_optional_checklist_or_rule_runtime_fields_are_commit_grade(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde för bygglovshandläggning. "
+                        "Vid körning laddar jag upp en ansökan och kan också "
+                        "ange vilken checklista eller regel som ska användas. "
+                        "Flödet ska läsa ansökan, jämföra mot checklistan och "
+                        "skapa en tydlig rapport i text."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+        assert slot.is_commit_grade
+
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=("runtime_metadata_fields",),
+        )
+        assert "runtime_metadata_fields" not in policy.allowed_ask_question_targets
 
     def test_user_supplies_prompt_resolves_detailed_runtime_metadata(
         self,
@@ -1593,6 +1624,42 @@ class TestModelSlotMerge:
         slot = state.resolved_slots["runtime_metadata_fields"]
         assert slot.value == "no_extra_metadata"
         assert slot.source == "policy_default"
+
+    def test_medium_model_output_does_not_downgrade_high_runtime_field_heuristic(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "runtime_metadata_fields": _slot(
+                name="runtime_metadata_fields",
+                value="detailed_case_metadata",
+                source="heuristic",
+                confidence="high",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "basic_case_metadata",
+                        "medium",
+                    ),
+                )
+            ),
+            prompt_hash="c" * 64,
+            freeform_text=(
+                "Vid körning kan användaren ange vilken checklista eller regel "
+                "som ska användas."
+            ),
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
 
     def test_medium_model_output_replaces_heuristic_and_fills_missing_slot(
         self,
