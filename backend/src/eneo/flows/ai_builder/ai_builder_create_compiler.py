@@ -17,6 +17,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_assembly import (
+    try_compile_create_intent_with_assembly,
+)
 from eneo.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
@@ -189,6 +192,29 @@ def compile_create_intent_to_spec(
     final_output_mode = context.final_output_mode if context is not None else None
     pattern_ids = context.pattern_ids if context is not None else ()
     chain_steps = context.pattern_chain_steps if context is not None else ()
+    aggregation_intent = context.aggregation_intent if context is not None else "linear"
+    assembly_spec = try_compile_create_intent_with_assembly(
+        intent,
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        form_fields=form_fields,
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
+        aggregation_intent=aggregation_intent,
+        terminal_output_schema=context.terminal_output_schema if context else None,
+        source_reader_required_fields=(
+            context.source_reader_required_fields if context is not None else ()
+        ),
+        ui_language=context.ui_language if context is not None else None,
+    )
+    if assembly_spec is not None:
+        _log_dropped_primary_input_shadow_fields(
+            field_names=dropped_primary_input_field_names,
+            runtime_input_type=runtime_input_type,
+        )
+        return assembly_spec
+
     pattern_resolution = resolve_step_skeleton_patterns(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
@@ -249,7 +275,6 @@ def compile_create_intent_to_spec(
             )
         )
 
-    aggregation_intent = context.aggregation_intent if context is not None else "linear"
     try:
         skeleton_plan = materialize_step_skeleton(
             runtime_input_type=runtime_input_type,

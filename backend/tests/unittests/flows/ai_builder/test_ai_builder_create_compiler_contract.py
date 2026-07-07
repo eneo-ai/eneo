@@ -48,6 +48,58 @@ def _question(input_bindings: dict[str, object] | None) -> str:
     return question
 
 
+def test_compiler_uses_assembly_path_for_single_step_linear_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("single-step linear flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Quick answer",
+            "flow_description": "Answer with the requested tone.",
+            "plan_rationale": "One text step is enough.",
+            "input_fields": [
+                {
+                    "variable_name": "tone",
+                    "label": "Tone",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Write answer",
+                    "instructions": "Write the answer in the requested tone.",
+                    "output_type": "text",
+                    "uses_form_fields": ["tone"],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent)
+
+    assert compiled.flow_name == "Quick answer"
+    assert compiled.flow_description == "Answer with the requested tone."
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["tone"]
+    assert len(compiled.steps) == 1
+    step = compiled.steps[0]
+    assert step.input_source == InputSource.FLOW_INPUT
+    assert step.input_type == InputType.TEXT
+    assert step.output_type == OutputType.TEXT
+    assert step.output_mode == OutputMode.PASS_THROUGH
+    assert _question(step.input_bindings) == (
+        "{{ indata_text }}\n\ntone: {{ flow_input.tone }}"
+    )
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() -> None:
     compiled = compile_create_steps_to_spec(
         flow_name="Dokumentanalys",
