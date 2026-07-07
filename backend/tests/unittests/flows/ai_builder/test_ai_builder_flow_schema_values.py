@@ -11,9 +11,11 @@ from eneo.flows.enums import (
     AIBuilderInputSource,
     AIBuilderInputType,
     AIBuilderOutputMode,
+    FlowInputType,
     FlowOutputMode,
     FlowOutputType,
 )
+from eneo.flows.flow_authoring_spec import InputType
 from eneo.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     RUNTIME_INPUT_MODE_BY_TYPE,
@@ -43,6 +45,16 @@ def test_builder_runtime_input_modes_are_covered_by_schema_input_types() -> None
     assert {input_type.value for input_type in RUNTIME_INPUT_MODE_BY_TYPE} <= set(
         builder_input_type_values()
     )
+
+
+def test_builder_exposed_flow_input_types_bridge_to_authoring_input_type() -> None:
+    exposed_flow_input_types = [
+        FlowInputType(value) for value in builder_input_type_values()
+    ]
+
+    assert [InputType(input_type.value) for input_type in exposed_flow_input_types] == [
+        AIBuilderInputType(value) for value in builder_input_type_values()
+    ]
 
 
 def test_document_delivery_modes_are_derived_from_flow_capability_rules() -> None:
