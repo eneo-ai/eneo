@@ -88,8 +88,10 @@ def test_source_reader_completion_canonicalizes_obligation_variants() -> None:
                 "array",
                 item_fields=[
                     _field("topic_summary"),
+                    _field("source_summary"),
                     _field("key_requirements"),
                     _field("sensitive_parts"),
+                    _field("confidential_sections"),
                 ],
             ),
         ),
