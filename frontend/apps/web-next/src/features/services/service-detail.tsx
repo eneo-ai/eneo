@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
+import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
@@ -33,32 +34,36 @@ export function ServiceDetail({ serviceId }: { serviceId: string }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <Link
-          href={`/spaces/${routeId}/services`}
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
-          {t("services")}
-        </Link>
-        <PageHeader title={service.name} />
-      </div>
+    <SaveStatusProvider>
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <div className="flex flex-col gap-1">
+          <Link
+            href={`/spaces/${routeId}/services`}
+            className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
+          >
+            <ChevronLeft className="size-4" />
+            {t("services")}
+          </Link>
+          <PageHeader title={service.name}>
+            {canEdit && tab === "settings" ? <SaveStatusIndicator /> : null}
+          </PageHeader>
+        </div>
 
-      <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList>
-          <TabsTrigger value="playground">{t("playground")}</TabsTrigger>
-          {canEdit && <TabsTrigger value="settings">{t("settings")}</TabsTrigger>}
-        </TabsList>
-        <TabsContent value="playground" className="pt-4">
-          <ServicePlayground serviceId={serviceId} />
-        </TabsContent>
-        {canEdit && (
-          <TabsContent value="settings" className="pt-4">
-            <ServiceEditor service={service} />
+        <Tabs value={tab} onValueChange={selectTab}>
+          <TabsList>
+            <TabsTrigger value="playground">{t("playground")}</TabsTrigger>
+            {canEdit && <TabsTrigger value="settings">{t("settings")}</TabsTrigger>}
+          </TabsList>
+          <TabsContent value="playground" className="pt-4">
+            <ServicePlayground serviceId={serviceId} />
           </TabsContent>
-        )}
-      </Tabs>
-    </div>
+          {canEdit && (
+            <TabsContent value="settings" className="pt-4">
+              <ServiceEditor service={service} />
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
+    </SaveStatusProvider>
   );
 }

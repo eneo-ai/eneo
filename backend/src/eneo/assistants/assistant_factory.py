@@ -229,6 +229,10 @@ class AssistantFactory:
         else:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
+        mcp_tools = [
+            (tool.mcp_server_tool_id, tool.is_enabled)
+            for tool in assistant_in_db.assistant_mcp_server_tools
+        ]
 
         # `is None` (not truthiness) so corrupt non-None JSONB still raises
         # ValidationError downstream rather than being silently dropped.
@@ -277,6 +281,7 @@ class AssistantFactory:
             collections=collections,
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=mcp_servers,
+            mcp_tools=mcp_tools,
             created_at=assistant_in_db.created_at,
             updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,

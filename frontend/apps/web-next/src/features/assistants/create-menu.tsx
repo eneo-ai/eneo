@@ -25,9 +25,10 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import type { Schema } from "@/lib/api/models";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
-import { TemplateGalleryDialog } from "./template-gallery-dialog";
+import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dialog";
 
 function CreateDialog({
   open,
@@ -109,13 +110,19 @@ export function CreateChatAppMenu() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
 
   const createAssistant = useMutation({
-    mutationFn: ({ name, templateId }: { name: string; templateId?: string }) =>
+    mutationFn: ({
+      name,
+      fromTemplate
+    }: {
+      name: string;
+      fromTemplate?: Schema<"TemplateCreate">;
+    }) =>
       unwrap(
         browserApi.POST("/api/v1/spaces/{id}/applications/assistants/", {
           params: { path: { id: space.id } },
           body: {
             name,
-            ...(templateId ? { from_template: { id: templateId, additional_fields: null } } : {})
+            ...(fromTemplate ? { from_template: fromTemplate } : {})
           }
         })
       ),
@@ -180,10 +187,14 @@ export function CreateChatAppMenu() {
         onCreate={(name) => createAssistant.mutate({ name })}
       />
       <TemplateGalleryDialog
+        templateKind="assistant"
+        createLabel={t("create_assistant")}
         open={dialog === "template"}
         onOpenChange={(open) => setDialog(open ? "template" : null)}
         pending={createAssistant.isPending}
-        onCreate={(templateId, name) => createAssistant.mutate({ name, templateId })}
+        onCreate={(fromTemplate, name) =>
+          createAssistant.mutateAsync({ name, fromTemplate }).then(() => undefined)
+        }
       />
       <CreateDialog
         open={dialog === "group-chat"}

@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
 import { SettingsGroup } from "@/components/composites/settings-rows";
-import { useAutosave } from "@/components/composites/use-autosave";
+import { useAutosave, useDirtySaveStatus } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,12 +24,14 @@ import {
   type HelperAvailability
 } from "@/features/help-assistants/prompt-guide/helper-runs";
 import { PromptGuideDialog } from "@/features/help-assistants/prompt-guide/prompt-guide-dialog";
+import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
 import { useSpace } from "@/features/spaces/use-space";
-import { PromptVersionDialog } from "./prompt-version-dialog";
+import { isPromptLocked } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 // Rough heuristic: ~4 characters per token. Good enough for a live editor hint.
 const CHARS_PER_TOKEN = 4;
+const PROMPT_AUTOSAVE_DEBOUNCE_MS = 1500;
 
 /** Right-aligned muted line: character count + a markdown hint. */
 function PromptMeta({ text }: { text: string }) {
@@ -63,8 +65,9 @@ export function InstructionsSection({
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
-  const autosave = useAutosave("instructions");
+  const autosave = useAutosave("assistant-prompt");
   const savedPrompt = assistant.prompt?.text ?? "";
+  const promptLocked = isPromptLocked(assistant.effective_config);
   const [prompt, setPrompt] = useState(savedPrompt);
   const [promptDescription, setPromptDescription] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -76,6 +79,7 @@ export function InstructionsSection({
   });
 
   const dirty = prompt !== savedPrompt;
+  useDirtySaveStatus("assistant-prompt", dirty);
 
   // Adopt the saved prompt when it changes server-side (our save landing, or a
   // version restored elsewhere) unless the user has unsaved local edits.
@@ -91,12 +95,28 @@ export function InstructionsSection({
   // apply rather than on every keystroke.
   const commit = useCallback(
     async (text = prompt, description = promptDescription) => {
+      if (promptLocked) return;
       if (text === savedPrompt) return;
       const result = await autosave(() => update.mutateAsync({ prompt: { text, description } }));
       if (result !== undefined) setPromptDescription("");
     },
-    [autosave, prompt, promptDescription, savedPrompt, update]
+    [autosave, prompt, promptDescription, promptLocked, savedPrompt, update]
   );
+
+  useEffect(() => {
+    if (!dirty) return;
+    const timer = window.setTimeout(() => void commit(), PROMPT_AUTOSAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [commit, dirty]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = () => {
+      if (document.visibilityState === "hidden") void commit();
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, [commit, dirty]);
 
   const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
   const attachmentTokens = (assistant.attachments ?? []).reduce(
@@ -147,7 +167,7 @@ export function InstructionsSection({
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {promptGuide && availability && (
+            {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex">
@@ -169,9 +189,11 @@ export function InstructionsSection({
                 </TooltipContent>
               </Tooltip>
             )}
-            <Button type="button" variant="ghost" size="sm" onClick={() => setShowHistory(true)}>
-              <History className="size-4" /> {t("show_prompt_history")}
-            </Button>
+            {!promptLocked && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowHistory(true)}>
+                <History className="size-4" /> {t("show_prompt_history")}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"
@@ -184,9 +206,17 @@ export function InstructionsSection({
           </div>
         </div>
 
+        {promptLocked && (
+          <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
+            <span className="font-semibold">{t("warning")}:</span>{" "}
+            {t("governance_assistant_prompt_locked_hint")}
+          </p>
+        )}
+
         <Textarea
           id="assistant-prompt"
           value={prompt}
+          disabled={promptLocked}
           rows={12}
           className="min-h-72 w-full resize-y text-base leading-6"
           onChange={(event) => {
@@ -203,12 +233,13 @@ export function InstructionsSection({
       </div>
 
       <PromptGuideDialog
-        open={showPromptGuide}
+        open={showPromptGuide && !promptLocked}
         onOpenChange={setShowPromptGuide}
         targetId={assistant.id}
         targetPrompt={prompt}
         hasUnsavedPromptChanges={dirty}
         onApply={(text) => {
+          if (promptLocked) return;
           const description = t("prompt_guide_apply_description", {
             date: formatDateTime(new Date().toISOString())
           });
@@ -218,10 +249,11 @@ export function InstructionsSection({
         }}
       />
       <PromptVersionDialog
-        assistantId={assistant.id}
-        open={showHistory}
+        resource={{ type: "assistant", id: assistant.id }}
+        open={showHistory && !promptLocked}
         onOpenChange={setShowHistory}
         onUseVersion={(text) => {
+          if (promptLocked) return;
           setPrompt(text);
           setPromptDescription("");
           void commit(text, "");
@@ -236,6 +268,7 @@ export function InstructionsSection({
           <Textarea
             aria-label={t("prompt")}
             value={prompt}
+            disabled={promptLocked}
             className="min-h-0 flex-1 resize-none text-base leading-6"
             onChange={(event) => {
               setPrompt(event.target.value);

@@ -2,12 +2,11 @@
 
 import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
-import { toast } from "sonner";
+import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
+import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { formatBytes } from "@/lib/format";
-import type { InputFieldRules } from "../apps";
 
 export type RunFile = {
   /** Local key while uploading; backend file id once uploaded. */
@@ -43,21 +42,12 @@ export function useAppRunInputs() {
   const [files, setFiles] = useState<RunFile[]>([]);
 
   const addFiles = useCallback(
-    async (incoming: File[], rules: InputFieldRules) => {
-      const accepted = new Set(rules.perTypeLimits.map((limit) => limit.mimetype));
-      for (const file of incoming) {
-        if (accepted.size > 0 && !accepted.has(file.type)) {
-          toast.error(`${file.name}: ${t("file_type_not_supported")}`);
-          continue;
-        }
-        const cap =
-          rules.perTypeLimits.find((limit) => limit.mimetype === file.type)?.sizeLimit ??
-          rules.maxSize;
-        if (Number.isFinite(cap) && file.size > cap) {
-          toast.error(`${file.name}: ${t("file_too_large")} (${formatBytes(cap)})`);
-          continue;
-        }
+    async (incoming: File[], rules: FileUploadRules) => {
+      const plan = planFileUploads(incoming, files, rules);
+      const shown = { maxFiles: false };
+      for (const rejection of plan.rejected) toastUploadRejection(rejection, t, shown);
 
+      for (const file of plan.accepted) {
         const key = crypto.randomUUID();
         setFiles((current) => [
           ...current,
@@ -76,7 +66,7 @@ export function useAppRunInputs() {
         }
       }
     },
-    [t]
+    [files, t]
   );
 
   const removeFile = useCallback((key: string) => {

@@ -23,6 +23,8 @@ import {
   isSelectKwarg,
   kwargCapability,
   kwargsForBehaviour,
+  modelKwargLabel,
+  modelKwargOptionLabel,
   modelSpecificKwargs,
   supportsBehaviorPresets,
   type ModelBehaviour,
@@ -40,40 +42,6 @@ const NUMERIC_DEFAULT_MAX: Partial<Record<ModelKwargName, number>> = {
 };
 
 const AUDIO_INPUT_TYPES: InputFieldType[] = ["audio-recorder", "audio-upload"];
-
-function kwargLabel(name: ModelKwargName, t: (key: string) => string): string {
-  switch (name) {
-    case "reasoning_effort":
-      return t("reasoning_effort");
-    case "verbosity":
-      return t("verbosity");
-    case "top_p":
-      return t("top_p");
-    case "presence_penalty":
-      return t("presence_penalty");
-    case "frequency_penalty":
-      return t("frequency_penalty");
-    case "top_k":
-      return t("top_k");
-    default:
-      return name;
-  }
-}
-
-function optionLabel(option: string, t: (key: string) => string): string {
-  switch (option) {
-    case "none":
-      return t("none");
-    case "low":
-      return t("parameter_option_low");
-    case "medium":
-      return t("parameter_option_medium");
-    case "high":
-      return t("parameter_option_high");
-    default:
-      return option;
-  }
-}
 
 export function AiSection({ app }: { app: App }) {
   const t = useTranslations();
@@ -258,7 +226,7 @@ export function AiSection({ app }: { app: App }) {
                     htmlFor={`app-kwarg-${name}`}
                     className="text-muted-foreground font-normal"
                   >
-                    {kwargLabel(name, t)}
+                    {modelKwargLabel(name, t)}
                   </Label>
                   {isSelectKwarg(name) ? (
                     <Select
@@ -274,7 +242,7 @@ export function AiSection({ app }: { app: App }) {
                         <SelectItem value="__default">{t("default_behavior")}</SelectItem>
                         {(capability?.options ?? []).map((option) => (
                           <SelectItem key={option} value={option}>
-                            {optionLabel(option, t)}
+                            {modelKwargOptionLabel(option, t)}
                           </SelectItem>
                         ))}
                       </SelectContent>

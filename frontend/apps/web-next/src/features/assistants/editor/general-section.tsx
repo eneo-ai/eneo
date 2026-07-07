@@ -13,13 +13,14 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
   const update = useUpdateAssistant(assistant.id);
 
   const name = useAutosaveField({
-    key: "general",
+    key: "assistant-name",
     value: assistant.name,
     save: (value) => update.mutateAsync({ name: value }),
-    normalize: (value) => value.trim()
+    normalize: (value) => value.trim(),
+    validate: (value) => value.length > 0
   });
   const description = useAutosaveField({
-    key: "general",
+    key: "assistant-description",
     value: assistant.description ?? "",
     save: (value) => update.mutateAsync({ description: value })
   });

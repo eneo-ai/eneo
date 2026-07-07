@@ -4,6 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   ChevronLeft,
+  KeyRound,
   type LucideIcon,
   MessageSquare,
   Paperclip,
@@ -21,6 +22,7 @@ import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
+import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
 import { useSpace } from "@/features/spaces/use-space";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
@@ -72,7 +74,8 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
 
-  const hasMcp = (space.mcp_servers?.length ?? 0) > 0;
+  const hasMcp =
+    (space.mcp_servers?.length ?? 0) > 0 || assistant.effective_config?.mcp_enforced === true;
   const permissions = assistant.permissions ?? [];
   const hasPublishing = permissions.includes("publish") || permissions.includes("insight_toggle");
 
@@ -122,6 +125,18 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       label: t("security_and_privacy"),
       icon: ShieldCheck,
       node: <SecuritySection assistant={assistant} />
+    },
+    {
+      id: "api-keys",
+      label: t("api_keys"),
+      icon: KeyRound,
+      node: (
+        <ResourceApiKeysSection
+          scopeType="assistant"
+          scopeId={assistant.id}
+          resourceName={assistant.name}
+        />
+      )
     },
     ...(hasPublishing
       ? [
@@ -175,7 +190,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
             </div>
             <nav
               aria-label={t("settings")}
-              className="flex snap-x gap-1 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex snap-x [scrollbar-width:none] gap-1 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden"
             >
               {sections.map((section) => (
                 <a

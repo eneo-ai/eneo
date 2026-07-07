@@ -48,6 +48,8 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
   }, [savedKey, saved]);
 
   function handleChange(next: KnowledgeSelections) {
+    const previous = selections;
+    const attemptedKey = toIds(next);
     setSelections(next);
     void autosave(() =>
       update.mutateAsync({
@@ -55,7 +57,10 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
         websites: next.websites.map((item) => ({ id: item.id })),
         integration_knowledge_list: next.integrationKnowledge.map((item) => ({ id: item.id }))
       })
-    );
+    ).then((result) => {
+      if (result !== undefined) return;
+      setSelections((current) => (toIds(current) === attemptedKey ? previous : current));
+    });
   }
 
   const hasAnyKnowledge =
@@ -67,7 +72,7 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
   const disabledByMcp = hasAnyMcp && !hasAnyKnowledge;
 
   const warning = disabledByMcp && (
-    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+    <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
       <span className="font-semibold">{t("warning")}:</span>{" "}
       {t("knowledge_disabled_when_mcp_active")}
     </p>

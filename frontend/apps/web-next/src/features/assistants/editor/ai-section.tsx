@@ -34,6 +34,11 @@ import {
   type ModelKwargName,
   type ModelKwargs
 } from "./model-kwargs";
+import {
+  effectiveAssistantModels,
+  isModelsEnforced,
+  lockedAssistantModel
+} from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
@@ -201,6 +206,14 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
   const presetsSupported = model === null || supportsBehaviorPresets(model);
   const specificKwargs = modelSpecificKwargs(model);
   const showModelPricing = tenant.show_model_pricing === true;
+  const effectiveConfig = assistant.effective_config;
+  const modelsEnforced = isModelsEnforced(effectiveConfig);
+  const availableModels = effectiveAssistantModels(space.completion_models, effectiveConfig);
+  const lockedModel = lockedAssistantModel(space.completion_models, effectiveConfig);
+  const lockedSummaryModel =
+    lockedModel === null
+      ? null
+      : (space.completion_models.find((candidate) => candidate.id === lockedModel.id) ?? null);
 
   // Adopt server changes (our own save landing, or an edit elsewhere) unless the
   // user has diverged locally.
@@ -262,13 +275,27 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
       >
         <ModelSelector
           id="assistant-completion-model"
-          models={space.completion_models}
+          models={availableModels}
           selectedId={modelId}
           onSelect={changeModel}
+          locked={lockedModel}
           className="w-full justify-between"
           showPricing={showModelPricing}
         />
-        {model && <ModelSummary model={model} showPricing={showModelPricing} t={t} />}
+        {modelsEnforced && (
+          <p className="text-muted-foreground text-xs">
+            {lockedModel
+              ? t("governance_assistant_locked_by_policy")
+              : t("governance_assistant_models_filtered_hint")}
+          </p>
+        )}
+        {(lockedSummaryModel ?? model) && (
+          <ModelSummary
+            model={(lockedSummaryModel ?? model)!}
+            showPricing={showModelPricing}
+            t={t}
+          />
+        )}
       </SettingsRow>
 
       {presetsSupported && (

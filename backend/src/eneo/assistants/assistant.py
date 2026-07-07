@@ -64,6 +64,7 @@ class Assistant(Entity):
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
+        mcp_tools: list[tuple[UUID, bool]] | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -88,6 +89,7 @@ class Assistant(Entity):
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list or []
         self.mcp_servers = mcp_servers or []
+        self.mcp_tools = mcp_tools or []
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments

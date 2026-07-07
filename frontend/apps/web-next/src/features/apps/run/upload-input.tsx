@@ -4,9 +4,10 @@ import { Loader2, Upload, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { inputFieldRules } from "@/features/files/upload-plan";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { inputFieldRules, type InputField } from "../apps";
+import type { InputField } from "../apps";
 import type { RunFile } from "./use-app-run";
 
 const MIME_FRIENDLY: Record<string, string> = {

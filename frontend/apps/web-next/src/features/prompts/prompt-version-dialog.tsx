@@ -11,14 +11,39 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/format";
 
-/** Browse an assistant's prompt history and load a past version for review. */
+type PromptResource = {
+  type: "assistant" | "app";
+  id: string;
+};
+
+async function fetchPromptVersions(resource: PromptResource) {
+  if (resource.type === "assistant") {
+    return (
+      await unwrap(
+        browserApi.GET("/api/v1/assistants/{id}/prompts/", {
+          params: { path: { id: resource.id } }
+        })
+      )
+    ).items;
+  }
+
+  return (
+    await unwrap(
+      browserApi.GET("/api/v1/apps/{id}/prompts/", {
+        params: { path: { id: resource.id } }
+      })
+    )
+  ).items;
+}
+
+/** Browse a resource's prompt history and load a past version for review. */
 export function PromptVersionDialog({
-  assistantId,
+  resource,
   open,
   onOpenChange,
   onUseVersion
 }: {
-  assistantId: string;
+  resource: PromptResource;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUseVersion: (text: string) => void;
@@ -27,16 +52,9 @@ export function PromptVersionDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const list = useQuery({
-    queryKey: ["assistant-prompts", assistantId],
+    queryKey: [resource.type, resource.id, "prompts"],
     enabled: open,
-    queryFn: async () =>
-      (
-        await unwrap(
-          browserApi.GET("/api/v1/assistants/{id}/prompts/", {
-            params: { path: { id: assistantId } }
-          })
-        )
-      ).items
+    queryFn: () => fetchPromptVersions(resource)
   });
 
   const preview = useQuery({

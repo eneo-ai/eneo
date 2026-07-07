@@ -28,10 +28,10 @@ const TYPE_META: Record<InputFieldType, { icon: typeof Edit; labelKey: string }>
   "image-upload": { icon: FileImage, labelKey: "upload_image_file" }
 };
 
-const TYPE_GROUPS: { group: string; types: InputFieldType[] }[] = [
-  { group: "text", types: ["text-field", "text-upload"] },
-  { group: "audio", types: ["audio-recorder", "audio-upload"] },
-  { group: "image", types: ["image-upload"] }
+const TYPE_GROUPS: { labelKey: string; types: InputFieldType[] }[] = [
+  { labelKey: "text", types: ["text-field", "text-upload"] },
+  { labelKey: "audio", types: ["audio-recorder", "audio-upload"] },
+  { labelKey: "image", types: ["image-upload"] }
 ];
 
 function InputTypeSelect({
@@ -56,9 +56,9 @@ function InputTypeSelect({
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {TYPE_GROUPS.map(({ group, types }) => (
-          <SelectGroup key={group}>
-            <SelectLabel className="capitalize">{group}</SelectLabel>
+        {TYPE_GROUPS.map(({ labelKey, types }) => (
+          <SelectGroup key={labelKey}>
+            <SelectLabel>{t(labelKey)}</SelectLabel>
             {types.map((type) => {
               const TypeIcon = TYPE_META[type].icon;
               return (
@@ -106,22 +106,31 @@ export function InputSection({ app }: { app: App }) {
     setFields((current) => (JSON.stringify(current) === previous ? saved : current));
   }, [savedKey, saved]);
 
-  const persist = (next: EditableField[]) =>
-    autosave(() =>
+  const fieldsKey = (items: EditableField[]) => JSON.stringify(items);
+
+  const persist = (next: EditableField[], previous: EditableField[] = fields) => {
+    const attemptedKey = fieldsKey(next);
+    return autosave(() =>
       update.mutateAsync({
         input_fields: next.map((field) => ({
           type: field.type,
           description: field.description || null
         }))
       })
-    );
+    ).then((result) => {
+      if (result !== undefined) return result;
+      setFields((current) => (fieldsKey(current) === attemptedKey ? previous : current));
+      return undefined;
+    });
+  };
 
   function patchField(index: number, patch: Partial<EditableField>, save = true) {
+    const previous = fields;
     const next = fields.map((field, position) =>
       position === index ? { ...field, ...patch } : field
     );
     setFields(next);
-    if (save) void persist(next);
+    if (save) void persist(next, previous);
   }
 
   return (

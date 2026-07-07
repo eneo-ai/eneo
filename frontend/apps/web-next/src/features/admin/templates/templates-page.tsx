@@ -39,7 +39,9 @@ import {
   appTemplatesQueryOptions,
   assistantTemplatesQueryOptions,
   deletedAppTemplatesQueryOptions,
-  deletedAssistantTemplatesQueryOptions
+  deletedAssistantTemplatesQueryOptions,
+  rollbackAppTemplate,
+  rollbackAssistantTemplate
 } from "@/features/admin/templates/templates";
 import { TemplateEditorDialog } from "./template-editor-dialog";
 
@@ -77,6 +79,12 @@ function restoreTemplate(kind: TemplateKind, templateId: string) {
     : unwrap(browserApi.POST("/api/v1/admin/templates/apps/{template_id}/restore", { params }));
 }
 
+function rollbackTemplate(kind: TemplateKind, templateId: string) {
+  return kind === "assistants"
+    ? rollbackAssistantTemplate(browserApi, templateId)
+    : rollbackAppTemplate(browserApi, templateId);
+}
+
 function permanentDelete(kind: TemplateKind, templateId: string) {
   const params = { path: { template_id: templateId } };
   return kind === "assistants"
@@ -102,6 +110,7 @@ function TemplateRow({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
+  const [showRollback, setShowRollback] = useState(false);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: activeKey(kind) });
 
@@ -120,6 +129,15 @@ function TemplateRow({
     onSuccess: refresh,
     onError: (error) => toastApiError(error, t)
   });
+  const rollback = useMutation({
+    mutationFn: () => rollbackTemplate(kind, template.id),
+    onSuccess: () => {
+      void refresh();
+      setShowRollback(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+  const canRollback = Boolean(template.original_snapshot);
 
   return (
     <TableRow>
@@ -160,6 +178,11 @@ function TemplateRow({
               <Star className={cn("size-4", template.is_default && "fill-current")} />
               {template.is_default ? t("remove_default") : t("set_as_default")}
             </DropdownMenuItem>
+            {canRollback && (
+              <DropdownMenuItem onSelect={() => setShowRollback(true)}>
+                <RotateCcw className="size-4" /> {t("rollback")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
               <Trash2 className="size-4" /> {t("delete")}
             </DropdownMenuItem>
@@ -174,6 +197,15 @@ function TemplateRow({
         confirmLabel={remove.isPending ? t("deleting") : t("delete")}
         pending={remove.isPending}
         onConfirm={() => remove.mutate()}
+      />
+      <ConfirmDialogControlled
+        open={showRollback}
+        onOpenChange={setShowRollback}
+        title={t("rollback_template")}
+        description={`${t("rollback_template_confirmation")} ${t("rollback_template_description")}`}
+        confirmLabel={rollback.isPending ? t("saving") : t("rollback")}
+        pending={rollback.isPending}
+        onConfirm={() => rollback.mutate()}
       />
     </TableRow>
   );

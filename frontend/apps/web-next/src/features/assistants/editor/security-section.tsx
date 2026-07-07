@@ -14,7 +14,7 @@ export function SecuritySection({ assistant }: { assistant: Assistant }) {
   const update = useUpdateAssistant(assistant.id);
 
   const days = useAutosaveField({
-    key: "security",
+    key: "assistant-retention-days",
     value: assistant.data_retention_days?.toString() ?? "",
     save: (value) =>
       update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),

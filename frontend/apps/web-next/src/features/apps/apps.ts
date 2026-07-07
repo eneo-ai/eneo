@@ -12,32 +12,6 @@ export type InputField = Schema<"InputFieldPublic">;
 export type InputFieldType = Schema<"InputFieldType">;
 export type AppRunStatus = Schema<"Status">;
 
-export type InputFieldRules = {
-  /** Mimetype list for the file picker's `accept` attribute (empty = any). */
-  acceptString: string;
-  /** Max number of files, or Infinity when unset. */
-  maxFiles: number;
-  /** Max combined size in bytes, or Infinity when unset. */
-  maxSize: number;
-  /** Per-mimetype size caps (bytes). */
-  perTypeLimits: { mimetype: string; sizeLimit: number }[];
-};
-
-/** Upload rules for a single input field (port of getExplicitAttachmentRules). */
-export function inputFieldRules(
-  field: Pick<InputField, "accepted_file_types" | "limit">
-): InputFieldRules {
-  return {
-    acceptString: field.accepted_file_types.map((type) => type.mimetype).join(","),
-    maxFiles: field.limit.max_files || Infinity,
-    maxSize: field.limit.max_size || Infinity,
-    perTypeLimits: field.accepted_file_types.map((type) => ({
-      mimetype: type.mimetype,
-      sizeLimit: type.size_limit
-    }))
-  };
-}
-
 export const UPLOAD_INPUT_TYPES: InputFieldType[] = [
   "text-upload",
   "audio-upload",
@@ -55,12 +29,25 @@ export function isRunActive(status: AppRunStatus): boolean {
   return status === "in progress" || status === "queued";
 }
 
+export type ResultTitleLabels = {
+  inputPrefix: string;
+  empty: string;
+};
+
+const DEFAULT_RESULT_TITLE_LABELS: ResultTitleLabels = {
+  inputPrefix: "Input",
+  empty: "No input found to generate name"
+};
+
 /** Title for a run derived from its inputs (text excerpt + file names). */
-export function getResultTitle(run: { input: { text: string | null; files: { name: string }[] } }) {
+export function getResultTitle(
+  run: { input: { text: string | null; files: { name: string }[] } },
+  labels: ResultTitleLabels = DEFAULT_RESULT_TITLE_LABELS
+) {
   const parts: string[] = [];
-  if (run.input.text) parts.push(`Input: ${run.input.text}`);
+  if (run.input.text) parts.push(`${labels.inputPrefix}: ${run.input.text}`);
   parts.push(...run.input.files.map((file) => file.name));
-  return parts.join(", ") || "No input found to generate name";
+  return parts.join(", ") || labels.empty;
 }
 
 export function appQueryOptions(api: EneoClient, appId: string) {

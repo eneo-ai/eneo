@@ -20,6 +20,7 @@ export function useUpdateApp(appId: string, onSuccess?: () => void) {
   // Feedback is owned by the caller's autosave wrapper (useAutosave); this
   // mutation only refreshes the cache.
   return useMutation({
+    scope: { id: `app:${appId}` },
     mutationFn: (body: AppUpdate) =>
       unwrap(browserApi.PATCH("/api/v1/apps/{id}/", { params: { path: { id: appId } }, body })),
     onSuccess: (app) => {

@@ -5,9 +5,10 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { inputFieldRules } from "@/features/files/upload-plan";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { inputFieldRules, type InputField } from "../apps";
+import type { InputField } from "../apps";
 import { FileChip } from "./upload-input";
 import type { RunFile } from "./use-app-run";
 
@@ -236,7 +237,7 @@ export function AudioRecorderInput({
         </div>
       )}
 
-      {error && <span className={cn("text-sm", "text-red-600 dark:text-red-400")}>{error}</span>}
+      {error && <span className={cn("text-destructive text-sm")}>{error}</span>}
     </div>
   );
 }

@@ -15,7 +15,7 @@ export function SecuritySection({ app }: { app: App }) {
   const update = useUpdateApp(app.id);
 
   const days = useAutosaveField({
-    key: "security",
+    key: "app-retention-days",
     value: app.data_retention_days?.toString() ?? "",
     save: (value) =>
       update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),

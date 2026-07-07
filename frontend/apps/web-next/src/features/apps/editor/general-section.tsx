@@ -14,13 +14,14 @@ export function GeneralSection({ app }: { app: App }) {
   const update = useUpdateApp(app.id);
 
   const name = useAutosaveField({
-    key: "general",
+    key: "app-name",
     value: app.name,
     save: (value) => update.mutateAsync({ name: value }),
-    normalize: (value) => value.trim()
+    normalize: (value) => value.trim(),
+    validate: (value) => value.length > 0
   });
   const description = useAutosaveField({
-    key: "general",
+    key: "app-description",
     value: app.description ?? "",
     save: (value) => update.mutateAsync({ description: value })
   });

@@ -31,10 +31,15 @@ import { AppRunStatusBadge } from "../status-badge";
 
 const RESULTS_POLL_MS = 5_000;
 
+function resultTitleLabels(t: (key: string) => string) {
+  return { inputPrefix: t("input"), empty: t("app_run_no_input_title") };
+}
+
 function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
+  const titleLabels = resultTitleLabels(t);
 
   const deleteRun = useMutation({
     mutationFn: () =>
@@ -64,7 +69,7 @@ function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
         open={showDelete}
         onOpenChange={setShowDelete}
         title={t("delete_result")}
-        description={t("confirm_delete_result", { resultTitle: getResultTitle(run) })}
+        description={t("confirm_delete_result", { resultTitle: getResultTitle(run, titleLabels) })}
         confirmLabel={deleteRun.isPending ? t("deleting") : t("delete")}
         pending={deleteRun.isPending}
         onConfirm={() => deleteRun.mutate()}

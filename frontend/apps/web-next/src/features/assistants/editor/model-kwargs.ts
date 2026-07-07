@@ -39,6 +39,40 @@ export function isSelectKwarg(name: ModelKwargName): name is SelectKwargName {
   return (SELECT_KWARGS as readonly string[]).includes(name);
 }
 
+export function modelKwargLabel(name: ModelKwargName, t: (key: string) => string): string {
+  switch (name) {
+    case "reasoning_effort":
+      return t("reasoning_effort");
+    case "verbosity":
+      return t("verbosity");
+    case "top_p":
+      return t("top_p");
+    case "presence_penalty":
+      return t("presence_penalty");
+    case "frequency_penalty":
+      return t("frequency_penalty");
+    case "top_k":
+      return t("top_k");
+    case "temperature":
+      return t("temperature");
+  }
+}
+
+export function modelKwargOptionLabel(option: string, t: (key: string) => string): string {
+  switch (option) {
+    case "none":
+      return t("none");
+    case "low":
+      return t("parameter_option_low");
+    case "medium":
+      return t("parameter_option_medium");
+    case "high":
+      return t("parameter_option_high");
+    default:
+      return option;
+  }
+}
+
 export function kwargCapability(
   model: ModelWithKwargs | null | undefined,
   name: ModelKwargName

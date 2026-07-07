@@ -1,7 +1,7 @@
 "use client";
 
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Info } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/composites/page-header";
@@ -58,14 +58,15 @@ export function HelpAssistantEditor({
 
         <GeneralSection assistant={assistant} />
 
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+        <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
           {t("admin_help_assistants_edit_prompt_warning")}
         </p>
         <InstructionsSection assistant={assistant} promptGuide={helperKind !== PROMPT_GUIDE_KIND} />
 
         <AiSection assistant={assistant} />
 
-        <p className="text-muted-foreground text-sm">
+        <p className="border-border bg-card text-muted-foreground flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm">
+          <Info className="mt-0.5 size-4 shrink-0" />
           {t("admin_help_assistants_edit_logging_explanation")}
         </p>
         <SecuritySection assistant={assistant} />

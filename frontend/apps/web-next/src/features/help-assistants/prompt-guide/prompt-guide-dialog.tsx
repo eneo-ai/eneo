@@ -784,7 +784,7 @@ export function PromptGuideDialog({
             <>
               <div
                 role="status"
-                className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+                className="border-warning/30 bg-warning/10 text-warning flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
               >
                 <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
                 <span className="flex-1">{t("prompt_guide_warning_llm_off_format")}</span>

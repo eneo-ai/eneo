@@ -8,8 +8,10 @@ import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
+import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
 import { useSpace } from "@/features/spaces/use-space";
 import { appQueryOptions } from "../apps";
+import { AttachmentsSection } from "./attachments-section";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
 import { InputSection } from "./input-section";
@@ -17,10 +19,7 @@ import { InstructionsSection } from "./instructions-section";
 import { PublishingSection } from "./publishing-section";
 import { SecuritySection } from "./security-section";
 
-/**
- * App settings, saved per section (web-next pattern). Prompt history,
- * attachments and API-keys sections are deferred, like the assistant editor.
- */
+/** App settings, saved per section (web-next pattern). */
 export function AppEditor({ appId }: { appId: string }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -47,8 +46,10 @@ export function AppEditor({ appId }: { appId: string }) {
         <GeneralSection app={app} />
         <InputSection app={app} />
         <InstructionsSection app={app} />
+        <AttachmentsSection app={app} />
         <AiSection app={app} />
         <SecuritySection app={app} />
+        <ResourceApiKeysSection scopeType="app" scopeId={app.id} resourceName={app.name} />
         <PublishingSection app={app} />
         <div className="min-h-12" />
       </div>

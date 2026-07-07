@@ -26,6 +26,7 @@ export function useUpdateAssistant(assistantId: string, onSuccess?: () => void) 
   // Error/success feedback is owned by the caller's autosave wrapper
   // (useAutosave), so this mutation only updates the cache.
   return useMutation({
+    scope: { id: `assistant:${assistantId}` },
     mutationFn: (body: AssistantUpdate) =>
       unwrap(
         browserApi.POST("/api/v1/assistants/{id}/", {

@@ -75,3 +75,19 @@ export function updateAppTemplate(api: EneoClient, templateId: string, body: App
     })
   );
 }
+
+export function rollbackAssistantTemplate(api: EneoClient, templateId: string) {
+  return unwrap(
+    api.POST("/api/v1/admin/templates/assistants/{template_id}/rollback", {
+      params: { path: { template_id: templateId } }
+    })
+  );
+}
+
+export function rollbackAppTemplate(api: EneoClient, templateId: string) {
+  return unwrap(
+    api.POST("/api/v1/admin/templates/apps/{template_id}/rollback", {
+      params: { path: { template_id: templateId } }
+    })
+  );
+}

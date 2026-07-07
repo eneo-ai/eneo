@@ -120,8 +120,9 @@ export function TemplateEditorDialog({
                 description: collectionsDescription.trim() || null
               }
       };
-      const kwargsBody: ModelKwargs =
-        temperature.trim() === "" ? {} : { temperature: Number(temperature) };
+      const kwargsBody: ModelKwargs = { ...initialKwargs };
+      if (temperature.trim() === "") delete kwargsBody.temperature;
+      else kwargsBody.temperature = Number(temperature);
       const base = {
         name: name.trim(),
         category: category.trim(),

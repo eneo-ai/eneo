@@ -22,6 +22,10 @@ import { AppRunStatusBadge } from "../status-badge";
 
 const RESULT_POLL_MS = 3_000;
 
+function resultTitleLabels(t: (key: string) => string) {
+  return { inputPrefix: t("input"), empty: t("app_run_no_input_title") };
+}
+
 function downloadText(text: string, fileName: string) {
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const anchor = document.createElement("a");
@@ -139,7 +143,8 @@ export function ResultDetail({
 
   const complete = !isRunActive(run.status);
   const transcribedCount = run.input.files.filter((file) => file.transcription).length;
-  const outputFileName = `${getResultTitle(run).slice(0, 40)}.txt`;
+  const title = getResultTitle(run, resultTitleLabels(t));
+  const outputFileName = `${title.slice(0, 40)}.txt`;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -151,7 +156,7 @@ export function ResultDetail({
           <ChevronLeft className="size-4" />
           {t("back")}
         </Link>
-        <PageHeader title={getResultTitle(run)}>
+        <PageHeader title={title}>
           {editHref && (
             <Button asChild variant="outline">
               <Link href={editHref}>{t("edit")}</Link>
