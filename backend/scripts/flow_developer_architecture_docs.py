@@ -256,6 +256,10 @@ def render_flow_developer_architecture_docs_page() -> str:
         "",
         _render_target_home_table(target_home_descriptions),
         "",
+        "## AI Builder create compile spine",
+        "",
+        _render_ai_builder_create_compile_spine(),
+        "",
         "## Change index",
         "",
         "This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-developers/reviewing-flows-code) for the ordered procedure and validation sequence.",
@@ -366,6 +370,11 @@ def _render_change_index_table() -> str:
         ("Change type", "Start in", "Then check"),
         [
             (
+                "AI Builder create compile shape",
+                "`ai_builder_assembly`",
+                "FCM, Flow validators, runtime contracts, API battle harness",
+            ),
+            (
                 "API router or response schema",
                 "`api`",
                 "`application`, error metadata, generated consumer docs",
@@ -406,6 +415,29 @@ def _render_change_index_table() -> str:
                 "docs generator, docs contract test, `make docs:regen`",
             ),
         ],
+    )
+
+
+def _render_ai_builder_create_compile_spine() -> str:
+    return "\n".join(
+        [
+            "Create-mode AI Builder is a plugin boundary that assembles deterministic Flow mechanics before lowering. The model owns semantic intent; `FlowAssemblyPlan` owns topology, underlag channel, fixed renderer/transcription/template steps, form-field placement, source exposure, and source-reader obligations.",
+            "",
+            render_flow_docs_mermaid_block(
+                "flowchart LR",
+                '  intent["CreateFlowIntent<br/>semantic steps"] --> context["CreateCompileContext<br/>server-owned architecture"]',
+                '  context --> assemble["ai_builder_assembly.create<br/>topology admission"]',
+                '  assemble --> plan["FlowAssemblyPlan<br/>validated mechanics"]',
+                '  plan --> lower["lower_assembly_plan<br/>single writer"]',
+                '  lower --> spec["FlowDraftSpecCore<br/>Flow authoring contract"]',
+                '  spec --> runtime["Flow validators + runtime contracts"]',
+            ),
+            "",
+            "- `compile_create_intent_to_spec` is the entry point; if assembly cannot support a create intent it raises `architecture_materialization_failed` instead of falling back to legacy create rewrites.",
+            "- `ai_builder_assembly/create.py` admits supported topology and source exposure, `plan.py` validates `FlowAssemblyPlan`, `fixed_steps.py` owns zero-LLM planned steps, and `lower.py` is the only create-path writer of `FlowDraftSpecCore` bindings.",
+            "- Do not add create-mode normalizers after `lower_assembly_plan`; update assembly rules and the API battle harness when a new Flow capability becomes authorable.",
+            "- Edit mode still uses its per-step compiler path separately; do not use edit compatibility needs to reintroduce create-mode post-processing.",
+        ]
     )
 
 

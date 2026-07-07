@@ -1545,6 +1545,14 @@ def test_flow_developer_docs_how_built_is_generated_from_layout_sources() -> Non
     assert "`tenant_id`" in page
     assert "`flow_run_access_denied`" in page
     assert "`auth_layer`" in page
+    assert "## AI Builder create compile spine" in page
+    assert "`FlowAssemblyPlan` owns topology" in page
+    assert "`lower_assembly_plan`" in page
+    assert "`architecture_materialization_failed`" in page
+    assert "AI Builder create compile shape" in page
+    assert page.index("## AI Builder create compile spine") < page.index(
+        "## Change index"
+    )
 
     change_index_section = page.split("## Change index", maxsplit=1)[1].split(
         "## Module ownership",

@@ -60,20 +60,45 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 | `remove-merge-later` | duplicate or temporary root import surface to delete              |
 | `runtime`            | worker, executor, step execution, and runtime adapter code        |
 
+## AI Builder create compile spine
+
+Create-mode AI Builder is a plugin boundary that assembles deterministic Flow mechanics before lowering. The model owns semantic intent; `FlowAssemblyPlan` owns topology, underlag channel, fixed renderer/transcription/template steps, form-field placement, source exposure, and source-reader obligations.
+
+<div className="flow-docs-mermaid-figure">
+
+```mermaid
+%%{init: {"themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
+flowchart LR
+  intent["CreateFlowIntent<br/>semantic steps"] --> context["CreateCompileContext<br/>server-owned architecture"]
+  context --> assemble["ai_builder_assembly.create<br/>topology admission"]
+  assemble --> plan["FlowAssemblyPlan<br/>validated mechanics"]
+  plan --> lower["lower_assembly_plan<br/>single writer"]
+  lower --> spec["FlowDraftSpecCore<br/>Flow authoring contract"]
+  spec --> runtime["Flow validators + runtime contracts"]
+```
+
+</div>
+
+- `compile_create_intent_to_spec` is the entry point; if assembly cannot support a create intent it raises `architecture_materialization_failed` instead of falling back to legacy create rewrites.
+- `ai_builder_assembly/create.py` admits supported topology and source exposure, `plan.py` validates `FlowAssemblyPlan`, `fixed_steps.py` owns zero-LLM planned steps, and `lower.py` is the only create-path writer of `FlowDraftSpecCore` bindings.
+- Do not add create-mode normalizers after `lower_assembly_plan`; update assembly rules and the API battle harness when a new Flow capability becomes authorable.
+- Edit mode still uses its per-step compiler path separately; do not use edit compatibility needs to reintroduce create-mode post-processing.
+
 ## Change index
 
 This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-developers/reviewing-flows-code) for the ordered procedure and validation sequence.
 
-| Change type                          | Start in                             | Then check                                             |
-| ------------------------------------ | ------------------------------------ | ------------------------------------------------------ |
-| API router or response schema        | `api`                                | `application`, error metadata, generated consumer docs |
-| Runtime executor or worker behavior  | `application`, `runtime`             | `domain`, persistence owner, lifecycle docs            |
-| Step handler or output mode          | `runtime`                            | capability manifest, parser, output processing, tests  |
-| Runtime file or upload binding       | `application`, `infrastructure`      | file services, run contract, consumer files guide      |
-| Schema, migration, or JSONB boundary | `infrastructure`                     | SQLAlchemy table, JSONB owner registry, schema docs    |
-| FlowApiErrorCode or failure path     | `api`                                | error metadata, localization, consumer error reference |
-| Review checkpoint lifecycle          | `application`, `infrastructure`      | checkpoint repository, service, lifecycle docs         |
-| Developer docs or guarded contract   | `backend/scripts`, docs-site content | docs generator, docs contract test, `make docs:regen`  |
+| Change type                          | Start in                             | Then check                                                  |
+| ------------------------------------ | ------------------------------------ | ----------------------------------------------------------- |
+| AI Builder create compile shape      | `ai_builder_assembly`                | FCM, Flow validators, runtime contracts, API battle harness |
+| API router or response schema        | `api`                                | `application`, error metadata, generated consumer docs      |
+| Runtime executor or worker behavior  | `application`, `runtime`             | `domain`, persistence owner, lifecycle docs                 |
+| Step handler or output mode          | `runtime`                            | capability manifest, parser, output processing, tests       |
+| Runtime file or upload binding       | `application`, `infrastructure`      | file services, run contract, consumer files guide           |
+| Schema, migration, or JSONB boundary | `infrastructure`                     | SQLAlchemy table, JSONB owner registry, schema docs         |
+| FlowApiErrorCode or failure path     | `api`                                | error metadata, localization, consumer error reference      |
+| Review checkpoint lifecycle          | `application`, `infrastructure`      | checkpoint repository, service, lifecycle docs              |
+| Developer docs or guarded contract   | `backend/scripts`, docs-site content | docs generator, docs contract test, `make docs:regen`       |
 
 ## Module ownership
 
