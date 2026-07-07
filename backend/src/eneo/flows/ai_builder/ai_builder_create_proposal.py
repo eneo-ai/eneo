@@ -154,6 +154,7 @@ async def _process_create_spec(
             plan_edit_context=plan_edit_context,
             prior_plan=prior_plan_for_revision,
         ),
+        ui_language=resolve_ui_language(conversation),
     )
     if prepared.failure_feedback is not None:
         if prepared.validation is not None and prepared.validation.errors:

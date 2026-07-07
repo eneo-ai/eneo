@@ -83,6 +83,7 @@ async def process_edit_arguments(
             feedback=f"Invalid propose_flow arguments: {exc}",
             failure_kind="parse",
         )
+    ui_language = resolve_ui_language(conversation)
     try:
         edit_result = compile_edit_proposal(
             proposal,
@@ -97,6 +98,7 @@ async def process_edit_arguments(
                 planning_state=planning_state,
                 conversation=conversation,
             ),
+            ui_language=ui_language,
         )
     except BadRequestException as exc:
         return ToolProcessingResult(
@@ -130,6 +132,7 @@ async def process_edit_arguments(
             plan_edit_context=plan_edit_context,
             prior_plan=prior_plan_for_revision,
         ),
+        ui_language=ui_language,
     )
     if prepared.failure_feedback is not None:
         return ToolProcessingResult(

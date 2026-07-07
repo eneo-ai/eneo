@@ -171,6 +171,7 @@ def process_scoped_step_revision_if_requested(
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
         terminal_output_type=requested_terminal_output_type,
+        ui_language=resolve_ui_language(conversation),
     )
     if prepared.failure_feedback is not None:
         if prepared.validation is not None and prepared.validation.errors:

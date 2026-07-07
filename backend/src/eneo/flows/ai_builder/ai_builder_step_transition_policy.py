@@ -48,7 +48,6 @@ _ARTIFACT_GENERATION_PREFIXES = (
     "generera",
     "formattera",
 )
-_SWEDISH_ARTIFACT_GENERATION_PREFIXES = ("skapa", "generera", "formattera")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,11 +63,13 @@ def normalize_ai_builder_spec(
     *,
     terminal_output_type: OutputType | None = None,
     disambiguate_duplicate_step_names: bool = False,
+    ui_language: str | None = None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     spec, topology_changes = normalize_ai_builder_step_topology(
         spec,
         terminal_output_type=terminal_output_type,
         disambiguate_duplicate_step_names=disambiguate_duplicate_step_names,
+        ui_language=ui_language,
     )
     normalized_steps: list[StepSpec] = []
     changes: list[tuple[StepSpec, StepNormalizationChange]] = list(topology_changes)
@@ -90,6 +91,7 @@ def normalize_ai_builder_step_topology(
     *,
     terminal_output_type: OutputType | None = None,
     disambiguate_duplicate_step_names: bool = False,
+    ui_language: str | None = None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     """Normalize redundant Flow graph mechanics before quality validation.
 
@@ -107,6 +109,7 @@ def normalize_ai_builder_step_topology(
     spec, artifact_body_changes = _normalize_pre_terminal_artifact_body_step(
         spec,
         terminal_output_type=terminal_output_type,
+        ui_language=ui_language,
     )
     step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
     form_fields = {
@@ -160,7 +163,8 @@ def normalize_ai_builder_step_topology(
         spec if not mutated else spec.model_copy(update={"steps": normalized_steps})
     )
     normalized_spec, source_material_changes = _normalize_source_material_underlag(
-        normalized_spec
+        normalized_spec,
+        ui_language=ui_language,
     )
     changes.extend(source_material_changes)
     mutated = mutated or bool(source_material_changes)
@@ -232,6 +236,8 @@ def _step_name_key(name: str) -> str:
 
 def _normalize_source_material_underlag(
     spec: FlowDraftSpecCore,
+    *,
+    ui_language: str | None = None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     updated_steps = list(spec.steps)
     changes: list[tuple[StepSpec, StepNormalizationChange]] = []
@@ -247,7 +253,10 @@ def _normalize_source_material_underlag(
             for index, candidate in enumerate(spec.steps)
             if candidate is boundary.step
         )
-        normalized_bindings = source_material_bindings_for_boundary(boundary)
+        normalized_bindings = source_material_bindings_for_boundary(
+            boundary,
+            ui_language=ui_language,
+        )
         updates: dict[str, Any] = {
             "input_type": InputType.TEXT,
             "input_bindings": normalized_bindings,
@@ -277,6 +286,7 @@ def _normalize_pre_terminal_artifact_body_step(
     spec: FlowDraftSpecCore,
     *,
     terminal_output_type: OutputType | None,
+    ui_language: str | None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     if terminal_output_type not in {OutputType.PDF, OutputType.DOCX}:
         return spec, []
@@ -318,7 +328,7 @@ def _normalize_pre_terminal_artifact_body_step(
         body_step_name = _unique_step_name(
             _artifact_body_step_name(
                 output_type=output_type,
-                source_text=_step_instruction_text(step),
+                ui_language=ui_language,
             ),
             used_names=used_step_names,
         )
@@ -329,6 +339,7 @@ def _normalize_pre_terminal_artifact_body_step(
                 "assistant_spec": _artifact_body_step_assistant(
                     step=step,
                     output_type=output_type,
+                    ui_language=ui_language,
                 ),
             }
         )
@@ -379,23 +390,26 @@ def _mentions_artifact_type(text: str, *, output_type: OutputType) -> bool:
     return False
 
 
-def _artifact_body_step_name(*, output_type: OutputType, source_text: str) -> str:
-    normalized = normalize_discovery_text(source_text)
+def _artifact_body_step_name(
+    *,
+    output_type: OutputType,
+    ui_language: str | None,
+) -> str:
     artifact_name = output_type.value.upper()
-    if contains_any_token_prefix(normalized, _SWEDISH_ARTIFACT_GENERATION_PREFIXES):
-        return f"Förbered {artifact_name}-innehåll"
-    return f"Prepare {artifact_name} content"
+    if _uses_english_ui(ui_language):
+        return f"Prepare {artifact_name} content"
+    return f"Förbered {artifact_name}-innehåll"
 
 
 def _artifact_body_step_assistant(
     *,
     step: StepSpec,
     output_type: OutputType,
+    ui_language: str | None,
 ) -> AssistantSpec:
-    source_text = _step_instruction_text(step)
     prefix = _artifact_body_step_instruction_prefix(
         output_type=output_type,
-        source_text=source_text,
+        ui_language=ui_language,
     )
     instructions = step.assistant_spec.instructions.strip()
     return step.assistant_spec.model_copy(
@@ -408,19 +422,22 @@ def _artifact_body_step_assistant(
 def _artifact_body_step_instruction_prefix(
     *,
     output_type: OutputType,
-    source_text: str,
+    ui_language: str | None,
 ) -> str:
     artifact_name = output_type.value.upper()
-    normalized = normalize_discovery_text(source_text)
-    if contains_any_token_prefix(normalized, _SWEDISH_ARTIFACT_GENERATION_PREFIXES):
+    if _uses_english_ui(ui_language):
         return (
-            f"Förbered textinnehållet som terminalsteget ska rendera till "
-            f"{artifact_name}. Terminalsteget skapar själva {artifact_name}-filen."
+            f"Prepare the text content that the terminal step will render as "
+            f"{artifact_name}. The terminal step creates the actual {artifact_name} file."
         )
     return (
-        f"Prepare the text content that the terminal step will render as "
-        f"{artifact_name}. The terminal step creates the actual {artifact_name} file."
+        f"Förbered textinnehållet som terminalsteget ska rendera till "
+        f"{artifact_name}. Terminalsteget skapar själva {artifact_name}-filen."
     )
+
+
+def _uses_english_ui(ui_language: str | None) -> bool:
+    return ui_language is not None and ui_language.casefold().startswith("en")
 
 
 def _step_instruction_text(step: StepSpec) -> str:

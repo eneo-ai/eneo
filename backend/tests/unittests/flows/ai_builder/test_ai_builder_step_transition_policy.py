@@ -601,6 +601,45 @@ def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None
     ] == ["pre_terminal_artifact_body_step_renamed"]
 
 
+def test_normalize_ai_builder_spec_uses_ui_language_for_artifact_body_copy() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Audio DOCX",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Identifiera struktur",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Formatera och generera DOCX",
+                instructions="Bygg ett DOCX-dokument med rubriker och brödtext.",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_c",
+                name="Skapa DOCX",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    normalized, _changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+        ui_language="en",
+    )
+
+    body_step = normalized.steps[-2]
+    assert body_step.name == "Prepare DOCX content"
+    assert "terminal step will render" in body_step.assistant_spec.instructions
+    assert "terminalsteget" not in body_step.assistant_spec.instructions
+
+
 def test_normalize_ai_builder_spec_keeps_distinct_names_for_multiple_artifact_body_steps() -> (
     None
 ):
@@ -819,7 +858,7 @@ def test_normalize_ai_builder_spec_completes_source_material_underlag() -> None:
 def test_normalize_ai_builder_spec_completes_source_material_for_text_report() -> None:
     spec = _text_report_source_material_spec()
 
-    normalized, changes = normalize_ai_builder_spec(spec)
+    normalized, changes = normalize_ai_builder_spec(spec, ui_language="en")
 
     final_step = normalized.steps[3]
     assert final_step.input_source == InputSource.PREVIOUS_STEP
@@ -914,7 +953,7 @@ def test_normalize_ai_builder_spec_treats_immediate_structured_only_as_incomplet
         final_input_bindings={"question": "{{ step_c.output.structured }}"}
     )
 
-    normalized, _changes = normalize_ai_builder_spec(spec)
+    normalized, _changes = normalize_ai_builder_spec(spec, ui_language="en")
 
     assert normalized.steps[3].input_type == InputType.TEXT
     assert normalized.steps[3].input_bindings == {
@@ -1014,7 +1053,7 @@ def test_compiler_source_refs_complete_once_after_normalization_and_materializat
     )
     spec = _text_report_source_material_spec(final_input_bindings=compiled_bindings)
 
-    normalized, changes = normalize_ai_builder_spec(spec)
+    normalized, changes = normalize_ai_builder_spec(spec, ui_language="en")
     shared = compile_flow_draft_changeset(normalized, current_flow=None)
 
     assert any(
@@ -1059,7 +1098,7 @@ def test_normalize_ai_builder_spec_treats_source_only_underlag_as_intentional_pa
 def test_normalize_ai_builder_spec_completes_empty_source_material_question() -> None:
     spec = _text_report_source_material_spec(final_input_bindings={"question": ""})
 
-    normalized, _changes = normalize_ai_builder_spec(spec)
+    normalized, _changes = normalize_ai_builder_spec(spec, ui_language="en")
 
     assert normalized.steps[3].input_bindings == _completed_source_refs(
         structured_step_ref="step_c",
@@ -1155,7 +1194,7 @@ def test_normalize_ai_builder_spec_uses_text_flow_input_as_primary_source() -> N
         source_output_mode=OutputMode.PASS_THROUGH,
     )
 
-    normalized, _changes = normalize_ai_builder_spec(spec)
+    normalized, _changes = normalize_ai_builder_spec(spec, ui_language="en")
 
     assert normalized.steps[3].input_bindings == _completed_source_refs(
         structured_step_ref="step_c",
@@ -1328,6 +1367,7 @@ def test_normalize_ai_builder_spec_completes_structured_field_only_source_materi
     normalized, changes = normalize_ai_builder_spec(
         spec,
         terminal_output_type=OutputType.DOCX,
+        ui_language="en",
     )
 
     assert normalized.steps[2].input_bindings == {
@@ -1391,6 +1431,7 @@ def test_normalize_ai_builder_spec_prefers_primary_audio_source_over_prior_text_
     normalized, _changes = normalize_ai_builder_spec(
         spec,
         terminal_output_type=OutputType.DOCX,
+        ui_language="en",
     )
 
     assert normalized.steps[3].input_bindings == {
@@ -1439,6 +1480,7 @@ def test_normalize_ai_builder_spec_uses_english_source_material_label() -> None:
     normalized, _changes = normalize_ai_builder_spec(
         spec,
         terminal_output_type=OutputType.DOCX,
+        ui_language="en",
     )
 
     assert normalized.steps[2].input_bindings == {

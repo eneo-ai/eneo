@@ -93,6 +93,7 @@ def compile_edit_proposal(
     assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
     requested_primary_runtime_input_type: InputType | None = None,
+    ui_language: str | None = None,
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = (
@@ -140,7 +141,8 @@ def compile_edit_proposal(
             flow_description=compiled_spec.flow_description,
             steps=compiled_steps,
             form_fields=compiled_spec.form_fields,
-        )
+        ),
+        ui_language=ui_language,
     )
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
