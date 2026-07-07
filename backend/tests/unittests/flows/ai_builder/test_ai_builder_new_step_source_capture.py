@@ -4,6 +4,7 @@ import logging
 
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
+    _source_ref_payloads_if_valid,
     compile_input_reference_instruction_hint,
     compile_new_step_draft,
 )
@@ -13,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputType
+from eneo.flows.input_binding_contract_rules import SourceRefBinding
 
 _LOGGER_NAME = "eneo.flows.ai_builder.ai_builder_new_step_compiler"
 
@@ -162,3 +164,28 @@ def test_compile_new_step_passes_ui_language_to_input_reference_hint() -> None:
         step.assistant_spec.instructions
     )
     assert "- Decision (step 1: decision)" in step.assistant_spec.instructions
+
+
+def test_invalid_source_ref_payload_fallback_logs(caplog) -> None:
+    caplog.set_level(logging.WARNING, logger=_LOGGER_NAME)
+
+    assert (
+        _source_ref_payloads_if_valid(
+            [
+                SourceRefBinding(
+                    step_ref="step_a",
+                    output="text",
+                    field_path=("summary",),
+                )
+            ]
+        )
+        is None
+    )
+    record = next(
+        item
+        for item in caplog.records
+        if item.message == "ai_builder_source_refs_degraded_to_question_binding"
+    )
+    assert record.source_ref_count == 1
+    assert record.source_ref_expressions == ["{{ step_a.output.text.summary }}"]
+    assert "field_path" in record.error

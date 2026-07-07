@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
@@ -28,6 +30,8 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+
+_LOWER_LOGGER_NAME = "eneo.flows.ai_builder.ai_builder_assembly.lower"
 
 
 def _text_step(
@@ -140,6 +144,39 @@ def test_fixed_assembly_steps_use_english_when_requested() -> None:
 
     assert template_reader.name == "Extract template variables"
     assert renderer.name == "Render PDF"
+
+
+def test_lowering_logs_terminal_output_fields_suppressed_by_schema(caplog) -> None:
+    caplog.set_level(logging.INFO, logger=_LOWER_LOGGER_NAME)
+    plan = FlowAssemblyPlan(
+        flow_name="Report",
+        flow_description="",
+        form_fields=(),
+        steps=(
+            _text_step(
+                output_type=OutputType.JSON,
+                output_fields=(_field("model_authored_summary"),),
+            ),
+        ),
+        terminal_output_schema={
+            "type": "object",
+            "properties": {"model_authored_summary": {"type": "string"}},
+        },
+        source_reader_required_fields=(),
+        aggregation_intent="linear",
+        ui_language=None,
+    )
+
+    lower_assembly_plan(plan)
+
+    record = next(
+        item
+        for item in caplog.records
+        if item.message == "ai_builder_terminal_output_fields_suppressed_by_schema"
+    )
+    assert record.step_index == 1
+    assert record.step_name == "Write answer"
+    assert record.field_names == ["model_authored_summary"]
 
 
 def test_planned_step_rejects_empty_name_and_instructions() -> None:

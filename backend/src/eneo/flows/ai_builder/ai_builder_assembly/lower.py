@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
@@ -28,18 +30,31 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     flow_name = normalize_flow_name(plan.flow_name)
-    step_drafts = [
-        _new_step_draft_from_planned_step(
-            planned_step,
-            emit_output_fields=(
-                plan.terminal_output_schema is None or index != len(plan.steps) - 1
-            ),
+    step_drafts: list[NewStepDraft] = []
+    for index, planned_step in enumerate(plan.steps):
+        emit_output_fields = (
+            plan.terminal_output_schema is None or index != len(plan.steps) - 1
         )
-        for index, planned_step in enumerate(plan.steps)
-    ]
+        if not emit_output_fields and planned_step.output_fields:
+            logger.info(
+                "ai_builder_terminal_output_fields_suppressed_by_schema",
+                extra={
+                    "step_index": index + 1,
+                    "step_name": planned_step.name,
+                    "field_names": [field.name for field in planned_step.output_fields],
+                },
+            )
+        step_drafts.append(
+            _new_step_draft_from_planned_step(
+                planned_step,
+                emit_output_fields=emit_output_fields,
+            )
+        )
     form_fields = list(plan.form_fields)
     source_capture_fields_by_index = source_capture_fields_by_step_index(
         steps=step_drafts,

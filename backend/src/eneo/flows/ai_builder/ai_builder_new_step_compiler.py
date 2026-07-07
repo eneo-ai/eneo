@@ -784,7 +784,17 @@ def _source_ref_payloads_if_valid(
     payloads = [ref.binding_payload() for ref in source_refs]
     try:
         lower_source_refs_to_question_binding({"source_refs": payloads})
-    except InputBindingContractError:
+    except InputBindingContractError as exc:
+        logger.warning(
+            "ai_builder_source_refs_degraded_to_question_binding",
+            extra={
+                "source_ref_count": len(source_refs),
+                "source_ref_expressions": [
+                    ref.template_expression() for ref in source_refs
+                ],
+                "error": str(exc),
+            },
+        )
         return None
     return payloads
 
