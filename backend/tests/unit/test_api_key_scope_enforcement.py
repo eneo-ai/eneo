@@ -866,11 +866,7 @@ class TestScopeRouteGuardCoverage:
         for route in runtime_router_routes():
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", set())
-            if (
-                path == "/users/"
-                or path.startswith("/users/admin")
-                or path.startswith("/users/api-keys")
-            ):
+            if path == "/users/" or path.startswith("/users/admin"):
                 has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 has_admin_key_dep = route_has_dependency_named(
                     route, "_api_key_permission_dep"
@@ -879,8 +875,8 @@ class TestScopeRouteGuardCoverage:
                     (path, sorted(methods), has_scope_dep, has_admin_key_dep)
                 )
 
-        assert len(admin_routes) >= 5, (
-            f"Expected at least 5 user admin-gated routes, found {len(admin_routes)}"
+        assert len(admin_routes) >= 4, (
+            f"Expected at least 4 user admin-gated routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
             assert has_scope_dep, (

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -19,9 +19,6 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.user_groups_table import UserGroups
 
-if TYPE_CHECKING:
-    from eneo.database.tables.api_keys_table import ApiKeys
-
 
 class Users(BasePublic):
     username: Mapped[Optional[str]] = mapped_column()
@@ -38,7 +35,6 @@ class Users(BasePublic):
     is_system_user: Mapped[bool] = mapped_column(server_default=false(), nullable=False)
 
     tenant: Mapped[Tenants] = relationship()
-    api_key: Mapped["ApiKeys"] = relationship(cascade="all, delete-orphan")
     roles: Mapped[list[Roles]] = relationship(
         secondary="users_roles", order_by=Roles.created_at
     )

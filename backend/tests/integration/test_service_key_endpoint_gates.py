@@ -234,34 +234,6 @@ async def test_get_users_me_works_for_bearer_user(client, admin_token):
     assert resp.status_code == 200, resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_legacy_user_api_key_endpoint_rejects_service_key(
-    client, tenant_admin_service_secret
-):
-    resp = await client.post(
-        "/api/v1/users/api-keys/",
-        headers={"X-API-Key": tenant_admin_service_secret},
-    )
-    # The user-identity gate runs before the deprecated/permission checks,
-    # so we expect 403 with our error code regardless of feature-flag state.
-    assert resp.status_code == 403, resp.text
-    assert _has_user_identity_required_code(resp.json()), resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_legacy_user_api_key_revoke_rejects_service_key(
-    client, tenant_admin_service_secret
-):
-    resp = await client.delete(
-        "/api/v1/users/api-keys/legacy",
-        headers={"X-API-Key": tenant_admin_service_secret},
-    )
-    assert resp.status_code == 403, resp.text
-    assert _has_user_identity_required_code(resp.json()), resp.text
-
-
 # ---------------------------------------------------------------------------
 # 4. Creation gate — service keys cannot create new user-owned resources
 # ---------------------------------------------------------------------------

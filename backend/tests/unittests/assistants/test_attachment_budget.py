@@ -41,7 +41,6 @@ def _service(file_service=None):
         repo=AsyncMock(),
         space_repo=AsyncMock(),
         user=MagicMock(),
-        auth_service=MagicMock(),
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
