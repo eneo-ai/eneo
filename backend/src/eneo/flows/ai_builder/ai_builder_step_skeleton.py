@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
@@ -33,6 +34,8 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+
+logger = logging.getLogger(__name__)
 
 StepSkeletonRole = Literal[
     "backend_fixed",
@@ -754,14 +757,41 @@ def _remap_semantic_previous_field_refs(
     for ref in refs:
         compiled_step_number = semantic_step_to_compiled_step.get(ref.from_step)
         if compiled_step_number is None:
+            _log_dropped_semantic_previous_ref(
+                ref,
+                ref_kind="field",
+                reason="unmapped_semantic_step",
+                compiled_from_step=None,
+                source_output_type=None,
+            )
             continue
         source_step = prior_steps[compiled_step_number - 1]
-        if (
-            source_step.output_type != OutputType.JSON
-            or source_step.output_fields is None
-        ):
+        if source_step.output_type != OutputType.JSON:
+            _log_dropped_semantic_previous_ref(
+                ref,
+                ref_kind="field",
+                reason="source_not_json",
+                compiled_from_step=compiled_step_number,
+                source_output_type=source_step.output_type,
+            )
+            continue
+        if source_step.output_fields is None:
+            _log_dropped_semantic_previous_ref(
+                ref,
+                ref_kind="field",
+                reason="source_missing_output_fields",
+                compiled_from_step=compiled_step_number,
+                source_output_type=source_step.output_type,
+            )
             continue
         if missing_draft_field_path(source_step.output_fields, ref.field_path):
+            _log_dropped_semantic_previous_ref(
+                ref,
+                ref_kind="field",
+                reason="missing_field_path",
+                compiled_from_step=compiled_step_number,
+                source_output_type=source_step.output_type,
+            )
             continue
         remapped.append(ref.model_copy(update={"from_step": compiled_step_number}))
     return tuple(remapped)
@@ -777,12 +807,50 @@ def _remap_semantic_previous_output_refs(
     for ref in refs:
         compiled_step_number = semantic_step_to_compiled_step.get(ref.from_step)
         if compiled_step_number is None:
+            _log_dropped_semantic_previous_ref(
+                ref,
+                ref_kind="output",
+                reason="unmapped_semantic_step",
+                compiled_from_step=None,
+                source_output_type=None,
+            )
             continue
         source_step = prior_steps[compiled_step_number - 1]
         if source_step.output_type != OutputType.TEXT:
+            _log_dropped_semantic_previous_ref(
+                ref,
+                ref_kind="output",
+                reason="source_not_text",
+                compiled_from_step=compiled_step_number,
+                source_output_type=source_step.output_type,
+            )
             continue
         remapped.append(ref.model_copy(update={"from_step": compiled_step_number}))
     return tuple(remapped)
+
+
+def _log_dropped_semantic_previous_ref(
+    ref: PreviousFieldRef | PreviousOutputRef,
+    *,
+    ref_kind: Literal["field", "output"],
+    reason: str,
+    compiled_from_step: int | None,
+    source_output_type: OutputType | None,
+) -> None:
+    field_path = ref.field_path if isinstance(ref, PreviousFieldRef) else None
+    logger.warning(
+        "ai_builder_step_skeleton_semantic_previous_ref_dropped",
+        extra={
+            "ref_kind": ref_kind,
+            "reason": reason,
+            "semantic_from_step": ref.from_step,
+            "compiled_from_step": compiled_from_step,
+            "field_path": field_path,
+            "source_output_type": source_output_type.value
+            if source_output_type is not None
+            else None,
+        },
+    )
 
 
 def _compose_output_fields(

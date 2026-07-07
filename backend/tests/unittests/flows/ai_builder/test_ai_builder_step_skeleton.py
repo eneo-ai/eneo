@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    PreviousFieldRef,
+    PreviousOutputRef,
+    StructuredFieldDraft,
+)
 from eneo.flows.ai_builder.ai_builder_step_skeleton import (
     _LEGAL_STEP_SKELETON_POLICIES,
     StepSkeleton,
@@ -501,6 +508,83 @@ def test_document_artifact_inserts_body_writer_after_single_json_semantic() -> N
     assert composition.steps[2].input_type == InputType.TEXT
     assert composition.document_body_writer_step_indexes == (1,)
     assert composition.output_type_drifts == ()
+
+
+def test_skeleton_logs_dropped_semantic_previous_refs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.TEXT,
+        final_output_type=OutputType.TEXT,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+    )
+
+    caplog.set_level(
+        logging.WARNING,
+        logger="eneo.flows.ai_builder.ai_builder_step_skeleton",
+    )
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Extract facts",
+                instructions="Extract facts from the input.",
+                output_fields=(
+                    StructuredFieldDraft(
+                        name="summary",
+                        field_type="string",
+                        description="Summary",
+                    ),
+                ),
+            ),
+            StepSkeletonSemanticContent(
+                name="Draft text",
+                instructions="Draft a text response.",
+            ),
+            StepSkeletonSemanticContent(
+                name="Write final answer",
+                instructions="Use valid prior context only.",
+                uses_previous_fields=(
+                    PreviousFieldRef(from_step=1, field_path="summary"),
+                    PreviousFieldRef(from_step=2, field_path="summary"),
+                    PreviousFieldRef(from_step=1, field_path="missing"),
+                    PreviousFieldRef(from_step=4, field_path="future"),
+                ),
+                uses_previous_outputs=(
+                    PreviousOutputRef(from_step=2),
+                    PreviousOutputRef(from_step=1),
+                    PreviousOutputRef(from_step=4),
+                ),
+            ),
+            StepSkeletonSemanticContent(
+                name="Append note",
+                instructions="Append a short note.",
+            ),
+        ]
+    )
+
+    writer = composition.steps[2]
+    assert [(ref.from_step, ref.field_path) for ref in writer.uses_previous_fields] == [
+        (1, "summary")
+    ]
+    assert [ref.from_step for ref in writer.uses_previous_outputs] == [2]
+
+    drop_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_step_skeleton_semantic_previous_ref_dropped"
+    ]
+    assert [
+        (record.ref_kind, record.reason, record.semantic_from_step)
+        for record in drop_records
+    ] == [
+        ("field", "source_not_json", 2),
+        ("field", "missing_field_path", 1),
+        ("field", "unmapped_semantic_step", 4),
+        ("output", "source_not_text", 1),
+        ("output", "unmapped_semantic_step", 4),
+    ]
 
 
 def _chain_steps(pattern_id: str) -> tuple[str, ...]:
