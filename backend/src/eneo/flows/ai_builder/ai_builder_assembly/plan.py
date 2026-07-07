@@ -6,7 +6,6 @@ from typing import Literal
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     PreviousFieldRef,
-    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
@@ -52,7 +51,6 @@ UnderlagChannel = Literal[
     "implicit_previous",
     "whole_object",
     "field_refs",
-    "text_anchor",
     "fan_in",
 ]
 
@@ -72,7 +70,6 @@ class PlannedStep:
     runtime_max_files: int | None = None
     form_field_refs: tuple[str, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
-    previous_output_refs: tuple[PreviousOutputRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()
     model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
@@ -92,11 +89,6 @@ class PlannedStep:
             raise ValueError(
                 f"Planned step {self.name!r} instructions must not contain "
                 "template variables."
-            )
-        if self.previous_field_refs and self.previous_output_refs:
-            raise ValueError(
-                f"Planned step {self.name!r} cannot mix previous field refs "
-                "and previous output refs."
             )
         _validate_underlag_channel_shape(self)
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
@@ -164,7 +156,7 @@ def _validate_underlag_channel_shape(step: PlannedStep) -> None:
                 f"Planned step {step.name!r} declares underlag_channel "
                 f"{step.underlag_channel!r}; expected 'flow_input'."
             )
-        if step.previous_field_refs or step.previous_output_refs:
+        if step.previous_field_refs:
             raise ValueError(
                 f"Planned step {step.name!r} cannot reference previous output "
                 "while reading flow input."
@@ -176,11 +168,7 @@ def _validate_underlag_channel_shape(step: PlannedStep) -> None:
                 f"Planned step {step.name!r} declares underlag_channel "
                 f"{step.underlag_channel!r}; expected 'fan_in'."
             )
-        if (
-            step.form_field_refs
-            or step.previous_field_refs
-            or step.previous_output_refs
-        ):
+        if step.form_field_refs or step.previous_field_refs:
             raise ValueError(
                 f"Planned step {step.name!r} cannot combine fan-in with "
                 "explicit form fields or previous refs."
@@ -191,13 +179,6 @@ def _validate_underlag_channel_shape(step: PlannedStep) -> None:
             raise ValueError(
                 f"Planned step {step.name!r} declares underlag_channel "
                 f"{step.underlag_channel!r}; expected field refs or whole object."
-            )
-        return
-    if step.previous_output_refs:
-        if step.underlag_channel != "text_anchor":
-            raise ValueError(
-                f"Planned step {step.name!r} declares underlag_channel "
-                f"{step.underlag_channel!r}; expected 'text_anchor'."
             )
         return
     if step.underlag_channel not in {"implicit_previous", "whole_object"}:
@@ -213,7 +194,6 @@ def derive_underlag_channel(
     input_type: InputType,
     previous_step: PlannedStep | None,
     previous_field_refs: tuple[PreviousFieldRef, ...],
-    previous_output_refs: tuple[PreviousOutputRef, ...],
 ) -> UnderlagChannel:
     if input_source == InputSource.FLOW_INPUT:
         return "flow_input"
@@ -230,8 +210,6 @@ def derive_underlag_channel(
         ):
             return "whole_object"
         return "field_refs"
-    if previous_output_refs:
-        return "text_anchor"
     if (
         previous_step is not None
         and previous_step.output_type == OutputType.JSON
@@ -287,7 +265,6 @@ def _validate_step_order(
                 else None
             ),
             previous_field_refs=step.previous_field_refs,
-            previous_output_refs=step.previous_output_refs,
         )
         if step.underlag_channel != expected_underlag_channel:
             raise ValueError(
@@ -310,7 +287,7 @@ def _validate_step_order(
 
 
 def _validate_previous_refs(step: PlannedStep, *, expected_from_step: int) -> None:
-    for ref in (*step.previous_field_refs, *step.previous_output_refs):
+    for ref in step.previous_field_refs:
         if ref.from_step < 1 or ref.from_step > expected_from_step:
             raise ValueError(
                 f"Planned step {step.name!r} references step {ref.from_step}; "

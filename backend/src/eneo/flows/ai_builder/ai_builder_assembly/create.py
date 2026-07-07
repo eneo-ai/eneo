@@ -447,7 +447,6 @@ def _assemble_create_intent(
                 input_type=input_type,
                 previous_step=previous_planned_step,
                 previous_field_refs=previous_field_refs,
-                previous_output_refs=(),
             ),
             runtime_required=(
                 index == 0
@@ -814,7 +813,6 @@ def _assemble_docx_template_fill(
             input_type=content_input_type,
             previous_step=reader_step,
             previous_field_refs=(),
-            previous_output_refs=(),
         ),
         form_field_refs=tuple(semantic_step.uses_form_fields),
         model_ref=semantic_step.model_ref,

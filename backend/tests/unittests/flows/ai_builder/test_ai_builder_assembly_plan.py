@@ -18,7 +18,6 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
-    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
@@ -45,7 +44,6 @@ def _text_step(
     underlag_channel: UnderlagChannel = "flow_input",
     form_field_refs: tuple[str, ...] = (),
     previous_field_refs: tuple[PreviousFieldRef, ...] = (),
-    previous_output_refs: tuple[PreviousOutputRef, ...] = (),
     output_fields: tuple[StructuredFieldDraft, ...] = (),
 ) -> PlannedStep:
     return PlannedStep(
@@ -59,7 +57,6 @@ def _text_step(
         underlag_channel=underlag_channel,
         form_field_refs=form_field_refs,
         previous_field_refs=previous_field_refs,
-        previous_output_refs=previous_output_refs,
         output_fields=output_fields,
     )
 
