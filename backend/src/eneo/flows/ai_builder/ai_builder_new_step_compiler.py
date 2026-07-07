@@ -485,18 +485,40 @@ def _append_source_capture_guidance(
 
     heading, absence_instruction = _source_capture_copy(ui_language)
     normalized_instructions = instructions.casefold()
-    field_lines: list[str] = []
-    for field in source_capture_fields[:MAX_SOURCE_CAPTURE_FIELDS]:
+    eligible_lines: list[str] = []
+    for field in source_capture_fields:
         name = field.name.strip()
         if not name or name.casefold() in normalized_instructions:
             continue
         description = _truncate_source_capture_description(field.description)
-        line = f"- {name}: {description}" if description else f"- {name}"
+        eligible_lines.append(
+            f"- {name}: {description}" if description else f"- {name}"
+        )
+
+    field_lines: list[str] = []
+    cap_reason: str | None = None
+    for line in eligible_lines:
+        if len(field_lines) == MAX_SOURCE_CAPTURE_FIELDS:
+            cap_reason = "field_count"
+            break
         candidate_lines = [*field_lines, line]
         candidate_block = "\n".join([heading, *candidate_lines, absence_instruction])
         if len(candidate_block) > MAX_SOURCE_CAPTURE_BLOCK_CHARS:
+            cap_reason = "block_chars"
             break
         field_lines.append(line)
+
+    if cap_reason is not None:
+        logger.warning(
+            "ai_builder_source_capture_guidance_cap_bound",
+            extra={
+                "cap_reason": cap_reason,
+                "field_cap": MAX_SOURCE_CAPTURE_FIELDS,
+                "block_char_cap": MAX_SOURCE_CAPTURE_BLOCK_CHARS,
+                "eligible_field_count": len(eligible_lines),
+                "rendered_field_count": len(field_lines),
+            },
+        )
 
     if not field_lines:
         return instructions

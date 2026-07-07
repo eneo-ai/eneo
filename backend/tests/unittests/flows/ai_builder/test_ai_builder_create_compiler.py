@@ -98,6 +98,7 @@ from tests.unittests.flows.ai_builder.authoring_command_assertions import (
 
 PROPOSAL_INTENT_LOGGER = "eneo.flows.ai_builder.ai_builder_proposal_intent"
 CREATE_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_create_compiler"
+NEW_STEP_COMPILER_LOGGER = "eneo.flows.ai_builder.ai_builder_new_step_compiler"
 SOURCE_CAPTURE_HEADING = "Bevara följande uppgifter eftersom senare steg behöver dem:"
 
 
@@ -7418,7 +7419,11 @@ def test_compile_create_steps_to_spec_logs_fuzzy_source_leaf_match(
     assert "ai_builder_source_reader_contract_fuzzy_leaf_match" in caplog.text
 
 
-def test_compile_create_steps_to_spec_caps_source_capture_fields() -> None:
+def test_compile_create_steps_to_spec_caps_source_capture_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger=NEW_STEP_COMPILER_LOGGER)
+
     compiled = _compile_create_steps(
         flow_name="Dokumentanalys till PDF",
         steps=[
@@ -7451,6 +7456,16 @@ def test_compile_create_steps_to_spec_caps_source_capture_fields() -> None:
     assert "- field_7: Field 7." in capture_lines
     assert all("field_8" not in line for line in capture_lines)
     assert len(source_instructions.split(SOURCE_CAPTURE_HEADING, maxsplit=1)[1]) < 900
+    cap_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_source_capture_guidance_cap_bound"
+    ]
+    assert len(cap_records) == 1
+    assert cap_records[0].cap_reason == "field_count"
+    assert cap_records[0].field_cap == 8
+    assert cap_records[0].eligible_field_count == 12
+    assert cap_records[0].rendered_field_count == 8
     assert validate_spec(compiled).valid
 
 
