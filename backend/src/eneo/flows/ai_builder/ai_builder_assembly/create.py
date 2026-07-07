@@ -245,13 +245,14 @@ def _assemble_create_intent(
         previous_output_type = OutputType.TEXT
         has_source_prefix = True
     for index, semantic_step in enumerate(semantic_steps):
+        is_terminal_semantic_step = index == len(semantic_steps) - 1
         if semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs:
             return None
         step_output_type = _linear_step_output_type(
             output_type=semantic_step.output_type,
             output_fields=semantic_step.output_fields,
             final_output_type=terminal_semantic_output_type,
-            is_terminal=index == len(intent.steps) - 1,
+            is_terminal=is_terminal_semantic_step,
         )
         if step_output_type is None:
             return None
@@ -285,7 +286,7 @@ def _assemble_create_intent(
         planned_step = PlannedStep(
             role=_linear_step_role(
                 output_type=step_output_type,
-                is_terminal=index == len(intent.steps) - 1,
+                is_terminal=is_terminal_semantic_step,
                 document_artifact_requested=document_artifact_requested,
             ),
             name=semantic_step.name,
