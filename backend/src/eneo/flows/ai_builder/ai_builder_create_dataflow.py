@@ -1093,6 +1093,16 @@ def _select_targeted_underlag_field_refs(
             field = fields[field_index]
             selected_refs.append(_field_ref_from_draft_field(predecessor_index, field))
             if len(selected_refs) == TARGETED_UNDERLAG_TOTAL_FIELD_CAP:
+                logger.warning(
+                    "ai_builder_create_dataflow_targeted_underlag_field_cap_bound",
+                    extra={
+                        "field_cap": TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
+                        "available_field_count": sum(
+                            len(fields) for _, fields in ordered_priors
+                        ),
+                        "json_prior_count": len(ordered_priors),
+                    },
+                )
                 return selected_refs
     return selected_refs
 
