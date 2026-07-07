@@ -8,7 +8,6 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
-    compute_unresolved_core_slots,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
@@ -100,14 +99,11 @@ def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
         source="model",
         confidence="medium",
     )
-    unresolved = compute_unresolved_core_slots(state)
-
     policy = build_planner_action_policy(
         session_state=state,
         selected_discovery_question_ids=(),
     )
 
-    assert unresolved == frozenset({"terminal_output"})
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("terminal_output",)
 

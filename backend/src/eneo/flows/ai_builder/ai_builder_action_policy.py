@@ -26,11 +26,11 @@ from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
-CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
+_CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
     "primary_runtime_input",
     "terminal_output",
 )
-CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(CORE_ARCHITECTURAL_SLOT_ORDER)
+_CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(_CORE_ARCHITECTURAL_SLOT_ORDER)
 
 PlannerActionKind = Literal[
     "ask_question",
@@ -64,7 +64,7 @@ def build_planner_action_policy(
     """
 
     commit_grade_slot_names = _commit_grade_slot_names(session_state)
-    unresolved_core_slots = compute_unresolved_core_slots(session_state)
+    unresolved_core_slots = _compute_unresolved_core_slots(session_state)
     derived_commit = derive_architecture_commit_draft(session_state)
     unresolved_commit_slots = _unresolved_slots_for_derived_commit(
         session_state=session_state,
@@ -144,12 +144,12 @@ def build_planner_action_policy(
     )
 
 
-def compute_unresolved_core_slots(
+def _compute_unresolved_core_slots(
     planning_state: PlanningState,
 ) -> frozenset[str]:
     """Core slots that lack evidence strong enough to close discovery."""
 
-    return CORE_ARCHITECTURAL_SLOTS - _commit_grade_slot_names(planning_state)
+    return _CORE_ARCHITECTURAL_SLOTS - _commit_grade_slot_names(planning_state)
 
 
 def _commit_grade_slot_names(planning_state: PlanningState) -> frozenset[str]:
@@ -211,10 +211,10 @@ def _ordered_ask_targets(
 
 def _order_slot_names(slot_names: frozenset[str]) -> tuple[str, ...]:
     core_slots = tuple(
-        slot for slot in CORE_ARCHITECTURAL_SLOT_ORDER if slot in slot_names
+        slot for slot in _CORE_ARCHITECTURAL_SLOT_ORDER if slot in slot_names
     )
     remaining = tuple(
-        slot for slot in sorted(slot_names) if slot not in CORE_ARCHITECTURAL_SLOTS
+        slot for slot in sorted(slot_names) if slot not in _CORE_ARCHITECTURAL_SLOTS
     )
     return core_slots + remaining
 
@@ -243,9 +243,7 @@ def _is_user_requirement_question(slot_name: str) -> bool:
 
 
 __all__ = [
-    "CORE_ARCHITECTURAL_SLOTS",
     "PlannerActionKind",
     "PlannerActionPolicy",
     "build_planner_action_policy",
-    "compute_unresolved_core_slots",
 ]
