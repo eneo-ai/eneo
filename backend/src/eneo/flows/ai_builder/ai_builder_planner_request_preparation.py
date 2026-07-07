@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 from uuid import UUID
 
 from eneo.files.file_models import File
@@ -50,10 +51,6 @@ from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
 )
-from eneo.flows.ai_builder.ai_builder_prompts import (
-    compute_conversation_token_budget,
-    trim_conversation_for_context,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
     LLMMessageRole,
@@ -81,6 +78,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.main.logging import get_logger
+from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 from eneo.observability.failure_events import stable_hash
 from eneo.tokens.token_utils import count_message_tokens
 
@@ -88,6 +86,7 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
+_MessageT = TypeVar("_MessageT", bound=Mapping[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,6 +379,85 @@ def _prepare_prompt_messages(
         trimmed_message_count=len(trimmed),
         system_prompt_chars=len(system_prompt),
     )
+
+
+def compute_conversation_token_budget(
+    *,
+    litellm_model: str | None,
+    model_max_input_tokens: int | None,
+    system_prompt_tokens: int,
+    max_output_tokens: int,
+    safety_buffer_tokens: int,
+    minimum_budget_tokens: int,
+    unknown_model_context_window_tokens: int | None = None,
+) -> int:
+    defaults = None
+    if litellm_model:
+        bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
+        defaults = lookup_model_defaults(litellm_model, bare_name)
+
+    context_window = (
+        (defaults.max_input_tokens if defaults else None)
+        or model_max_input_tokens
+        or unknown_model_context_window_tokens
+    )
+    if context_window is None:
+        raise ValueError("Planner model has no known context window.")
+
+    budget = (
+        context_window - system_prompt_tokens - max_output_tokens - safety_buffer_tokens
+    )
+    return max(budget, minimum_budget_tokens)
+
+
+def trim_conversation_for_context(
+    messages: list[_MessageT],
+    *,
+    max_tokens: int,
+    litellm_model: str = "",
+) -> list[_MessageT]:
+    if max_tokens >= _count_group_tokens(messages, litellm_model):
+        return list(messages)
+
+    groups: list[list[_MessageT]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        group = [message]
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            tool_index = index + 1
+            while (
+                tool_index < len(messages)
+                and messages[tool_index].get("role") == "tool"
+            ):
+                group.append(messages[tool_index])
+                tool_index += 1
+            index = tool_index
+        else:
+            index += 1
+        groups.append(group)
+
+    kept_groups: list[list[_MessageT]] = []
+    consumed_tokens = 0
+    for group in reversed(groups):
+        group_tokens = _count_group_tokens(group, litellm_model)
+        if kept_groups and consumed_tokens + group_tokens > max_tokens:
+            break
+        kept_groups.append(group)
+        consumed_tokens += group_tokens
+
+    kept_groups.reverse()
+    trimmed: list[_MessageT] = []
+    for group in kept_groups:
+        trimmed.extend(group)
+    return trimmed
+
+
+def _count_group_tokens(
+    group: Sequence[Mapping[str, Any]],
+    litellm_model: str,
+) -> int:
+    return count_message_tokens([dict(message) for message in group], litellm_model)
 
 
 def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageParam:

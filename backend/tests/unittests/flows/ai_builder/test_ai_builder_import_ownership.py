@@ -321,8 +321,10 @@ PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
         "ProposalPrepared",
         "ServerOutputPrepared",
         "build_proposal_prepared",
+        "compute_conversation_token_budget",
         "conversation_message_to_llm_message",
         "prepare_planner_request",
+        "trim_conversation_for_context",
     }
 )
 PLANNER_FAILURE_EVENTS_PUBLIC_NAMES = frozenset(

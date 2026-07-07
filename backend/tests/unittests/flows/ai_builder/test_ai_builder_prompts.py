@@ -15,7 +15,7 @@ from eneo.flows.ai_builder.ai_builder_flow_context import (
     build_plan_summary,
     build_step_ref_mapping,
 )
-from eneo.flows.ai_builder.ai_builder_prompts import (
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     trim_conversation_for_context,
 )
 from eneo.flows.assistant_authoring_snapshot import (
