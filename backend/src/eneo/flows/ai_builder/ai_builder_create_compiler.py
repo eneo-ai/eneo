@@ -158,17 +158,32 @@ def compile_create_intent_to_spec(
         intent_fields=intent.input_fields,
         context=context,
         runtime_input_type=runtime_input_type,
-        referenced_hint_names=referenced_hint_names,
     )
     known_field_order = [field.name for field in form_fields]
     known_field_names = set(known_field_order)
+    server_owned_field_names = _server_owned_runtime_field_names(
+        context=context,
+        known_field_names=known_field_names,
+    )
+    server_owned_fields_requiring_placement = [
+        field_name
+        for field_name in known_field_order
+        if field_name in server_owned_field_names
+        and field_name not in referenced_hint_names
+    ]
+    intent_with_server_owned_field_placement = (
+        _intent_with_server_owned_form_field_placement(
+            intent,
+            field_names=server_owned_fields_requiring_placement,
+        )
+    )
 
     final_output_mode = context.final_output_mode if context is not None else None
     pattern_ids = context.pattern_ids if context is not None else ()
     chain_steps = context.pattern_chain_steps if context is not None else ()
     aggregation_intent = context.aggregation_intent if context is not None else "linear"
     assembly_spec = try_compile_create_intent_with_assembly(
-        intent,
+        intent_with_server_owned_field_placement,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
@@ -202,15 +217,15 @@ def compile_create_intent_to_spec(
         pattern_ids=pattern_resolution.pattern_ids,
         chain_steps=pattern_resolution.chain_steps,
     )
-    semantic_steps_original = list(intent.steps)
+    semantic_steps_original = list(intent_with_server_owned_field_placement.steps)
     semantic_step_rewrite = _normalize_leading_audio_transcription_step(
-        steps=list(intent.steps),
+        steps=semantic_steps_original,
         runtime_input_type=runtime_input_type,
         backend_audio_transcription_inserted=backend_audio_transcription_inserted,
     )
     backend_audio_transcription_review_mode = (
         _redundant_leading_audio_transcription_review_mode(
-            steps=list(intent.steps),
+            steps=semantic_steps_original,
             runtime_input_type=runtime_input_type,
             backend_audio_transcription_inserted=backend_audio_transcription_inserted,
         )
@@ -334,6 +349,33 @@ def _semantic_content_from_intent_step(
         mcp_tool_refs=tuple(step.mcp_tool_refs),
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
+    )
+
+
+def _intent_with_server_owned_form_field_placement(
+    intent: CreateFlowIntent,
+    *,
+    field_names: list[str],
+) -> CreateFlowIntent:
+    if not field_names or not intent.steps:
+        return intent
+
+    final_step = intent.steps[-1]
+    uses_form_fields = [
+        *final_step.uses_form_fields,
+        *(
+            field_name
+            for field_name in field_names
+            if field_name not in final_step.uses_form_fields
+        ),
+    ]
+    return intent.model_copy(
+        update={
+            "steps": [
+                *intent.steps[:-1],
+                final_step.model_copy(update={"uses_form_fields": uses_form_fields}),
+            ]
+        }
     )
 
 
@@ -794,7 +836,6 @@ def _compile_form_fields(
     intent_fields: list[FlowInputFieldIntent],
     context: CreateCompileContext | None,
     runtime_input_type: InputType | None,
-    referenced_hint_names: set[str],
 ) -> tuple[list[FormFieldSpec], list[str]]:
     runtime_metadata_state = (
         context.runtime_metadata_state if context is not None else None
@@ -846,8 +887,6 @@ def _compile_form_fields(
         ):
             dropped_primary_input_field_names.append(hint.variable_name)
             continue
-        if hint.variable_name not in referenced_hint_names:
-            continue
         if hint.variable_name in seen:
             continue
         fields.append(
@@ -861,6 +900,20 @@ def _compile_form_fields(
         )
         seen.add(hint.variable_name)
     return fields, dropped_primary_input_field_names
+
+
+def _server_owned_runtime_field_names(
+    *,
+    context: CreateCompileContext | None,
+    known_field_names: set[str],
+) -> set[str]:
+    if context is None:
+        return set()
+    return {
+        hint.variable_name
+        for hint in context.runtime_input_field_hints
+        if hint.variable_name in known_field_names
+    }
 
 
 def _log_dropped_runtime_metadata_input_fields(

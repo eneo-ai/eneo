@@ -16,6 +16,9 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    RuntimeInputFieldHint,
+)
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
@@ -505,6 +508,80 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
     assert "manual_case_id" not in repr(reader_step.input_bindings)
     assert "report_title" not in repr(reader_step.input_bindings)
     assert "document_category_hint" not in repr(reader_step.input_bindings)
+    assert validate_spec(compiled).valid
+
+
+def test_assembly_places_server_owned_runtime_field_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("server-owned runtime fields should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Bygglovsrapport",
+            "flow_description": "Läser ansökan och skriver en handläggarrapport.",
+            "plan_rationale": "Dokumentet läses först och rapporten skrivs sist.",
+            "steps": [
+                {
+                    "name": "Läs ansökan",
+                    "instructions": "Extrahera uppgifter från ansökan.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "sammanfattning",
+                            "field_type": "string",
+                            "description": "Kort sammanfattning.",
+                        },
+                        {
+                            "name": "saknade_uppgifter",
+                            "field_type": "string",
+                            "description": "Saknade uppgifter.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Skriv handläggarrapport",
+                    "instructions": "Skriv en kort handläggarrapport.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            runtime_metadata_state="detailed_case_metadata",
+            runtime_input_field_hints=(
+                RuntimeInputFieldHint("arendenummer", "ärendenummer", required=True),
+                RuntimeInputFieldHint("kommun", "kommun", required=True),
+                RuntimeInputFieldHint("handlaggare", "handläggare", required=True),
+                RuntimeInputFieldHint("sista_svarsdatum", "sista svarsdatum"),
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == [
+        "arendenummer",
+        "kommun",
+        "handlaggare",
+        "sista_svarsdatum",
+    ]
+    report_step = compiled.steps[-1]
+    question = _question(report_step.input_bindings)
+    assert "{{ step_a.output.structured }}" in question
+    assert "arendenummer: {{ flow_input.arendenummer }}" in question
+    assert "kommun: {{ flow_input.kommun }}" in question
+    assert "handlaggare: {{ flow_input.handlaggare }}" in question
+    assert "sista_svarsdatum: {{ flow_input.sista_svarsdatum }}" in question
     assert validate_spec(compiled).valid
 
 
