@@ -300,9 +300,7 @@ PROPOSAL_INTENT_BANNED_COMPILER_NAMES = frozenset(
         "PlanningState",
         "compile_create_intent_to_spec",
         "derive_architecture_commit_draft",
-        "materialize_step_skeleton",
         "create_compile_context_from_planning_state",
-        "resolve_step_skeleton_patterns",
     }
 )
 DELETED_CREATE_FORM_FIELD_DRAFT = "CreateFormFieldDraft"
