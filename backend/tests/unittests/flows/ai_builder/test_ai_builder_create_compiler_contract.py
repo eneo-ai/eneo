@@ -100,6 +100,80 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow(
     assert validate_spec(compiled).valid
 
 
+def test_compiler_uses_assembly_path_for_linear_previous_field_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("linear previous-field flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case summary",
+            "flow_description": "Extract facts and write a short summary.",
+            "plan_rationale": "Extract structured facts before writing.",
+            "input_fields": [
+                {
+                    "variable_name": "case_id",
+                    "label": "Case ID",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Extract facts",
+                    "instructions": "Extract the relevant facts.",
+                    "output_type": "json",
+                    "uses_form_fields": ["case_id"],
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Short summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "summary",
+                            "label": "Summary",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent)
+
+    assert len(compiled.steps) == 2
+    extract_step = compiled.steps[0]
+    assert extract_step.input_source == InputSource.FLOW_INPUT
+    assert extract_step.input_type == InputType.TEXT
+    assert extract_step.output_type == OutputType.JSON
+    assert _question(extract_step.input_bindings) == (
+        "{{ indata_text }}\n\ncase_id: {{ flow_input.case_id }}"
+    )
+    write_step = compiled.steps[1]
+    assert write_step.input_source == InputSource.PREVIOUS_STEP
+    assert write_step.input_type == InputType.TEXT
+    assert write_step.output_type == OutputType.TEXT
+    assert write_step.output_mode == OutputMode.PASS_THROUGH
+    assert _question(write_step.input_bindings) == (
+        "Summary: {{ step_a.output.structured.summary }}"
+    )
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() -> None:
     compiled = compile_create_steps_to_spec(
         flow_name="Dokumentanalys",

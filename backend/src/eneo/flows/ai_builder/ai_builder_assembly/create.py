@@ -11,9 +11,14 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
+    PreviousFieldRef,
+    PreviousOutputRef,
     StructuredFieldDraft,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import CreateFlowIntent
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    CreateFlowIntent,
+    SemanticStepIntent,
+)
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -35,7 +40,9 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PlannedStepRole = Literal["reader", "transform"]
-UnderlagChannel = Literal["flow_input"]
+UnderlagChannel = Literal[
+    "flow_input", "implicit_previous", "field_refs", "text_anchor"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +56,8 @@ class PlannedStep:
     output_mode: OutputMode
     underlag_channel: UnderlagChannel
     form_field_refs: tuple[str, ...] = ()
+    previous_field_refs: tuple[PreviousFieldRef, ...] = ()
+    previous_output_refs: tuple[PreviousOutputRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()
     model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
@@ -81,7 +90,7 @@ def try_compile_create_intent_with_assembly(
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     ui_language: str | None,
 ) -> FlowDraftSpecCore | None:
-    plan = _assemble_single_step_create_intent(
+    plan = _assemble_linear_create_intent(
         intent,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
@@ -99,7 +108,7 @@ def try_compile_create_intent_with_assembly(
     return _lower_assembly_plan(plan)
 
 
-def _assemble_single_step_create_intent(
+def _assemble_linear_create_intent(
     intent: CreateFlowIntent,
     *,
     runtime_input_type: InputType,
@@ -119,7 +128,7 @@ def _assemble_single_step_create_intent(
         or aggregation_intent != "linear"
         or terminal_output_schema is not None
         or source_reader_required_fields
-        or len(intent.steps) != 1
+        or not intent.steps
     ):
         return None
     if runtime_input_type not in {InputType.TEXT, InputType.JSON}:
@@ -130,49 +139,147 @@ def _assemble_single_step_create_intent(
     if output_mode != OutputMode.PASS_THROUGH:
         return None
 
-    semantic_step = intent.steps[0]
-    if semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs:
-        return None
-    if (
-        semantic_step.output_type is not None
-        and semantic_step.output_type != final_output_type
-    ):
-        return None
-    if semantic_step.output_fields and final_output_type != OutputType.JSON:
-        return None
-
-    placed_form_fields = tuple(semantic_step.uses_form_fields)
     form_field_names = {field.name for field in form_fields}
-    if set(placed_form_fields) != form_field_names:
-        return None
+    placed_form_fields: set[str] = set()
+    planned_steps: list[PlannedStep] = []
+    previous_output_type: OutputType | None = None
+    for index, semantic_step in enumerate(intent.steps):
+        if not _previous_refs_are_immediate(semantic_step, step_index=index):
+            return None
+        step_output_type = _linear_step_output_type(
+            output_type=semantic_step.output_type,
+            output_fields=semantic_step.output_fields,
+            final_output_type=final_output_type,
+            is_terminal=index == len(intent.steps) - 1,
+        )
+        if step_output_type is None:
+            return None
+        input_source = (
+            InputSource.FLOW_INPUT if index == 0 else InputSource.PREVIOUS_STEP
+        )
+        input_type = _linear_step_input_type(
+            step_index=index,
+            runtime_input_type=runtime_input_type,
+            previous_output_type=previous_output_type,
+            output_type=step_output_type,
+            has_explicit_previous_refs=bool(
+                semantic_step.uses_previous_fields
+                or semantic_step.uses_previous_outputs
+            ),
+        )
+        planned_step = PlannedStep(
+            role="reader" if step_output_type == OutputType.JSON else "transform",
+            name=semantic_step.name,
+            instructions=semantic_step.instructions,
+            input_source=input_source,
+            input_type=input_type,
+            output_type=step_output_type,
+            output_mode=output_mode,
+            underlag_channel=_linear_underlag_channel(
+                step_index=index,
+                previous_field_refs=semantic_step.uses_previous_fields,
+                previous_output_refs=semantic_step.uses_previous_outputs,
+            ),
+            form_field_refs=tuple(semantic_step.uses_form_fields),
+            previous_field_refs=tuple(semantic_step.uses_previous_fields),
+            previous_output_refs=tuple(semantic_step.uses_previous_outputs),
+            output_fields=tuple(semantic_step.output_fields or ()),
+            model_ref=semantic_step.model_ref,
+            knowledge_refs=tuple(semantic_step.knowledge_refs),
+            mcp_server_refs=tuple(semantic_step.mcp_server_refs),
+            mcp_tool_refs=tuple(semantic_step.mcp_tool_refs),
+            citations_requested=semantic_step.citations_requested,
+            review_mode=semantic_step.review_mode,
+        )
+        if not _capability_tuple_is_supported(planned_step):
+            return None
+        planned_steps.append(planned_step)
+        placed_form_fields.update(planned_step.form_field_refs)
+        previous_output_type = step_output_type
 
-    planned_step = PlannedStep(
-        role="reader" if final_output_type == OutputType.JSON else "transform",
-        name=semantic_step.name,
-        instructions=semantic_step.instructions,
-        input_source=InputSource.FLOW_INPUT,
-        input_type=runtime_input_type,
-        output_type=final_output_type,
-        output_mode=output_mode,
-        underlag_channel="flow_input",
-        form_field_refs=placed_form_fields,
-        output_fields=tuple(semantic_step.output_fields or ()),
-        model_ref=semantic_step.model_ref,
-        knowledge_refs=tuple(semantic_step.knowledge_refs),
-        mcp_server_refs=tuple(semantic_step.mcp_server_refs),
-        mcp_tool_refs=tuple(semantic_step.mcp_tool_refs),
-        citations_requested=semantic_step.citations_requested,
-        review_mode=semantic_step.review_mode,
-    )
-    if not _capability_tuple_is_supported(planned_step):
+    if placed_form_fields != form_field_names:
         return None
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
         form_fields=tuple(form_fields),
-        steps=(planned_step,),
+        steps=tuple(planned_steps),
         ui_language=ui_language,
     )
+
+
+def _previous_refs_are_immediate(
+    semantic_step: SemanticStepIntent,
+    *,
+    step_index: int,
+) -> bool:
+    if step_index == 0:
+        expected_from_step = 0
+    else:
+        expected_from_step = step_index
+    if semantic_step.uses_previous_fields and semantic_step.uses_previous_outputs:
+        return False
+    return all(
+        ref.from_step == expected_from_step
+        for ref in (
+            *semantic_step.uses_previous_fields,
+            *semantic_step.uses_previous_outputs,
+        )
+    )
+
+
+def _linear_step_output_type(
+    *,
+    output_type: OutputType | None,
+    output_fields: Sequence[StructuredFieldDraft] | None,
+    final_output_type: OutputType,
+    is_terminal: bool,
+) -> OutputType | None:
+    step_output_type = output_type
+    if step_output_type is None:
+        if output_fields:
+            step_output_type = OutputType.JSON
+        elif is_terminal:
+            step_output_type = final_output_type
+        else:
+            step_output_type = OutputType.TEXT
+    if output_fields and step_output_type != OutputType.JSON:
+        return None
+    if is_terminal and step_output_type != final_output_type:
+        return None
+    return step_output_type
+
+
+def _linear_step_input_type(
+    *,
+    step_index: int,
+    runtime_input_type: InputType,
+    previous_output_type: OutputType | None,
+    output_type: OutputType,
+    has_explicit_previous_refs: bool,
+) -> InputType:
+    if step_index == 0:
+        return runtime_input_type
+    if previous_output_type == OutputType.JSON:
+        if output_type == OutputType.TEXT and has_explicit_previous_refs:
+            return InputType.TEXT
+        return InputType.JSON
+    return InputType.TEXT
+
+
+def _linear_underlag_channel(
+    *,
+    step_index: int,
+    previous_field_refs: Sequence[PreviousFieldRef],
+    previous_output_refs: Sequence[PreviousOutputRef],
+) -> UnderlagChannel:
+    if step_index == 0:
+        return "flow_input"
+    if previous_field_refs:
+        return "field_refs"
+    if previous_output_refs:
+        return "text_anchor"
+    return "implicit_previous"
 
 
 def _capability_tuple_is_supported(step: PlannedStep) -> bool:
@@ -219,6 +326,8 @@ def _new_step_draft_from_planned_step(step: PlannedStep) -> NewStepDraft:
         mcp_tool_refs=list(step.mcp_tool_refs),
         runtime_required=False,
         uses_form_fields=list(step.form_field_refs),
+        uses_previous_fields=list(step.previous_field_refs),
+        uses_previous_outputs=list(step.previous_output_refs),
         output_fields=list(step.output_fields),
         document_delivery_mode="not_applicable",
         citations_requested=step.citations_requested,
