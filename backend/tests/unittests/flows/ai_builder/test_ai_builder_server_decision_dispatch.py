@@ -68,7 +68,6 @@ def _request(
         conversation=conversation,
         new_messages_start=new_messages_start,
         flow=None,
-        discovery_analysis=None,
         requirements_confirmed=requirements_confirmed,
         ui_language="en",
         telemetry=ServerDecisionTelemetry(

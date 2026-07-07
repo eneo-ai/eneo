@@ -13,10 +13,8 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_to_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (
-    build_discovery_followup,
     build_registry_question_followup,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
@@ -86,7 +84,6 @@ class ServerDecisionDispatchRequest:
     conversation: list[ConversationMessage]
     new_messages_start: int
     flow: "Flow | None"
-    discovery_analysis: DiscoveryAnalysis | None
     requirements_confirmed: bool
     ui_language: str | None
     telemetry: ServerDecisionTelemetry
@@ -143,33 +140,11 @@ async def _dispatch_question(
     decision: AskCanonicalQuestion,
 ) -> ServerDecisionDispatchResult:
     question_id = decision.slot_name
-    discovery_followup = build_discovery_followup(
+    followup = build_registry_question_followup(
+        question_id,
         request.conversation,
         flow=request.flow,
-        analysis=request.discovery_analysis,
     )
-    if (
-        discovery_followup is not None
-        and discovery_followup.question_data.question_id == question_id
-    ):
-        followup = discovery_followup
-    else:
-        followup = build_registry_question_followup(
-            question_id,
-            request.conversation,
-            flow=request.flow,
-        )
-        if followup is None and discovery_followup is not None:
-            logger.warning(
-                "AI Builder server question fallback selected a different "
-                "discovery question.",
-                extra={
-                    "requested_question_id": question_id,
-                    "fallback_question_id": (
-                        discovery_followup.question_data.question_id
-                    ),
-                },
-            )
 
     telemetry = _server_turn_telemetry(
         request,
@@ -261,7 +236,6 @@ async def _dispatch_architecture_commit(
                 conversation=request.conversation,
                 new_messages_start=len(request.conversation),
                 flow=request.flow,
-                discovery_analysis=None,
                 requirements_confirmed=request.requirements_confirmed,
                 ui_language=request.ui_language,
                 telemetry=request.telemetry,

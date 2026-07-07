@@ -2952,7 +2952,6 @@ class TestPlannerDiscoveryQuestionDispatch:
                 conversation=conversation,
                 new_messages_start=0,
                 flow=None,
-                discovery_analysis=None,
                 requirements_confirmed=False,
                 ui_language="en",
                 telemetry=ServerDecisionTelemetry(

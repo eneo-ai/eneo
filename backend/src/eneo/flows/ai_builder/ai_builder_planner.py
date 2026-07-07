@@ -322,9 +322,6 @@ class AIBuilderPlanner:
                                 conversation=conversation,
                                 new_messages_start=new_messages_start,
                                 flow=flow,
-                                discovery_analysis=(
-                                    planner_turn_request.discovery_analysis
-                                ),
                                 requirements_confirmed=requirements_state.confirmed,
                                 ui_language=ui_language,
                                 telemetry=ServerDecisionTelemetry(
