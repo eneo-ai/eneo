@@ -48,7 +48,6 @@ from eneo.flows.flow_authoring_spec import (
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.planning_state import AggregationIntent
 
-_DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _SOURCE_READER_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 _ARTIFACT_RENDER_ONLY_PREFIXES = (
     "render",
@@ -194,11 +193,12 @@ def _normalize_step_mechanics(
     ):
         # DOCX is the only template-fill runtime; other document outputs are generated.
         updates["document_delivery_mode"] = (
-            "generated" if output_type in _DOCUMENT_OUTPUT_TYPES else "not_applicable"
+            "generated"
+            if is_document_renderer(output_type=output_type)
+            else "not_applicable"
         )
-    elif (
-        step.document_delivery_mode != "not_applicable"
-        and output_type not in _DOCUMENT_OUTPUT_TYPES
+    elif step.document_delivery_mode != "not_applicable" and not is_document_renderer(
+        output_type=output_type
     ):
         updates["document_delivery_mode"] = "not_applicable"
 
@@ -296,7 +296,10 @@ def _is_generated_document_renderer(step: NewStepDraft) -> bool:
     return (
         step.input_source == InputSource.PREVIOUS_STEP
         and step.input_type == InputType.TEXT
-        and step.output_type in _DOCUMENT_OUTPUT_TYPES
+        and is_document_renderer(
+            output_type=step.output_type,
+            document_delivery_mode=step.document_delivery_mode,
+        )
         and step.document_delivery_mode in {"generated", "not_applicable"}
     )
 
