@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any, Awaitable, Callable, Final, Sequence
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun, FlowStepResult
@@ -33,6 +33,9 @@ from eneo.flows.template_reference_analyzer import (
     consumes_runtime_input,
 )
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+
+RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE: Final = "[SOURCE {source_number}]"
+RUNTIME_INPUT_SOURCE_FILE_NAME_KEY: Final = "file_name"
 
 
 @dataclass(frozen=True)
@@ -354,12 +357,38 @@ async def _load_runtime_files(
 
 
 def _extract_text_from_files(files: list[Any]) -> str:
-    extracted = [
-        str(file.text).strip()
-        for file in files
-        if isinstance(getattr(file, "text", None), str) and str(file.text).strip()
-    ]
+    extracted: list[str] = []
+    for source_number, file in enumerate(files, start=1):
+        text_value = getattr(file, "text", None)
+        if not isinstance(text_value, str) or not text_value.strip():
+            continue
+        extracted.append(
+            _format_runtime_source_text(
+                file=file,
+                source_number=source_number,
+                text=text_value.strip(),
+            )
+        )
     return "\n\n".join(extracted)
+
+
+def _format_runtime_source_text(*, file: Any, source_number: int, text: str) -> str:
+    header_lines = [
+        RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number=source_number)
+    ]
+    file_name = _runtime_source_file_name(file)
+    if file_name is not None:
+        header_lines.append(f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY}: {file_name}")
+    header = "\n".join(header_lines)
+    return f"{header}\n\n{text}"
+
+
+def _runtime_source_file_name(file: Any) -> str | None:
+    raw_name = getattr(file, "name", None)
+    if not isinstance(raw_name, str):
+        return None
+    file_name = " ".join(raw_name.split())
+    return file_name or None
 
 
 def _build_runtime_input_metadata(

@@ -547,10 +547,11 @@ async def test_resolve_step_input_document_loads_files(user):
         requested_file_ids=[file_id],
     )
 
+    labeled_text = "[SOURCE 1]\nfile_name: underlag.pdf\n\nExtracted document text"
     assert resolved.files == [fake_file]
-    assert resolved.text == "Extracted document text\n\nfallback"
+    assert resolved.text == f"{labeled_text}\n\nfallback"
     assert resolved.runtime_input_metadata == {
-        "text": "Extracted document text",
+        "text": labeled_text,
         "file_ids": [str(file_id)],
         "files_count": 1,
         "files": [
@@ -567,10 +568,75 @@ async def test_resolve_step_input_document_loads_files(user):
             }
         ],
         "total_file_size": 128,
-        "extracted_text_length": len("Extracted document text"),
+        "extracted_text_length": len(labeled_text),
         "input_format": "document",
         "capture_mode": "runtime_input",
     }
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_labels_multiple_files_in_requested_order(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    first_file = SimpleNamespace(
+        id=first_file_id,
+        text="[PAGE 1]\nFirst file text",
+        name="first.pdf",
+        checksum="checksum-1",
+        size=100,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    second_file = SimpleNamespace(
+        id=second_file_id,
+        text="[PAGE 1]\nSecond file text",
+        name="second.pdf",
+        checksum="checksum-2",
+        size=200,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
+        return_value=[second_file, first_file]
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[first_file_id, second_file_id],
+    )
+
+    assert resolved.files == [first_file, second_file]
+    assert resolved.text == (
+        "[SOURCE 1]\n"
+        "file_name: first.pdf\n\n"
+        "[PAGE 1]\n"
+        "First file text\n\n"
+        "[SOURCE 2]\n"
+        "file_name: second.pdf\n\n"
+        "[PAGE 1]\n"
+        "Second file text"
+    )
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["text"] == resolved.text
+    assert resolved.runtime_input_metadata["file_ids"] == [
+        str(first_file_id),
+        str(second_file_id),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1346,7 +1412,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
     )
 
     assert resolved.source_text == ""
-    assert resolved.text == "runtime step upload test"
+    assert resolved.text == "[SOURCE 1]\n\nruntime step upload test"
 
 
 @pytest.mark.asyncio
@@ -1723,7 +1789,7 @@ async def test_file_input_uses_extracted_file_text(user):
 
     output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
-    assert output.input_text == "Extracted file text"
+    assert output.input_text == "[SOURCE 1]\n\nExtracted file text"
     assert output.full_text == "ok"
 
 

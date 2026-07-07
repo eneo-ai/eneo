@@ -1223,15 +1223,15 @@ def _append_multi_document_source_reader_instruction(
         addition = (
             "For documents[] output, create exactly one item per source document. "
             "Keep every item's facts scoped to that one source only; do not merge "
-            "facts across documents. Set source_label to the file name when "
-            "available, otherwise use a stable source number."
+            "facts across documents. Set source_label to the file_name in the "
+            "[SOURCE n] header when present, otherwise use the [SOURCE n] label."
         )
     else:
         addition = (
             "För documents[]-utdata ska du skapa exakt en post per källdokument. "
             "Håll varje posts fakta avgränsade till just den källan; blanda inte "
-            "uppgifter mellan dokument. Sätt source_label till filnamnet om det "
-            "finns, annars ett stabilt källnummer."
+            "uppgifter mellan dokument. Sätt source_label till file_name i "
+            "[SOURCE n]-rubriken när den finns, annars [SOURCE n]-etiketten."
         )
     if addition in instructions:
         return instructions

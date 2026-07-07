@@ -1672,10 +1672,11 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     ]
     assert "sammanfattning" not in item_properties
     assert "documents" not in item_properties
-    assert "exakt en post per källdokument" in reader_step.assistant_spec.instructions
-    assert "blanda inte uppgifter mellan dokument" in (
-        reader_step.assistant_spec.instructions
-    )
+    reader_instructions = reader_step.assistant_spec.instructions
+    assert "exakt en post per källdokument" in reader_instructions
+    assert "blanda inte uppgifter mellan dokument" in reader_instructions
+    assert "[SOURCE n]" in reader_instructions
+    assert "file_name" in reader_instructions
     assert validate_spec(compiled).valid
 
 
@@ -1730,10 +1731,11 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     assert documents_schema["items"]["type"] == "object"
     assert list(documents_schema["items"]["properties"]) == ["source_label"]
     assert documents_schema["items"]["required"] == ["source_label"]
-    assert "exakt en post per källdokument" in reader_step.assistant_spec.instructions
-    assert "blanda inte uppgifter mellan dokument" in (
-        reader_step.assistant_spec.instructions
-    )
+    reader_instructions = reader_step.assistant_spec.instructions
+    assert "exakt en post per källdokument" in reader_instructions
+    assert "blanda inte uppgifter mellan dokument" in reader_instructions
+    assert "[SOURCE n]" in reader_instructions
+    assert "file_name" in reader_instructions
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 
