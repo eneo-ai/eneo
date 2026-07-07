@@ -150,6 +150,7 @@ def test_compile_context_derives_analysis_fields_from_result_obligations() -> No
 
     assert context is not None
     assert [field.name for field in context.result_contract_output_fields] == [
+        "matches",
         "missing_information",
         "uncertainty",
         "recommended_action",
@@ -570,6 +571,95 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
             {"step_ref": "step_b", "output": "structured"},
         ]
     }
+    assert validate_spec(compiled).valid
+
+
+def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Bygglovsgranskning",
+            "flow_description": "Jämför en ansökan mot angiven checklista.",
+            "plan_rationale": "Läs ansökan, jämför mot regeln och skriv rapport.",
+            "input_fields": [
+                {
+                    "variable_name": "reference_material",
+                    "label": "Reference material",
+                    "field_type": "text",
+                    "required": True,
+                },
+                {
+                    "variable_name": "case_context",
+                    "label": "Case context",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "jurisdiction",
+                    "label": "Jurisdiction",
+                    "field_type": "text",
+                    "required": False,
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Läs ansökan",
+                    "instructions": "Extrahera fakta ur ansökan.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "application_facts",
+                            "field_type": "string",
+                            "description": "Fakta ur ansökan.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Jämför krav",
+                    "instructions": "Jämför ansökan mot checklistan eller regeln.",
+                    "output_type": "json",
+                    "uses_form_fields": [
+                        "reference_material",
+                        "case_context",
+                        "jurisdiction",
+                    ],
+                    "output_fields": [
+                        {
+                            "name": "requirements",
+                            "field_type": "string",
+                            "description": "Krav som ska bedömas.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv en tydlig rapport.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            runtime_metadata_state="detailed_case_metadata",
+            runtime_input_field_hints=(
+                RuntimeInputFieldHint("checklista", "checklista"),
+                RuntimeInputFieldHint("regel", "regel"),
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["checklista", "regel"]
+    report_question = _question(compiled.steps[-1].input_bindings)
+    assert "checklista: {{ flow_input.checklista }}" in report_question
+    assert "regel: {{ flow_input.regel }}" in report_question
+    assert "reference_material" not in report_question
+    assert "case_context" not in report_question
+    assert "jurisdiction" not in report_question
     assert validate_spec(compiled).valid
 
 

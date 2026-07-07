@@ -136,6 +136,7 @@
             "supplier_promises",
             "supplier_promise",
             "supplier_commitment",
+            "supplier_commitments",
             "leverantörslöften",
             "leverantorsloften"
           ],

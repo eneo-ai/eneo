@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     FlowInputFieldIntent,
+    SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
@@ -107,16 +108,24 @@ def compile_create_intent_to_spec(
         if context is not None and context.final_output_type is not None
         else OutputType.TEXT
     )
-    referenced_hint_names = {
-        field_name
-        for semantic_step in intent.steps
-        for field_name in semantic_step.uses_form_fields
-    }
-    form_fields, dropped_primary_input_field_names = _compile_form_fields(
+    (
+        form_fields,
+        dropped_primary_input_field_names,
+        dropped_form_field_ref_names,
+    ) = _compile_form_fields(
         intent_fields=intent.input_fields,
         context=context,
         runtime_input_type=runtime_input_type,
     )
+    intent_with_admitted_form_refs = _intent_without_form_field_refs(
+        intent,
+        field_names=dropped_form_field_ref_names,
+    )
+    referenced_hint_names = {
+        field_name
+        for semantic_step in intent_with_admitted_form_refs.steps
+        for field_name in semantic_step.uses_form_fields
+    }
     known_field_order = [field.name for field in form_fields]
     known_field_names = set(known_field_order)
     server_owned_field_names = _server_owned_runtime_field_names(
@@ -131,7 +140,7 @@ def compile_create_intent_to_spec(
     ]
     intent_with_server_owned_field_placement = (
         _intent_with_server_owned_form_field_placement(
-            intent,
+            intent_with_admitted_form_refs,
             field_names=server_owned_fields_requiring_placement,
         )
     )
@@ -247,6 +256,32 @@ def _intent_with_server_owned_form_field_placement(
     )
 
 
+def _intent_without_form_field_refs(
+    intent: CreateFlowIntent,
+    *,
+    field_names: set[str],
+) -> CreateFlowIntent:
+    if not field_names:
+        return intent
+
+    steps: list[SemanticStepIntent] = []
+    changed = False
+    for step in intent.steps:
+        uses_form_fields = [
+            field_name
+            for field_name in step.uses_form_fields
+            if field_name not in field_names
+        ]
+        if uses_form_fields == step.uses_form_fields:
+            steps.append(step)
+            continue
+        steps.append(step.model_copy(update={"uses_form_fields": uses_form_fields}))
+        changed = True
+    if not changed:
+        return intent
+    return intent.model_copy(update={"steps": steps})
+
+
 def create_compile_context_from_planning_state(
     planning_state: PlanningState | None,
     *,
@@ -355,6 +390,8 @@ def _result_contract_output_fields_from_planning_state(
         return ()
 
     field_names: list[str] = []
+    if contract.post_processing_goal == "compare_or_validate":
+        field_names.append("matches")
     if "missing_information_policy" in contract.secondary_obligations:
         field_names.extend(("missing_information", "uncertainty"))
     if "recommendations" in contract.secondary_obligations:
@@ -390,6 +427,12 @@ def _result_contract_output_field_description(
             "Saknade uppgifter eller krav som inte kan verifieras i underlaget."
             if swedish
             else "Missing information or requirements that cannot be verified from the source material."
+        )
+    if field_name == "matches":
+        return (
+            "Krav eller kontrollpunkter som uppfylls enligt jämförelsen."
+            if swedish
+            else "Requirements or control points that are satisfied by the comparison."
         )
     if field_name == "uncertainty":
         return (
@@ -619,7 +662,7 @@ def _compile_form_fields(
     intent_fields: list[FlowInputFieldIntent],
     context: CreateCompileContext | None,
     runtime_input_type: InputType | None,
-) -> tuple[list[FormFieldSpec], list[str]]:
+) -> tuple[list[FormFieldSpec], list[str], set[str]]:
     runtime_metadata_state = (
         context.runtime_metadata_state if context is not None else None
     )
@@ -645,19 +688,29 @@ def _compile_form_fields(
             ],
             runtime_metadata_state=runtime_metadata_state,
         )
+        dropped_ref_names = {
+            *(field.variable_name for field in intent_fields),
+            *(hint.variable_name for hint in runtime_input_field_hints),
+        }
         runtime_input_field_hints = ()
         if metadata_disables_declared_input_fields:
-            return [], []
+            return [], [], dropped_ref_names
 
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
+    dropped_form_field_ref_names: set[str] = set()
+    runtime_hint_names = {hint.variable_name for hint in runtime_input_field_hints}
     for field in intent_fields:
+        if runtime_hint_names and field.variable_name not in runtime_hint_names:
+            dropped_form_field_ref_names.add(field.variable_name)
+            continue
         if is_primary_runtime_input_shadow_field(
             variable_name=field.variable_name,
             field_type=field.field_type,
             runtime_input_type=runtime_input_type,
         ):
             dropped_primary_input_field_names.append(field.variable_name)
+            dropped_form_field_ref_names.add(field.variable_name)
             continue
         fields.append(_compile_input_field(field))
 
@@ -669,6 +722,7 @@ def _compile_form_fields(
             runtime_input_type=runtime_input_type,
         ):
             dropped_primary_input_field_names.append(hint.variable_name)
+            dropped_form_field_ref_names.add(hint.variable_name)
             continue
         if hint.variable_name in seen:
             continue
@@ -682,7 +736,7 @@ def _compile_form_fields(
             )
         )
         seen.add(hint.variable_name)
-    return fields, dropped_primary_input_field_names
+    return fields, dropped_primary_input_field_names, dropped_form_field_ref_names
 
 
 def _server_owned_runtime_field_names(
