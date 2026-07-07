@@ -11,7 +11,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
 from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     apply_terminal_output_schema,
-    clear_terminal_schema_output_fields,
     source_capture_fields_by_step_index,
 )
 from eneo.flows.flow_authoring_name import normalize_flow_name
@@ -20,12 +19,14 @@ from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 
 def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     step_drafts = [
-        _new_step_draft_from_planned_step(planned_step) for planned_step in plan.steps
+        _new_step_draft_from_planned_step(
+            planned_step,
+            emit_output_fields=(
+                plan.terminal_output_schema is None or index != len(plan.steps) - 1
+            ),
+        )
+        for index, planned_step in enumerate(plan.steps)
     ]
-    step_drafts = clear_terminal_schema_output_fields(
-        steps=step_drafts,
-        terminal_output_schema=plan.terminal_output_schema,
-    )
     form_fields = list(plan.form_fields)
     source_capture_fields_by_index = source_capture_fields_by_step_index(
         steps=step_drafts,
@@ -60,7 +61,11 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     )
 
 
-def _new_step_draft_from_planned_step(step: PlannedStep) -> NewStepDraft:
+def _new_step_draft_from_planned_step(
+    step: PlannedStep,
+    *,
+    emit_output_fields: bool,
+) -> NewStepDraft:
     return NewStepDraft(
         name=step.name,
         instructions=step.instructions,
@@ -76,7 +81,7 @@ def _new_step_draft_from_planned_step(step: PlannedStep) -> NewStepDraft:
         uses_form_fields=list(step.form_field_refs),
         uses_previous_fields=list(step.previous_field_refs),
         uses_previous_outputs=list(step.previous_output_refs),
-        output_fields=list(step.output_fields),
+        output_fields=list(step.output_fields) if emit_output_fields else None,
         document_delivery_mode=step.document_delivery_mode,
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
