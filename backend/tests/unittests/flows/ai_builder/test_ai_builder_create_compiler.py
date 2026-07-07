@@ -121,13 +121,14 @@ def _normalize_create_steps(
     form_fields: list[FormFieldSpec] | None = None,
     flow_description: str | None = None,
     aggregation_intent: AggregationIntent = "linear",
+    ui_language: str | None = None,
 ) -> list[NewStepDraft]:
+    _ = flow_name, flow_description
     return normalize_create_step_mechanics(
         steps=steps,
         form_fields=form_fields or [],
-        flow_name=flow_name,
-        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
+        ui_language=ui_language,
     )
 
 
@@ -140,6 +141,7 @@ def _compile_create_steps(
     document_body_writer_step_indexes: tuple[int, ...] = (),
     aggregation_intent: AggregationIntent = "linear",
     terminal_output_schema: dict[str, object] | None = None,
+    ui_language: str | None = None,
 ) -> FlowDraftSpecCore:
     return compile_create_steps_to_spec(
         flow_name=flow_name,
@@ -149,6 +151,7 @@ def _compile_create_steps(
         document_body_writer_step_indexes=document_body_writer_step_indexes,
         aggregation_intent=aggregation_intent,
         terminal_output_schema=terminal_output_schema,
+        ui_language=ui_language,
     )
 
 
@@ -158,12 +161,13 @@ def auto_bind_targeted_underlag_for_text_composer(
     flow_name: str = "Auto-bind test",
     flow_description: str | None = None,
     aggregation_intent: AggregationIntent,
+    ui_language: str | None = None,
 ) -> list[NewStepDraft]:
+    _ = flow_name, flow_description
     return _auto_bind_targeted_underlag_for_text_composer(
         steps=steps,
-        flow_name=flow_name,
-        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
+        ui_language=ui_language,
     )
 
 
@@ -4819,7 +4823,7 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
 
     draft = compile_create_intent_to_spec(
         outline,
-        context=create_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state, ui_language="en"),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -5071,7 +5075,7 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
 
     draft = compile_create_intent_to_spec(
         outline,
-        context=create_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state, ui_language="en"),
     )
     compiled = draft
     validation = validate_spec(compiled)

@@ -8,7 +8,7 @@ from eneo.flows.ai_builder.ai_builder_source_material import (
     primary_source_material_ref_for_steps,
     source_material_binding_status,
     source_material_bindings_for_boundary,
-    source_material_label_for_text,
+    source_material_label_for_language,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -245,7 +245,7 @@ def test_source_material_status_keeps_source_only_binding_intentional_partial() 
 def test_source_material_bindings_for_boundary_completes_typed_refs() -> None:
     boundary = _only_boundary(_report_spec())
 
-    assert source_material_bindings_for_boundary(boundary) == {
+    assert source_material_bindings_for_boundary(boundary, ui_language="en") == {
         "source_refs": [
             {"step_ref": "step_b", "output": "structured"},
             {"step_ref": "step_a", "output": "text", "label": "Source material"},
@@ -258,7 +258,7 @@ def test_source_material_bindings_for_boundary_preserves_prompt_copy() -> None:
         _report_spec(final_question="Audience: {{ flow_input.audience }}")
     )
 
-    assert source_material_bindings_for_boundary(boundary) == {
+    assert source_material_bindings_for_boundary(boundary, ui_language="en") == {
         "question": "Audience: {{ flow_input.audience }}",
         "source_refs": [
             {"step_ref": "step_b", "output": "structured"},
@@ -267,13 +267,10 @@ def test_source_material_bindings_for_boundary_preserves_prompt_copy() -> None:
     }
 
 
-def test_source_material_label_uses_swedish_when_context_is_swedish() -> None:
-    assert source_material_label_for_text("Skapa mötesprotokoll från ljud") == (
-        "Källmaterial"
-    )
-    assert source_material_label_for_text("Create a customer meeting report") == (
-        "Source material"
-    )
+def test_source_material_label_uses_ui_language_not_text_content() -> None:
+    assert source_material_label_for_language("sv") == "Källmaterial"
+    assert source_material_label_for_language("en") == "Source material"
+    assert source_material_label_for_language(None) == "Källmaterial"
 
 
 def test_create_steps_return_material_report_for_text_or_document_outputs() -> None:
@@ -333,8 +330,7 @@ def test_primary_source_material_ref_for_steps_targets_primary_material_upload()
                 output_type=OutputType.JSON,
             ),
         ],
-        flow_name="Skapa mötesprotokoll från ljud",
-        flow_description=None,
+        ui_language="sv",
     )
 
     assert source_ref is not None
@@ -353,8 +349,7 @@ def test_primary_source_material_ref_for_steps_ignores_plain_text_flow_input() -
                     output_type=OutputType.TEXT,
                 )
             ],
-            flow_name="Text summary",
-            flow_description=None,
+            ui_language="en",
         )
         is None
     )

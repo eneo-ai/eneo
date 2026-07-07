@@ -447,9 +447,8 @@ def compile_create_steps_to_spec(
     normalized_steps = normalize_create_step_mechanics(
         steps=steps,
         form_fields=form_fields or [],
-        flow_name=flow_name,
-        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
+        ui_language=ui_language,
     )
     normalized_steps, form_fields, dropped_source_contract_field_names = (
         _drop_source_contract_shadow_form_fields(

@@ -76,9 +76,8 @@ def normalize_create_step_mechanics(
     *,
     steps: list[NewStepDraft],
     form_fields: list[FormFieldSpec],
-    flow_name: str,
-    flow_description: str | None,
     aggregation_intent: "AggregationIntent" = "linear",
+    ui_language: str | None = None,
 ) -> list[NewStepDraft]:
     """Normalize server-owned create mechanics before compiling a flow.
 
@@ -100,9 +99,8 @@ def normalize_create_step_mechanics(
     normalized_steps = _fold_redundant_artifact_text_render_helper(normalized_steps)
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
         normalized_steps,
-        flow_name=flow_name,
-        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
+        ui_language=ui_language,
     )
     return _normalize_create_step_refs(
         rebound_steps,
@@ -612,9 +610,8 @@ def _invalid_previous_ref_error(
 def auto_bind_targeted_underlag_for_text_composer(
     steps: list[NewStepDraft],
     *,
-    flow_name: str,
-    flow_description: str | None,
     aggregation_intent: "AggregationIntent",
+    ui_language: str | None = None,
 ) -> list[NewStepDraft]:
     """Bind composer underlag from backend-owned draft mechanics.
 
@@ -627,8 +624,7 @@ def auto_bind_targeted_underlag_for_text_composer(
     # indexes match the step snapshot that targeted-underlag binding rewrites.
     source_ref = primary_source_material_ref_for_steps(
         steps=steps,
-        flow_name=flow_name,
-        flow_description=flow_description,
+        ui_language=ui_language,
     )
     returns_material_report = create_steps_return_material_report(steps)
     # Capture candidates before rewrites because each pass mutates input_source.

@@ -78,13 +78,14 @@ def _normalize_steps(
     flow_description: str | None = None,
     form_fields: list[FormFieldSpec] | None = None,
     aggregation_intent: AggregationIntent = "linear",
+    ui_language: str | None = None,
 ) -> list[NewStepDraft]:
+    _ = flow_name, flow_description
     return normalize_create_step_mechanics(
         steps=_new_steps(steps),
         form_fields=form_fields or [],
-        flow_name=flow_name,
-        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
+        ui_language=ui_language,
     )
 
 
@@ -456,6 +457,7 @@ def test_normalize_create_step_mechanics_detects_source_after_input_source_norma
 ):
     normalized = _normalize_steps(
         flow_name="Audio source report",
+        ui_language="en",
         steps=[
             {
                 "name": "Transcribe audio",

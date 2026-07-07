@@ -4,10 +4,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
-    contains_any_token_prefix,
-    normalize_discovery_text,
-)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousOutputRef,
@@ -37,20 +33,6 @@ _PRIMARY_MATERIAL_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.
 _COMPILED_PRIMARY_MATERIAL_INPUT_TYPES = _PRIMARY_MATERIAL_INPUT_TYPES | {
     InputType.TEXT
 }
-_SWEDISH_LABEL_TOKENS = (
-    "analysera",
-    "bearbeta",
-    "dokument",
-    "ljud",
-    "mote",
-    "motet",
-    "protokoll",
-    "sammanfatt",
-    "skapa",
-    "steg",
-    "strukturera",
-    "transkrib",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +113,8 @@ def source_material_binding_status(
 
 def source_material_bindings_for_boundary(
     boundary: CompiledSourceMaterialBoundary,
+    *,
+    ui_language: str | None = None,
 ) -> dict[str, object]:
     bindings = dict(boundary.step.input_bindings or {})
     question = question_binding(bindings)
@@ -158,16 +142,7 @@ def source_material_bindings_for_boundary(
             SourceRefBinding(
                 step_ref=source_step.plan_step_ref,
                 output="text",
-                label=source_material_label_for_text(
-                    " ".join(
-                        (
-                            boundary.step.name,
-                            boundary.step.assistant_spec.instructions,
-                            source_step.name,
-                            source_step.assistant_spec.instructions,
-                        )
-                    )
-                ),
+                label=source_material_label_for_language(ui_language),
             )
         )
 
@@ -267,13 +242,10 @@ def _question_mentions_prior_text_source(
     )
 
 
-def source_material_label_for_text(text: str) -> str:
-    if any(character in text.casefold() for character in ("å", "ä", "ö")):
-        return "Källmaterial"
-    normalized = normalize_discovery_text(text)
-    if contains_any_token_prefix(normalized, _SWEDISH_LABEL_TOKENS):
-        return "Källmaterial"
-    return "Source material"
+def source_material_label_for_language(ui_language: str | None) -> str:
+    if ui_language is not None and ui_language.casefold().startswith("en"):
+        return "Source material"
+    return "Källmaterial"
 
 
 def _analyze_step_references(
@@ -344,25 +316,15 @@ def _compiled_spec_returns_material_report(spec: FlowDraftSpecCore) -> bool:
 def primary_source_material_ref_for_steps(
     *,
     steps: Sequence[NewStepDraft],
-    flow_name: str,
-    flow_description: str | None,
+    ui_language: str | None = None,
 ) -> PreviousOutputRef | None:
     source_step = _primary_source_text_step(steps)
     if source_step is None:
         return None
-    step_index, step = source_step
+    step_index, _ = source_step
     return PreviousOutputRef(
         from_step=step_index,
-        label=source_material_label_for_text(
-            " ".join(
-                (
-                    flow_name,
-                    flow_description or "",
-                    step.name,
-                    step.instructions or "",
-                )
-            )
-        ),
+        label=source_material_label_for_language(ui_language),
     )
 
 
@@ -416,5 +378,5 @@ __all__ = [
     "primary_source_material_ref_for_steps",
     "source_material_bindings_for_boundary",
     "source_material_binding_status",
-    "source_material_label_for_text",
+    "source_material_label_for_language",
 ]
