@@ -320,6 +320,17 @@ def test_runtime_input_field_extraction_keeps_explicit_secondary_fields() -> Non
     )
 
 
+def test_runtime_input_field_extraction_stops_before_report_writing_clause() -> None:
+    hints = extract_runtime_input_field_hints(
+        "Bygg ett flöde som använder inmatningsfält för målgrupp vid körning "
+        "och skriver en rapport."
+    )
+
+    assert [(hint.variable_name, hint.label) for hint in hints] == [
+        ("malgrupp", "målgrupp")
+    ]
+
+
 def test_runtime_input_field_extraction_understands_user_provided_metadata() -> None:
     text = (
         "Jag vill skapa ett transkriptionsflöde för utvecklingssamtal. "
