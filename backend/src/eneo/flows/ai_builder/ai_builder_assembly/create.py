@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
@@ -100,6 +101,122 @@ _SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
     }
 )
 
+CreateAssemblyRejectionReason = Literal[
+    "aggregate_requires_text_or_document_output",
+    "all_previous_step_cannot_use_explicit_refs",
+    "audio_requires_linear",
+    "docx_template_form_fields_mismatch",
+    "docx_template_shape_unsupported",
+    "empty_steps",
+    "explicit_refs_not_supported",
+    "invalid_template_fill_mode",
+    "plan_invariant_failed",
+    "pure_audio_transcription_requires_no_reader_fields",
+    "pure_audio_transcription_shape_unsupported",
+    "source_file_first_step_requires_json",
+    "step_output_type_mismatch",
+    "terminal_schema_requires_json_terminal",
+    "unsupported_aggregation_intent",
+    "unsupported_architecture_hints",
+    "unsupported_final_output_type",
+    "unsupported_output_mode",
+    "unsupported_runtime_input_type",
+]
+
+_REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
+    "aggregate_requires_text_or_document_output": (
+        "Aggregate and compare create flows must end in text or a document artifact; "
+        "remove the JSON terminal shape or make the flow linear."
+    ),
+    "all_previous_step_cannot_use_explicit_refs": (
+        "The fan-in step must combine prior outputs as a whole. Remove explicit "
+        "form-field or previous-output refs from that semantic step."
+    ),
+    "audio_requires_linear": "Audio create flows must be linear.",
+    "docx_template_form_fields_mismatch": (
+        "DOCX template-fill flows must reference every template field exactly once "
+        "in the content-writing semantic step."
+    ),
+    "docx_template_shape_unsupported": (
+        "DOCX template-fill flows require one text-writing semantic step for the "
+        "template variables."
+    ),
+    "empty_steps": "The proposal must contain at least one semantic step.",
+    "explicit_refs_not_supported": (
+        "Create-mode semantic steps must not author uses_previous_fields or "
+        "uses_previous_outputs. Describe the data needed in instructions and "
+        "output_fields instead."
+    ),
+    "invalid_template_fill_mode": (
+        "template_fill output mode is only valid for DOCX template-fill flows."
+    ),
+    "plan_invariant_failed": "The assembled flow violated a construction invariant.",
+    "pure_audio_transcription_requires_no_reader_fields": (
+        "Pure audio transcription must not request structured source-reader fields."
+    ),
+    "pure_audio_transcription_shape_unsupported": (
+        "Pure audio transcription requires one plain text semantic step and no "
+        "runtime form fields."
+    ),
+    "source_file_first_step_requires_json": (
+        "For document and file inputs, the first semantic step must extract JSON "
+        "before text-writing steps consume it."
+    ),
+    "step_output_type_mismatch": (
+        "A semantic step's output_type or output_fields conflicts with the confirmed "
+        "terminal output shape."
+    ),
+    "terminal_schema_requires_json_terminal": (
+        "A terminal output schema can only be used by a linear JSON terminal flow."
+    ),
+    "unsupported_aggregation_intent": (
+        "Create assembly supports only linear, aggregate, and compare intents."
+    ),
+    "unsupported_architecture_hints": (
+        "The confirmed architecture pattern is not supported by create assembly."
+    ),
+    "unsupported_final_output_type": (
+        "Create assembly supports text, JSON, PDF, and DOCX terminal outputs."
+    ),
+    "unsupported_output_mode": (
+        "Create assembly supports pass-through output mode for semantic model steps."
+    ),
+    "unsupported_runtime_input_type": (
+        "Create assembly supports text, JSON, audio, document, and file inputs."
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class CreateAssemblyRejection:
+    reason: CreateAssemblyRejectionReason
+    step_index: int | None = None
+    detail: str | None = None
+
+    @property
+    def failure_code(self) -> str:
+        return f"assembly_{self.reason}"
+
+    @property
+    def feedback(self) -> str:
+        feedback = self.detail or _REJECTION_FEEDBACK[self.reason]
+        if self.step_index is None:
+            return feedback
+        return f"Step {self.step_index}: {feedback}"
+
+
+def _reject(
+    reason: CreateAssemblyRejectionReason,
+    *,
+    step_index: int | None = None,
+    detail: str | None = None,
+) -> CreateAssemblyRejection:
+    return CreateAssemblyRejection(
+        reason=reason,
+        step_index=step_index,
+        detail=detail,
+    )
+
 
 def try_compile_create_intent_with_assembly(
     intent: CreateFlowIntent,
@@ -116,25 +233,28 @@ def try_compile_create_intent_with_assembly(
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
-) -> FlowDraftSpecCore | None:
-    plan = _assemble_create_intent(
-        intent,
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        final_output_mode=final_output_mode,
-        form_fields=form_fields,
-        pattern_ids=pattern_ids,
-        chain_steps=chain_steps,
-        aggregation_intent=aggregation_intent,
-        terminal_output_schema=terminal_output_schema,
-        source_reader_required_fields=source_reader_required_fields,
-        runtime_required=runtime_required,
-        runtime_max_files=runtime_max_files,
-        ui_language=ui_language,
-    )
-    if plan is None:
-        return None
-    return lower_assembly_plan(plan)
+) -> FlowDraftSpecCore | CreateAssemblyRejection:
+    try:
+        plan = _assemble_create_intent(
+            intent,
+            runtime_input_type=runtime_input_type,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
+            form_fields=form_fields,
+            pattern_ids=pattern_ids,
+            chain_steps=chain_steps,
+            aggregation_intent=aggregation_intent,
+            terminal_output_schema=terminal_output_schema,
+            source_reader_required_fields=source_reader_required_fields,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        )
+        if isinstance(plan, CreateAssemblyRejection):
+            return plan
+        return lower_assembly_plan(plan)
+    except ValueError as error:
+        return _reject("plan_invariant_failed", detail=str(error))
 
 
 def _assemble_create_intent(
@@ -152,43 +272,43 @@ def _assemble_create_intent(
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
-) -> FlowAssemblyPlan | None:
-    if (
-        not _architecture_hints_are_supported(
-            runtime_input_type=runtime_input_type,
-            final_output_type=final_output_type,
-            final_output_mode=final_output_mode,
-            pattern_ids=pattern_ids,
-            chain_steps=chain_steps,
-        )
-        or aggregation_intent not in {"linear", "aggregate", "compare"}
-        or not intent.steps
+) -> FlowAssemblyPlan | CreateAssemblyRejection:
+    if not _architecture_hints_are_supported(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
     ):
-        return None
+        return _reject("unsupported_architecture_hints")
+    if aggregation_intent not in {"linear", "aggregate", "compare"}:
+        return _reject("unsupported_aggregation_intent")
+    if not intent.steps:
+        return _reject("empty_steps")
     if runtime_input_type not in _SOURCE_INPUT_TYPES:
-        return None
+        return _reject("unsupported_runtime_input_type")
     if runtime_input_type == InputType.AUDIO and aggregation_intent != "linear":
-        return None
+        return _reject("audio_requires_linear")
     document_artifact_requested = final_output_type in _DOCUMENT_OUTPUT_TYPES
     if (
         final_output_type
         not in {OutputType.TEXT, OutputType.JSON} | _DOCUMENT_OUTPUT_TYPES
     ):
-        return None
+        return _reject("unsupported_final_output_type")
     template_fill_requested = (
         final_output_type == OutputType.DOCX
         and final_output_mode == OutputMode.TEMPLATE_FILL
     )
     if final_output_mode == OutputMode.TEMPLATE_FILL and not template_fill_requested:
-        return None
+        return _reject("invalid_template_fill_mode")
     if terminal_output_schema is not None and (
         document_artifact_requested or final_output_type != OutputType.JSON
     ):
-        return None
+        return _reject("terminal_schema_requires_json_terminal")
     if aggregation_intent != "linear" and (
         terminal_output_schema is not None or final_output_type == OutputType.JSON
     ):
-        return None
+        return _reject("aggregate_requires_text_or_document_output")
     if template_fill_requested:
         return _assemble_docx_template_fill(
             intent,
@@ -207,7 +327,7 @@ def _assemble_create_intent(
         pattern_ids=pattern_ids,
     ):
         if source_reader_required_fields:
-            return None
+            return _reject("pure_audio_transcription_requires_no_reader_fields")
         return _assemble_pure_audio_transcription(
             intent,
             form_fields=form_fields,
@@ -220,7 +340,7 @@ def _assemble_create_intent(
         not document_artifact_requested
         and (final_output_mode or OutputMode.PASS_THROUGH) != OutputMode.PASS_THROUGH
     ):
-        return None
+        return _reject("unsupported_output_mode")
 
     terminal_semantic_output_type = (
         OutputType.TEXT if document_artifact_requested else final_output_type
@@ -247,7 +367,7 @@ def _assemble_create_intent(
     for index, semantic_step in enumerate(semantic_steps):
         is_terminal_semantic_step = index == len(semantic_steps) - 1
         if semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs:
-            return None
+            return _reject("explicit_refs_not_supported", step_index=index + 1)
         step_output_type = _linear_step_output_type(
             output_type=semantic_step.output_type,
             output_fields=semantic_step.output_fields,
@@ -255,13 +375,16 @@ def _assemble_create_intent(
             is_terminal=is_terminal_semantic_step,
         )
         if step_output_type is None:
-            return None
+            return _reject("step_output_type_mismatch", step_index=index + 1)
         if (
             index == 0
             and runtime_input_type in _FILE_INPUT_TYPES
             and step_output_type != OutputType.JSON
         ):
-            return None
+            return _reject(
+                "source_file_first_step_requires_json",
+                step_index=index + 1,
+            )
         input_source = _linear_step_input_source(
             step_index=index,
             semantic_step_count=len(semantic_steps),
@@ -273,7 +396,10 @@ def _assemble_create_intent(
             or semantic_step.uses_previous_fields
             or semantic_step.uses_previous_outputs
         ):
-            return None
+            return _reject(
+                "all_previous_step_cannot_use_explicit_refs",
+                step_index=index + 1,
+            )
         input_type = _linear_step_input_type(
             input_source=input_source,
             runtime_input_type=runtime_input_type,
@@ -326,7 +452,7 @@ def _assemble_create_intent(
         previous_output_type = step_output_type
 
     if placed_form_fields != form_field_names:
-        return None
+        return _reject("docx_template_form_fields_mismatch")
     if document_artifact_requested:
         renderer_step = render_verbatim_step(
             output_type=final_output_type,
@@ -474,13 +600,13 @@ def _assemble_docx_template_fill(
     runtime_max_files: int | None,
     aggregation_intent: AggregationIntent,
     ui_language: str | None,
-) -> FlowAssemblyPlan | None:
+) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if (
         runtime_input_type not in _FILE_INPUT_TYPES
         or aggregation_intent != "linear"
         or len(intent.steps) != 1
     ):
-        return None
+        return _reject("docx_template_shape_unsupported")
     semantic_step = intent.steps[0]
     if (
         semantic_step.output_fields
@@ -488,10 +614,10 @@ def _assemble_docx_template_fill(
         or semantic_step.uses_previous_outputs
         or semantic_step.output_type not in {None, OutputType.TEXT}
     ):
-        return None
+        return _reject("docx_template_shape_unsupported", step_index=1)
     form_field_names = {field.name for field in form_fields}
     if set(semantic_step.uses_form_fields) != form_field_names:
-        return None
+        return _reject("docx_template_form_fields_mismatch", step_index=1)
 
     reader_step = template_variable_reader_step(
         runtime_input_type=runtime_input_type,
@@ -574,9 +700,9 @@ def _assemble_pure_audio_transcription(
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
-) -> FlowAssemblyPlan | None:
+) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if len(intent.steps) != 1 or form_fields:
-        return None
+        return _reject("pure_audio_transcription_shape_unsupported")
     semantic_step = intent.steps[0]
     if (
         semantic_step.output_fields
@@ -585,7 +711,10 @@ def _assemble_pure_audio_transcription(
         or semantic_step.uses_previous_outputs
         or semantic_step.output_type not in {None, OutputType.TEXT}
     ):
-        return None
+        return _reject(
+            "pure_audio_transcription_shape_unsupported",
+            step_index=1,
+        )
     planned_step = fixed_audio_transcription_step(
         name=semantic_step.name,
         instructions=semantic_step.instructions,

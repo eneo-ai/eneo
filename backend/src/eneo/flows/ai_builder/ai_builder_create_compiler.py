@@ -16,6 +16,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_assembly import (
+    CreateAssemblyRejection,
     try_compile_create_intent_with_assembly,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
@@ -160,27 +161,32 @@ def compile_create_intent_to_spec(
         runtime_max_files=context.runtime_max_files if context is not None else None,
         ui_language=context.ui_language if context is not None else None,
     )
-    if assembly_spec is not None:
+    if isinstance(assembly_spec, CreateAssemblyRejection):
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=assembly_spec.feedback,
+            log_context={
+                "failure_code": assembly_spec.failure_code,
+                "reason": assembly_spec.reason,
+                "step_index": assembly_spec.step_index,
+                "runtime_input_type": runtime_input_type.value,
+                "final_output_type": final_output_type.value,
+                "final_output_mode": (
+                    final_output_mode.value if final_output_mode is not None else None
+                ),
+                "pattern_ids": ",".join(pattern_ids),
+                "chain_steps": ",".join(chain_steps),
+                "semantic_step_count": len(
+                    intent_with_server_owned_field_placement.steps
+                ),
+            },
+        )
+    else:
         _log_dropped_primary_input_shadow_fields(
             field_names=dropped_primary_input_field_names,
             runtime_input_type=runtime_input_type,
         )
         return assembly_spec
-
-    raise AIBuilderArchitectureError(
-        public_code="architecture_materialization_failed",
-        detail="FlowAssemblyPlan did not support this create intent.",
-        log_context={
-            "runtime_input_type": runtime_input_type.value,
-            "final_output_type": final_output_type.value,
-            "final_output_mode": (
-                final_output_mode.value if final_output_mode is not None else None
-            ),
-            "pattern_ids": ",".join(pattern_ids),
-            "chain_steps": ",".join(chain_steps),
-            "semantic_step_count": len(intent_with_server_owned_field_placement.steps),
-        },
-    )
 
 
 def _raise_for_unplaced_create_form_fields(
@@ -204,6 +210,7 @@ def _raise_for_unplaced_create_form_fields(
         public_code="architecture_materialization_failed",
         detail="Create-flow input fields must be referenced by at least one step.",
         log_context={
+            "failure_code": "unplaced_form_fields",
             "reason": "unplaced_form_fields",
             "field_names": ",".join(unplaced_field_names),
         },

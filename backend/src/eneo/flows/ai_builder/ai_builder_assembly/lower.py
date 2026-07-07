@@ -6,6 +6,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
+    derive_new_step_output_mode,
     make_plan_step_ref,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
@@ -33,7 +34,11 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         terminal_output_schema=plan.terminal_output_schema,
     )
     compiled_steps: list[StepSpec] = []
-    for index, step_draft in enumerate(step_drafts):
+    for index, (planned_step, step_draft) in enumerate(
+        zip(plan.steps, step_drafts, strict=True)
+    ):
+        if planned_step.output_mode != derive_new_step_output_mode(step_draft):
+            raise ValueError("Planned step output_mode diverged during lowering.")
         compiled_steps.append(
             compile_new_step_draft(
                 step_draft=step_draft,

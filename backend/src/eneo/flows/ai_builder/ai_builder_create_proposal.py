@@ -107,7 +107,21 @@ async def process_create_intent_arguments(
             feedback=f"Invalid propose_flow arguments: {error}",
             failure_kind="parse",
         )
-    except AIBuilderArchitectureError:
+    except AIBuilderArchitectureError as error:
+        failure_code = _retryable_architecture_failure_code(error)
+        if failure_code is not None:
+            logger.info(
+                "ai_builder_create_intent_architecture_rejected "
+                "session_id=%s tool_call_id=%s failure_code=%s",
+                turn.session_id,
+                tool_call_id,
+                failure_code,
+            )
+            return ToolProcessingResult(
+                feedback=error.detail,
+                failure_kind="validation",
+                failure_codes=frozenset({failure_code}),
+            )
         raise
 
     return await _process_create_spec(
@@ -218,3 +232,12 @@ async def _process_create_spec(
             aggregation_intent=aggregation_intent,
         ),
     )
+
+
+def _retryable_architecture_failure_code(
+    error: AIBuilderArchitectureError,
+) -> str | None:
+    value = error.log_context.get("failure_code")
+    if isinstance(value, str) and value:
+        return value
+    return None

@@ -462,6 +462,47 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
 
 
 @pytest.mark.asyncio
+async def test_outline_assembly_rejection_returns_validation_failure_code() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="documents",
+        source="structured_answer",
+        confidence="high",
+    )
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(role="user", content="Bygg ett dokumentflöde.")
+        ],
+        arguments={
+            "flow_name": "Invalid document reader",
+            "plan_rationale": "The first step tried to write text from documents.",
+            "steps": [
+                {
+                    "name": "Write summary",
+                    "instructions": "Write a summary directly from uploaded documents.",
+                    "output_type": "text",
+                }
+            ],
+        },
+        tool_call_id="call-assembly-rejection",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset(
+        {"assembly_source_file_first_step_requires_json"}
+    )
+    assert result.feedback is not None
+    assert "first semantic step" in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(

@@ -4,11 +4,15 @@ from typing import cast
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
@@ -106,6 +110,43 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
         "{{ indata_text }}\n\ntone: {{ flow_input.tone }}"
     )
     assert validate_spec(compiled).valid
+
+
+def test_assembly_plan_value_error_becomes_typed_architecture_failure() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Text report",
+            "plan_rationale": "A plain text step cannot satisfy reader fields.",
+            "steps": [
+                {
+                    "name": "Write report",
+                    "instructions": "Write the report.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                source_reader_required_fields=(
+                    SourceCaptureField(
+                        name="document_title",
+                        description="Document title.",
+                    ),
+                ),
+            ),
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_plan_invariant_failed"
+    )
+    assert "source_reader_required_fields require a source-reader planned step" in (
+        exc_info.value.detail
+    )
 
 
 def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag() -> (

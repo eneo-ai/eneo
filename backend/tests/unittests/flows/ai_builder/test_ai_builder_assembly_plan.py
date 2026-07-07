@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
@@ -84,6 +85,21 @@ def test_planned_step_rejects_unsupported_capability_tuple() -> None:
             output_type=OutputType.PDF,
             output_mode=OutputMode.PASS_THROUGH,
         )
+
+
+def test_lowering_rejects_planned_output_mode_divergence() -> None:
+    plan = _plan(
+        steps=(
+            _text_step(
+                name="Fill DOCX",
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="output_mode diverged"):
+        lower_assembly_plan(plan)
 
 
 def test_planned_step_rejects_empty_name_and_instructions() -> None:

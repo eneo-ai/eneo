@@ -299,6 +299,77 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
 
 
 @pytest.mark.asyncio
+async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair() -> (
+    None
+):
+    submission = _make_submission()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-assembly-rejection",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Invalid previous refs",
+            "plan_rationale": "The model authored backend wiring.",
+            "steps": [
+                {
+                    "name": "Write summary",
+                    "instructions": "Write a summary from a previous field.",
+                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
+                }
+            ],
+        },
+        tool_call_id="call-assembly-rejection",
+    )
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        usage_tracker=tracker,
+        request_id="req-assembly-rejection",
+        text_content="",
+    )
+    process_outline = AsyncMock(
+        return_value=ToolProcessingResult(
+            feedback="uses_previous_fields is backend-owned wiring.",
+            failure_kind="validation",
+            failure_codes=frozenset({"assembly_explicit_refs_not_supported"}),
+        )
+    )
+
+    async def _repair_events(request):
+        assert request.failure_codes == frozenset(
+            {"assembly_explicit_refs_not_supported"}
+        )
+        yield build_status_event("repairing")
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
+            "run_tool_self_correction",
+            side_effect=_repair_events,
+        ) as repair,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            new=process_outline,
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = _wire_events([event async for event in dispatched])
+
+    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    repair.assert_called_once()
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_success"] is False
+    assert telemetry["proposal_first_attempt_failure_kind"] == "validation"
+    assert telemetry["proposal_repair_invocation_count"] == 1
+    assert telemetry["proposal_repair_invocation_reasons"] == ["validation"]
+
+
+@pytest.mark.asyncio
 async def test_edit_propose_flow_architecture_error_is_not_translated_to_create_error() -> (
     None
 ):
