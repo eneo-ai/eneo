@@ -508,6 +508,7 @@ def _run_case(
     plan = plan if isinstance(plan, dict) else None
     plan_summary = _summarize_plan(plan)
     event_summary = _interaction_event_summary(interactions)
+    failure_summary = _failure_summary(event_summary)
     quality_report = _quality_report(
         plan=plan,
         summary=plan_summary,
@@ -536,6 +537,7 @@ def _run_case(
         "plan": plan,
         "plan_summary": plan_summary,
         "event_summary": event_summary,
+        "failure_summary": failure_summary,
         "quality_report": quality_report,
     }
 
@@ -780,6 +782,9 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "warnings": warnings if isinstance(warnings, list) else [],
         "metrics": metrics if isinstance(metrics, Mapping) else {},
         "event_summary": dict(event_summary),
+        "failure_summary": bundle.get("failure_summary")
+        if isinstance(bundle.get("failure_summary"), Mapping)
+        else _failure_summary(event_summary),
     }
 
 
@@ -887,6 +892,7 @@ def _reanalyze_bundles(
                 "reanalyzed_at": time.strftime("%Y%m%dT%H%M%S"),
                 "plan_summary": summary,
                 "event_summary": event_summary,
+                "failure_summary": _failure_summary(event_summary),
                 "quality_report": report,
             }
             output_path = _write_reanalysis_bundle(output_dir, bundle_path, refreshed)
@@ -1238,6 +1244,10 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
     event_counts: dict[str, int] = {}
     question_event_ids: list[str] = []
     error_codes: list[str] = []
+    error_details: list[JsonObject] = []
+    failure_codes: list[str] = []
+    critic_issue_ids: list[str] = []
+    repair_feedback_texts: list[str] = []
     question_like_text_events: list[str] = []
     server_ask_question_text_only_count = 0
     self_correction_quality_failure_count = 0
@@ -1272,6 +1282,13 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
                     error_codes.append(code)
                     if code == "self_correction_quality_failure":
                         self_correction_quality_failure_count += 1
+                error_details.append(_error_event_detail(data))
+                _extend_failure_observability(
+                    data,
+                    failure_codes=failure_codes,
+                    critic_issue_ids=critic_issue_ids,
+                    repair_feedback_texts=repair_feedback_texts,
+                )
             elif event_name == "usage" and isinstance(data, Mapping):
                 if data.get("last_outcome_kind") == "server_ask_question":
                     saw_server_ask_question_usage = True
@@ -1288,6 +1305,75 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
         "self_correction_quality_failure_count": (
             self_correction_quality_failure_count
         ),
+        "error_details": error_details,
+        "failure_codes": failure_codes,
+        "critic_issue_ids": critic_issue_ids,
+        "repair_feedback_texts": repair_feedback_texts[:5],
+    }
+
+
+def _error_event_detail(data: Mapping[str, Any]) -> JsonObject:
+    detail: JsonObject = {}
+    for key in ("code", "message", "phase", "request_id"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            detail[key] = value
+    details = data.get("details")
+    if isinstance(details, Mapping):
+        detail["details"] = dict(details)
+    diagnostic_context = data.get("diagnostic_context")
+    if isinstance(diagnostic_context, Mapping):
+        detail["diagnostic_context"] = dict(diagnostic_context)
+    return detail
+
+
+def _extend_failure_observability(
+    data: Mapping[str, Any],
+    *,
+    failure_codes: list[str],
+    critic_issue_ids: list[str],
+    repair_feedback_texts: list[str],
+) -> None:
+    sources = [data]
+    details = data.get("details")
+    if isinstance(details, Mapping):
+        sources.append(details)
+    diagnostic_context = data.get("diagnostic_context")
+    if isinstance(diagnostic_context, Mapping):
+        sources.append(diagnostic_context)
+
+    for source in sources:
+        _extend_unique_strings(
+            failure_codes,
+            _string_values_from_keys(
+                source,
+                ("failure_codes", "quality_failure_codes"),
+            ),
+        )
+        _extend_unique_strings(
+            critic_issue_ids,
+            _string_values_from_keys(source, ("critic_issue_ids",)),
+        )
+        _extend_unique_strings(
+            repair_feedback_texts,
+            _string_values_from_keys(
+                source,
+                ("repair_feedback", "retry_feedback", "feedback"),
+            ),
+        )
+
+
+def _failure_summary(event_summary: Mapping[str, Any]) -> JsonObject:
+    return {
+        "error_codes": _string_list(event_summary.get("error_codes")),
+        "failure_codes": _string_list(event_summary.get("failure_codes")),
+        "critic_issue_ids": _string_list(event_summary.get("critic_issue_ids")),
+        "repair_feedback_texts": _string_list(
+            event_summary.get("repair_feedback_texts")
+        ),
+        "error_details": event_summary.get("error_details")
+        if isinstance(event_summary.get("error_details"), list)
+        else [],
     }
 
 
@@ -1630,9 +1716,7 @@ def _field_groups(raw_groups: list[object]) -> list[list[str]]:
 def _field_name_matches(expected_name: str, actual_name: str) -> bool:
     expected = _normalized_field_name(expected_name)
     actual = _normalized_field_name(actual_name)
-    if len(expected) <= 3 or len(actual) <= 3:
-        return expected == actual
-    return expected == actual or expected in actual or actual in expected
+    return expected == actual
 
 
 def _normalized_field_name(value: str) -> str:
@@ -1842,6 +1926,29 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _string_values_from_keys(
+    payload: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str):
+            values.extend(part.strip() for part in value.split(",") if part.strip())
+        elif isinstance(value, list):
+            values.extend(item for item in value if isinstance(item, str) and item)
+    return values
+
+
+def _extend_unique_strings(target: list[str], values: list[str]) -> None:
+    seen = set(target)
+    for value in values:
+        if value in seen:
+            continue
+        target.append(value)
+        seen.add(value)
 
 
 def _int_value(value: object) -> int | None:

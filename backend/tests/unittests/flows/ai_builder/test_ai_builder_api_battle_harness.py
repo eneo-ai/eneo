@@ -167,6 +167,55 @@ def test_harness_can_fail_extra_post_json_text_helper() -> None:
     assert report["metrics"]["post_json_text_cleanup_step_count"] == 2
 
 
+def test_field_expectations_require_explicit_aliases() -> None:
+    harness = _battle_harness()
+    summary = {
+        "steps": [
+            {
+                "output_contract_properties": ["document_date"],
+                "output_contract_leaf_properties": ["document_date"],
+            }
+        ]
+    }
+
+    missing_alias_report = harness._quality_report(
+        plan={},
+        summary=summary,
+        expected={"expected_leaf_output_field_groups": [["date"]]},
+        event_summary={},
+    )
+    explicit_alias_report = harness._quality_report(
+        plan={},
+        summary=summary,
+        expected={"expected_leaf_output_field_groups": [["date", "document_date"]]},
+        event_summary={},
+    )
+
+    missing_checks = {check["name"]: check for check in missing_alias_report["checks"]}
+    explicit_checks = {
+        check["name"]: check for check in explicit_alias_report["checks"]
+    }
+    assert missing_checks["expected_leaf_output_fields"]["passed"] is False
+    assert explicit_checks["expected_leaf_output_fields"]["passed"] is True
+
+
+def test_context_balance_pdf_case_sets_cleanup_cap() -> None:
+    harness = _battle_harness()
+    cases = harness._read_cases_file(
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_context_balance_cases.json"
+    )
+
+    pdf_case = next(
+        case
+        for case in cases
+        if case.case_id == "document_pdf_source_retention_balance"
+    )
+
+    assert pdf_case.expected["max_post_json_text_cleanup_steps"] == 1
+
+
 def test_suite_reliability_counts_invalid_plan_errors() -> None:
     harness = _battle_harness()
 
@@ -207,6 +256,38 @@ def test_suite_reliability_counts_invalid_plan_errors() -> None:
     assert case_summary["plan_created_count"] == 1
     assert case_summary["self_correction_invalid_plan_count"] == 2
     assert case_summary["error_code_counts"] == {"self_correction_invalid_plan": 2}
+
+
+def test_event_summary_extracts_failure_detail() -> None:
+    harness = _battle_harness()
+
+    summary = harness._interaction_event_summary(
+        [
+            {
+                "events": [
+                    {
+                        "event": "error",
+                        "data": {
+                            "code": "self_correction_quality_failure",
+                            "message": "Quality retry failed.",
+                            "details": {
+                                "quality_failure_codes": "missing_leaf,wrong_mode",
+                                "critic_issue_ids": ["json_input_rejects_all_previous"],
+                                "feedback": "Use the structured output.",
+                            },
+                        },
+                    }
+                ]
+            }
+        ]
+    )
+    failure_summary = harness._failure_summary(summary)
+
+    assert summary["error_codes"] == ["self_correction_quality_failure"]
+    assert summary["failure_codes"] == ["missing_leaf", "wrong_mode"]
+    assert summary["critic_issue_ids"] == ["json_input_rejects_all_previous"]
+    assert summary["repair_feedback_texts"] == ["Use the structured output."]
+    assert failure_summary["error_details"][0]["message"] == "Quality retry failed."
 
 
 def test_suite_returns_failure_when_quality_checks_fail(

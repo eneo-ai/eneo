@@ -12,6 +12,7 @@
         "min_steps": 2,
         "min_json_steps": 1,
         "max_all_previous_steps": 1,
+        "max_post_json_text_cleanup_steps": 1,
         "forbid_primary_material_form_fields": true,
         "forbid_generic_primary_reader_envelope": true,
         "expected_leaf_output_field_groups": [
