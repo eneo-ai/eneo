@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.module_table import Modules
 from eneo.database.tables.tenant_table import tenants_modules_table
-from eneo.modules.module import ModuleBase, ModuleClientConfig, ModuleInDB
+from eneo.modules.module import (
+    ModuleBase,
+    ModuleClientConfig,
+    ModuleInDB,
+    ModuleTenantClientConfig,
+)
 
 
 class ModuleRepository:
@@ -42,20 +47,49 @@ class ModuleRepository:
         return ModuleInDB.model_validate(module)
 
     async def update_client_config(
-        self, module_id: UUID, config: ModuleClientConfig
-    ) -> Optional[ModuleInDB]:
+        self, tenant_id: UUID, module_id: UUID, config: ModuleClientConfig
+    ) -> Optional[ModuleTenantClientConfig]:
         stmt = (
-            sa.update(Modules)
-            .where(Modules.id == module_id)
+            sa.update(tenants_modules_table)
+            .where(
+                tenants_modules_table.c.tenant_id == tenant_id,
+                tenants_modules_table.c.module_id == module_id,
+            )
             .values(**config.model_dump())
-            .returning(Modules)
+            .returning(
+                tenants_modules_table.c.tenant_id,
+                tenants_modules_table.c.module_id,
+                tenants_modules_table.c.redirect_uris,
+                tenants_modules_table.c.service_key_id,
+            )
         )
-        module = await self.session.scalar(stmt)
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
 
-        if module is None:
+        if row is None:
             return None
 
-        return ModuleInDB.model_validate(module)
+        return ModuleTenantClientConfig.model_validate(dict(row))
+
+    async def get_module_client_config(
+        self, tenant_id: UUID, module_id: UUID
+    ) -> Optional[ModuleTenantClientConfig]:
+        stmt = sa.select(
+            tenants_modules_table.c.tenant_id,
+            tenants_modules_table.c.module_id,
+            tenants_modules_table.c.redirect_uris,
+            tenants_modules_table.c.service_key_id,
+        ).where(
+            tenants_modules_table.c.tenant_id == tenant_id,
+            tenants_modules_table.c.module_id == module_id,
+        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+
+        if row is None:
+            return None
+
+        return ModuleTenantClientConfig.model_validate(dict(row))
 
     async def is_module_in_tenant(self, module_id: UUID, tenant_id: UUID) -> bool:
         stmt = sa.select(

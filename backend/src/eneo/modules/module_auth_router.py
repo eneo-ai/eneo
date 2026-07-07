@@ -20,7 +20,7 @@ _Container = Annotated[Container, Depends(get_container(with_user=True))]
 
 
 @router.post(
-    "/auth/tickets/",
+    "/tickets/",
     response_model=ModuleTicketResponse,
     status_code=status.HTTP_201_CREATED,
     description=(
@@ -46,7 +46,7 @@ async def issue_module_ticket(
 
 
 @router.post(
-    "/auth/token/",
+    "/token/",
     response_model=ModuleTokenResponse,
     description=(
         "Exchange a one-time login ticket for a short-lived, module-scoped "

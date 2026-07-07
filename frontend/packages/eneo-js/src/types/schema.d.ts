@@ -7517,7 +7517,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/{module_id}/client-config/": {
+  "/api/v1/modules/{tenant_id}/{module_id}/client-config/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7532,9 +7532,9 @@ export interface paths {
     head?: never;
     /**
      * Update Module Client Config
-     * @description Set a module's auth-broker client config: the exact-match redirect URI allowlist and the sk_ service key allowed to exchange its login tickets.
+     * @description Set a tenant module's auth-broker client config: the exact-match redirect URI allowlist and the sk_ service key allowed to exchange that tenant's login tickets.
      */
-    patch: operations["update_module_client_config_api_v1_modules__module_id__client_config__patch"];
+    patch: operations["update_module_client_config_api_v1_modules__tenant_id___module_id__client_config__patch"];
     trace?: never;
   };
   "/api/v1/modules/{tenant_id}/": {
@@ -7557,7 +7557,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/auth/tickets/": {
+  "/api/v1/module-auth/tickets/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7570,14 +7570,14 @@ export interface paths {
      * Issue Module Ticket
      * @description Issue a one-time, short-lived login ticket for a module. Requires a session token; the frontend redirects the browser to `redirect_target`, where the module exchanges the ticket server-side.
      */
-    post: operations["issue_module_ticket_api_v1_modules_auth_tickets__post"];
+    post: operations["issue_module_ticket_api_v1_module_auth_tickets__post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/auth/token/": {
+  "/api/v1/module-auth/token/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7590,7 +7590,7 @@ export interface paths {
      * Exchange Module Ticket
      * @description Exchange a one-time login ticket for a short-lived, module-scoped user token. Requires the sk_ service key registered for the ticket's module; the ticket is consumed atomically and cannot be reused.
      */
-    post: operations["exchange_module_ticket_api_v1_modules_auth_token__post"];
+    post: operations["exchange_module_ticket_api_v1_module_auth_token__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -14255,10 +14255,23 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /** ModuleTenantClientConfig */
+    ModuleTenantClientConfig: {
       /** Redirect Uris */
       redirect_uris?: string[] | null;
       /** Service Key Id */
       service_key_id?: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
     };
     /** ModuleTicketRequest */
     ModuleTicketRequest: {
@@ -46324,11 +46337,12 @@ export interface operations {
       };
     };
   };
-  update_module_client_config_api_v1_modules__module_id__client_config__patch: {
+  update_module_client_config_api_v1_modules__tenant_id___module_id__client_config__patch: {
     parameters: {
       query?: never;
       header?: never;
       path: {
+        tenant_id: string;
         module_id: string;
       };
       cookie?: never;
@@ -46345,7 +46359,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ModuleInDB"];
+          "application/json": components["schemas"]["ModuleTenantClientConfig"];
         };
       };
       /** @description Unauthorized */
@@ -46430,7 +46444,7 @@ export interface operations {
       };
     };
   };
-  issue_module_ticket_api_v1_modules_auth_tickets__post: {
+  issue_module_ticket_api_v1_module_auth_tickets__post: {
     parameters: {
       query?: never;
       header?: never;
@@ -46499,7 +46513,7 @@ export interface operations {
       };
     };
   };
-  exchange_module_ticket_api_v1_modules_auth_token__post: {
+  exchange_module_ticket_api_v1_module_auth_token__post: {
     parameters: {
       query?: never;
       header?: never;

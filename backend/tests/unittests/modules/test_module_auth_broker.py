@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.authentication.auth_models import ApiKeyOwnership
 from eneo.authentication.auth_service import AuthService
@@ -12,7 +13,7 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.modules.module import ModuleInDB
+from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
 from eneo.modules.module_auth import (
     ModuleAuthBroker,
     module_audience,
@@ -34,6 +35,9 @@ class FakeRedis:
     async def setex(self, key, ttl, value):
         self.store[key] = value
 
+    async def get(self, key):
+        return self.store.get(key)
+
     async def getdel(self, key):
         return self.store.pop(key, None)
 
@@ -42,13 +46,22 @@ def make_module(**overrides):
     values = {
         "id": MODULE_ID,
         "name": "tal-till-text",
-        "redirect_uris": [REDIRECT_URI],
-        "service_key_id": SERVICE_KEY_ID,
         "created_at": None,
         "updated_at": None,
     }
     values.update(overrides)
     return ModuleInDB(**values)
+
+
+def make_config(**overrides):
+    values = {
+        "tenant_id": TENANT_ID,
+        "module_id": MODULE_ID,
+        "redirect_uris": [REDIRECT_URI],
+        "service_key_id": SERVICE_KEY_ID,
+    }
+    values.update(overrides)
+    return ModuleTenantClientConfig(**values)
 
 
 def make_user(**overrides):
@@ -74,12 +87,14 @@ def make_api_key(**overrides):
     return key
 
 
-def make_broker(module=None, user=None, redis=None):
+def make_broker(module=None, config=None, user=None, redis=None):
     module_repo = AsyncMock()
     module_repo.get_module.return_value = (
         module if module is not None else make_module()
     )
-    module_repo.is_module_in_tenant.return_value = True
+    module_repo.get_module_client_config.return_value = (
+        config if config is not None else make_config()
+    )
 
     user_repo = AsyncMock()
     user_repo.get_user_by_id_and_tenant_id.return_value = (
@@ -124,10 +139,19 @@ class TestIssueTicket:
             await issue(broker)
 
     async def test_unconfigured_module_raises_bad_request(self):
-        broker = make_broker(module=make_module(service_key_id=None))
+        broker = make_broker(config=make_config(service_key_id=None))
 
         with pytest.raises(BadRequestException):
             await issue(broker)
+
+    async def test_redirect_uri_is_normalized_before_allowlist_match(self):
+        broker = make_broker()
+
+        result = await issue(
+            broker, redirect_uri="https://TTT.example.com/auth/callback/"
+        )
+
+        assert result.redirect_target.startswith(REDIRECT_URI + "?ticket=")
 
     async def test_unregistered_redirect_uri_rejected(self):
         broker = make_broker()
@@ -135,9 +159,18 @@ class TestIssueTicket:
         with pytest.raises(BadRequestException):
             await issue(broker, redirect_uri="https://evil.example.com/callback")
 
+    async def test_invalid_redirect_uri_rejected_as_bad_request(self):
+        broker = make_broker()
+
+        with pytest.raises(BadRequestException):
+            await issue(
+                broker,
+                redirect_uri="https://ttt.example.com/auth/callback?ticket=x",
+            )
+
     async def test_module_not_enabled_for_tenant_rejected(self):
         broker = make_broker()
-        broker.module_repo.is_module_in_tenant.return_value = False
+        broker.module_repo.get_module_client_config.return_value = None
 
         with pytest.raises(UnauthorizedException):
             await issue(broker)
@@ -198,6 +231,18 @@ class TestExchangeTicket:
                 api_key=make_api_key(id=uuid4()), ticket=ticket
             )
 
+    async def test_wrong_service_key_does_not_consume_ticket(self):
+        broker = make_broker()
+        ticket = (await issue(broker)).ticket
+
+        with pytest.raises(UnauthorizedException):
+            await broker.exchange_ticket(
+                api_key=make_api_key(id=uuid4()), ticket=ticket
+            )
+
+        result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+        assert result.module == "tal-till-text"
+
     async def test_rotated_successor_of_registered_key_accepted(self):
         broker = make_broker()
         ticket = (await issue(broker)).ticket
@@ -224,3 +269,21 @@ class TestExchangeTicket:
 
         with pytest.raises(AuthenticationException):
             await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+
+class TestModuleClientConfig:
+    def test_redirect_uris_are_normalized_and_deduplicated(self):
+        config = ModuleClientConfig(
+            redirect_uris=[
+                "https://TTT.example.com/auth/callback/",
+                "https://ttt.example.com/auth/callback",
+            ]
+        )
+
+        assert config.redirect_uris == [REDIRECT_URI]
+
+    def test_invalid_redirect_uri_is_rejected(self):
+        with pytest.raises(ValidationError):
+            ModuleClientConfig(
+                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"]
+            )

@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
@@ -18,7 +18,7 @@ from eneo.authentication.auth_models import (
     JWTPayload,
 )
 from eneo.authentication.auth_service import AuthService
-from eneo.main.config import get_settings
+from eneo.main.config import get_settings, validate_redirect_uri
 from eneo.main.exceptions import (
     AuthenticationException,
     BadRequestException,
@@ -37,6 +37,14 @@ MODULE_AUDIENCE_PREFIX = "eneo-module:"
 class ModuleTicketRequest(BaseModel):
     module_id: UUID
     redirect_uri: str
+
+    @field_validator("redirect_uri")
+    @classmethod
+    def normalize_redirect_uri(cls, value: str) -> str:
+        redirect_uri = validate_redirect_uri(value)
+        if redirect_uri is None:
+            raise ValueError("redirect_uri is required")
+        return redirect_uri
 
 
 class ModuleTicketResponse(BaseModel):
@@ -101,24 +109,32 @@ class ModuleAuthBroker:
         self, user: UserInDB, module_id: UUID, redirect_uri: str
     ) -> ModuleTicketResponse:
         settings = get_settings()
+        try:
+            normalized_redirect_uri = validate_redirect_uri(redirect_uri)
+        except ValueError as exc:
+            raise BadRequestException(str(exc)) from exc
+        if normalized_redirect_uri is None:
+            raise BadRequestException("redirect_uri is invalid.")
+        redirect_uri = normalized_redirect_uri
 
         module = await self.module_repo.get_module(module_id)
         if module is None:
             raise NotFoundException("Module not found.")
 
-        if not module.redirect_uris or module.service_key_id is None:
+        config = await self.module_repo.get_module_client_config(
+            tenant_id=user.tenant_id, module_id=module.id
+        )
+        if config is None:
+            raise UnauthorizedException("Module is not enabled for this tenant.")
+
+        if not config.redirect_uris or config.service_key_id is None:
             raise BadRequestException(
                 "Module is not configured for login handoff "
                 "(missing redirect_uris or service key registration)."
             )
 
-        if redirect_uri not in module.redirect_uris:
+        if redirect_uri not in config.redirect_uris:
             raise BadRequestException("redirect_uri is not registered for this module.")
-
-        if not await self.module_repo.is_module_in_tenant(
-            module_id=module.id, tenant_id=user.tenant_id
-        ):
-            raise UnauthorizedException("Module is not enabled for this tenant.")
 
         ticket = secrets.token_urlsafe(32)
         ttl = settings.module_auth_ticket_ttl_seconds
@@ -158,13 +174,18 @@ class ModuleAuthBroker:
                 "Module ticket exchange requires a service (sk_) key."
             )
 
-        raw = await self.redis_client.getdel(_ticket_redis_key(ticket))
+        ticket_key = _ticket_redis_key(ticket)
+        raw = await self.redis_client.get(ticket_key)
         if raw is None:
             raise AuthenticationException("Invalid or expired module ticket.")
 
         data = json.loads(raw)
         module = await self.module_repo.get_module(UUID(data["module_id"]))
         tenant_id = UUID(data["tenant_id"])
+        module_id = UUID(data["module_id"])
+        config = await self.module_repo.get_module_client_config(
+            tenant_id=tenant_id, module_id=module_id
+        )
 
         # Binding: only the key registered for this module may exchange its
         # tickets. A rotated successor stays valid (it points back at the
@@ -173,8 +194,9 @@ class ModuleAuthBroker:
         allowed_ids = {api_key.id, api_key.rotated_from_key_id} - {None}
         if (
             module is None
-            or module.service_key_id is None
-            or module.service_key_id not in allowed_ids
+            or config is None
+            or config.service_key_id is None
+            or config.service_key_id not in allowed_ids
         ):
             raise UnauthorizedException("API key is not registered for this module.")
 
@@ -186,6 +208,10 @@ class ModuleAuthBroker:
         )
         if user is None or not user.is_active:
             raise AuthenticationException("User is not active.")
+
+        consumed = await self.redis_client.getdel(ticket_key)
+        if consumed is None or consumed != raw:
+            raise AuthenticationException("Invalid or expired module ticket.")
 
         expires_in_minutes = settings.module_auth_token_expiry_minutes
         access_token = self.auth_service.create_access_token_for_user(

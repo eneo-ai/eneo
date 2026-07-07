@@ -20,14 +20,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("modules", sa.Column("redirect_uris", JSONB(), nullable=True))
+    op.add_column("tenants_modules", sa.Column("redirect_uris", JSONB(), nullable=True))
     op.add_column(
-        "modules",
+        "tenants_modules",
         sa.Column("service_key_id", sa.UUID(), nullable=True),
     )
     op.create_foreign_key(
-        "fk_modules_service_key_id_api_keys_v2",
-        "modules",
+        "fk_tenants_modules_service_key_id_api_keys_v2",
+        "tenants_modules",
         "api_keys_v2",
         ["service_key_id"],
         ["id"],
@@ -37,7 +37,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(
-        "fk_modules_service_key_id_api_keys_v2", "modules", type_="foreignkey"
+        "fk_tenants_modules_service_key_id_api_keys_v2",
+        "tenants_modules",
+        type_="foreignkey",
     )
-    op.drop_column("modules", "service_key_id")
-    op.drop_column("modules", "redirect_uris")
+    op.drop_column("tenants_modules", "service_key_id")
+    op.drop_column("tenants_modules", "redirect_uris")

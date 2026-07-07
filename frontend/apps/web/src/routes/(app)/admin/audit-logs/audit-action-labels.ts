@@ -113,6 +113,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_module_added_to_tenant,
     description: m.audit_action_module_added_to_tenant_description
   },
+  module_client_config_updated: {
+    name: m.audit_action_module_client_config_updated,
+    description: m.audit_action_module_client_config_updated_description
+  },
+  module_auth_ticket_issued: {
+    name: m.audit_action_module_auth_ticket_issued,
+    description: m.audit_action_module_auth_ticket_issued_description
+  },
+  module_auth_token_exchanged: {
+    name: m.audit_action_module_auth_token_exchanged,
+    description: m.audit_action_module_auth_token_exchanged_description
+  },
   governance_policy_updated: {
     name: m.audit_action_governance_policy_updated,
     description: m.audit_action_governance_policy_updated_description

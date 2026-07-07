@@ -11,7 +11,12 @@ from eneo.authentication import auth
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import ModelId, PaginatedResponse
-from eneo.modules.module import ModuleBase, ModuleClientConfig, ModuleInDB
+from eneo.modules.module import (
+    ModuleBase,
+    ModuleClientConfig,
+    ModuleInDB,
+    ModuleTenantClientConfig,
+)
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantInDB
@@ -52,26 +57,60 @@ async def add_module(module: ModuleBase, container: _Container) -> ModuleInDB:
 
 
 @router.patch(
-    "/{module_id}/client-config/",
-    response_model=ModuleInDB,
+    "/{tenant_id}/{module_id}/client-config/",
+    response_model=ModuleTenantClientConfig,
     description=(
-        "Set a module's auth-broker client config: the exact-match redirect "
-        "URI allowlist and the sk_ service key allowed to exchange its "
-        "login tickets."
+        "Set a tenant module's auth-broker client config: the exact-match "
+        "redirect URI allowlist and the sk_ service key allowed to exchange "
+        "that tenant's login tickets."
     ),
     responses=responses.get_responses([404]),
 )
 async def update_module_client_config(
+    tenant_id: UUID,
     module_id: UUID,
     config: ModuleClientConfig,
     container: _Container,
-) -> ModuleInDB:
+) -> ModuleTenantClientConfig:
     module_repo = container.module_repo()
-    module = await module_repo.update_client_config(module_id, config)
+    module = await module_repo.get_module(module_id)
     if module is None:
         raise NotFoundException("Module not found.")
 
-    return module
+    previous = await module_repo.get_module_client_config(
+        tenant_id=tenant_id, module_id=module_id
+    )
+    if previous is None:
+        raise NotFoundException("Module is not enabled for this tenant.")
+
+    updated = await module_repo.update_client_config(
+        tenant_id=tenant_id, module_id=module_id, config=config
+    )
+    if updated is None:
+        raise NotFoundException("Module is not enabled for this tenant.")
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.MODULE_CLIENT_CONFIG_UPDATED,
+        entity_type=EntityType.MODULE,
+        entity_id=module_id,
+        description=f"Sysadmin updated module auth client config for '{module.name}'",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "super_duper_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "module_id": str(module_id),
+                "module_name": module.name,
+            },
+            "before": previous.model_dump(mode="json"),
+            "after": updated.model_dump(mode="json"),
+        },
+    )
+
+    return updated
 
 
 @router.post(
