@@ -1837,11 +1837,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "post_processing_goal" not in question_ids
-        assert any(
-            candidate.issue_id == "post_processing_goal"
-            and candidate.suppressed_reason == "question_budget_exhausted"
-            for candidate in analysis.suppressed_candidates
-        )
 
     def test_structured_analysis_answer_resolves_audio_docx_extraction_question(
         self,
@@ -2746,9 +2741,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "final_pdf_type" not in question_ids
-        assert all(
-            candidate.issue_id != "final_pdf_type" for candidate in analysis.candidates
-        )
         assert all(
             "slut-pdf" not in assumption.casefold()
             for assumption in analysis.assumptions

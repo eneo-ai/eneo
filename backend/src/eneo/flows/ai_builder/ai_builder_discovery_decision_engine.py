@@ -84,8 +84,6 @@ def apply_discovery_decision_engine(
     list[DiscoveryIssue],
     list[str],
     list[str],
-    list[DiscoveryCandidate],
-    list[DiscoveryCandidate],
 ]:
     scored_signals = score_conversation_signals(
         conversation, freeform_text=profile.text
@@ -97,8 +95,6 @@ def apply_discovery_decision_engine(
     )
     selected: list[DiscoveryIssue] = []
     selected_question_ids: list[str] = []
-    suppressed: list[DiscoveryCandidate] = []
-    candidates: list[DiscoveryCandidate] = []
     family_used: set[str] = set()
 
     for issue in _rank_issues_for_profile(issues, profile):
@@ -114,48 +110,28 @@ def apply_discovery_decision_engine(
             question_id is not None
             and question_exposure_for_id(question_id) != "user_requirement"
         ):
-            suppressed.append(
-                suppressed_candidate(candidate, reason="planner_internal_question")
-            )
             continue
 
         if (
             profile.edit_mode
             and candidate.family not in profile.edit_scope.active_families
         ):
-            suppressed.append(
-                suppressed_candidate(candidate, reason="inactive_edit_scope")
-            )
             continue
 
-        candidates.append(candidate)
-
         if candidate.impact == "polish":
-            suppressed.append(
-                suppressed_candidate(candidate, reason="polish_not_blocking")
-            )
             continue
 
         assumption = assumption_for_candidate(candidate, profile)
         if candidate.assumption_safe and assumption is not None:
             assumptions.append(assumption)
-            suppressed.append(
-                suppressed_candidate(candidate, reason="assumed_from_context")
-            )
             family_used.add(candidate.family)
             continue
 
         if candidate.family in family_used:
-            suppressed.append(
-                suppressed_candidate(candidate, reason="family_suppressed")
-            )
             continue
 
         if candidate.confidence == "high" and assumption is not None:
             assumptions.append(assumption)
-            suppressed.append(
-                suppressed_candidate(candidate, reason="high_confidence_assumption")
-            )
             family_used.add(candidate.family)
             continue
 
@@ -163,9 +139,6 @@ def apply_discovery_decision_engine(
             spent_user_questions + len(selected_question_ids) >= max_questions
             and candidate.impact != "architecture"
         ):
-            suppressed.append(
-                suppressed_candidate(candidate, reason="question_budget_exhausted")
-            )
             continue
 
         selected.append(issue)
@@ -177,8 +150,6 @@ def apply_discovery_decision_engine(
         _rank_issues_for_profile(selected, profile),
         assumptions,
         selected_question_ids,
-        suppressed,
-        candidates,
     )
 
 
@@ -392,25 +363,6 @@ def assumption_for_candidate(
             "Assuming the flow primarily handles reports, decisions, and formal documents.",
         )
     return None
-
-
-def suppressed_candidate(
-    candidate: DiscoveryCandidate,
-    *,
-    reason: str,
-) -> DiscoveryCandidate:
-    return DiscoveryCandidate(
-        issue_id=candidate.issue_id,
-        question_id=candidate.question_id,
-        impact=candidate.impact,
-        confidence=candidate.confidence,
-        assumption_safe=candidate.assumption_safe,
-        family=candidate.family,
-        resolved_by=candidate.resolved_by,
-        evidence=candidate.evidence,
-        selected=False,
-        suppressed_reason=reason,
-    )
 
 
 def compute_question_budget(text: str) -> int:

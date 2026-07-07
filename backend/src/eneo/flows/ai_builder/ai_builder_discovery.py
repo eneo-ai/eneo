@@ -69,7 +69,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
     DiscoveryAnalysis,
-    DiscoveryCandidate,
     DiscoveryIssue,
     DiscoveryLanguage,
     DiscoveryProfile,
@@ -180,8 +179,6 @@ def analyze_discovery(
         selected_issues,
         assumptions,
         selected_question_ids,
-        suppressed_candidates,
-        candidates,
     ) = _apply_discovery_decision_engine(
         issues=_dedupe_issues(raw_issues),
         profile=profile,
@@ -201,8 +198,6 @@ def analyze_discovery(
         mvs_met=mvs_met,
         assumptions=tuple(dict.fromkeys(assumptions)),
         selected_question_ids=tuple(selected_question_ids),
-        suppressed_candidates=tuple(suppressed_candidates),
-        candidates=tuple(candidates),
     )
 
 
@@ -878,8 +873,6 @@ def _apply_discovery_decision_engine(
     list[DiscoveryIssue],
     list[str],
     list[str],
-    list[DiscoveryCandidate],
-    list[DiscoveryCandidate],
 ]:
     return apply_discovery_decision_engine(
         issues=issues,

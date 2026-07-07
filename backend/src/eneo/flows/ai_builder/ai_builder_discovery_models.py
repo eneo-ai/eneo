@@ -91,8 +91,6 @@ class DiscoveryCandidate:
     family: str
     resolved_by: DiscoveryResolvedBy
     evidence: tuple[str, ...] = field(default_factory=tuple)
-    selected: bool = False
-    suppressed_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,8 +105,6 @@ class DiscoveryAnalysis:
     mvs_met: bool = True
     assumptions: tuple[str, ...] = ()
     selected_question_ids: tuple[str, ...] = ()
-    suppressed_candidates: tuple[DiscoveryCandidate, ...] = ()
-    candidates: tuple[DiscoveryCandidate, ...] = ()
 
     @property
     def blocking_issues(self) -> tuple[DiscoveryIssue, ...]:

@@ -175,13 +175,6 @@ class TestEditScopePolicy:
         assert "document_kind" not in question_ids
         assert "document_material_scope" not in question_ids
 
-        candidate_question_ids = {
-            candidate.question_id
-            for candidate in analysis.candidates
-            if candidate.question_id is not None
-        }
-        assert candidate_question_ids == set()
-
     def test_word_instead_of_pdf_edit_defaults_generated_docx_without_reopening_question(
         self,
     ) -> None:
@@ -401,7 +394,6 @@ class TestEditScopePolicy:
 
         assert analysis.issues == ()
         assert analysis.next_issue is None
-        assert analysis.candidates == ()
 
     def test_citation_edit_does_not_reopen_input_questions(self) -> None:
         flow = _make_flow(
