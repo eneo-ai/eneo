@@ -433,6 +433,7 @@ export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
 };
 
 export const CodeBlockCopyButton = ({
+  "aria-label": ariaLabel,
   onCopy,
   onError,
   timeout = 2000,
@@ -473,6 +474,7 @@ export const CodeBlockCopyButton = ({
 
   return (
     <Button
+      aria-label={ariaLabel ?? (isCopied ? "Code copied" : "Copy code")}
       className={cn("shrink-0", className)}
       onClick={copyToClipboard}
       size="icon"

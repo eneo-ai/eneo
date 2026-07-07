@@ -14,6 +14,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
+    McpToolReference,
     ResponseType,
     TokenUsage,
     ToolCallMetadata,
@@ -81,6 +82,21 @@ def _tool(status: str | None, tool_call_id: str = "call-1") -> ToolCallMetadata:
         tool_call_id=tool_call_id,
         approved=None,
         result_status=status,
+    )
+
+
+def _mcp_reference(
+    reference_id: UUID = UUID("44444444-4444-4444-4444-444444444444"),
+) -> McpToolReference:
+    return McpToolReference(
+        id=reference_id,
+        tool_call_id="call-1",
+        mcp_tool_name="files__read_file",
+        uri="mcp://files/a.txt",
+        mime_type="text/markdown",
+        content="resource content",
+        meta={"title": "a.txt", "section": "Intro"},
+        order=0,
     )
 
 
@@ -227,6 +243,43 @@ async def test_reasoning_only_closes_without_text():
 
 
 @pytest.mark.asyncio
+async def test_reasoning_can_resume_after_text():
+    completions = [
+        Completion(response_type=ResponseType.TEXT, text="First"),
+        Completion(
+            response_type=ResponseType.REASONING, reasoning_content="Think again"
+        ),
+        Completion(response_type=ResponseType.TEXT, text="Second"),
+    ]
+
+    chunks = await _collect(_response(completions))
+    types = [chunk["type"] for chunk in chunks]
+
+    assert types == [
+        "start",
+        "data-session",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+
+    assert [c["id"] for c in chunks if c["type"] == "text-start"] == [
+        "text-0",
+        "text-1",
+    ]
+    assert [c["id"] for c in chunks if c["type"] == "reasoning-start"] == [
+        "reasoning-0"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_calls_and_approval_pause_resume():
     completions = [
         Completion(
@@ -275,6 +328,46 @@ async def test_tool_calls_and_approval_pause_resume():
     tool_output = next(c for c in chunks if c["type"] == "tool-output-available")
     assert tool_output["toolCallId"] == "call-1"
     assert tool_output["output"] == {"status": "succeeded"}
+
+
+@pytest.mark.asyncio
+async def test_tool_call_emits_mcp_resource_references():
+    reference = _mcp_reference()
+    completions = [
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[_tool(status="succeeded")],
+            mcp_tool_references=[reference],
+        ),
+        Completion(response_type=ResponseType.TEXT, text="Done"),
+    ]
+
+    chunks = await _collect(_response(completions))
+    types = [chunk["type"] for chunk in chunks]
+
+    assert types == [
+        "start",
+        "data-session",
+        "data-mcp-tool-references",
+        "tool-output-available",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+
+    references = next(c for c in chunks if c["type"] == "data-mcp-tool-references")
+    assert references["data"]["mcp_tool_references"] == [
+        {
+            "id": str(reference.id),
+            "uri": "mcp://files/a.txt",
+            "mime_type": "text/markdown",
+            "content": "resource content",
+            "meta": {"title": "a.txt", "section": "Intro"},
+            "tool_call_id": "call-1",
+            "mcp_tool_name": "files__read_file",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -338,6 +431,7 @@ async def test_generated_image_and_status_event():
 
     file_chunk = chunks[3]
     assert file_chunk["mediaType"] == "image/png"
+    assert file_chunk["filename"] == "generated.png"
     assert file_chunk["url"].startswith("http://backend:8123/api/v1/files/")
     assert "/download/?token=" in file_chunk["url"]
 

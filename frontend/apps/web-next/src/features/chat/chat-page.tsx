@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { History, Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +14,7 @@ import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ChatView } from "./chat-view";
 import { HistoryPanel } from "./history-panel";
+import { InsightsPanel } from "./insights-panel";
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
@@ -21,6 +22,12 @@ type ActiveConversation = {
   sessionId: string | null;
   messages: EneoUIMessage[];
 };
+
+function hasInsights(partner: ChatPartner): partner is ChatPartner & {
+  type: "assistant" | "group-chat";
+} {
+  return Boolean(partner.insightEnabled && partner.type !== "default-assistant");
+}
 
 /**
  * Chat surface: ChatView with a collapsible history panel. History is closed by
@@ -33,6 +40,7 @@ export function ChatPage({
   initialSessionId,
   buildSessionUrl,
   modelSelector,
+  partnerSwitcher,
   actions
 }: {
   partner: ChatPartner;
@@ -41,6 +49,8 @@ export function ChatPage({
   buildSessionUrl?: (sessionId: string | null) => string;
   /** Interactive model picker rendered in the composer (default-assistant). */
   modelSelector?: React.ReactNode;
+  /** Optional interactive partner picker for space chat. */
+  partnerSwitcher?: React.ReactNode;
   /** Header actions for editable partners (e.g. an Edit button for assistants). */
   actions?: React.ReactNode;
 }) {
@@ -50,6 +60,14 @@ export function ChatPage({
   );
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(initialSessionId ?? null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [tab, setTab] = useState<"chat" | "insights">(() =>
+    typeof window !== "undefined" &&
+    window.location.search.includes("tab=insights") &&
+    partner.insightEnabled &&
+    partner.type !== "default-assistant"
+      ? "insights"
+      : "chat"
+  );
 
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
@@ -79,6 +97,14 @@ export function ChatPage({
     if (buildSessionUrl) window.history.replaceState(null, "", buildSessionUrl(sessionId));
   }
 
+  const selectTab = useCallback((next: "chat" | "insights") => {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === "insights") url.searchParams.set("tab", "insights");
+    else url.searchParams.delete("tab");
+    window.history.replaceState(null, "", url);
+  }, []);
+
   function selectSession(sessionId: string) {
     setPendingSessionId(sessionId);
     updateUrl(sessionId);
@@ -102,11 +128,39 @@ export function ChatPage({
     return () => document.removeEventListener("keydown", onKey);
   }, [historyOpen]);
 
+  const insightPartner = hasInsights(partner) ? partner : null;
+  const showInsightsTab = Boolean(insightPartner);
+  const effectiveTab = showInsightsTab ? tab : "chat";
+
   return (
     <div className="relative flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4">
         <div className="-mx-4 flex h-13 shrink-0 items-center gap-2.5 border-b px-4">
-          <span className="truncate text-sm font-semibold">{partner.name}</span>
+          {partnerSwitcher ?? (
+            <span className="truncate text-sm font-semibold">{partner.name}</span>
+          )}
+          {showInsightsTab && (
+            <div className="bg-muted flex rounded-md p-0.5">
+              <Button
+                type="button"
+                variant={effectiveTab === "chat" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => selectTab("chat")}
+              >
+                {t("chat")}
+              </Button>
+              <Button
+                type="button"
+                variant={effectiveTab === "insights" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => selectTab("insights")}
+              >
+                {t("insights")}
+              </Button>
+            </div>
+          )}
           <div className="ml-auto flex items-center gap-2">
             {/* Fixed-model partners show a read-only badge; the default
                 assistant's interactive picker lives in the composer instead. */}
@@ -133,7 +187,9 @@ export function ChatPage({
             </Button>
           </div>
         </div>
-        {active ? (
+        {insightPartner && effectiveTab === "insights" ? (
+          <InsightsPanel partner={insightPartner} />
+        ) : active ? (
           <ChatView
             key={active.key}
             partner={partner}

@@ -117,7 +117,7 @@ export function HistoryPanel({
           <div
             key={session.id}
             className={cn(
-              "group hover:bg-sidebar-accent/60 flex items-center rounded-lg transition-colors",
+              "group hover:bg-sidebar-accent/60 focus-within:bg-sidebar-accent/60 flex items-center rounded-lg transition-colors",
               session.id === activeSessionId &&
                 "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent font-medium"
             )}
@@ -135,7 +135,7 @@ export function HistoryPanel({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-7 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                  className="size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                   aria-label={t("actions")}
                 >
                   <MoreHorizontal className="size-4" />
@@ -185,6 +185,7 @@ export function HistoryPanel({
             <DialogTitle>{t("rename")}</DialogTitle>
           </DialogHeader>
           <Input
+            aria-label={t("rename")}
             value={renaming?.name ?? ""}
             onChange={(event) =>
               setRenaming((current) => current && { ...current, name: event.target.value })

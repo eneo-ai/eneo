@@ -16,14 +16,20 @@ import {
   MessageContent,
   MessageResponse
 } from "@/components/ai-elements/message";
-import { resolveInrefs, stripInrefs, trimPartialInref } from "@/lib/chat/inref";
+import { useAppContext } from "@/components/providers/app-context";
+import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage } from "@/lib/chat/types";
 
 import { ActivityTimeline } from "./activity-timeline";
+import { copyAssistantAnswer, getPreferredAssistantCopyFormat } from "./copy-assistant-answer";
 import {
   GeneratedFile,
+  McpImageStrip,
+  MessageFilePart,
   MessageFiles,
   MessageSources,
+  answeringAssistantFromParts,
+  mcpReferencesFromParts,
   mergeSources,
   ToolApprovalCard
 } from "./message-parts";
@@ -36,23 +42,31 @@ import {
  */
 export function ChatMessage({
   message,
+  sessionId = null,
   isStreaming = false,
   showResponseLabel = false,
   liveAnswering = null
 }: {
   message: EneoUIMessage;
+  sessionId?: string | null;
   isStreaming?: boolean;
   showResponseLabel?: boolean;
   liveAnswering?: { id: string; handle: string } | null;
 }) {
   const t = useTranslations();
+  const { settings } = useAppContext();
   const isAssistant = message.role === "assistant";
+  const copyFormat = getPreferredAssistantCopyFormat(settings);
   const textContent = message.parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n\n");
-  const answering = message.metadata?.answeringAssistant ?? (isStreaming ? liveAnswering : null);
-  const sources = mergeSources(message.parts, message.metadata?.webSearchReferences);
+  const answering =
+    message.metadata?.answeringAssistant ??
+    answeringAssistantFromParts(message.parts) ??
+    (isStreaming ? liveAnswering : null);
+  const mcpReferences = mcpReferencesFromParts(message.parts, message.metadata?.mcpToolReferences);
+  const sources = mergeSources(message.parts, message.metadata?.webSearchReferences, mcpReferences);
   const sourceIds = sources.map((source) => source.sourceId);
 
   return (
@@ -63,7 +77,9 @@ export function ChatMessage({
             @{answering.handle}
           </span>
         )}
-        {isAssistant && <ActivityTimeline parts={message.parts} isStreaming={isStreaming} />}
+        {isAssistant && (
+          <ActivityTimeline parts={message.parts} isStreaming={isStreaming} sessionId={sessionId} />
+        )}
         {message.parts.map((part, index) => {
           // Reasoning and tool calls are grouped into ActivityTimeline above.
           if (part.type === "reasoning" || part.type === "dynamic-tool") {
@@ -90,21 +106,14 @@ export function ChatMessage({
             return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
           }
           if (part.type === "file") {
-            return part.mediaType.startsWith("image/") ? (
-              // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
-              <img
-                key={index}
-                src={part.url}
-                alt={part.filename ?? "generated"}
-                className="max-h-96 rounded-lg border"
-              />
-            ) : null;
+            return <MessageFilePart key={index} part={part} />;
           }
           return null;
         })}
         {!isAssistant && (message.metadata?.files?.length ?? 0) > 0 && (
           <MessageFiles files={message.metadata!.files!} />
         )}
+        {isAssistant && <McpImageStrip references={mcpReferences} />}
         {isAssistant &&
           message.metadata?.generatedFiles?.map((file) => (
             <GeneratedFile key={file.id} file={file} />
@@ -114,9 +123,9 @@ export function ChatMessage({
       {isAssistant && textContent && !isStreaming && (
         <MessageActions className="-ml-1.5">
           <MessageAction
-            tooltip={t("copy")}
-            onClick={() => {
-              navigator.clipboard.writeText(stripInrefs(textContent));
+            tooltip={copyFormat === "richtext" ? t("copy_as_richtext") : t("copy_as_markdown")}
+            onClick={async () => {
+              await copyAssistantAnswer(textContent, copyFormat);
               toast.success(t("copied"));
             }}
           >

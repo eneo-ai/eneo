@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -289,6 +290,8 @@ const ENTRIES: { label: string; entries: Entry[] }[] = [
 ];
 
 export default function ChatMockPage() {
+  if (process.env.NODE_ENV === "production") notFound();
+
   return (
     <div className="bg-muted/30 min-h-[calc(100vh-3.25rem)] px-4 py-5">
       <div className="border-border/70 bg-background mx-auto flex min-h-[calc(100vh-5.75rem)] w-full max-w-6xl overflow-hidden rounded-lg border shadow-sm">

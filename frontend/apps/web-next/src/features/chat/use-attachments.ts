@@ -8,6 +8,7 @@ import { unwrap } from "@/lib/api/errors";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
+import { type ChatAttachmentRejection, planChatAttachmentUploads } from "./chat-attachment-plan";
 
 export type Attachment = {
   /** Local key while uploading; backend file id once uploaded. */
@@ -20,6 +21,27 @@ export type Attachment = {
   /** Object URL for previewing the file in the composer (revoked on removal). */
   previewUrl?: string;
 };
+
+function toastRejection(
+  rejection: ChatAttachmentRejection<File>,
+  t: (key: string, values?: Record<string, string | number | Date>) => string,
+  shown: { maxFiles: boolean }
+) {
+  switch (rejection.reason) {
+    case "unsupported-type":
+      toast.error(`${rejection.file.name}: ${t("file_type_not_supported")}`);
+      break;
+    case "too-large":
+      toast.error(`${rejection.file.name}: ${t("file_too_large")}`);
+      break;
+    case "max-files":
+      if (!shown.maxFiles) {
+        toast.error(t("attachment_error_max_count", { count: rejection.limit ?? 0 }));
+        shown.maxFiles = true;
+      }
+      break;
+  }
+}
 
 /**
  * Upload queue for chat attachments: validates against the tenant's limits
@@ -34,19 +56,15 @@ export function useAttachments(partner: ChatPartner) {
   const vision = partner.completionModel?.vision ?? false;
   const formats = limits.attachments.formats.filter((format) => !format.vision || vision);
   const acceptString = formats.map((format) => format.mimetype).join(",");
+  const maxFiles = partner.allowedAttachments?.limit.max_files ?? Infinity;
+  const canAddMore = maxFiles === Infinity || attachments.length < maxFiles;
 
   async function addFiles(files: File[]) {
-    for (const file of files) {
-      const format = formats.find((candidate) => candidate.mimetype === file.type);
-      if (!format) {
-        toast.error(`${file.name}: ${t("file_type_not_supported")}`);
-        continue;
-      }
-      if (file.size > format.size) {
-        toast.error(`${file.name}: ${t("file_too_large")}`);
-        continue;
-      }
+    const plan = planChatAttachmentUploads(files, attachments.length, formats, maxFiles);
+    const shown = { maxFiles: false };
+    for (const rejection of plan.rejected) toastRejection(rejection, t, shown);
 
+    for (const file of plan.accepted) {
       const key = crypto.randomUUID();
       const previewUrl = URL.createObjectURL(file);
       setAttachments((current) => [
@@ -102,9 +120,11 @@ export function useAttachments(partner: ChatPartner) {
   return {
     attachments,
     acceptString,
+    canAddMore,
     addFiles,
     removeAttachment,
     clear,
+    maxFiles,
     uploading: attachments.some((attachment) => attachment.uploading),
     fileIds: attachments.flatMap((attachment) => (attachment.fileId ? [attachment.fileId] : []))
   };

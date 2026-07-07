@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { BrainIcon, ChevronDownIcon, SparklesIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, type ReactNode } from "react";
@@ -17,6 +18,8 @@ import {
 } from "@/components/ai-elements/tool-status";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Spinner } from "@/components/ui/spinner";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
 import type { EneoUIMessage } from "@/lib/chat/types";
 
 type Part = EneoUIMessage["parts"][number];
@@ -44,7 +47,15 @@ const STATUS_KEY = {
  * steps when expanded, and per-step I/O one dive deeper. Auto-expands while the
  * turn streams, then collapses — unless the reader has taken manual control.
  */
-export function ActivityTimeline({ parts, isStreaming }: { parts: Part[]; isStreaming: boolean }) {
+export function ActivityTimeline({
+  parts,
+  isStreaming,
+  sessionId = null
+}: {
+  parts: Part[];
+  isStreaming: boolean;
+  sessionId?: string | null;
+}) {
   const t = useTranslations();
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
@@ -119,7 +130,12 @@ export function ActivityTimeline({ parts, isStreaming }: { parts: Part[]; isStre
             part.type === "reasoning" ? (
               <ReasoningStep key={index} part={part} />
             ) : (
-              <ToolStep key={index} part={part} label={t(STATUS_KEY[part.state])} />
+              <ToolStep
+                key={index}
+                part={part}
+                label={t(STATUS_KEY[part.state])}
+                sessionId={sessionId}
+              />
             )
           )}
         </div>
@@ -157,17 +173,71 @@ function ReasoningStep({ part }: { part: ReasoningPart }) {
   );
 }
 
-function ToolStep({ part, label }: { part: ToolPart; label: string }) {
+function ToolStep({
+  part,
+  label,
+  sessionId
+}: {
+  part: ToolPart;
+  label: string;
+  sessionId: string | null;
+}) {
+  const t = useTranslations();
   // Keep the active and failed steps open by default; completed steps stay
   // tucked away until the reader dives in.
   const defaultOpen = part.state === "output-error" || part.state === "input-available";
+  const [open, setOpen] = useState(defaultOpen);
+  const canLoadResult = Boolean(
+    sessionId &&
+    part.toolCallId &&
+    (part.state === "output-available" || part.state === "output-error")
+  );
+  const result = useQuery({
+    queryKey: ["conversations", "tool-call-result", sessionId, part.toolCallId],
+    enabled: open && canLoadResult,
+    staleTime: Infinity,
+    queryFn: async () => {
+      const response = await unwrap(
+        browserApi.GET("/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/", {
+          params: {
+            path: {
+              session_id: sessionId!,
+              tool_call_id: part.toolCallId!
+            }
+          }
+        })
+      );
+      return response.result ?? null;
+    }
+  });
+
+  const hasLoadedResult = canLoadResult && result.data !== undefined;
+  const resultText = typeof result.data === "string" && result.data.trim() ? result.data : null;
+  const output =
+    canLoadResult && result.isLoading
+      ? t("loading_ellipsis")
+      : canLoadResult && result.isError
+        ? undefined
+        : hasLoadedResult
+          ? (resultText ?? t("mcp_tool_response_empty"))
+          : part.state === "output-available"
+            ? JSON.stringify(part.output, null, 2)
+            : undefined;
+  const errorText =
+    canLoadResult && result.isError
+      ? t("mcp_tool_response_load_error")
+      : hasLoadedResult && output
+        ? undefined
+        : part.state === "output-error"
+          ? part.errorText
+          : undefined;
 
   return (
     <div className="relative flex gap-3">
       <StatusNode tone={toolStateTone(part.state)}>
         <ToolStateIcon state={part.state} className="size-3.5" />
       </StatusNode>
-      <Collapsible defaultOpen={defaultOpen} className="group/tool min-w-0 flex-1">
+      <Collapsible open={open} onOpenChange={setOpen} className="group/tool min-w-0 flex-1">
         <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-left">
           <span className="text-foreground truncate text-sm font-medium">
             {humanizeToolName(part.toolName)}
@@ -185,12 +255,7 @@ function ToolStep({ part, label }: { part: ToolPart; label: string }) {
         </CollapsibleTrigger>
         <ToolContent className="px-0">
           <ToolInput input={part.input} />
-          <ToolOutput
-            errorText={part.state === "output-error" ? part.errorText : undefined}
-            output={
-              part.state === "output-available" ? JSON.stringify(part.output, null, 2) : undefined
-            }
-          />
+          <ToolOutput errorText={errorText} output={output} />
         </ToolContent>
       </Collapsible>
     </div>

@@ -8,6 +8,7 @@ export type ChatPartner = {
   type: ChatPartnerType;
   id: string;
   name: string;
+  allowedAttachments?: Schema<"FileRestrictions"> | null;
   completionModel?: {
     id: string;
     name: string;
@@ -19,6 +20,12 @@ export type ChatPartner = {
   mentionableAssistants?: { id: string; handle: string }[];
   /** Group chats: label which assistant answered. */
   showResponseLabel?: boolean;
+  /** MCP servers that can be toggled for this partner when no policy overrides them. */
+  mcpServers?: Schema<"MCPServerPublicDict">[];
+  /** Personal-assistant governance hints, including enforced MCP defaults. */
+  effectiveConfig?: Schema<"EffectiveConfigPublic"> | null;
+  /** Whether the partner exposes the conversation insights tab. */
+  insightEnabled?: boolean;
 };
 
 export type CompletionModelInfo = {
@@ -35,6 +42,7 @@ export type SessionData = {
   completion_model: CompletionModelInfo | null;
   files: Schema<"FilePublic">[];
   web_search_references: { id: string; title: string; url: string }[];
+  mcp_tool_references?: Schema<"McpToolReferencePublic">[];
   /** Group chats: which member assistant answered (null = none / clarification). */
   answering_assistant?: { id: string; handle: string } | null;
 };
@@ -48,6 +56,7 @@ export type TokenUsageData = {
 export type ToolCallInfo = {
   server_name: string;
   tool_name: string;
+  title?: string | null;
   arguments?: Record<string, unknown> | null;
   tool_call_id?: string | null;
   approved?: boolean | null;
@@ -62,6 +71,7 @@ export type ToolApprovalData = {
 
 export type EneoDataParts = {
   session: SessionData;
+  "mcp-tool-references": { mcp_tool_references: Schema<"McpToolReferencePublic">[] };
   "token-usage": TokenUsageData;
   status: { status: string };
   "tool-approval": ToolApprovalData;
@@ -75,6 +85,7 @@ export type EneoMessageMetadata = {
   /** Generated files on a persisted assistant message (fetched on demand). */
   generatedFiles?: Schema<"FilePublic">[];
   webSearchReferences?: { id: string; title: string; url: string }[];
+  mcpToolReferences?: Schema<"McpToolReferencePublic">[];
   tokens?: { prompt?: number | null; completion?: number | null };
   completionModel?: CompletionModelInfo | null;
   /** Group chats: which member assistant answered this message. */
@@ -94,4 +105,5 @@ export type ConversationBody = {
   stream: true;
   use_web_search?: boolean;
   require_tool_approval?: boolean;
+  disabled_mcp_server_ids?: string[];
 };

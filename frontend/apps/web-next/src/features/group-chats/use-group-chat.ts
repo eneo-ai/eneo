@@ -24,6 +24,7 @@ export function useUpdateGroupChat(groupChatId: string) {
   // Feedback is owned by the caller's autosave wrapper (useAutosave); this
   // mutation only refreshes the cache.
   return useMutation({
+    scope: { id: `group-chat:${groupChatId}` },
     mutationFn: (body: GroupChatUpdate) =>
       unwrap(
         browserApi.PATCH("/api/v1/group-chats/{id}/", {

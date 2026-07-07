@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Globe, Paperclip, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -32,6 +32,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
+import { getErrorMessageForCode } from "@/lib/api/errors";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
@@ -40,9 +41,26 @@ import { ComposerAttachments } from "./attachments";
 import { ChatMessage } from "./chat-message";
 import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
+import {
+  ChatMcpServers,
+  chatPartnerMcpServers,
+  defaultDisabledMcpServerIds,
+  mcpConversationOptions,
+  pruneDisabledMcpServerIds
+} from "./mcp-controls";
 import { useAttachments } from "./use-attachments";
 
 const NO_MENTION = "__none__";
+const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
+
+function autoAcceptToolsPreference(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
 
 function PersonalAssistantWelcome({
   title,
@@ -128,12 +146,23 @@ export function ChatView({
   modelSelector?: ReactNode;
 }) {
   const t = useTranslations();
-  const { user } = useAppContext();
+  const { featureFlags, user } = useAppContext();
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
+  const canUseWebSearch = featureFlags.showWebSearch && partner.type === "default-assistant";
+  const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
 
   const [input, setInput] = useState("");
+  const [streamErrorCode, setStreamErrorCode] = useState<number | null>(null);
   const [useWebSearch, setUseWebSearch] = useState(false);
+  const [autoAcceptTools, setAutoAcceptTools] = useState(autoAcceptToolsPreference);
+  const [disabledMcpServerIds, setDisabledMcpServerIds] = useState<Set<string>>(
+    () => new Set(defaultDisabledMcpServerIds(partner))
+  );
+  const activeDisabledMcpServerIds = useMemo(
+    () => pruneDisabledMcpServerIds(disabledMcpServerIds, mcpServers),
+    [disabledMcpServerIds, mcpServers]
+  );
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -141,6 +170,8 @@ export function ChatView({
   const sessionIdRef = useRef<string | null>(initialSessionId);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [liveAnswering, setLiveAnswering] = useState<{ id: string; handle: string } | null>(null);
+  const streamStartedRef = useRef(false);
+  const pendingSendRef = useRef<{ text: string } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
   const [lockedTokens, setLockedTokens] = useState(() => {
     const last = initialMessages[initialMessages.length - 1];
@@ -166,52 +197,84 @@ export function ChatView({
     return { tokens, turns };
   });
 
-  const transport = useMemo(() => createChatTransport(), []);
-  const { messages, sendMessage, status, stop, error } = useChat<EneoUIMessage>({
-    transport,
-    messages: initialMessages,
-    // Backend forwards one SSE delta per provider token; coalesce UI updates to
-    // ~20/s so fast streams don't re-parse markdown on every token (the Svelte
-    // app frame-buffered for the same reason). Tune up for snappier, down for calmer.
-    experimental_throttle: 50,
-    onData: (part) => {
-      if (part.type === "data-session") {
-        if (!sessionIdRef.current) {
-          sessionIdRef.current = part.data.session_id;
-          setSessionId(part.data.session_id);
-          onSessionCreated?.(part.data.session_id);
-        }
-        setLiveAnswering(part.data.answering_assistant ?? null);
-      }
-      if (part.type === "data-token-usage") {
-        setLockedTokens({
-          input: part.data.prompt_tokens ?? 0,
-          output: part.data.completion_tokens ?? 0
-        });
-        const turnTokens = part.data.turn_tokens ?? 0;
-        if (turnTokens > 0) {
-          setCumulative((current) => ({
-            tokens: current.tokens + turnTokens,
-            turns: current.turns + 1
-          }));
-        }
-      }
-    },
-    onFinish: async () => {
-      // Auto-title after the first exchange of a fresh conversation.
-      if (isNewSession.current && sessionIdRef.current) {
-        isNewSession.current = false;
-        try {
-          await browserApi.POST("/api/v1/conversations/{session_id}/title/", {
-            params: { path: { session_id: sessionIdRef.current } }
-          });
-        } catch {
-          // Title generation is a nicety; ignore failures.
-        }
-      }
-      queryClient.invalidateQueries({ queryKey: historyQueryKey(partner) });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        AUTO_ACCEPT_TOOLS_STORAGE_KEY,
+        autoAcceptTools ? "true" : "false"
+      );
+    } catch {
+      // Ignore preference persistence failures.
     }
-  });
+  }, [autoAcceptTools]);
+
+  const transport = useMemo(() => createChatTransport(), []);
+  const { messages, sendMessage, setMessages, status, stop, error, clearError } =
+    useChat<EneoUIMessage>({
+      transport,
+      messages: initialMessages,
+      // Backend forwards one SSE delta per provider token; coalesce UI updates to
+      // ~20/s so fast streams don't re-parse markdown on every token (the Svelte
+      // app frame-buffered for the same reason). Tune up for snappier, down for calmer.
+      experimental_throttle: 50,
+      onData: (part) => {
+        if (part.type === "data-session") {
+          streamStartedRef.current = true;
+          if (!sessionIdRef.current) {
+            sessionIdRef.current = part.data.session_id;
+            setSessionId(part.data.session_id);
+            onSessionCreated?.(part.data.session_id);
+          }
+          setLiveAnswering(part.data.answering_assistant ?? null);
+        }
+        if (part.type === "data-error") {
+          setStreamErrorCode(part.data.code ?? null);
+        }
+        if (part.type === "data-token-usage") {
+          setLockedTokens({
+            input: part.data.prompt_tokens ?? 0,
+            output: part.data.completion_tokens ?? 0
+          });
+          const turnTokens = part.data.turn_tokens ?? 0;
+          if (turnTokens > 0) {
+            setCumulative((current) => ({
+              tokens: current.tokens + turnTokens,
+              turns: current.turns + 1
+            }));
+          }
+        }
+      },
+      onError: () => {
+        const pending = pendingSendRef.current;
+        if (!pending || streamStartedRef.current) return;
+        setInput((current) => (current.trim() ? current : pending.text));
+        setMessages((current) => {
+          const last = current.at(-1);
+          if (
+            last?.role === "user" &&
+            last.parts.some((part) => part.type === "text" && part.text === pending.text)
+          ) {
+            return current.slice(0, -1);
+          }
+          return current;
+        });
+      },
+      onFinish: async () => {
+        pendingSendRef.current = null;
+        // Auto-title after the first exchange of a fresh conversation.
+        if (isNewSession.current && sessionIdRef.current) {
+          isNewSession.current = false;
+          try {
+            await browserApi.POST("/api/v1/conversations/{session_id}/title/", {
+              params: { path: { session_id: sessionIdRef.current } }
+            });
+          } catch {
+            // Title generation is a nicety; ignore failures.
+          }
+        }
+        queryClient.invalidateQueries({ queryKey: historyQueryKey(partner) });
+      }
+    });
 
   const preflight = usePreflight({
     question: input,
@@ -255,6 +318,10 @@ export function ChatView({
   function submit(message: PromptInputMessage) {
     const text = message.text?.trim();
     if (!text || busy || attachments.uploading || usage.willExceedContext) return;
+    clearError();
+    setStreamErrorCode(null);
+    streamStartedRef.current = false;
+    pendingSendRef.current = { text };
 
     const mention =
       partner.type === "group-chat" && mentionId !== NO_MENTION
@@ -264,19 +331,23 @@ export function ChatView({
     // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
     // continuing a session identifies the partner through the session.
     const continuing = sessionIdRef.current !== null;
+    const mcpOptions = mcpConversationOptions({
+      servers: mcpServers,
+      disabledServerIds: activeDisabledMcpServerIds,
+      autoAcceptTools,
+      supportsToolApproval: partner.type !== "group-chat"
+    });
     const body: ChatSendOptions = {
       session_id: sessionIdRef.current,
       assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
       group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
       files: attachments.fileIds.map((id) => ({ id })),
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
-      use_web_search: useWebSearch || undefined,
-      // The backend rejects tool approval for group chats (400 not_supported),
-      // including continued group-chat sessions.
-      require_tool_approval: partner.type !== "group-chat"
+      use_web_search: canUseWebSearch && useWebSearch ? true : undefined,
+      ...mcpOptions
     };
 
-    sendMessage({ text }, { body });
+    void sendMessage({ text, files: message.files }, { body });
     setInput("");
     attachments.clear();
     setMentionId(NO_MENTION);
@@ -304,6 +375,7 @@ export function ChatView({
             <ChatMessage
               key={message.id}
               message={message}
+              sessionId={sessionId}
               isStreaming={busy && messageIndex === messages.length - 1}
               showResponseLabel={partner.showResponseLabel ?? false}
               liveAnswering={liveAnswering}
@@ -322,10 +394,12 @@ export function ChatView({
             </Message>
           )}
           {error && (
-            <p className="text-destructive text-sm">{error.message || t("request_failed")}</p>
+            <p className="text-destructive text-sm">
+              {getErrorMessageForCode(streamErrorCode, t) ?? (error.message || t("request_failed"))}
+            </p>
           )}
         </ConversationContent>
-        <ConversationScrollButton />
+        <ConversationScrollButton aria-label={t("scroll_to_bottom")} />
       </Conversation>
 
       <div className="mx-auto w-full max-w-3xl pb-4">
@@ -352,14 +426,17 @@ export function ChatView({
           <PromptInputFooter>
             <PromptInputTools>
               {modelSelector}
-              <PromptInputButton
-                variant="outline"
-                onClick={openAttachmentDialog}
-                aria-label={t("attachments")}
-              >
-                <Paperclip className="text-muted-foreground size-4" /> {t("attachments")}
-              </PromptInputButton>
-              {partner.type === "default-assistant" && (
+              {attachments.maxFiles !== 0 && (
+                <PromptInputButton
+                  variant="outline"
+                  disabled={!attachments.canAddMore}
+                  onClick={openAttachmentDialog}
+                  aria-label={t("attachments")}
+                >
+                  <Paperclip className="text-muted-foreground size-4" /> {t("attachments")}
+                </PromptInputButton>
+              )}
+              {canUseWebSearch && (
                 <PromptInputButton
                   variant={useWebSearch ? "default" : "outline"}
                   onClick={() => setUseWebSearch((value) => !value)}
@@ -368,6 +445,15 @@ export function ChatView({
                   <Globe className={cn("size-4", !useWebSearch && "text-muted-foreground")} />{" "}
                   {t("web_search")}
                 </PromptInputButton>
+              )}
+              {mcpServers.length > 0 && (
+                <ChatMcpServers
+                  servers={mcpServers}
+                  disabledServerIds={activeDisabledMcpServerIds}
+                  autoAcceptTools={autoAcceptTools}
+                  onDisabledServerIdsChange={setDisabledMcpServerIds}
+                  onAutoAcceptToolsChange={setAutoAcceptTools}
+                />
               )}
               {partner.type === "group-chat" &&
                 (partner.mentionableAssistants?.length ?? 0) > 0 && (
@@ -398,17 +484,19 @@ export function ChatView({
         <p className="text-muted-foreground mt-2.5 text-center text-[11.5px]">
           {t("chat_sovereignty_hint")}
         </p>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          hidden
-          accept={attachments.acceptString}
-          onChange={(event) => {
-            attachments.addFiles(Array.from(event.target.files ?? []));
-            event.target.value = "";
-          }}
-        />
+        {attachments.maxFiles !== 0 && (
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            accept={attachments.acceptString}
+            onChange={(event) => {
+              attachments.addFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+        )}
       </div>
     </div>
   );

@@ -33,6 +33,10 @@ export function DashboardChat({
     type: "assistant",
     id: assistant.id,
     name: assistant.name,
+    allowedAttachments: assistant.allowed_attachments,
+    insightEnabled: assistant.insight_enabled,
+    mcpServers: assistant.mcp_servers ?? [],
+    effectiveConfig: assistant.effective_config ?? null,
     completionModel: assistant.completion_model
       ? {
           id: assistant.completion_model.id,

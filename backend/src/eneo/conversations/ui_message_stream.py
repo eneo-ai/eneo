@@ -10,6 +10,7 @@ Custom data parts (consumed by the web-next chat UI):
 - `data-session`: session id, completion model and uploaded files, replacing
   v2's first_chunk metadata.
 - `data-status`: transient progress events (e.g. generating_image).
+- `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
 - `data-token-usage`: transient prompt/completion/turn token counts.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
   part id (the approval_id), so a timeout updates the pending part. The
@@ -152,7 +153,30 @@ def _generated_file_chunk(file: Any, base_url: str) -> dict[str, Any]:
         "type": "file",
         "url": url,
         "mediaType": public.mimetype,
+        "filename": public.name,
         "providerMetadata": {"eneo": json.loads(public.model_dump_json())},
+    }
+
+
+def _mcp_tool_references_chunk(references: list[Any]) -> dict[str, Any] | None:
+    if not references:
+        return None
+    return {
+        "type": "data-mcp-tool-references",
+        "data": {
+            "mcp_tool_references": [
+                {
+                    "id": str(ref.id),
+                    "uri": ref.uri,
+                    "mime_type": ref.mime_type,
+                    "content": ref.content,
+                    "meta": ref.meta,
+                    "tool_call_id": ref.tool_call_id,
+                    "mcp_tool_name": ref.mcp_tool_name,
+                }
+                for ref in references
+            ]
+        },
     }
 
 
@@ -177,6 +201,18 @@ async def _ui_message_chunks(
                 {"id": str(result.id), "title": result.title, "url": result.url}
                 for result in response.web_search_results
             ],
+            "mcp_tool_references": [
+                {
+                    "id": str(ref.id),
+                    "uri": ref.uri,
+                    "mime_type": ref.mime_type,
+                    "content": ref.content,
+                    "meta": ref.meta,
+                    "tool_call_id": ref.tool_call_id,
+                    "mcp_tool_name": ref.mcp_tool_name,
+                }
+                for ref in response.mcp_tool_references
+            ],
             # Group chat stamps the answering member assistant onto the response;
             # the single-assistant / clarification paths leave it empty.
             "answering_assistant": (
@@ -199,7 +235,9 @@ async def _ui_message_chunks(
             yield chunk_dict
 
     text_id: Optional[str] = None
+    text_index = 0
     reasoning_id: Optional[str] = None
+    reasoning_index = 0
     reasoning_open = False
     tool_fallback_ids: dict[int, str] = {}
     emitted_tool_chunks: set[str] = set()
@@ -210,8 +248,12 @@ async def _ui_message_chunks(
         response_type = completion.response_type
 
         if response_type == ResponseType.REASONING:
-            if reasoning_id is None:
-                reasoning_id = "reasoning-0"
+            if text_id is not None:
+                yield {"type": "text-end", "id": text_id}
+                text_id = None
+            if not reasoning_open:
+                reasoning_id = f"reasoning-{reasoning_index}"
+                reasoning_index += 1
                 reasoning_open = True
                 yield {"type": "reasoning-start", "id": reasoning_id}
             if completion.reasoning_content:
@@ -227,7 +269,8 @@ async def _ui_message_chunks(
                 yield {"type": "reasoning-end", "id": reasoning_id}
                 reasoning_open = False
             if text_id is None:
-                text_id = "text-0"
+                text_id = f"text-{text_index}"
+                text_index += 1
                 yield {"type": "text-start", "id": text_id}
             if completion.text:
                 yield {"type": "text-delta", "id": text_id, "delta": completion.text}
@@ -249,6 +292,11 @@ async def _ui_message_chunks(
             }
 
         elif response_type == ResponseType.TOOL_CALL:
+            reference_chunk = _mcp_tool_references_chunk(
+                list(completion.mcp_tool_references or [])
+            )
+            if reference_chunk is not None:
+                yield reference_chunk
             for chunk_dict in _tool_chunks(
                 list(completion.tool_calls_metadata or []), tool_fallback_ids
             ):

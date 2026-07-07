@@ -34,10 +34,11 @@ function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
   const update = useUpdateGroupChat(groupChat.id);
 
   const name = useAutosaveField({
-    key: "general",
+    key: "group-chat-name",
     value: groupChat.name,
     save: (value) => update.mutateAsync({ name: value }),
-    normalize: (value) => value.trim()
+    normalize: (value) => value.trim(),
+    validate: (value) => value.length > 0
   });
 
   return (
@@ -71,6 +72,7 @@ function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
   const autosave = useAutosave("assistants");
   const saved = useMemo(() => groupChat.tools.assistants, [groupChat.tools.assistants]);
   const [selected, setSelected] = useState<GroupChatAssistant[]>(saved);
+  const selectionKey = (assistants: GroupChatAssistant[]) => JSON.stringify(assistants);
 
   // Adopt server changes (our own save landing) unless the user diverged.
   const savedKey = JSON.stringify(saved);
@@ -83,6 +85,8 @@ function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
   }, [savedKey, saved]);
 
   function handleChange(next: GroupChatAssistant[]) {
+    const previous = selected;
+    const attemptedKey = selectionKey(next);
     setSelected(next);
     void autosave(() =>
       update.mutateAsync({
@@ -93,7 +97,10 @@ function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
           }))
         }
       })
-    );
+    ).then((result) => {
+      if (result !== undefined) return;
+      setSelected((current) => (selectionKey(current) === attemptedKey ? previous : current));
+    });
   }
 
   return (

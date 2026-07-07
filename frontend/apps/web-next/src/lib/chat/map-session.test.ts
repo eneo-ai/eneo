@@ -104,6 +104,27 @@ describe("mapSessionMessages", () => {
     expect(messages[1]!.metadata?.tokens).toEqual({ prompt: 12, completion: 34 });
   });
 
+  it("carries persisted MCP resource references in assistant metadata", () => {
+    const mcpReference = {
+      id: "abcd1234-0000-0000-0000-000000000000",
+      uri: "mcp://files/a.md",
+      mime_type: "text/markdown",
+      content: "snippet",
+      meta: { title: "A file" },
+      tool_call_id: "call-1",
+      mcp_tool_name: "files__read_file"
+    } as NonNullable<PersistedMessage["mcp_tool_references"]>[number];
+
+    const messages = mapSessionMessages([
+      {
+        ...baseMessage,
+        mcp_tool_references: [mcpReference]
+      }
+    ]);
+
+    expect(messages[1]!.metadata?.mcpToolReferences).toEqual([mcpReference]);
+  });
+
   it("is lenient about missing ids and unknown data", () => {
     const messages = mapSessionMessages([
       { ...baseMessage, id: null, references: [{} as never] },

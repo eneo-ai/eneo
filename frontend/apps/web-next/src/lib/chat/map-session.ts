@@ -74,6 +74,7 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
           title: ref.title,
           url: ref.url
         })),
+        mcpToolReferences: message.mcp_tool_references ?? [],
         tokens: {
           prompt: message.num_tokens_question,
           completion: message.num_tokens_answer

@@ -62,7 +62,11 @@ function SpaceSection({ space }: { space: SpaceDashboard }) {
               key={assistant.id}
               href={`/dashboard/${assistant.id}?tab=chat`}
               icon={MessageSquare}
-              name={assistant.name}
+              name={
+                space.personal && assistant.id === space.default_assistant?.id
+                  ? t("personal_assistant")
+                  : assistant.name
+              }
             />
           ))}
           {apps.map((app) => (

@@ -62,6 +62,7 @@ export const ConversationEmptyState = ({
 export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
 export const ConversationScrollButton = ({
+  "aria-label": ariaLabel,
   className,
   ...props
 }: ConversationScrollButtonProps) => {
@@ -74,6 +75,7 @@ export const ConversationScrollButton = ({
   return (
     !isAtBottom && (
       <Button
+        aria-label={ariaLabel ?? "Scroll to latest message"}
         className={cn(
           "dark:bg-background dark:hover:bg-muted absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full",
           className
@@ -113,6 +115,7 @@ export const messagesToMarkdown = (
 ): string => messages.map((msg, i) => formatMessage(msg, i)).join("\n\n");
 
 export const ConversationDownload = ({
+  "aria-label": ariaLabel,
   messages,
   filename = "conversation.md",
   formatMessage = defaultFormatMessage,
@@ -135,6 +138,7 @@ export const ConversationDownload = ({
 
   return (
     <Button
+      aria-label={ariaLabel ?? "Download conversation"}
       className={cn(
         "dark:bg-background dark:hover:bg-muted absolute top-4 right-4 rounded-full",
         className
