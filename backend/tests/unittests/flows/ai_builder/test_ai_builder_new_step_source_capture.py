@@ -6,7 +6,10 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
     compile_new_step_draft,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
 from eneo.flows.flow_authoring_spec import InputType, OutputType
 
 _LOGGER_NAME = "eneo.flows.ai_builder.ai_builder_new_step_compiler"
@@ -86,3 +89,27 @@ def test_source_capture_guidance_logs_when_description_truncates(caplog) -> None
     assert "- summary: " in instructions
     assert "..." in instructions
     assert "a" * 120 not in instructions
+
+
+def test_output_field_guidance_keeps_field_named_in_instructions() -> None:
+    step = compile_new_step_draft(
+        step_draft=NewStepDraft(
+            name="Extract metadata",
+            instructions="Extract the title from the document.",
+            input_type=InputType.DOCUMENT,
+            output_type=OutputType.JSON,
+            output_fields=[
+                StructuredFieldDraft(
+                    name="title",
+                    field_type="string",
+                    description="Document title exactly as written.",
+                )
+            ],
+        ),
+        plan_step_ref="step_a",
+        prior_steps=[],
+    )
+
+    instructions = step.assistant_spec.instructions
+    assert "Required JSON fields:" in instructions
+    assert "- title: Document title exactly as written." in instructions

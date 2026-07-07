@@ -818,13 +818,8 @@ def _append_output_field_guidance(
     if not output_fields:
         return instructions
 
-    normalized_instructions = instructions.casefold()
     guidance_lines: list[str] = []
-    top_level_fields = [
-        field
-        for field in output_fields
-        if field.name and field.name.casefold() not in normalized_instructions
-    ]
+    top_level_fields = [field for field in output_fields if field.name]
     guidance_lines.extend(
         f"- {field.name}: {field.description}" for field in top_level_fields
     )
