@@ -34,12 +34,6 @@ from eneo.flows.ai_builder.pattern_registry import (
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
-from eneo.flows.enums import (
-    FlowInputSource,
-    FlowInputType,
-    FlowOutputMode,
-    FlowOutputType,
-)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -48,7 +42,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
-from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
 from eneo.json_types import JsonObject
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
@@ -230,8 +223,6 @@ def _assemble_create_intent(
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
         )
-        if not _capability_tuple_is_supported(transcription_step):
-            return None
         planned_steps.append(transcription_step)
         previous_output_type = OutputType.TEXT
         source_prefix_step_count = 1
@@ -320,25 +311,17 @@ def _assemble_create_intent(
             citations_requested=semantic_step.citations_requested,
             review_mode=semantic_step.review_mode,
         )
-        if not _capability_tuple_is_supported(planned_step):
-            return None
         planned_steps.append(planned_step)
         placed_form_fields.update(planned_step.form_field_refs)
         previous_output_type = step_output_type
 
     if placed_form_fields != form_field_names:
         return None
-    if source_reader_required_fields and not any(
-        _planned_step_is_source_reader(step) for step in planned_steps
-    ):
-        return None
     if document_artifact_requested:
         renderer_step = render_verbatim_step(
             output_type=final_output_type,
             body_step_name=planned_steps[-1].name,
         )
-        if not _capability_tuple_is_supported(renderer_step):
-            return None
         planned_steps.append(renderer_step)
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
@@ -433,8 +416,6 @@ def _assemble_docx_template_fill(
     )
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
     planned_steps = (reader_step, content_step, fixed_template_fill_step)
-    if not all(_capability_tuple_is_supported(step) for step in planned_steps):
-        return None
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
@@ -490,8 +471,6 @@ def _assemble_pure_audio_transcription(
         ui_language=ui_language,
         review_mode=semantic_step.review_mode,
     )
-    if not _capability_tuple_is_supported(planned_step):
-        return None
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
@@ -611,15 +590,6 @@ def _linear_underlag_channel(
     return "implicit_previous"
 
 
-def _planned_step_is_source_reader(step: PlannedStep) -> bool:
-    return (
-        step.input_source == InputSource.FLOW_INPUT
-        and step.input_type in _FILE_INPUT_TYPES | {InputType.TEXT}
-        and step.output_type == OutputType.JSON
-        and bool(step.output_fields)
-    )
-
-
 def _offset_previous_field_refs(
     refs: Sequence[PreviousFieldRef],
     *,
@@ -643,16 +613,4 @@ def _offset_previous_output_refs(
     return tuple(
         ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
         for ref in refs
-    )
-
-
-def _capability_tuple_is_supported(step: PlannedStep) -> bool:
-    return (
-        resolve_capability_for_tuple(
-            input_source=FlowInputSource(step.input_source.value),
-            input_type=FlowInputType(step.input_type.value),
-            output_type=FlowOutputType(step.output_type.value),
-            output_mode=FlowOutputMode(step.output_mode.value),
-        )
-        is not None
     )
