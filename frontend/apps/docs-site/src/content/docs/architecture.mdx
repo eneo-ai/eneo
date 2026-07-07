@@ -6,7 +6,7 @@ Eneo follows a modern microservices architecture with clean separation of concer
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers (OpenAI, Anthropic, Azure, Local models)](/diagrams/eneo-architecture.svg)
+![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, worker services, and AI Providers (OpenAI, Anthropic, Azure, Local models)](/diagrams/eneo-architecture.svg)
 
 </div>
 
@@ -17,12 +17,14 @@ Eneo follows a modern microservices architecture with clean separation of concer
 ### Frontend (SvelteKit)
 
 **Technology Stack:**
+
 - **Framework**: SvelteKit with TypeScript
 - **Styling**: Tailwind CSS
 - **State Management**: Svelte stores
 - **HTTP Client**: Fetch API with type-safe wrappers
 
 **Responsibilities:**
+
 - User interface and user experience
 - Client-side routing and navigation
 - Form handling and validation
@@ -30,6 +32,7 @@ Eneo follows a modern microservices architecture with clean separation of concer
 - State management and caching
 
 **Key Features:**
+
 - Server-side rendering (SSR) for SEO
 - Hot module replacement for development
 - Type-safe API client generation
@@ -37,6 +40,7 @@ Eneo follows a modern microservices architecture with clean separation of concer
 - Dark mode support
 
 **Directory Structure:**
+
 ```
 frontend/apps/client/
 ├── src/
@@ -54,6 +58,7 @@ frontend/apps/client/
 ### Backend (FastAPI)
 
 **Technology Stack:**
+
 - **Framework**: FastAPI (Python 3.11+)
 - **ORM**: SQLAlchemy 2.0
 - **Validation**: Pydantic v2
@@ -61,6 +66,7 @@ frontend/apps/client/
 - **API Documentation**: OpenAPI/Swagger
 
 **Responsibilities:**
+
 - RESTful API endpoints
 - Business logic and validation
 - Authentication and authorization
@@ -69,36 +75,30 @@ frontend/apps/client/
 - WebSocket connections
 
 **Architecture Pattern:**
+
 - **Domain-Driven Design** (DDD)
 - **Repository Pattern** for data access
 - **Service Layer** for business logic
 - **Dependency Injection** for modularity
 
 **Directory Structure:**
+
 ```
-backend/
-├── app/
-│   ├── main.py              # Application entry point
-│   ├── api/                 # API endpoints
-│   │   ├── routes/          # Route handlers
-│   │   └── dependencies.py  # DI dependencies
-│   ├── core/                # Core functionality
-│   │   ├── config.py        # Configuration
-│   │   ├── security.py      # Auth & security
-│   │   └── database.py      # DB connection
-│   ├── models/              # SQLAlchemy models
-│   ├── schemas/             # Pydantic schemas
-│   ├── services/            # Business logic
-│   │   ├── ai/              # AI integrations
-│   │   ├── embeddings/      # Vector embeddings
-│   │   └── documents/       # Document processing
-│   └── worker.py            # Background worker
-└── tests/
+backend/src/eneo/
+├── server/                  # FastAPI app, routers, middleware, lifespan
+├── main/                    # Configuration, container, logging
+├── database/                # SQLAlchemy tables and database setup
+├── flows/                   # Flow domain, application, API, runtime, AI Builder plugin
+├── worker/                  # ARQ background jobs and Flow Celery worker wiring
+├── info_blobs/              # Uploaded document metadata and processing
+├── assistants/              # Assistant configuration and chat surfaces
+└── spaces/                  # Workspace and membership ownership
 ```
 
 **Key Design Patterns:**
 
 **Repository Pattern:**
+
 ```python
 class UserRepository:
     def __init__(self, db: Session):
@@ -115,6 +115,7 @@ class UserRepository:
 ```
 
 **Service Layer:**
+
 ```python
 class AIService:
     def __init__(self, user_repo: UserRepository, ai_provider: AIProvider):
@@ -129,9 +130,52 @@ class AIService:
 
 ---
 
+### Eneo Flows and Flow AI Builder
+
+Eneo Flows is a backend product surface with authoring, publishing, runtime execution, evidence, artifacts, and API consumer contracts. Flow AI Builder is an authoring plugin that creates or edits draft Flows; it is not a runtime and it is not a second Flow definition format.
+
+**Flow runtime ownership:**
+
+| Concern                    | Canonical owner                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| Draft authoring            | `FlowService`, `FlowRepository`, and `FlowDraftSpecCore`                                          |
+| Published runtime snapshot | `published_definition.py` and `flow_versions.definition_json`                                     |
+| Run contract               | `FlowRunContractService`                                                                          |
+| Run creation and dispatch  | `FlowRunService` and Flow runtime tasks                                                           |
+| Step execution             | `FlowRunExecutor` and runtime `StepHandler` implementations                                       |
+| Output rendering           | Output format specs plus `render_verbatim`, `transcribe_only`, `template_fill`, and step handlers |
+| Evidence and artifacts     | `FlowRunEvidenceService`, evidence bundle/export modules, and artifact file services              |
+
+**Flow AI Builder create compilation:**
+
+AI Builder separates semantic intent from deterministic Flow mechanics. Supported create-mode shapes pass through a compile-time assembly spine:
+
+```
+planning state + conversation evidence
+    ↓
+ai_builder_assembly.create
+    ↓
+FlowAssemblyPlan
+    ↓
+ai_builder_assembly.lower
+    ↓
+FlowDraftSpecCore
+```
+
+`FlowAssemblyPlan` is not persisted. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering.
+
+The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Later passes must not silently rewrite underlag channels, renderer modes, transcription mechanics, or template-fill mechanics.
+
+Generated PDF/DOCX final artifacts use a body-writer step followed by `render_verbatim`. Audio transcription uses `transcribe_only`, and DOCX templates use `template_fill`. These fixed runtime modes avoid unnecessary LLM calls; the semantic LLM work happens before the fixed renderer, transcriber, or filler step.
+
+See [AI Builder](/docs/ai-builder), [Eneo Flows](/docs/flows), and [Flows for Developers](/docs/flows-for-developers) for maintainer-facing details.
+
+---
+
 ### Database (PostgreSQL + pgvector)
 
 **Technology:**
+
 - **Database**: PostgreSQL 13+
 - **Extension**: pgvector for vector similarity search
 - **Migrations**: Alembic
@@ -139,6 +183,7 @@ class AIService:
 **Schema Design:**
 
 **Core Tables:**
+
 - `users` - User accounts and profiles
 - `organizations` - Organization/tenant data
 - `spaces` - Collaborative workspaces
@@ -149,6 +194,7 @@ class AIService:
 - `document_chunks` - Chunked document text with embeddings
 
 **Key Relationships:**
+
 ```
 organizations (1) ─── (N) users
 organizations (1) ─── (N) spaces
@@ -160,6 +206,7 @@ documents (1) ─── (N) document_chunks
 ```
 
 **Vector Search:**
+
 ```sql
 -- Example vector similarity search
 SELECT id, content,
@@ -171,28 +218,34 @@ LIMIT 5;
 ```
 
 **Indexes:**
+
 - B-tree indexes on foreign keys
 - IVFFlat index on vector embeddings
 - GiST indexes for full-text search
 
 ---
 
-### Worker Service (ARQ)
+### Worker Services
 
 **Technology:**
-- **Queue**: Redis-based ARQ (Async Redis Queue)
+
+- **General queue**: Redis-based ARQ (Async Redis Queue)
+- **Flow runtime queue**: Celery workers for Flow execution, maintenance, reconciliation, and outbox delivery
 - **Language**: Python with async/await
 - **Concurrency**: Configurable worker pool
 
 **Responsibilities:**
+
 - Document processing (PDF, Word, etc.)
 - Web crawling and content extraction
 - Embedding generation
 - Background tasks and scheduled jobs
+- Flow run execution, stale-run reconciliation, and Flow runtime delivery outboxes
 
 **Task Types:**
 
 **Document Processing:**
+
 ```python
 @worker.task
 async def process_document(ctx, document_id: int):
@@ -210,6 +263,7 @@ async def process_document(ctx, document_id: int):
 ```
 
 **Web Crawling:**
+
 ```python
 @worker.task
 async def crawl_website(ctx, url: str, max_depth: int):
@@ -218,6 +272,11 @@ async def crawl_website(ctx, url: str, max_depth: int):
         for page in pages:
             await process_page_content(page)
 ```
+
+**Flow Runtime:**
+
+- Flow execution tasks load a published snapshot, claim run and step work, invoke StepHandlers, persist artifacts and evidence, and terminalize the run.
+- Flow maintenance tasks reconcile stale runs and deliver runtime outboxes outside the HTTP request path.
 
 ---
 
@@ -232,13 +291,15 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 ### Redis (Cache & Queue)
 
 **Responsibilities:**
+
 - Session storage
-- Task queue for ARQ
+- Task queues for ARQ and Flow Celery workers
 - Caching frequently accessed data
 - Rate limiting counters
 - WebSocket pub/sub
 
 **Cache Strategy:**
+
 - **Session data**: 24-hour TTL
 - **API responses**: 5-minute TTL
 - **Embeddings**: 1-hour TTL
@@ -249,6 +310,7 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 ### Reverse Proxy (Traefik)
 
 **Responsibilities:**
+
 - SSL/TLS termination
 - Load balancing
 - Request routing
@@ -256,6 +318,7 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 - Health checks
 
 **Configuration:**
+
 ```yaml
 # Route HTTP to HTTPS
 - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
@@ -316,7 +379,7 @@ Save conversation to database
 
 1. User uploads file via `POST /api/v1/files/`
 2. Backend saves metadata to `InfoBlobs` table and enqueues processing task
-3. Worker picks up task from Redis (ARQ)
+3. ARQ worker picks up the task from Redis
 4. Processing pipeline: extract text → chunk (200 tokens) → generate embeddings
 5. Store chunks and vectors in `InfoBlobChunks` (pgvector)
 6. Update job status to `COMPLETE` or `FAILED`
@@ -341,11 +404,13 @@ Save conversation to database
 ### Authorization Model
 
 **Role-Based Access Control (RBAC):**
+
 - **Global Roles**: Admin, User
 - **Space Roles**: Owner, Editor, Viewer
 - **Resource-level**: Per-assistant, per-document permissions
 
 **Permission Checks:**
+
 ```python
 def check_permission(user: User, resource: Space, action: str) -> bool:
     membership = get_membership(user.id, resource.id)
@@ -366,11 +431,13 @@ def check_permission(user: User, resource: Space, action: str) -> bool:
 ### Horizontal Scaling
 
 **Stateless Services:**
+
 - Frontend and Backend are stateless
 - Can run multiple instances behind load balancer
 - Session state in Redis (shared)
 
 **Scaling Strategy:**
+
 ```yaml
 # Docker Compose scaling
 docker compose up -d --scale backend=3 --scale worker=2
@@ -379,17 +446,20 @@ docker compose up -d --scale backend=3 --scale worker=2
 ### Database Scaling
 
 **Read Replicas:**
+
 - Primary for writes
 - Replicas for reads
 - Connection pooling (PgBouncer)
 
 **Partitioning:**
+
 - Partition large tables by date
 - Separate hot and cold data
 
 ### Caching Strategy
 
 **Multi-Level Cache:**
+
 1. Browser cache (static assets)
 2. CDN cache (public content)
 3. Redis cache (dynamic data)
@@ -402,6 +472,7 @@ docker compose up -d --scale backend=3 --scale worker=2
 ### Single Server (Small Organizations)
 
 All services on one server with Docker Compose:
+
 - Frontend, Backend, Worker
 - PostgreSQL, Redis
 - Traefik
@@ -411,6 +482,7 @@ All services on one server with Docker Compose:
 ### Multi-Server (Medium Organizations)
 
 Separate servers for different roles:
+
 - **Web Server**: Frontend + Backend
 - **Database Server**: PostgreSQL
 - **Worker Server**: Background processing
@@ -421,6 +493,7 @@ Separate servers for different roles:
 ### Kubernetes (Large Organizations)
 
 Fully orchestrated with K8s:
+
 - Auto-scaling pods
 - Service discovery
 - Rolling updates
@@ -435,6 +508,7 @@ Fully orchestrated with K8s:
 ### Logging
 
 **Structured Logging:**
+
 ```json
 {
   "timestamp": "2025-09-30T10:30:45Z",
@@ -450,6 +524,7 @@ Fully orchestrated with K8s:
 ### Metrics
 
 **Key Metrics:**
+
 - Request rate and latency
 - Error rates (4xx, 5xx)
 - Database query performance
@@ -459,6 +534,7 @@ Fully orchestrated with K8s:
 ### Health Checks
 
 **Endpoints:**
+
 - `GET /api/health` - Basic health
 - `GET /api/health/db` - Database connectivity
 - `GET /api/health/redis` - Redis connectivity
@@ -489,12 +565,11 @@ Fully orchestrated with K8s:
 - Excellent performance
 - ACID compliance for data integrity
 
-### Why ARQ?
+### Why ARQ and Celery?
 
-- Python-native async task queue
-- Simple and reliable
-- Redis-backed for speed
-- Cron-like scheduling support
+- ARQ remains the Python-native async queue for general background jobs and scheduled document/crawler work.
+- Celery owns Flow runtime execution and maintenance because Flow runs need explicit retry, redelivery, worker-loss, and outbox behavior.
+- Both queues use Redis, but their ownership is separate so Flow runtime guarantees do not leak into unrelated background jobs.
 
 ---
 

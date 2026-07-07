@@ -264,11 +264,13 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
     _decision(
         slug="ai-builder-assembly-plan",
         title="AI Builder create plans assemble before lowering",
-        context="Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics.",
-        decision="`FlowAssemblyPlan` is the create-path compile contract: assemble deterministic step mechanics, then lower once into `FlowDraftSpecCore`.",
+        context="Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics without downstream rewrite passes.",
+        decision="`FlowAssemblyPlan` is the create-path compile contract: validate deterministic step mechanics at construction, then lower once into `FlowDraftSpecCore`.",
         consequences=(
             "Keep `FlowAssemblyPlan` compile-time only; do not persist it or make it a second Flow definition.",
-            "Keep topology admission, fixed-step construction, and lowering in their respective assembly modules.",
+            "Validate capability support, step order, previous-output refs, form-field placement, source exposure, and source-reader obligations on the plan.",
+            "Allow fan-in only for aggregate or compare body writers; linear plans must stay adjacent or targeted.",
+            "Keep topology admission, fixed-step construction, plan validation, and lowering in their respective assembly modules.",
             "Reject new create-mode rewrites that change underlag, renderer, transcription, or template-fill mechanics after lowering.",
         ),
         source_refs=(
@@ -287,6 +289,14 @@ FLOW_DEVELOPER_KEY_DECISIONS: tuple[FlowDeveloperKeyDecision, ...] = (
             _source(
                 "Plan lowering",
                 "backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py",
+            ),
+            _source(
+                "Capability manifest",
+                "backend/src/eneo/flows/flow_capability_manifest.py",
+            ),
+            _source(
+                "Step chain rules",
+                "backend/src/eneo/flows/step_chain_rules.py",
             ),
         ),
     ),

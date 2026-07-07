@@ -138,17 +138,19 @@ The refactor journal is the append-only audit trail. Code, schema, and tests are
 
 ### 9. AI Builder create plans assemble before lowering
 
-**Context.** Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics.
+**Context.** Create-mode AI Builder must separate semantic intent from deterministic Flow mechanics without downstream rewrite passes.
 
-**Decision.** `FlowAssemblyPlan` is the create-path compile contract: assemble deterministic step mechanics, then lower once into `FlowDraftSpecCore`.
+**Decision.** `FlowAssemblyPlan` is the create-path compile contract: validate deterministic step mechanics at construction, then lower once into `FlowDraftSpecCore`.
 
 **Consequences.**
 
 - Keep `FlowAssemblyPlan` compile-time only; do not persist it or make it a second Flow definition.
-- Keep topology admission, fixed-step construction, and lowering in their respective assembly modules.
+- Validate capability support, step order, previous-output refs, form-field placement, source exposure, and source-reader obligations on the plan.
+- Allow fan-in only for aggregate or compare body writers; linear plans must stay adjacent or targeted.
+- Keep topology admission, fixed-step construction, plan validation, and lowering in their respective assembly modules.
 - Reject new create-mode rewrites that change underlag, renderer, transcription, or template-fill mechanics after lowering.
 
-**Source refs.** Assembly plan: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/plan.py`, Topology admission: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/create.py`, Fixed planned steps: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/fixed_steps.py`, Plan lowering: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py`.
+**Source refs.** Assembly plan: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/plan.py`, Topology admission: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/create.py`, Fixed planned steps: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/fixed_steps.py`, Plan lowering: `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py`, Capability manifest: `backend/src/eneo/flows/flow_capability_manifest.py`, Step chain rules: `backend/src/eneo/flows/step_chain_rules.py`.
 
 ### 10. Review checkpoint as a revisioned state machine
 

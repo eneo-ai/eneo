@@ -47,6 +47,10 @@ For create-plan compilation, supported shapes now pass through an explicit compi
 
 That spine is compile-time only; it is not persisted and it is not a second Flow definition. Its job is to make mechanical choices once, then lower them into normal Flow authoring data.
 
+`FlowAssemblyPlan` is the construction-time guardrail. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering. Linear plans reject fan-in; aggregate and compare plans may use fan-in only where the body writer intentionally combines compacted prior outputs.
+
+The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Do not add create-mode passes that rewrite underlag, renderer, transcription, or template-fill mechanics after lowering.
+
 Current assembly-backed create shapes include:
 
 - linear text, JSON, and document-source flows
@@ -110,6 +114,8 @@ That is different from instructions:
 | Underlag till steget | Controls the text or structured material the model works on |
 
 AI Builder should normally let the backend compose material from flow input, form fields, files, and previous outputs. That is more robust than asking the language model to hand-write fragile prompt templates. Use advanced material overrides only when the default material assembly is not precise enough.
+
+For assembly-backed create plans, the underlag channel is part of `FlowAssemblyPlan`: implicit previous output, whole-object refs, field refs, text anchors, or fan-in. The selected channel is lowered into normal Flow bindings once. Later validation may reject invalid output, but it must not silently choose a different channel.
 
 See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Advanced step input templates</a> for the runtime mental model.
 
