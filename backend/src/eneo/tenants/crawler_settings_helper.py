@@ -142,6 +142,22 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+# Keys that were valid crawler settings in earlier releases but have since been
+# retired from CRAWLER_SETTING_SPECS (they belonged to the old in-process Scrapy
+# crawler and have no effect on the remote crawler). Existing tenant rows may
+# still carry them in their crawler_settings JSONB; they are tolerated and
+# dropped on load rather than rejected, and stripped from storage by an Alembic
+# data migration. Genuinely unknown keys are still rejected by validation.
+RETIRED_CRAWLER_SETTING_KEYS: frozenset[str] = frozenset(
+    {
+        "dns_timeout",
+        "retry_times",
+        "obey_robots",
+        "autothrottle_enabled",
+    }
+)
+
+
 def _get_setting_default(setting_name: str, spec: dict[str, Any]) -> Any:
     """Get the default value for a setting from env or hardcoded default."""
     # If spec has hardcoded default, use it

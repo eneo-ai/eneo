@@ -87,6 +87,21 @@ async def service():
 
     app.router.add_get("/slow/{delay_ms}/{name}", serve_slow_file)
 
+    async def serve_stream_stall(request: web.Request) -> web.StreamResponse:
+        # Send a few bytes, then stall forever mid-body: the client opens its
+        # .part file and writes a partial chunk before the crawl deadline
+        # cancels the download, exercising partial-file cleanup.
+        stub.file_requests.append((request.path, request.headers.get("Authorization")))
+        response = web.StreamResponse(
+            status=200, headers={"Content-Type": "application/pdf"}
+        )
+        await response.prepare(request)
+        await response.write(b"x" * 4)
+        await asyncio.sleep(3600)
+        return response
+
+    app.router.add_get("/stall/{name}", serve_stream_stall)
+
     server = TestServer(app)
     await server.start_server()
     stub.base_url = str(server.make_url("")).rstrip("/")
@@ -514,6 +529,36 @@ class TestFileDownloads:
             assert list(crawl.files) == []
 
         assert service.file_requests == []
+
+    @pytest.mark.asyncio
+    async def test_deadline_during_download_yields_no_partial_file(self, service):
+        # A file that stalls mid-body outlives the crawl deadline. The download
+        # is cancelled after a partial chunk is written, and the crawl must
+        # yield pages only: never the truncated blob, and no leftover .part.
+        file_url = f"{service.base_url}/stall/rapport.pdf"
+        service.body = ndjson(
+            page(
+                f"{service.base_url}/a",
+                file_links=[{"url": file_url, "mime": "application/pdf"}],
+            ),
+            DONE,
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        # Zero margin + a short max_length puts the shared deadline just past the
+        # fast stream, so it fires while the stalled file is still downloading.
+        with patch("eneo.crawler.remote_crawler._CLIENT_TIMEOUT_MARGIN_SECONDS", 0):
+            async with crawler.crawl(
+                url=service.base_url,
+                download_files=True,
+                tenant_crawler_settings={"crawl_max_length": 1},
+            ) as crawl:
+                assert len(list(crawl.pages)) == 1
+                files = list(crawl.files)
+
+        # The stalled file was fetched, but nothing (whole or partial) is yielded
+        assert service.file_requests == [("/stall/rapport.pdf", None)]
+        assert files == []
 
 
 class TestFilenameForLink:

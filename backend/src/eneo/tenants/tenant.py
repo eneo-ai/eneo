@@ -224,20 +224,32 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         All fields are optional - only validates types and ranges for provided fields.
         Missing fields will fall back to environment variable defaults at runtime.
 
+        Retired keys (settings removed in a later release) are dropped rather than
+        rejected, so existing tenant rows written before the removal still load;
+        an Alembic data migration strips them from storage. Genuinely unknown
+        keys are still rejected.
+
         Uses CRAWLER_SETTING_SPECS from crawler_settings_helper.py as single source of truth.
         """
         if not v:
             return {}
 
         # Import here to avoid circular dependency
-        from eneo.tenants.crawler_settings_helper import validate_crawler_setting
+        from eneo.tenants.crawler_settings_helper import (
+            RETIRED_CRAWLER_SETTING_KEYS,
+            validate_crawler_setting,
+        )
 
-        for key, value in v.items():
+        cleaned = {
+            k: value for k, value in v.items() if k not in RETIRED_CRAWLER_SETTING_KEYS
+        }
+
+        for key, value in cleaned.items():
             errors = validate_crawler_setting(key, value)
             if errors:
                 raise ValueError(errors[0])
 
-        return v
+        return cleaned
 
 
 class TenantUpdatePublic(BaseModel):

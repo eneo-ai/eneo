@@ -450,6 +450,11 @@ class RemoteCrawler:
                 )
                 continue
             target = Path(files_dir) / _filename_for_link(link_url, taken, index)
+            # Stream into a sibling .part file and publish with an atomic rename
+            # only after a complete response. A cancelled or failed write never
+            # reaches the rename, so ``files_dir`` only ever exposes whole files
+            # to the worker — never a truncated blob.
+            part = target.parent / (target.name + ".part")
             try:
                 async with session.get(
                     link_url,
@@ -474,18 +479,23 @@ class RemoteCrawler:
                         )
                         continue
                     written = 0
-                    with open(target, "wb") as out:
+                    with open(part, "wb") as out:
                         async for chunk in response.content.iter_chunked(64 * 1024):
                             written += len(chunk)
                             if written > max_size:
                                 raise CrawlerException("download_max_size exceeded")
                             out.write(chunk)
+                part.replace(target)
             except (aiohttp.ClientError, asyncio.TimeoutError, CrawlerException) as exc:
                 logger.warning(
                     "Failed to download linked file, skipping",
                     extra={"file_url": link_url, "error": str(exc)},
                 )
-                target.unlink(missing_ok=True)
+            finally:
+                # Drop the partial on any early exit: HTTP error, per-file
+                # timeout, size cap, or cancellation from the overall crawl
+                # deadline (which surfaces as CancelledError, not caught above).
+                part.unlink(missing_ok=True)
 
     @asynccontextmanager
     async def crawl(
@@ -558,11 +568,17 @@ class RemoteCrawler:
                 # Heartbeat teardown is deferred to this outer finally so the
                 # background heartbeat_loop keeps refreshing liveness through the
                 # linked-file download phase, not just the stream.
+                # One deadline spans the stream and the linked-file phase, so
+                # the whole crawl stays within max_length + margin rather than
+                # letting files start a second, full max_length budget.
+                overall_deadline = (
+                    asyncio.get_running_loop().time()
+                    + max_length
+                    + _CLIENT_TIMEOUT_MARGIN_SECONDS
+                )
                 try:
                     try:
-                        async with asyncio.timeout(
-                            max_length + _CLIENT_TIMEOUT_MARGIN_SECONDS
-                        ):
+                        async with asyncio.timeout_at(overall_deadline):
                             (
                                 pages_count,
                                 failed_count,
@@ -651,12 +667,14 @@ class RemoteCrawler:
                         )
 
                     # Linked files are fetched while the heartbeat is still
-                    # live, under a bounded budget so a large or slow file set
-                    # can never run unbounded past the crawl deadline; files are
-                    # best-effort, so an exhausted budget yields pages only.
+                    # live, sharing the overall crawl deadline so a large or slow
+                    # file set can never push the crawl past max_length + margin;
+                    # files are best-effort, so an exhausted budget (e.g. a
+                    # stream that already consumed the deadline) yields pages
+                    # only.
                     if download_files and file_links:
                         try:
-                            async with asyncio.timeout(max_length):
+                            async with asyncio.timeout_at(overall_deadline):
                                 await self._download_files(
                                     session,
                                     file_links,
@@ -668,11 +686,12 @@ class RemoteCrawler:
                                 )
                         except TimeoutError:
                             logger.warning(
-                                "Linked-file downloads exceeded budget; "
+                                "Linked-file downloads hit the crawl deadline; "
                                 "proceeding with pages only",
                                 extra={
                                     "url": url,
-                                    "budget_seconds": max_length,
+                                    "deadline_seconds": max_length
+                                    + _CLIENT_TIMEOUT_MARGIN_SECONDS,
                                     "file_links": len(file_links),
                                 },
                             )
