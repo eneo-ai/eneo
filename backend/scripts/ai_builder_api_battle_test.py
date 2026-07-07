@@ -332,7 +332,8 @@ def _run_suite(
     suite_dir = output_dir / f"ai-builder-api-battle-suite-{started_at}"
     suite_dir.mkdir(parents=True, exist_ok=True)
     results: list[JsonObject] = []
-    failures = 0
+    case_error_count = 0
+    quality_failure_run_count = 0
     total_runs = len(cases) * args.repetitions
 
     run_index = 0
@@ -361,9 +362,18 @@ def _run_suite(
                     suffix=f"{case.case_id}{repetition_suffix}",
                 )
                 _print_summary(bundle["plan_summary"], bundle_path)
-                results.append(_suite_result(bundle, bundle_path))
+                result = _suite_result(bundle, bundle_path)
+                results.append(result)
+                if (_int_value(result.get("failed_check_count")) or 0) > 0:
+                    quality_failure_run_count += 1
+                    failed_names = _failed_check_names(result)
+                    print(
+                        "case quality checks failed: "
+                        + ", ".join(failed_names or ["<unknown>"]),
+                        file=sys.stderr,
+                    )
             except (HTTPError, URLError, TimeoutError, ValueError) as error:
-                failures += 1
+                case_error_count += 1
                 failure = {
                     "case_id": case.case_id,
                     "complexity": case.complexity,
@@ -387,7 +397,9 @@ def _run_suite(
         "case_count": len(cases),
         "repetitions": args.repetitions,
         "run_count": total_runs,
-        "failure_count": failures,
+        "failure_count": case_error_count + quality_failure_run_count,
+        "case_error_count": case_error_count,
+        "quality_failure_run_count": quality_failure_run_count,
         "results": results,
         "reliability": _suite_reliability_summary(results),
     }
@@ -397,7 +409,7 @@ def _run_suite(
         encoding="utf-8",
     )
     print(f"\nsuite summary: {summary_path}")
-    return 1 if failures else 0
+    return 1 if case_error_count or quality_failure_run_count else 0
 
 
 def _run_case(
@@ -769,6 +781,20 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "metrics": metrics if isinstance(metrics, Mapping) else {},
         "event_summary": dict(event_summary),
     }
+
+
+def _failed_check_names(result: Mapping[str, Any]) -> list[str]:
+    failed_checks = result.get("failed_checks")
+    if not isinstance(failed_checks, list):
+        return []
+    names: list[str] = []
+    for failed_check in failed_checks:
+        if not isinstance(failed_check, Mapping):
+            continue
+        name = failed_check.get("name")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
 
 
 def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:

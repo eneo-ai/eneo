@@ -7,6 +7,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from pytest import MonkeyPatch
+
 
 def _battle_harness() -> ModuleType:
     module_path = (
@@ -205,6 +207,68 @@ def test_suite_reliability_counts_invalid_plan_errors() -> None:
     assert case_summary["plan_created_count"] == 1
     assert case_summary["self_correction_invalid_plan_count"] == 2
     assert case_summary["error_code_counts"] == {"self_correction_invalid_plan": 2}
+
+
+def test_suite_returns_failure_when_quality_checks_fail(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+
+    def fail_quality_check(**_: Any) -> dict[str, Any]:
+        return {
+            "created_at": "20260707T000000",
+            "case": {"id": "document_pdf_source_retention_balance"},
+            "session_id": "session-1",
+            "plan_id": "plan-1",
+            "plan_summary": {"step_count": 2},
+            "event_summary": {},
+            "quality_report": {
+                "checks": [
+                    {
+                        "name": "terminal_document_output_mode",
+                        "passed": False,
+                        "actual": "pass_through",
+                        "expected": "render_verbatim",
+                    }
+                ],
+                "warnings": [],
+                "metrics": {},
+            },
+        }
+
+    monkeypatch.setattr(harness, "_run_case", fail_quality_check)
+
+    exit_code = harness._run_suite(
+        cases=[
+            harness.BattleCase(
+                case_id="document_pdf_source_retention_balance", prompt="Build a PDF."
+            )
+        ],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=type(
+            "Args",
+            (),
+            {
+                "repetitions": 1,
+                "space_id": "space-1",
+            },
+        )(),
+        output_dir=tmp_path,
+    )
+
+    assert exit_code == 1
+    summary_path = next(
+        tmp_path.glob("ai-builder-api-battle-suite-*/suite-summary.json")
+    )
+    summary = json.loads(summary_path.read_text())
+    assert summary["case_error_count"] == 0
+    assert summary["quality_failure_run_count"] == 1
+    assert summary["failure_count"] == 1
+    assert summary["results"][0]["failed_check_count"] == 1
 
 
 def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
