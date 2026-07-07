@@ -7,19 +7,12 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
-from eneo.flows.ai_builder.ai_builder_source_material import (
-    SourceMaterialBindingStatus,
-    iter_compiled_source_material_boundaries,
-    source_material_binding_status,
-    source_material_bindings_for_boundary,
-)
 from eneo.flows.citation_sidecar import resolve_citation_mode
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
-    InputType,
     OutputMode,
     OutputType,
     StepSpec,
@@ -101,9 +94,6 @@ def normalize_ai_builder_step_topology(
     noisy quality warnings. Keep true fan-in when a prompt explicitly references
     several earlier steps, otherwise compile to the lean adjacent edge.
 
-    Artifact flows that cross a structured JSON boundary also need explicit
-    source-material underlag. Without that binding, later document-rendering
-    steps can see only metadata JSON and lose the transcript or source file text.
     """
 
     spec, artifact_body_changes = _normalize_pre_terminal_artifact_body_step(
@@ -162,13 +152,6 @@ def normalize_ai_builder_step_topology(
     normalized_spec = (
         spec if not mutated else spec.model_copy(update={"steps": normalized_steps})
     )
-    normalized_spec, source_material_changes = _normalize_source_material_underlag(
-        normalized_spec,
-        ui_language=ui_language,
-    )
-    changes.extend(source_material_changes)
-    mutated = mutated or bool(source_material_changes)
-
     if disambiguate_duplicate_step_names:
         normalized_spec, step_name_changes = _normalize_duplicate_step_names(
             normalized_spec
@@ -232,54 +215,6 @@ def _unique_step_name(name: str, *, used_names: set[str]) -> str:
 
 def _step_name_key(name: str) -> str:
     return name.strip().casefold()
-
-
-def _normalize_source_material_underlag(
-    spec: FlowDraftSpecCore,
-    *,
-    ui_language: str | None = None,
-) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
-    updated_steps = list(spec.steps)
-    changes: list[tuple[StepSpec, StepNormalizationChange]] = []
-
-    for boundary in iter_compiled_source_material_boundaries(spec):
-        if (
-            source_material_binding_status(boundary)
-            is not SourceMaterialBindingStatus.NEEDS_COMPLETION
-        ):
-            continue
-        step_index = next(
-            index
-            for index, candidate in enumerate(spec.steps)
-            if candidate is boundary.step
-        )
-        normalized_bindings = source_material_bindings_for_boundary(
-            boundary,
-            ui_language=ui_language,
-        )
-        updates: dict[str, Any] = {
-            "input_type": InputType.TEXT,
-            "input_bindings": normalized_bindings,
-        }
-        normalized_step = boundary.step.model_copy(update=updates)
-        updated_steps[step_index] = normalized_step
-        changes.append(
-            (
-                normalized_step,
-                StepNormalizationChange(
-                    code="source_material_underlag_completed",
-                    field_suffix="input_bindings.source_refs",
-                    message=(
-                        "Completed source-material underlag so the step receives "
-                        "the immediate structured result and the earlier source text."
-                    ),
-                ),
-            )
-        )
-
-    if not changes:
-        return spec, []
-    return spec.model_copy(update={"steps": updated_steps}), changes
 
 
 def _normalize_pre_terminal_artifact_body_step(

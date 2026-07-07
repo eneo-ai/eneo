@@ -803,8 +803,15 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
     assert transcription_step.input_config["runtime_input"]["input_format"] == "audio"
     assert extract_step.input_source == InputSource.PREVIOUS_STEP
     assert body_step.input_bindings == {
-        "source_refs": [{"step_ref": "step_b", "output": "structured"}]
+        "source_refs": [
+            {"step_ref": "step_b", "output": "structured"},
+            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
+        ]
     }
+    assert _question(body_step.input_bindings) == (
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert body_step.input_contract is None
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert renderer_step.input_bindings is None
     assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)

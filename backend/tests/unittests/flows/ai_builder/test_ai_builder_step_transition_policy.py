@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
-    compile_step_input_bindings,
-)
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
     supports_inline_inref_citation,
-)
-from eneo.flows.application.flow_draft_materialization import (
-    compile_flow_draft_changeset,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -22,7 +16,6 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.input_binding_contract_rules import (
     effective_question_binding,
-    question_binding,
 )
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -785,204 +778,6 @@ def test_normalize_ai_builder_spec_preserves_artifact_tail_without_output_intent
     assert changes == []
 
 
-def test_normalize_ai_builder_spec_completes_source_material_underlag() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Mötesprotokoll från ljud",
-        steps=[
-            _step(
-                ref="step_a",
-                name="Transkribera ljud",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_b",
-                name="Strukturera transkription",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_c",
-                name="Identifiera mötesmetadata",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.JSON,
-                input_contract={
-                    "type": "object",
-                    "properties": {"agenda": {"type": "array"}},
-                },
-            ),
-            _step(
-                ref="step_d",
-                name="Skapa DOCX",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.DOCX,
-                input_contract={
-                    "type": "object",
-                    "properties": {"metadata": {"type": "object"}},
-                },
-            ),
-        ],
-    )
-
-    normalized, changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=OutputType.DOCX,
-    )
-
-    assert normalized.steps[2].input_type == InputType.TEXT
-    assert normalized.steps[2].input_bindings == _completed_source_refs(
-        structured_step_ref="step_b",
-        source_step_ref="step_a",
-        label="Källmaterial",
-    )
-    assert _effective_question(normalized.steps[2].input_bindings) == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
-    assert normalized.steps[2].input_contract is None
-    assert normalized.steps[3].input_type == InputType.TEXT
-    assert normalized.steps[3].input_bindings == _completed_source_refs(
-        structured_step_ref="step_c",
-        source_step_ref="step_a",
-        label="Källmaterial",
-    )
-    assert _effective_question(normalized.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
-    assert normalized.steps[3].input_contract is None
-    assert normalized.steps[3].output_mode == OutputMode.PASS_THROUGH
-    assert [
-        change.code
-        for _step_spec, change in changes
-        if change.code == "source_material_underlag_completed"
-    ] == ["source_material_underlag_completed", "source_material_underlag_completed"]
-    assert all(
-        step.input_contract is None
-        for step in normalized.steps
-        if question_binding(step.input_bindings) is not None
-    )
-
-
-def test_normalize_ai_builder_spec_completes_source_material_for_text_report() -> None:
-    spec = _text_report_source_material_spec()
-
-    normalized, changes = normalize_ai_builder_spec(spec, ui_language="en")
-
-    final_step = normalized.steps[3]
-    assert final_step.input_source == InputSource.PREVIOUS_STEP
-    assert final_step.input_type == InputType.TEXT
-    assert final_step.input_bindings == _completed_source_refs(
-        structured_step_ref="step_c",
-        source_step_ref="step_a",
-    )
-    assert _effective_question(final_step.input_bindings) == (
-        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
-    )
-    assert [
-        change.code
-        for _step_spec, change in changes
-        if change.code == "source_material_underlag_completed"
-    ] == [
-        "source_material_underlag_completed",
-        "source_material_underlag_completed",
-    ]
-
-    metrics = _question_metrics(
-        question=_effective_question(final_step.input_bindings),
-        spec=normalized,
-    )
-    assert metrics["fan_in_width"] == 2
-    assert metrics["whole_output_reference_count"] == 2
-    assert metrics["source_duplication_count"] == 1
-    assert metrics["all_previous_steps_count"] == 0
-
-
-def test_normalize_ai_builder_spec_bounds_material_metrics_for_section_chain() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Section report",
-        steps=[
-            _step(
-                ref="step_a",
-                name="Transcribe meeting",
-                instructions="Transcribe the uploaded meeting.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_b",
-                name="Extract summary",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_c",
-                name="Extract decisions",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_d",
-                name="Extract risks",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_e",
-                name="Write report",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.TEXT,
-            ),
-        ],
-    )
-
-    normalized, _changes = normalize_ai_builder_spec(spec)
-
-    for step in normalized.steps[2:]:
-        question = _effective_question(step.input_bindings)
-        metrics = _question_metrics(question=question, spec=normalized)
-        assert metrics["binding_byte_size"] <= 96
-        assert metrics["fan_in_width"] == 2
-        assert metrics["structured_field_count"] == 0
-        assert metrics["whole_output_reference_count"] == 2
-        assert metrics["source_duplication_count"] == 1
-        assert metrics["all_previous_steps_count"] == 0
-
-
-def test_normalize_ai_builder_spec_treats_immediate_structured_only_as_incomplete() -> (
-    None
-):
-    spec = _text_report_source_material_spec(
-        final_input_bindings={"question": "{{ step_c.output.structured }}"}
-    )
-
-    normalized, _changes = normalize_ai_builder_spec(spec, ui_language="en")
-
-    assert normalized.steps[3].input_type == InputType.TEXT
-    assert normalized.steps[3].input_bindings == {
-        "question": "{{ step_c.output.structured }}",
-        "source_refs": [
-            {
-                "step_ref": "step_a",
-                "output": "text",
-                "label": "Source material",
-            }
-        ],
-    }
-    assert _effective_question(normalized.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
-    )
-
-
 def test_normalize_ai_builder_spec_preserves_text_report_complete_underlag() -> None:
     complete_question = (
         "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
@@ -994,11 +789,7 @@ def test_normalize_ai_builder_spec_preserves_text_report_complete_underlag() -> 
     normalized, changes = normalize_ai_builder_spec(spec)
 
     assert normalized.steps[3].input_bindings == {"question": complete_question}
-    assert not any(
-        step.plan_step_ref == "step_d"
-        and change.code == "source_material_underlag_completed"
-        for step, change in changes
-    )
+    assert changes == []
 
 
 def test_normalize_ai_builder_spec_preserves_source_refs_complete_underlag() -> None:
@@ -1017,11 +808,7 @@ def test_normalize_ai_builder_spec_preserves_source_refs_complete_underlag() -> 
     normalized, changes = normalize_ai_builder_spec(spec)
 
     assert normalized.steps[3].input_bindings == bindings
-    assert not any(
-        step.plan_step_ref == "step_d"
-        and change.code == "source_material_underlag_completed"
-        for step, change in changes
-    )
+    assert changes == []
 
 
 def test_normalize_ai_builder_spec_dedupes_existing_source_refs() -> None:
@@ -1051,43 +838,6 @@ def test_normalize_ai_builder_spec_dedupes_existing_source_refs() -> None:
     )
 
 
-def test_compiler_source_refs_complete_once_after_normalization_and_materialization() -> (
-    None
-):
-    spec = _text_report_source_material_spec()
-    compiled_bindings = compile_step_input_bindings(
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        uses_form_fields=[],
-        uses_previous_fields=[],
-        uses_previous_outputs=[],
-        prior_steps=spec.steps[:3],
-    )
-    spec = _text_report_source_material_spec(final_input_bindings=compiled_bindings)
-
-    normalized, changes = normalize_ai_builder_spec(spec, ui_language="en")
-    shared = compile_flow_draft_changeset(normalized, current_flow=None)
-
-    assert any(
-        step.plan_step_ref == "step_d"
-        and change.code == "source_material_underlag_completed"
-        for step, change in changes
-    )
-    assert shared.compiled_steps[3].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_3", "output": "structured"},
-            {
-                "step_ref": "step_1",
-                "output": "text",
-                "label": "Source material",
-            },
-        ]
-    }
-    assert effective_question_binding(shared.compiled_steps[3].input_bindings) == (
-        "{{ step_3.output.structured }}\n\nSource material: {{ step_1.output.text }}"
-    )
-
-
 def test_normalize_ai_builder_spec_treats_source_only_underlag_as_intentional_partial() -> (
     None
 ):
@@ -1100,25 +850,7 @@ def test_normalize_ai_builder_spec_treats_source_only_underlag_as_intentional_pa
     assert normalized.steps[3].input_bindings == {
         "question": "Source material: {{ step_a.output.text }}"
     }
-    assert not any(
-        step.plan_step_ref == "step_d"
-        and change.code == "source_material_underlag_completed"
-        for step, change in changes
-    )
-
-
-def test_normalize_ai_builder_spec_completes_empty_source_material_question() -> None:
-    spec = _text_report_source_material_spec(final_input_bindings={"question": ""})
-
-    normalized, _changes = normalize_ai_builder_spec(spec, ui_language="en")
-
-    assert normalized.steps[3].input_bindings == _completed_source_refs(
-        structured_step_ref="step_c",
-        source_step_ref="step_a",
-    )
-    assert _effective_question(normalized.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
-    )
+    assert changes == []
 
 
 def test_normalize_ai_builder_spec_does_not_add_source_material_without_json_predecessor() -> (
@@ -1154,10 +886,7 @@ def test_normalize_ai_builder_spec_does_not_add_source_material_without_json_pre
     normalized, changes = normalize_ai_builder_spec(spec)
 
     assert normalized == spec
-    assert not any(
-        change.code == "source_material_underlag_completed"
-        for _step_spec, change in changes
-    )
+    assert changes == []
 
 
 def test_normalize_ai_builder_spec_does_not_add_source_material_to_pure_json_chain() -> (
@@ -1194,313 +923,4 @@ def test_normalize_ai_builder_spec_does_not_add_source_material_to_pure_json_cha
     normalized, changes = normalize_ai_builder_spec(spec)
 
     assert normalized == spec
-    assert not any(
-        change.code == "source_material_underlag_completed"
-        for _step_spec, change in changes
-    )
-
-
-def test_normalize_ai_builder_spec_uses_text_flow_input_as_primary_source() -> None:
-    spec = _text_report_source_material_spec(
-        source_input_type=InputType.TEXT,
-        source_output_mode=OutputMode.PASS_THROUGH,
-    )
-
-    normalized, _changes = normalize_ai_builder_spec(spec, ui_language="en")
-
-    assert normalized.steps[3].input_bindings == _completed_source_refs(
-        structured_step_ref="step_c",
-        source_step_ref="step_a",
-    )
-    assert _effective_question(normalized.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nSource material: {{ step_a.output.text }}"
-    )
-
-
-def test_normalize_ai_builder_spec_typed_source_refs_are_completion_fixed_point() -> (
-    None
-):
-    spec = _text_report_source_material_spec()
-    normalized, _changes = normalize_ai_builder_spec(spec)
-    normalized_again, second_changes = normalize_ai_builder_spec(normalized)
-
-    assert normalized_again == normalized
-    assert not any(
-        change.code == "source_material_underlag_completed"
-        for _step_spec, change in second_changes
-    )
-
-
-def test_normalize_ai_builder_spec_source_material_underlag_is_idempotent() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Mötesprotokoll från ljud",
-        steps=[
-            _step(
-                ref="step_a",
-                name="Transkribera ljud",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_b",
-                name="Strukturera transkription",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_c",
-                name="Skapa DOCX",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-    )
-
-    normalized_once, first_changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=OutputType.DOCX,
-    )
-    normalized_twice, second_changes = normalize_ai_builder_spec(
-        normalized_once,
-        terminal_output_type=OutputType.DOCX,
-    )
-
-    assert normalized_twice == normalized_once
-    assert [
-        change.code
-        for _step_spec, change in first_changes
-        if change.code == "source_material_underlag_completed"
-    ] == ["source_material_underlag_completed"]
-    assert not any(
-        change.code == "source_material_underlag_completed"
-        for _step_spec, change in second_changes
-    )
-
-
-def test_normalize_ai_builder_spec_preserves_existing_source_material_question_tail() -> (
-    None
-):
-    spec = FlowDraftSpecCore(
-        flow_name="Mötesprotokoll från ljud",
-        steps=[
-            _step(
-                ref="step_a",
-                name="Transkribera ljud",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_b",
-                name="Strukturera transkription",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_c",
-                name="Skapa DOCX",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.DOCX,
-                input_bindings={"question": "audience: {{ audience }}"},
-            ),
-        ],
-    )
-
-    normalized, _changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=OutputType.DOCX,
-    )
-
-    assert normalized.steps[2].input_bindings == {
-        "question": "audience: {{ audience }}",
-        "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ],
-    }
-    assert _effective_question(normalized.steps[2].input_bindings) == (
-        "audience: {{ audience }}\n\n"
-        "{{ step_b.output.structured }}\n\n"
-        "Källmaterial: {{ step_a.output.text }}"
-    )
-
-
-def test_normalize_ai_builder_spec_completes_structured_field_only_source_material() -> (
-    None
-):
-    spec = FlowDraftSpecCore(
-        flow_name="Contract memo",
-        form_fields=[
-            FormFieldSpec(
-                name="review_audience",
-                type="text",
-                label="Review audience",
-            )
-        ],
-        steps=[
-            _step(
-                ref="step_a",
-                name="Transcribe vendor call",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_b",
-                name="Extract contract facts",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_c",
-                name="Create contract memo",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.DOCX,
-                input_bindings={
-                    "question": (
-                        "Audience: {{ review_audience }}\n"
-                        "Risk: {{ step_b.output.structured.contract.delivery_risk }}"
-                    )
-                },
-            ),
-        ],
-    )
-
-    normalized, changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=OutputType.DOCX,
-        ui_language="en",
-    )
-
-    assert normalized.steps[2].input_bindings == {
-        "question": (
-            "Audience: {{ review_audience }}\n"
-            "Risk: {{ step_b.output.structured.contract.delivery_risk }}"
-        ),
-        "source_refs": [
-            {"step_ref": "step_a", "output": "text", "label": "Source material"}
-        ],
-    }
-    assert _effective_question(normalized.steps[2].input_bindings) == (
-        "Audience: {{ review_audience }}\n"
-        "Risk: {{ step_b.output.structured.contract.delivery_risk }}\n\n"
-        "Source material: {{ step_a.output.text }}"
-    )
-    assert any(
-        change.code == "source_material_underlag_completed"
-        for _step_spec, change in changes
-    )
-
-
-def test_normalize_ai_builder_spec_prefers_primary_audio_source_over_prior_text_step() -> (
-    None
-):
-    spec = FlowDraftSpecCore(
-        flow_name="Audio report with notes",
-        steps=[
-            _step(
-                ref="step_a",
-                name="Read user notes",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_type=OutputType.TEXT,
-            ),
-            _step(
-                ref="step_b",
-                name="Transcribe audio",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_c",
-                name="Structure transcript",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_d",
-                name="Create DOCX",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-    )
-
-    normalized, _changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=OutputType.DOCX,
-        ui_language="en",
-    )
-
-    assert normalized.steps[3].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_c", "output": "structured"},
-            {"step_ref": "step_b", "output": "text", "label": "Source material"},
-        ]
-    }
-    assert _effective_question(normalized.steps[3].input_bindings) == (
-        "{{ step_c.output.structured }}\n\nSource material: {{ step_b.output.text }}"
-    )
-
-
-def test_normalize_ai_builder_spec_uses_english_source_material_label() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Audio report",
-        steps=[
-            _step(
-                ref="step_a",
-                name="Transcribe audio",
-                instructions="Transcribe the uploaded audio.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            _step(
-                ref="step_b",
-                name="Extract action items",
-                instructions="Extract action items from the transcript.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_type=OutputType.JSON,
-            ),
-            _step(
-                ref="step_c",
-                name="Create DOCX",
-                instructions="Create the final report.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.DOCX,
-            ),
-        ],
-    )
-
-    normalized, _changes = normalize_ai_builder_spec(
-        spec,
-        terminal_output_type=OutputType.DOCX,
-        ui_language="en",
-    )
-
-    assert normalized.steps[2].input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Source material"},
-        ]
-    }
-    assert _effective_question(normalized.steps[2].input_bindings) == (
-        "{{ step_b.output.structured }}\n\nSource material: {{ step_a.output.text }}"
-    )
+    assert changes == []

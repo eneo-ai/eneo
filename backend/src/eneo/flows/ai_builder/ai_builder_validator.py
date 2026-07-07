@@ -11,7 +11,6 @@ from eneo.flows.ai_builder.ai_builder_validation_quality import (
     lint_multi_goal_prompts,
     lint_shadowed_form_field_bare_references,
     lint_single_step_flow,
-    lint_source_material_underlag_boundaries,
     lint_unfiltered_structured_interpolation,
     lint_unused_form_fields,
     lint_vague_step_names,
@@ -154,7 +153,6 @@ def validate_spec(
         lint_shadowed_form_field_bare_references(spec, result)
         lint_all_previous_with_specific_refs(spec, result)
         lint_unfiltered_structured_interpolation(spec, result)
-        lint_source_material_underlag_boundaries(spec, result)
 
     return result
 
