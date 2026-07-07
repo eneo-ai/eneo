@@ -183,6 +183,7 @@ def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message
     assert "did not contain any flow steps" in payload["message"]
     assert "Compiled edit spec" not in payload["message"]
     assert "Flow must have at least one step" not in payload["message"]
+    assert payload["details"] == {"failure_codes": "empty_steps"}
 
 
 def test_self_correction_parse_error_uses_actionable_user_message() -> None:

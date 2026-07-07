@@ -893,19 +893,33 @@ async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes()
 
 
 @pytest.mark.asyncio
-async def test_run_tool_self_correction_keeps_non_quality_failure_codes_private() -> (
+async def test_run_tool_self_correction_surfaces_bounded_validation_failure_codes() -> (
     None
 ):
     _, _, events = await _run_repair_capturing(
         max_retries=0,
         failure_kind="validation",
-        failure_codes=frozenset({"duplicate_step_name"}),
+        failure_codes=frozenset(
+            {
+                "duplicate_step_name",
+                "assembly_explicit_refs_not_supported",
+                "assembly_source_file_first_step_requires_json",
+                "assembly_step_output_type_mismatch",
+            }
+        ),
     )
 
     payload = json.loads(events[-1]["data"])
 
     assert payload["code"] == "self_correction_invalid_plan"
-    assert "details" not in payload
+    assert payload["details"] == {
+        "failure_codes": (
+            "assembly_explicit_refs_not_supported,"
+            "assembly_source_file_first_step_requires_json,"
+            "assembly_step_output_type_mismatch"
+        ),
+        "failure_codes_count": 4,
+    }
 
 
 @pytest.mark.asyncio

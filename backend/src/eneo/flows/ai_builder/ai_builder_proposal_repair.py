@@ -60,7 +60,7 @@ from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 MAX_SELF_CORRECTION_RETRIES = 3
-_MAX_PUBLIC_QUALITY_FAILURE_CODES = 3
+_MAX_PUBLIC_FAILURE_CODES = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,16 +245,19 @@ def _self_correction_error_details(
     failure_kind: ToolProcessingFailureKind | None,
     failure_codes: frozenset[str],
 ) -> dict[str, JsonScalar] | None:
-    if failure_kind != "quality" or not failure_codes:
+    if not failure_codes:
         return None
 
     sorted_codes = sorted(failure_codes)
-    public_codes = sorted_codes[:_MAX_PUBLIC_QUALITY_FAILURE_CODES]
+    public_codes = sorted_codes[:_MAX_PUBLIC_FAILURE_CODES]
+    detail_key = (
+        "quality_failure_codes" if failure_kind == "quality" else "failure_codes"
+    )
     details: dict[str, JsonScalar] = {
-        "quality_failure_codes": ",".join(public_codes),
+        detail_key: ",".join(public_codes),
     }
     if len(sorted_codes) > len(public_codes):
-        details["quality_failure_code_count"] = len(sorted_codes)
+        details[f"{detail_key}_count"] = len(sorted_codes)
     return details
 
 
