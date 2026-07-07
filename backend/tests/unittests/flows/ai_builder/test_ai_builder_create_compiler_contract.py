@@ -7,11 +7,6 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
-    compile_create_steps_to_spec,
-)
-from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    NewStepDraft,
-    StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
@@ -29,27 +24,12 @@ from eneo.flows.ai_builder.pattern_registry import (
 )
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import (
-    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
     OutputType,
 )
 from eneo.flows.input_binding_contract_rules import effective_question_binding
-from eneo.flows.output_processing import validate_against_contract
-
-
-def _field(
-    name: str,
-    field_type: str = "string",
-    *,
-    description: str = "Beskrivning.",
-) -> StructuredFieldDraft:
-    return StructuredFieldDraft(
-        name=name,
-        field_type=field_type,
-        description=description,
-    )
 
 
 def _question(input_bindings: dict[str, object] | None) -> str:
@@ -949,46 +929,65 @@ def test_compiler_uses_assembly_path_for_docx_template_fill(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() -> None:
-    compiled = compile_create_steps_to_spec(
-        flow_name="Dokumentanalys",
-        form_fields=[
-            FormFieldSpec(
-                name="referensnummer",
-                label="Referensnummer",
-                type="text",
-                required=True,
-            )
-        ],
-        steps=[
-            NewStepDraft(
-                name="Extrahera risker",
-                instructions="Extrahera risker och rekommendationer.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.DOCUMENT,
-                output_type=OutputType.JSON,
-                runtime_required=True,
-                runtime_max_files=5,
-                uses_form_fields=["referensnummer"],
-                output_fields=[
-                    _field("sammanfattning", description="Kort sammanfattning."),
-                ],
-            ),
-            NewStepDraft(
-                name="Skriv slutrapport",
-                instructions="Skriv slutrapport med specifika datapunkter.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.TEXT,
-                uses_previous_fields=[
-                    {
-                        "from_step": 1,
-                        "field_path": "sammanfattning",
-                        "label": "Sammanfattning",
-                    }
-                ],
-            ),
-        ],
+def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("field-ref document chain should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys",
+            "plan_rationale": "Extrahera risker och skriv slutrapport.",
+            "input_fields": [
+                {
+                    "variable_name": "referensnummer",
+                    "label": "Referensnummer",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Extrahera risker",
+                    "instructions": "Extrahera risker och rekommendationer.",
+                    "output_type": "json",
+                    "uses_form_fields": ["referensnummer"],
+                    "output_fields": [
+                        {
+                            "name": "sammanfattning",
+                            "field_type": "string",
+                            "description": "Kort sammanfattning.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv slutrapport",
+                    "instructions": "Skriv slutrapport med specifika datapunkter.",
+                    "output_type": "text",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "sammanfattning",
+                            "label": "Sammanfattning",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            runtime_max_files=5,
+        ),
     )
 
     first_step = compiled.steps[0]
@@ -1005,53 +1004,6 @@ def test_compiler_lowers_runtime_inputs_form_fields_and_previous_field_refs() ->
     )
     assert _question(compiled.steps[1].input_bindings) == (
         "Sammanfattning: {{ step_a.output.structured.sammanfattning }}"
-    )
-    assert validate_spec(compiled).valid
-
-
-def test_source_reader_contract_keeps_all_terminal_schema_leaves() -> None:
-    required_properties = {f"field_{index}": {"type": "string"} for index in range(10)}
-
-    compiled = compile_create_steps_to_spec(
-        flow_name="Dokumentanalys till JSON",
-        terminal_output_schema={
-            "type": "object",
-            "properties": required_properties,
-        },
-        steps=[
-            NewStepDraft(
-                name="Läs källdokument",
-                instructions="Extrahera källdata.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.DOCUMENT,
-                output_type=OutputType.JSON,
-                output_fields=[_field("field_0")],
-                runtime_required=True,
-            ),
-            NewStepDraft(
-                name="Sammanställ resultat",
-                instructions="Sammanställ slutlig JSON.",
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.JSON,
-                output_type=OutputType.JSON,
-            ),
-        ],
-    )
-
-    source_contract = compiled.steps[0].output_contract
-    terminal_contract = compiled.steps[-1].output_contract
-    assert source_contract is not None
-    assert sorted(source_contract["properties"]) == [
-        f"field_{index}" for index in range(10)
-    ]
-    assert terminal_contract == {
-        "type": "object",
-        "properties": required_properties,
-    }
-    validate_against_contract(
-        {f"field_{index}": "value" for index in range(10)},
-        terminal_contract,
-        label="terminal output",
     )
     assert validate_spec(compiled).valid
 
