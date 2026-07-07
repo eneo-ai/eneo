@@ -6,6 +6,7 @@ on:
 
 permissions:
   issues: write
+  pull-requests: write
 
 concurrency:
   group: eneo-ai-review-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}
