@@ -569,8 +569,8 @@ class TestRule6FlowApiBoundary:
         )
         assert not offenders, (
             "The retired materialization bridge names must not be reintroduced. "
-            "Use compile_create_steps_to_spec, FlowAuthoringCommandService, or "
-            f"AIBuilderRepository directly.\nOffenders: {offenders}"
+            "Use compile_create_intent_to_spec, FlowAuthoringCommandService, "
+            f"or AIBuilderRepository directly.\nOffenders: {offenders}"
         )
 
     def test_helper_catches_all_offending_import_shapes(

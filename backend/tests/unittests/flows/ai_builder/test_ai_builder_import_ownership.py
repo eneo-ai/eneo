@@ -286,7 +286,6 @@ REPAIR_TRANSPORT_PATH = Path("src/eneo/flows/ai_builder/ai_builder_repair_transp
 CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
         "CreateCompileContext",
-        "compile_create_steps_to_spec",
         "compile_create_intent_to_spec",
         "create_compile_context_from_planning_state",
     }

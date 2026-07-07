@@ -38,16 +38,7 @@ def _question(input_bindings: dict[str, object] | None) -> str:
     return question
 
 
-def test_compiler_uses_assembly_path_for_single_step_linear_flow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("single-step linear flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Quick answer",
@@ -90,16 +81,9 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("linear derived-underlag flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag() -> (
+    None
+):
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Case summary",
@@ -164,16 +148,7 @@ def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underla
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_whole_object_underlag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("broad previous-field flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_for_whole_object_underlag() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Case report",
@@ -230,16 +205,8 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag(
 
 @pytest.mark.parametrize("final_output_type", [OutputType.PDF, OutputType.DOCX])
 def test_compiler_uses_assembly_path_for_generated_document_renderer(
-    monkeypatch: pytest.MonkeyPatch,
     final_output_type: OutputType,
 ) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("generated document flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Document summary",
@@ -283,16 +250,7 @@ def test_compiler_uses_assembly_path_for_generated_document_renderer(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_with_structural_pattern_hint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("structural pattern hint should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_with_structural_pattern_hint() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "PDF briefing",
@@ -326,16 +284,7 @@ def test_compiler_uses_assembly_path_with_structural_pattern_hint(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_document_source_reader_chain(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("document source-reader flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_for_document_source_reader_chain() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Document findings",
@@ -401,18 +350,7 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain(
     assert validate_spec(compiled).valid
 
 
-def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError(
-            "source-contract shadow form fields should use FlowAssemblyPlan"
-        )
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_assembly_drops_source_contract_shadow_form_fields_before_lowering() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Document case summary",
@@ -494,16 +432,7 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
     assert validate_spec(compiled).valid
 
 
-def test_assembly_places_server_owned_runtime_field_hints(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("server-owned runtime fields should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_assembly_places_server_owned_runtime_field_hints() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Bygglovsrapport",
@@ -568,16 +497,7 @@ def test_assembly_places_server_owned_runtime_field_hints(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("aggregate document flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Aggregate report",
@@ -646,18 +566,7 @@ def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in(
     assert validate_spec(compiled).valid
 
 
-def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError(
-            "terminal-schema source reader should use FlowAssemblyPlan"
-        )
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves() -> None:
     required_properties = {f"field_{index}": {"type": "string"} for index in range(10)}
     intent = parse_create_flow_intent_arguments(
         {
@@ -711,16 +620,7 @@ def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_pure_audio_transcription(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("pure audio transcription should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Meeting transcript",
@@ -762,16 +662,9 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underlag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("audio derived-underlag flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underlag() -> (
+    None
+):
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Meeting report",
@@ -850,16 +743,7 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_docx_template_fill(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("DOCX template fill should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_uses_assembly_path_for_docx_template_fill() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
@@ -932,18 +816,7 @@ def test_compiler_uses_assembly_path_for_docx_template_fill(
     assert validate_spec(compiled).valid
 
 
-def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError(
-            "document derived-underlag chain should use FlowAssemblyPlan"
-        )
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Dokumentanalys",
@@ -1015,16 +888,8 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag(
 
 @pytest.mark.parametrize("final_output_type", [OutputType.PDF, OutputType.DOCX])
 def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
-    monkeypatch: pytest.MonkeyPatch,
     final_output_type: OutputType,
 ) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("document artifact flow should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Document artifact report",
@@ -1090,18 +955,7 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
     assert validate_spec(compiled).valid
 
 
-def test_document_artifact_drops_model_authored_pdf_render_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError(
-            "terminal render-helper cleanup should use FlowAssemblyPlan"
-        )
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_document_artifact_drops_model_authored_pdf_render_helper() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Dokumentanalys till PDF",

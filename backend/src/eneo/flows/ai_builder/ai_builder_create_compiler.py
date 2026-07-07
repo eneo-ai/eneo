@@ -18,16 +18,8 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_assembly import (
     try_compile_create_intent_with_assembly,
 )
-from eneo.flows.ai_builder.ai_builder_create_dataflow import (
-    normalize_create_step_mechanics,
-)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
-    compile_new_step_draft,
-    make_plan_step_ref,
-)
-from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    NewStepDraft,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -47,14 +39,6 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_metadata_allows_input_fields,
     runtime_metadata_disables_declared_input_fields,
 )
-from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
-    apply_terminal_output_schema,
-    clear_terminal_schema_output_fields,
-    complete_source_reader_contracts,
-    drop_source_contract_shadow_form_fields,
-    log_dropped_source_contract_shadow_fields,
-    source_capture_fields_by_step_index,
-)
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
@@ -62,14 +46,12 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
 )
-from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
     InputType,
     OutputMode,
     OutputType,
-    StepSpec,
 )
 from eneo.json_types import JsonObject
 
@@ -252,88 +234,6 @@ def _intent_with_server_owned_form_field_placement(
                 final_step.model_copy(update={"uses_form_fields": uses_form_fields}),
             ]
         }
-    )
-
-
-def compile_create_steps_to_spec(
-    *,
-    flow_name: str,
-    flow_description: str | None = None,
-    form_fields: list[FormFieldSpec] | None = None,
-    steps: list[NewStepDraft],
-    document_body_writer_step_indexes: tuple[int, ...] = (),
-    aggregation_intent: AggregationIntent = "linear",
-    terminal_output_schema: JsonObject | None = None,
-    source_reader_required_fields: tuple[SourceCaptureField, ...] = (),
-    ui_language: str | None = None,
-) -> FlowDraftSpecCore:
-    form_fields = list(form_fields or [])
-    steps = clear_terminal_schema_output_fields(
-        steps=steps,
-        terminal_output_schema=terminal_output_schema,
-    )
-    steps = complete_source_reader_contracts(
-        steps=steps,
-        terminal_output_schema=terminal_output_schema,
-        required_fields=source_reader_required_fields,
-    )
-    normalized_steps = normalize_create_step_mechanics(
-        steps=steps,
-        form_fields=form_fields or [],
-        aggregation_intent=aggregation_intent,
-        ui_language=ui_language,
-    )
-    normalized_steps, form_fields, dropped_source_contract_field_names = (
-        drop_source_contract_shadow_form_fields(
-            steps=normalized_steps,
-            form_fields=form_fields,
-        )
-    )
-    log_dropped_source_contract_shadow_fields(
-        field_names=dropped_source_contract_field_names
-    )
-    source_capture_fields_by_index = source_capture_fields_by_step_index(
-        steps=normalized_steps,
-        terminal_output_schema=terminal_output_schema,
-    )
-    compiled_steps: list[StepSpec] = []
-    for index, step_draft in enumerate(normalized_steps):
-        compiled_steps.append(
-            compile_new_step_draft(
-                step_draft=step_draft,
-                plan_step_ref=make_plan_step_ref(index),
-                prior_steps=compiled_steps,
-                source_capture_fields=source_capture_fields_by_index.get(index, ()),
-                ui_language=ui_language,
-            )
-        )
-    compiled_steps = apply_terminal_output_schema(
-        compiled_steps,
-        terminal_output_schema=terminal_output_schema,
-    )
-
-    compiled = FlowDraftSpecCore(
-        flow_name=normalize_flow_name(flow_name),
-        flow_description=flow_description or "",
-        steps=compiled_steps,
-        form_fields=form_fields or None,
-        document_body_writer_step_refs=_document_body_writer_step_refs(
-            compiled_steps=compiled_steps,
-            step_indexes=document_body_writer_step_indexes,
-        ),
-    )
-    return compiled
-
-
-def _document_body_writer_step_refs(
-    *,
-    compiled_steps: list[StepSpec],
-    step_indexes: tuple[int, ...],
-) -> tuple[str, ...]:
-    return tuple(
-        compiled_steps[index].plan_step_ref
-        for index in step_indexes
-        if 0 <= index < len(compiled_steps)
     )
 
 

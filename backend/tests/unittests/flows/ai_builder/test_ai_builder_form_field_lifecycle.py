@@ -175,16 +175,9 @@ def test_single_step_outline_unreferenced_form_field_fails_create_compilation() 
     assert exc_info.value.log_context["field_names"] == "report_title"
 
 
-def test_intermediate_form_field_use_flows_through_derived_structured_underlag(
-    monkeypatch,
-) -> None:
-    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
-        raise AssertionError("form-field source chain should use FlowAssemblyPlan")
-
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_create_compiler.compile_create_steps_to_spec",
-        fail_old_skeleton_path,
-    )
+def test_intermediate_form_field_use_flows_through_derived_structured_underlag() -> (
+    None
+):
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Case assessment",
