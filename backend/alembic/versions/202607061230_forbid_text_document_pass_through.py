@@ -6,7 +6,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202607061230_no_text_doc_passthrough"
+revision = "202607061230_no_text_doc_pass"
 down_revision = "202607061030_render_verbatim"
 branch_labels = None
 depends_on = None
