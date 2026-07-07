@@ -12,8 +12,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     apply_terminal_output_schema,
     clear_terminal_schema_output_fields,
-    drop_source_contract_shadow_form_fields,
-    log_dropped_source_contract_shadow_fields,
     source_capture_fields_by_step_index,
 )
 from eneo.flows.flow_authoring_name import normalize_flow_name
@@ -29,15 +27,6 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         terminal_output_schema=plan.terminal_output_schema,
     )
     form_fields = list(plan.form_fields)
-    step_drafts, form_fields, dropped_source_contract_field_names = (
-        drop_source_contract_shadow_form_fields(
-            steps=step_drafts,
-            form_fields=form_fields,
-        )
-    )
-    log_dropped_source_contract_shadow_fields(
-        field_names=dropped_source_contract_field_names
-    )
     source_capture_fields_by_index = source_capture_fields_by_step_index(
         steps=step_drafts,
         terminal_output_schema=plan.terminal_output_schema,

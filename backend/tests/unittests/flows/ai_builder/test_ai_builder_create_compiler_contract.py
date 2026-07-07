@@ -415,6 +415,71 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain(
     assert validate_spec(compiled).valid
 
 
+def test_assembly_drops_source_contract_shadow_form_fields_before_lowering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError(
+            "source-contract shadow form fields should use FlowAssemblyPlan"
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document case summary",
+            "flow_description": "Extract the case id and write a summary.",
+            "plan_rationale": "The source reader owns the case id contract.",
+            "input_fields": [
+                {
+                    "variable_name": "manual_case_id",
+                    "label": "Manual case id",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract source facts from the document.",
+                    "output_type": "json",
+                    "uses_form_fields": ["manual_case_id"],
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id found in the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write case summary",
+                    "instructions": "Write the final case summary.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+        ),
+    )
+
+    reader_step = compiled.steps[0]
+    assert compiled.form_fields is None
+    assert reader_step.input_source == InputSource.FLOW_INPUT
+    assert reader_step.input_type == InputType.DOCUMENT
+    assert reader_step.output_type == OutputType.JSON
+    assert "manual_case_id" not in repr(reader_step.input_bindings)
+    assert validate_spec(compiled).valid
+
+
 def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

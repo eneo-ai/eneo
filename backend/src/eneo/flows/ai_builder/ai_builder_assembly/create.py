@@ -32,7 +32,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     complete_structured_source_reader_fields,
+    log_dropped_source_contract_shadow_fields,
     source_capture_fields_from_terminal_schema,
+    source_contract_shadow_form_field_names,
     source_reader_leaf_field_name,
     structured_fields_have_source_leaf,
 )
@@ -345,10 +347,16 @@ def _assemble_create_intent(
         terminal_output_schema=terminal_output_schema,
         required_fields=source_reader_required_fields,
     )
+    completed_steps, admitted_form_fields = (
+        _drop_planned_source_contract_shadow_form_fields(
+            planned_steps=completed_steps,
+            form_fields=tuple(form_fields),
+        )
+    )
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
-        form_fields=tuple(form_fields),
+        form_fields=admitted_form_fields,
         steps=completed_steps,
         terminal_output_schema=terminal_output_schema,
         source_reader_required_fields=source_reader_required_fields,
@@ -453,10 +461,16 @@ def _assemble_docx_template_fill(
         terminal_output_schema=None,
         required_fields=source_reader_required_fields,
     )
+    completed_steps, admitted_form_fields = (
+        _drop_planned_source_contract_shadow_form_fields(
+            planned_steps=completed_steps,
+            form_fields=tuple(form_fields),
+        )
+    )
     return FlowAssemblyPlan(
         flow_name=intent.flow_name,
         flow_description=intent.flow_description or "",
-        form_fields=tuple(form_fields),
+        form_fields=admitted_form_fields,
         steps=completed_steps,
         terminal_output_schema=None,
         source_reader_required_fields=source_reader_required_fields,
@@ -717,3 +731,50 @@ def _complete_planned_source_reader_contracts(
             },
         )
     return tuple(updated_steps)
+
+
+def _drop_planned_source_contract_shadow_form_fields(
+    *,
+    planned_steps: tuple[PlannedStep, ...],
+    form_fields: tuple[FormFieldSpec, ...],
+) -> tuple[tuple[PlannedStep, ...], tuple[FormFieldSpec, ...]]:
+    dropped_names = set(
+        source_contract_shadow_form_field_names(
+            output_fields_by_step=tuple(
+                planned_step.output_fields
+                for planned_step in planned_steps
+                if planned_step_is_source_reader(planned_step)
+            ),
+            form_fields=form_fields,
+        )
+    )
+    if not dropped_names:
+        return planned_steps, form_fields
+    log_dropped_source_contract_shadow_fields(field_names=sorted(dropped_names))
+    return (
+        tuple(
+            _without_planned_form_field_refs(
+                planned_step,
+                dropped_names=dropped_names,
+            )
+            for planned_step in planned_steps
+        ),
+        tuple(field for field in form_fields if field.name not in dropped_names),
+    )
+
+
+def _without_planned_form_field_refs(
+    planned_step: PlannedStep,
+    *,
+    dropped_names: set[str],
+) -> PlannedStep:
+    if not planned_step.form_field_refs:
+        return planned_step
+    form_field_refs = tuple(
+        field_name
+        for field_name in planned_step.form_field_refs
+        if field_name not in dropped_names
+    )
+    if form_field_refs == planned_step.form_field_refs:
+        return planned_step
+    return replace(planned_step, form_field_refs=form_field_refs)

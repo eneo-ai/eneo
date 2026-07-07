@@ -148,28 +148,21 @@ def drop_source_contract_shadow_form_fields(
     steps: list[NewStepDraft],
     form_fields: list[FormFieldSpec],
 ) -> tuple[list[NewStepDraft], list[FormFieldSpec], list[str]]:
-    if not form_fields:
-        return steps, form_fields, []
-    source_contract_token_sets = _source_contract_field_token_sets(steps)
-    if not source_contract_token_sets:
-        return steps, form_fields, []
-
-    kept_fields: list[FormFieldSpec] = []
-    dropped_names: set[str] = set()
-    for field in form_fields:
-        if _form_field_shadows_source_contract(
-            field,
-            source_contract_token_sets=source_contract_token_sets,
-        ):
-            dropped_names.add(field.name)
-            continue
-        kept_fields.append(field)
-
+    dropped_names = set(
+        source_contract_shadow_form_field_names(
+            output_fields_by_step=tuple(
+                tuple(step.output_fields or ())
+                for step in steps
+                if _is_source_json_contract_step(step)
+            ),
+            form_fields=tuple(form_fields),
+        )
+    )
     if not dropped_names:
         return steps, form_fields, []
     return (
         [_without_form_field_refs(step, dropped_names=dropped_names) for step in steps],
-        kept_fields,
+        [field for field in form_fields if field.name not in dropped_names],
         sorted(dropped_names),
     )
 
@@ -251,6 +244,33 @@ def complete_structured_source_reader_fields(
         _add_missing_source_reader_fields(
             list(fields),
             required_fields=_dedupe_capture_fields(list(required_fields)),
+        )
+    )
+
+
+def source_contract_shadow_form_field_names(
+    *,
+    output_fields_by_step: tuple[tuple[StructuredFieldDraft, ...], ...],
+    form_fields: tuple[FormFieldSpec, ...],
+) -> tuple[str, ...]:
+    if not form_fields:
+        return ()
+    source_contract_token_sets: set[frozenset[str]] = set()
+    for output_fields in output_fields_by_step:
+        source_contract_token_sets.update(
+            _structured_field_token_sets(list(output_fields))
+        )
+    if not source_contract_token_sets:
+        return ()
+    frozen_source_contract_token_sets = frozenset(source_contract_token_sets)
+    return tuple(
+        sorted(
+            field.name
+            for field in form_fields
+            if _form_field_shadows_source_contract(
+                field,
+                source_contract_token_sets=frozen_source_contract_token_sets,
+            )
         )
     )
 
@@ -369,17 +389,6 @@ def _leaf_field_name(field_path: str) -> str:
         ),
         "",
     )
-
-
-def _source_contract_field_token_sets(
-    steps: list[NewStepDraft],
-) -> frozenset[frozenset[str]]:
-    token_sets: set[frozenset[str]] = set()
-    for step in steps:
-        if not _is_source_json_contract_step(step):
-            continue
-        token_sets.update(_structured_field_token_sets(step.output_fields))
-    return frozenset(token_sets)
 
 
 def _is_source_json_contract_step(step: NewStepDraft) -> bool:
