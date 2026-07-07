@@ -9,6 +9,6 @@ def render_step_display_copy(
     ui_language: str | None,
 ) -> str:
     output_label = output_type.value.upper()
-    if ui_language == "sv":
-        return f"Rendera {output_label}"
-    return f"Render {output_label}"
+    if ui_language is not None and ui_language.casefold().startswith("en"):
+        return f"Render {output_label}"
+    return f"Rendera {output_label}"

@@ -19,16 +19,16 @@ def template_variable_reader_step(
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> PlannedStep:
-    if ui_language == "sv":
-        name = "Extrahera mallvariabler"
-        instructions = (
-            "Extrahera stabila fält och källfakta som behövs innan DOCX-mallen fylls."
-        )
-    else:
+    if _uses_english(ui_language):
         name = "Extract template variables"
         instructions = (
             "Extract the stable fields and source facts needed before filling "
             "the DOCX template."
+        )
+    else:
+        name = "Extrahera mallvariabler"
+        instructions = (
+            "Extrahera stabila fält och källfakta som behövs innan DOCX-mallen fylls."
         )
     return PlannedStep(
         role="reader",
@@ -46,17 +46,17 @@ def template_variable_reader_step(
 
 
 def template_fill_step(*, ui_language: str | None) -> PlannedStep:
-    if ui_language == "sv":
-        name = "Fyll DOCX-mall"
-        instructions = (
-            "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens "
-            "önskade omfattning och terminologi."
-        )
-    else:
+    if _uses_english(ui_language):
         name = "Fill DOCX template"
         instructions = (
             "Fill the DOCX template from the prepared content. Preserve the "
             "user's requested scope and terminology."
+        )
+    else:
+        name = "Fyll DOCX-mall"
+        instructions = (
+            "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens "
+            "önskade omfattning och terminologi."
         )
     return PlannedStep(
         role="template_fill",
@@ -80,17 +80,17 @@ def fixed_audio_transcription_step(
     instructions: str | None = None,
     review_mode: FlowStepReviewMode | None = None,
 ) -> PlannedStep:
-    if ui_language == "sv":
-        default_name = "Transkribera ljud"
-        default_instructions = (
-            "Transkribera det uppladdade ljudet till text innan analys "
-            "eller artefaktgenerering."
-        )
-    else:
+    if _uses_english(ui_language):
         default_name = "Transcribe audio"
         default_instructions = (
             "Transcribe the uploaded audio into text before downstream analysis "
             "or artifact generation."
+        )
+    else:
+        default_name = "Transkribera ljud"
+        default_instructions = (
+            "Transkribera det uppladdade ljudet till text innan analys "
+            "eller artefaktgenerering."
         )
     return PlannedStep(
         role="transcription",
@@ -160,3 +160,7 @@ def _default_template_source_fields() -> list[StructuredFieldDraft]:
             required=False,
         ),
     ]
+
+
+def _uses_english(ui_language: str | None) -> bool:
+    return ui_language is not None and ui_language.casefold().startswith("en")

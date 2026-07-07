@@ -4,13 +4,15 @@ import logging
 
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     SourceCaptureField,
+    compile_input_reference_instruction_hint,
     compile_new_step_draft,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
+    PreviousFieldRef,
     StructuredFieldDraft,
 )
-from eneo.flows.flow_authoring_spec import InputType, OutputType
+from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputType
 
 _LOGGER_NAME = "eneo.flows.ai_builder.ai_builder_new_step_compiler"
 
@@ -113,3 +115,50 @@ def test_output_field_guidance_keeps_field_named_in_instructions() -> None:
     instructions = step.assistant_spec.instructions
     assert "Required JSON fields:" in instructions
     assert "- title: Document title exactly as written." in instructions
+
+
+def test_input_reference_hint_defaults_to_swedish() -> None:
+    hint = compile_input_reference_instruction_hint(
+        uses_previous_fields=[PreviousFieldRef(from_step=1, field_path="summary")],
+        uses_form_fields=["deadline"],
+    )
+
+    assert "Beakta särskilt följande strukturerade fält i underlaget:" in hint
+    assert "- summary (steg 1: summary)" in hint
+    assert "Beakta också följande formulärfält vid analysen:" in hint
+    assert "- deadline: {{ flow_input.deadline }}" in hint
+
+
+def test_input_reference_hint_uses_english_when_requested() -> None:
+    hint = compile_input_reference_instruction_hint(
+        uses_previous_fields=[PreviousFieldRef(from_step=2, field_path="status")],
+        uses_form_fields=["owner"],
+        ui_language="en",
+    )
+
+    assert "Pay particular attention to these structured source fields:" in hint
+    assert "- status (step 2: status)" in hint
+    assert "Also use these form fields in the analysis:" in hint
+    assert "- owner: {{ flow_input.owner }}" in hint
+
+
+def test_compile_new_step_passes_ui_language_to_input_reference_hint() -> None:
+    step = compile_new_step_draft(
+        step_draft=NewStepDraft(
+            name="Summarize all prior work",
+            instructions="Write the combined summary.",
+            input_source=InputSource.ALL_PREVIOUS_STEPS,
+            output_type=OutputType.TEXT,
+            uses_previous_fields=[
+                PreviousFieldRef(from_step=1, field_path="decision", label="Decision")
+            ],
+        ),
+        plan_step_ref="step_b",
+        prior_steps=[],
+        ui_language="en",
+    )
+
+    assert "Pay particular attention to these structured source fields:" in (
+        step.assistant_spec.instructions
+    )
+    assert "- Decision (step 1: decision)" in step.assistant_spec.instructions

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
+    fixed_audio_transcription_step,
+    render_verbatim_step,
+    template_fill_step,
+    template_variable_reader_step,
+)
 from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
@@ -100,6 +106,40 @@ def test_lowering_rejects_planned_output_mode_divergence() -> None:
 
     with pytest.raises(ValueError, match="output_mode diverged"):
         lower_assembly_plan(plan)
+
+
+def test_fixed_assembly_steps_default_to_swedish_copy() -> None:
+    template_reader = template_variable_reader_step(
+        runtime_input_type=InputType.DOCUMENT,
+        runtime_required=True,
+        runtime_max_files=None,
+        ui_language=None,
+    )
+    template_fill = template_fill_step(ui_language=None)
+    transcription = fixed_audio_transcription_step(
+        runtime_required=True,
+        runtime_max_files=None,
+        ui_language=None,
+    )
+    renderer = render_verbatim_step(output_type=OutputType.PDF, ui_language=None)
+
+    assert template_reader.name == "Extrahera mallvariabler"
+    assert template_fill.name == "Fyll DOCX-mall"
+    assert transcription.name == "Transkribera ljud"
+    assert renderer.name == "Rendera PDF"
+
+
+def test_fixed_assembly_steps_use_english_when_requested() -> None:
+    template_reader = template_variable_reader_step(
+        runtime_input_type=InputType.DOCUMENT,
+        runtime_required=True,
+        runtime_max_files=None,
+        ui_language="en",
+    )
+    renderer = render_verbatim_step(output_type=OutputType.PDF, ui_language="en")
+
+    assert template_reader.name == "Extract template variables"
+    assert renderer.name == "Render PDF"
 
 
 def test_planned_step_rejects_empty_name_and_instructions() -> None:

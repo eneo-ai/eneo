@@ -433,6 +433,7 @@ def compile_assistant_instructions(
         hint = compile_input_reference_instruction_hint(
             uses_previous_fields=step_draft.uses_previous_fields,
             uses_form_fields=step_draft.uses_form_fields,
+            ui_language=ui_language,
         )
         if hint:
             instructions = f"{instructions}\n\n{hint}"
@@ -452,26 +453,46 @@ def compile_input_reference_instruction_hint(
     *,
     uses_previous_fields: list[PreviousFieldRef],
     uses_form_fields: list[str],
+    ui_language: str | None = None,
 ) -> str:
     sections: list[str] = []
     if uses_previous_fields:
         field_lines = "\n".join(
             f"- {field_ref.label or default_previous_field_label(field_ref.field_path)} "
-            f"(steg {field_ref.from_step}: {field_ref.field_path})"
+            f"({_step_label_for_language(ui_language)} {field_ref.from_step}: "
+            f"{field_ref.field_path})"
             for field_ref in uses_previous_fields
         )
-        sections.append(
-            f"Beakta särskilt följande strukturerade fält i underlaget:\n{field_lines}"
-        )
+        sections.append(f"{_previous_fields_hint_heading(ui_language)}\n{field_lines}")
     if uses_form_fields:
         form_lines = "\n".join(
             f"- {field_name}: {form_field_reference_expression(field_name)}"
             for field_name in uses_form_fields
         )
-        sections.append(
-            f"Beakta också följande formulärfält vid analysen:\n{form_lines}"
-        )
+        sections.append(f"{_form_fields_hint_heading(ui_language)}\n{form_lines}")
     return "\n\n".join(sections)
+
+
+def _previous_fields_hint_heading(ui_language: str | None) -> str:
+    if _uses_english(ui_language):
+        return "Pay particular attention to these structured source fields:"
+    return "Beakta särskilt följande strukturerade fält i underlaget:"
+
+
+def _form_fields_hint_heading(ui_language: str | None) -> str:
+    if _uses_english(ui_language):
+        return "Also use these form fields in the analysis:"
+    return "Beakta också följande formulärfält vid analysen:"
+
+
+def _step_label_for_language(ui_language: str | None) -> str:
+    if _uses_english(ui_language):
+        return "step"
+    return "steg"
+
+
+def _uses_english(ui_language: str | None) -> bool:
+    return ui_language is not None and ui_language.casefold().startswith("en")
 
 
 def _append_source_capture_guidance(
