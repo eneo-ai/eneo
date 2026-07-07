@@ -74,6 +74,17 @@ class PlannedStep:
     review_mode: FlowStepReviewMode | None = None
 
     def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("Planned steps require a non-empty name.")
+        if not self.instructions.strip():
+            raise ValueError(
+                f"Planned step {self.name!r} requires non-empty instructions."
+            )
+        if "{{" in self.instructions or "}}" in self.instructions:
+            raise ValueError(
+                f"Planned step {self.name!r} instructions must not contain "
+                "template variables."
+            )
         if self.previous_field_refs and self.previous_output_refs:
             raise ValueError(
                 f"Planned step {self.name!r} cannot mix previous field refs "

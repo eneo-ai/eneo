@@ -26,6 +26,7 @@ from eneo.flows.flow_authoring_spec import (
 def _text_step(
     *,
     name: str = "Write answer",
+    instructions: str = "Write the answer.",
     input_source: InputSource = InputSource.FLOW_INPUT,
     input_type: InputType = InputType.TEXT,
     output_type: OutputType = OutputType.TEXT,
@@ -39,7 +40,7 @@ def _text_step(
     return PlannedStep(
         role="transform",
         name=name,
-        instructions="Write the answer.",
+        instructions=instructions,
         input_source=input_source,
         input_type=input_type,
         output_type=output_type,
@@ -83,6 +84,19 @@ def test_planned_step_rejects_unsupported_capability_tuple() -> None:
             output_type=OutputType.PDF,
             output_mode=OutputMode.PASS_THROUGH,
         )
+
+
+def test_planned_step_rejects_empty_name_and_instructions() -> None:
+    with pytest.raises(ValueError, match="non-empty name"):
+        _text_step(name=" ")
+
+    with pytest.raises(ValueError, match="non-empty instructions"):
+        _text_step(instructions=" ")
+
+
+def test_planned_step_rejects_template_variables_in_instructions() -> None:
+    with pytest.raises(ValueError, match="must not contain template variables"):
+        _text_step(instructions="Use {{ step_input.text }} directly.")
 
 
 def test_plan_rejects_incompatible_previous_step_chain() -> None:
