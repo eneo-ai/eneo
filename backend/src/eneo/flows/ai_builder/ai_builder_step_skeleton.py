@@ -987,15 +987,15 @@ def default_final_step_instructions(*, ui_language: str | None) -> str:
     )
 
 
-def default_render_step_instructions(
+def default_render_step_display_copy(
     output_type: OutputType,
     *,
     ui_language: str | None,
 ) -> str:
     output_label = output_type.value.upper()
     if ui_language == "sv":
-        return f"Rendera föregående text som {output_label} utan att ändra innehållet."
-    return f"Render the previous text as a {output_label} without changing the content."
+        return f"Rendera {output_label}"
+    return f"Render {output_label}"
 
 
 def _semantic_default_name(*, slot_id: str, ui_language: str | None) -> str:
@@ -1467,7 +1467,7 @@ def _terminal_artifact_slot(
             ui_language=ui_language,
         ),
         default_instructions=(
-            default_render_step_instructions(
+            default_render_step_display_copy(
                 final_output_type,
                 ui_language=ui_language,
             )

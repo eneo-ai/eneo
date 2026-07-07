@@ -120,9 +120,7 @@ def test_materialize_audio_artifact_skeleton() -> None:
     ]
     assert skeleton[0].runtime_required is True
     assert skeleton[2].document_delivery_mode == "generated"
-    assert skeleton[2].default_instructions == (
-        "Render the previous text as a PDF without changing the content."
-    )
+    assert skeleton[2].default_instructions == "Render PDF"
 
 
 def test_materialize_audio_document_without_pattern_infers_transcript_chain() -> None:
@@ -355,9 +353,7 @@ def test_artifact_skeleton_keeps_final_semantic_body_text_when_fields_are_reques
     assert composition.steps[1].output_fields is not None
     assert composition.steps[2].name == "Skapa slutresultat"
     assert composition.steps[2].input_type == InputType.TEXT
-    assert composition.steps[-1].instructions == (
-        "Rendera föregående text som DOCX utan att ändra innehållet."
-    )
+    assert composition.steps[-1].instructions == "Rendera DOCX"
     assert composition.steps[-1].input_source == InputSource.PREVIOUS_STEP
     assert composition.steps[-1].input_type == InputType.TEXT
     assert composition.document_body_writer_step_indexes == (2,)
