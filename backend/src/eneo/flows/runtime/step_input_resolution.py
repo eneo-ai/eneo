@@ -36,6 +36,10 @@ from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE: Final = "[SOURCE {source_number}]"
 RUNTIME_INPUT_SOURCE_FILE_NAME_KEY: Final = "file_name"
+RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER: Final = "[no readable text extracted]"
+RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
+    "runtime_input_source_text_unavailable"
+)
 
 
 @dataclass(frozen=True)
@@ -161,7 +165,12 @@ async def resolve_step_input(
                     )
                 )
         else:
-            runtime_input_text = _extract_text_from_files(files)
+            runtime_input_text, file_text_diagnostics = _extract_text_from_files(
+                files,
+                step_order=step.step_order,
+                logger=deps.logger,
+            )
+            diagnostics.extend(file_text_diagnostics)
             if runtime_input_text:
                 raw_extracted_text = runtime_input_text
 
@@ -356,11 +365,40 @@ async def _load_runtime_files(
     return files
 
 
-def _extract_text_from_files(files: list[Any]) -> str:
+def _extract_text_from_files(
+    files: list[Any],
+    *,
+    step_order: int,
+    logger: Any,
+) -> tuple[str, list[StepDiagnostic]]:
     extracted: list[str] = []
+    diagnostics: list[StepDiagnostic] = []
     for source_number, file in enumerate(files, start=1):
         text_value = getattr(file, "text", None)
         if not isinstance(text_value, str) or not text_value.strip():
+            extracted.append(
+                _format_runtime_source_text(
+                    file=file,
+                    source_number=source_number,
+                    text=RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
+                )
+            )
+            diagnostics.append(
+                _runtime_source_empty_text_diagnostic(
+                    step_order=step_order,
+                    source_number=source_number,
+                    file=file,
+                )
+            )
+            if logger is not None:
+                logger.warning(
+                    "flow_executor.runtime_input_source_text_unavailable "
+                    "step_order=%d source_number=%d file_id=%s file_name=%s",
+                    step_order,
+                    source_number,
+                    getattr(file, "id", None),
+                    _runtime_source_file_name(file),
+                )
             continue
         extracted.append(
             _format_runtime_source_text(
@@ -369,7 +407,29 @@ def _extract_text_from_files(files: list[Any]) -> str:
                 text=text_value.strip(),
             )
         )
-    return "\n\n".join(extracted)
+    return "\n\n".join(extracted), diagnostics
+
+
+def _runtime_source_empty_text_diagnostic(
+    *,
+    step_order: int,
+    source_number: int,
+    file: Any,
+) -> StepDiagnostic:
+    source_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
+        source_number=source_number
+    )
+    file_name = _runtime_source_file_name(file)
+    source_description = (
+        f"{source_label} ({file_name})" if file_name is not None else source_label
+    )
+    return StepDiagnostic(
+        code=RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
+        message=(
+            f"Step {step_order}: no readable text could be extracted from "
+            f"{source_description}."
+        ),
+    )
 
 
 def _format_runtime_source_text(*, file: Any, source_number: int, text: str) -> str:

@@ -41,12 +41,20 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.runtime.step_input_resolution import (
+    RUNTIME_INPUT_SOURCE_FILE_NAME_KEY,
+    RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE,
+)
 
 
 def _question(input_bindings: dict[str, object] | None) -> str:
     question = effective_question_binding(input_bindings)
     assert question is not None
     return question
+
+
+def _runtime_source_header_sample() -> str:
+    return RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number="n")
 
 
 def _slot(name: str, value: str) -> ResolvedSlot:
@@ -1675,8 +1683,8 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     reader_instructions = reader_step.assistant_spec.instructions
     assert "exakt en post per källdokument" in reader_instructions
     assert "blanda inte uppgifter mellan dokument" in reader_instructions
-    assert "[SOURCE n]" in reader_instructions
-    assert "file_name" in reader_instructions
+    assert _runtime_source_header_sample() in reader_instructions
+    assert RUNTIME_INPUT_SOURCE_FILE_NAME_KEY in reader_instructions
     assert validate_spec(compiled).valid
 
 
@@ -1734,8 +1742,8 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     reader_instructions = reader_step.assistant_spec.instructions
     assert "exakt en post per källdokument" in reader_instructions
     assert "blanda inte uppgifter mellan dokument" in reader_instructions
-    assert "[SOURCE n]" in reader_instructions
-    assert "file_name" in reader_instructions
+    assert _runtime_source_header_sample() in reader_instructions
+    assert RUNTIME_INPUT_SOURCE_FILE_NAME_KEY in reader_instructions
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 

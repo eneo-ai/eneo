@@ -54,6 +54,10 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.flows.runtime.step_input_resolution import (
+    RUNTIME_INPUT_SOURCE_FILE_NAME_KEY,
+    RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE,
+)
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -1219,19 +1223,22 @@ def _append_multi_document_source_reader_instruction(
     *,
     ui_language: str | None,
 ) -> str:
+    source_header_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number="n")
     if ui_language == "en":
         addition = (
             "For documents[] output, create exactly one item per source document. "
             "Keep every item's facts scoped to that one source only; do not merge "
-            "facts across documents. Set source_label to the file_name in the "
-            "[SOURCE n] header when present, otherwise use the [SOURCE n] label."
+            "facts across documents. Set source_label to the "
+            f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY} in the {source_header_label} "
+            f"header when present, otherwise use the {source_header_label} label."
         )
     else:
         addition = (
             "För documents[]-utdata ska du skapa exakt en post per källdokument. "
             "Håll varje posts fakta avgränsade till just den källan; blanda inte "
-            "uppgifter mellan dokument. Sätt source_label till file_name i "
-            "[SOURCE n]-rubriken när den finns, annars [SOURCE n]-etiketten."
+            "uppgifter mellan dokument. Sätt source_label till "
+            f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY} i {source_header_label}-rubriken "
+            f"när den finns, annars {source_header_label}-etiketten."
         )
     if addition in instructions:
         return instructions

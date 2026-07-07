@@ -42,6 +42,10 @@ from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.models import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.flows.runtime.step_input_resolution import (
+    RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
+    RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -637,6 +641,73 @@ async def test_resolve_step_input_document_labels_multiple_files_in_requested_or
         str(first_file_id),
         str(second_file_id),
     ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_preserves_empty_source_slot(
+    user,
+    caplog,
+):
+    executor, _, _, _ = _build_executor(user)
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    first_file = SimpleNamespace(
+        id=first_file_id,
+        text="First file text",
+        name="first.pdf",
+        checksum="checksum-1",
+        size=100,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    second_file = SimpleNamespace(
+        id=second_file_id,
+        text="   ",
+        name="second.pdf",
+        checksum="checksum-2",
+        size=200,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
+        return_value=[first_file, second_file]
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with caplog.at_level("WARNING"):
+        resolved = await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[first_file_id, second_file_id],
+        )
+
+    assert resolved.text == (
+        "[SOURCE 1]\n"
+        "file_name: first.pdf\n\n"
+        "First file text\n\n"
+        "[SOURCE 2]\n"
+        "file_name: second.pdf\n\n"
+        f"{RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER}"
+    )
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["text"] == resolved.text
+    assert resolved.runtime_input_metadata["files"][1]["has_text"] is False
+    assert len(resolved.diagnostics) == 1
+    diagnostic = resolved.diagnostics[0]
+    assert diagnostic.code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
+    assert diagnostic.severity == "warning"
+    assert "[SOURCE 2] (second.pdf)" in diagnostic.message
+    assert "flow_executor.runtime_input_source_text_unavailable" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1714,40 +1785,7 @@ async def test_audio_input_previous_step_rejected_runtime(user):
 
 
 @pytest.mark.asyncio
-async def test_empty_document_extraction_fails(user):
-    """Document extraction producing empty text raises typed_io_empty_extraction."""
-    executor, _, _, _ = _build_executor(user)
-    file_id = uuid4()
-    step = _runtime_step(input_type="document")
-    run = _run(
-        status=FlowRunStatus.RUNNING,
-        user=user,
-        input_payload={},
-    )
-    # File exists but has no extracted text
-    fake_file = SimpleNamespace(id=file_id, text="")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
-    executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
-
-    mock_assistant = MagicMock()
-    mock_assistant.get_prompt_text.return_value = ""
-    mock_assistant.completion_model_kwargs = MagicMock()
-    mock_assistant.completion_model_kwargs.model_copy.return_value = (
-        mock_assistant.completion_model_kwargs
-    )
-    mock_assistant.completion_model_kwargs.model_dump.return_value = {}
-    mock_assistant.completion_model = SimpleNamespace(
-        id=uuid4(), name="test", provider_type="test"
-    )
-    executor._load_assistant = AsyncMock(return_value=mock_assistant)
-
-    with pytest.raises(TypedIOValidationException, match="empty text"):
-        await executor._execute_step(step=step, run=run, attempt_no=1)
-
-
-@pytest.mark.asyncio
-async def test_document_extraction_does_not_fallback_to_payload_text(user):
-    """Document extraction must fail when files contain no text even if payload text exists."""
+async def test_empty_document_extraction_uses_source_marker_not_payload_fallback(user):
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
     step = _runtime_step(input_type="document")
@@ -1756,17 +1794,25 @@ async def test_document_extraction_does_not_fallback_to_payload_text(user):
         user=user,
         input_payload={"text": "fallback payload text"},
     )
-    fake_file = SimpleNamespace(id=file_id, text="")
+    fake_file = SimpleNamespace(id=file_id, text="", name="empty.pdf")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
     executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
 
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run, attempt_no=1)
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
-    assert exc.value.code == "typed_io_empty_extraction"
+    assert output.input_text == (
+        "[SOURCE 1]\n"
+        "file_name: empty.pdf\n\n"
+        f"{RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER}\n\n"
+        "fallback payload text"
+    )
+    assert output.input_text != "fallback payload text"
+    assert output.diagnostics[0].code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["files"][0]["has_text"] is False
 
 
 @pytest.mark.asyncio
