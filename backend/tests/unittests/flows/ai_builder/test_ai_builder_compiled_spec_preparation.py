@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    CreateCompileContext,
+    compile_create_intent_to_spec,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -15,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
 )
@@ -278,6 +287,63 @@ def _source_material_docx_spec() -> FlowDraftSpecCore:
     )
 
 
+def _assembly_document_pdf_spec() -> FlowDraftSpecCore:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentanalys till PDF",
+            "plan_rationale": (
+                "Läs dokument, skriv rapportinnehåll och leverera som PDF."
+            ),
+            "steps": [
+                {
+                    "name": "Identifiera dokumentens innehåll",
+                    "instructions": (
+                        "Läs varje inskickat dokument och avgör vad det är för "
+                        "typ av dokument, vilket ämne det handlar om, kategori, "
+                        "datum, författare och slutsatser."
+                    ),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": (
+                                "En post per dokument i körningen med de uppgifter "
+                                "som ska användas i rapporten."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapportinnehåll",
+                    "instructions": (
+                        "Använd den extraherade informationen för att skriva den "
+                        "fullständiga rapporttexten för PDF:en."
+                    ),
+                    "output_type": "text",
+                },
+                {
+                    "name": "Skapa PDF-rapport",
+                    "instructions": (
+                        "Omvandla den färdiga rapporttexten till en professionell PDF."
+                    ),
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    return compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            aggregation_intent=cast(AggregationIntent, "linear"),
+            ui_language="sv",
+        ),
+    )
+
+
 def _assert_prepared_spec_compiles_with_shared_compiler(
     spec: FlowDraftSpecCore,
 ) -> None:
@@ -413,6 +479,31 @@ def test_prepared_explicit_multi_step_fan_in_is_apply_normalization_fixed_point(
     spec = _prepare_valid_spec(_multi_step_fan_in_spec())
 
     _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
+
+
+def test_prepared_assembly_document_pdf_spec_is_normalization_fixed_point() -> None:
+    compiled = _assembly_document_pdf_spec()
+
+    prepared = _prepare_valid_spec(
+        compiled,
+        terminal_output_type=OutputType.PDF,
+    )
+    normalized, normalization_changes = normalize_ai_builder_spec(
+        prepared,
+        terminal_output_type=OutputType.PDF,
+        ui_language="sv",
+    )
+
+    assert prepared == compiled
+    assert normalized == prepared
+    assert normalization_changes == []
+    assert [step.output_type for step in prepared.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert prepared.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
+    _assert_prepared_spec_compiles_with_shared_compiler(prepared)
 
 
 def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() -> None:
