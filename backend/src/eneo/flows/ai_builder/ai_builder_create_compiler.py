@@ -304,11 +304,6 @@ def compile_create_intent_to_spec(
             review_mode=backend_audio_transcription_review_mode,
         )
     terminal_output_schema = context.terminal_output_schema if context else None
-    steps = _attach_unreferenced_form_fields_to_final_step(
-        steps=steps,
-        known_field_order=known_field_order,
-        semantic_step_count=len(semantic_steps),
-    )
     _log_dropped_primary_input_shadow_fields(
         field_names=dropped_primary_input_field_names,
         runtime_input_type=runtime_input_type,
@@ -1263,35 +1258,3 @@ def _compile_input_field(field: FlowInputFieldIntent) -> FormFieldSpec:
         required=field.required,
         options=list(field.options) or None,
     )
-
-
-def _attach_unreferenced_form_fields_to_final_step(
-    *,
-    steps: list[NewStepDraft],
-    known_field_order: list[str],
-    semantic_step_count: int,
-) -> list[NewStepDraft]:
-    if not steps or not known_field_order:
-        return steps
-    referenced = {field_name for step in steps for field_name in step.uses_form_fields}
-    unreferenced = [
-        field_name for field_name in known_field_order if field_name not in referenced
-    ]
-    if not unreferenced:
-        return steps
-    # With one semantic step there is no competing field consumer; larger flows
-    # must surface unused fields to the critic instead of guessing a target.
-    if semantic_step_count != 1:
-        return steps
-    final_step = steps[-1]
-    return [
-        *steps[:-1],
-        final_step.model_copy(
-            update={
-                "uses_form_fields": [
-                    *final_step.uses_form_fields,
-                    *unreferenced,
-                ]
-            }
-        ),
-    ]

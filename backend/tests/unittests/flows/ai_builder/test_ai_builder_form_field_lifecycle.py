@@ -149,7 +149,7 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
     assert any(warning.code == "unused_form_field" for warning in validation.warnings)
 
 
-def test_single_step_outline_form_field_fallback_binds_only_available_step() -> None:
+def test_single_step_outline_unreferenced_form_field_stays_unused_for_repair() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "PDF report",
@@ -176,11 +176,12 @@ def test_single_step_outline_form_field_fallback_binds_only_available_step() -> 
         outline,
         context=CreateCompileContext(final_output_type=OutputType.PDF),
     )
-    question = _question_binding(compiled.steps[-1].input_bindings)
 
-    assert "report_title: {{ flow_input.report_title }}" in question
-    assert find_unused_form_fields(compiled) == []
-    assert validate_spec(compiled).valid
+    assert find_unused_form_fields(compiled) == ["report_title"]
+    assert "form_fields_declared_must_be_referenced" in _critic_issue_ids(compiled)
+    validation = validate_spec(compiled)
+    assert validation.valid
+    assert any(warning.code == "unused_form_field" for warning in validation.warnings)
 
 
 def test_intermediate_form_field_use_flows_through_structured_previous_field() -> None:
