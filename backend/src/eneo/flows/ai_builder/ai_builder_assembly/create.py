@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
+    fixed_audio_transcription_step,
+    render_verbatim_step,
+    template_fill_step,
+    template_variable_reader_step,
+)
 from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
@@ -43,7 +49,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.flow_capability_manifest import resolve_capability_for_tuple
-from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 _DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
@@ -220,7 +225,7 @@ def _assemble_create_intent(
     previous_output_type: OutputType | None = None
     source_prefix_step_count = 0
     if runtime_input_type == InputType.AUDIO:
-        transcription_step = _fixed_audio_transcription_step(
+        transcription_step = fixed_audio_transcription_step(
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
@@ -328,7 +333,7 @@ def _assemble_create_intent(
     ):
         return None
     if document_artifact_requested:
-        renderer_step = _render_verbatim_step(
+        renderer_step = render_verbatim_step(
             output_type=final_output_type,
             body_step_name=planned_steps[-1].name,
         )
@@ -403,7 +408,7 @@ def _assemble_docx_template_fill(
     if set(semantic_step.uses_form_fields) != form_field_names:
         return None
 
-    reader_step = _template_variable_reader_step(
+    reader_step = template_variable_reader_step(
         runtime_input_type=runtime_input_type,
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
@@ -426,8 +431,8 @@ def _assemble_docx_template_fill(
         citations_requested=semantic_step.citations_requested,
         review_mode=semantic_step.review_mode,
     )
-    template_fill_step = _template_fill_step(ui_language=ui_language)
-    planned_steps = (reader_step, content_step, template_fill_step)
+    fixed_template_fill_step = template_fill_step(ui_language=ui_language)
+    planned_steps = (reader_step, content_step, fixed_template_fill_step)
     if not all(_capability_tuple_is_supported(step) for step in planned_steps):
         return None
     return FlowAssemblyPlan(
@@ -477,7 +482,7 @@ def _assemble_pure_audio_transcription(
         or semantic_step.output_type not in {None, OutputType.TEXT}
     ):
         return None
-    planned_step = _fixed_audio_transcription_step(
+    planned_step = fixed_audio_transcription_step(
         name=semantic_step.name,
         instructions=semantic_step.instructions,
         runtime_required=runtime_required,
@@ -615,137 +620,6 @@ def _planned_step_is_source_reader(step: PlannedStep) -> bool:
     )
 
 
-def _template_variable_reader_step(
-    *,
-    runtime_input_type: InputType,
-    runtime_required: bool,
-    runtime_max_files: int | None,
-    ui_language: str | None,
-) -> PlannedStep:
-    if ui_language == "sv":
-        name = "Extrahera mallvariabler"
-        instructions = (
-            "Extrahera stabila fält och källfakta som behövs innan DOCX-mallen fylls."
-        )
-    else:
-        name = "Extract template variables"
-        instructions = (
-            "Extract the stable fields and source facts needed before filling "
-            "the DOCX template."
-        )
-    return PlannedStep(
-        role="reader",
-        name=name,
-        instructions=instructions,
-        input_source=InputSource.FLOW_INPUT,
-        input_type=runtime_input_type,
-        output_type=OutputType.JSON,
-        output_mode=OutputMode.PASS_THROUGH,
-        underlag_channel="flow_input",
-        runtime_required=runtime_required,
-        runtime_max_files=runtime_max_files,
-        output_fields=tuple(_default_template_source_fields()),
-    )
-
-
-def _default_template_source_fields() -> list[StructuredFieldDraft]:
-    return [
-        StructuredFieldDraft(
-            name="source_facts",
-            field_type="array",
-            description="Important source facts extracted from the input material.",
-            item_fields=[
-                StructuredFieldDraft(
-                    name="fact",
-                    field_type="string",
-                    description="A concise source fact.",
-                ),
-                StructuredFieldDraft(
-                    name="source_note",
-                    field_type="string",
-                    description="Where the fact came from or why it matters.",
-                    required=False,
-                ),
-            ],
-        ),
-        StructuredFieldDraft(
-            name="uncertainties",
-            field_type="array",
-            description="Missing, ambiguous, or uncertain information.",
-            item_fields=[
-                StructuredFieldDraft(
-                    name="issue",
-                    field_type="string",
-                    description="A missing or uncertain point.",
-                )
-            ],
-            required=False,
-        ),
-    ]
-
-
-def _template_fill_step(*, ui_language: str | None) -> PlannedStep:
-    if ui_language == "sv":
-        name = "Fyll DOCX-mall"
-        instructions = (
-            "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens "
-            "önskade omfattning och terminologi."
-        )
-    else:
-        name = "Fill DOCX template"
-        instructions = (
-            "Fill the DOCX template from the prepared content. Preserve the "
-            "user's requested scope and terminology."
-        )
-    return PlannedStep(
-        role="template_fill",
-        name=name,
-        instructions=instructions,
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        output_type=OutputType.DOCX,
-        output_mode=OutputMode.TEMPLATE_FILL,
-        underlag_channel="implicit_previous",
-        document_delivery_mode="template_fill",
-    )
-
-
-def _fixed_audio_transcription_step(
-    *,
-    runtime_required: bool,
-    runtime_max_files: int | None,
-    ui_language: str | None,
-    name: str | None = None,
-    instructions: str | None = None,
-    review_mode: FlowStepReviewMode | None = None,
-) -> PlannedStep:
-    if ui_language == "sv":
-        default_name = "Transkribera ljud"
-        default_instructions = (
-            "Transkribera det uppladdade ljudet till text innan analys "
-            "eller artefaktgenerering."
-        )
-    else:
-        default_name = "Transcribe audio"
-        default_instructions = (
-            "Transcribe the uploaded audio into text before downstream analysis "
-            "or artifact generation."
-        )
-    return PlannedStep(
-        role="transcription",
-        name=name or default_name,
-        instructions=instructions or default_instructions,
-        input_source=InputSource.FLOW_INPUT,
-        input_type=InputType.AUDIO,
-        output_type=OutputType.TEXT,
-        output_mode=OutputMode.TRANSCRIBE_ONLY,
-        underlag_channel="flow_input",
-        runtime_required=runtime_required,
-        runtime_max_files=runtime_max_files,
-        review_mode=review_mode,
-    )
-
-
 def _offset_previous_field_refs(
     refs: Sequence[PreviousFieldRef],
     *,
@@ -769,24 +643,6 @@ def _offset_previous_output_refs(
     return tuple(
         ref.model_copy(update={"from_step": ref.from_step + compiled_step_offset})
         for ref in refs
-    )
-
-
-def _render_verbatim_step(
-    *,
-    output_type: OutputType,
-    body_step_name: str,
-) -> PlannedStep:
-    return PlannedStep(
-        role="renderer",
-        name=f"Render {body_step_name}",
-        instructions="Render the final document.",
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        output_type=output_type,
-        output_mode=OutputMode.RENDER_VERBATIM,
-        underlag_channel="implicit_previous",
-        document_delivery_mode="generated",
     )
 
 
