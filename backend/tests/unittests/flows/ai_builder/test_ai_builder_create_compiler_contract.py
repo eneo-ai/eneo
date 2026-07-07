@@ -298,6 +298,84 @@ def test_compiler_uses_assembly_path_for_document_source_reader_chain(
     assert validate_spec(compiled).valid
 
 
+def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_old_skeleton_path(*args: object, **kwargs: object) -> object:
+        raise AssertionError("aggregate document flow should use FlowAssemblyPlan")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
+        fail_old_skeleton_path,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Aggregate report",
+            "flow_description": "Extract, analyze, and render a PDF report.",
+            "plan_rationale": "The body writer aggregates compact prior work.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "facts",
+                            "field_type": "array",
+                            "description": "Source facts.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Analyze facts",
+                    "instructions": "Analyze the extracted facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "analysis",
+                            "field_type": "string",
+                            "description": "Analysis summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the final report body from prior work.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+        ),
+    )
+
+    body_step = compiled.steps[-2]
+    renderer_step = compiled.steps[-1]
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert body_step.input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert body_step.input_type == InputType.TEXT
+    assert body_step.input_bindings is None
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
 def test_assembly_source_reader_contract_keeps_all_terminal_schema_leaves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

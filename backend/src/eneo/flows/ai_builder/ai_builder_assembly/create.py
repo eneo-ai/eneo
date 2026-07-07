@@ -56,7 +56,7 @@ _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 
 PlannedStepRole = Literal["reader", "transform", "body_writer", "renderer"]
 UnderlagChannel = Literal[
-    "flow_input", "implicit_previous", "field_refs", "text_anchor"
+    "flow_input", "implicit_previous", "field_refs", "text_anchor", "fan_in"
 ]
 
 
@@ -112,7 +112,7 @@ def try_compile_create_intent_with_assembly(
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> FlowDraftSpecCore | None:
-    plan = _assemble_linear_create_intent(
+    plan = _assemble_create_intent(
         intent,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
@@ -132,7 +132,7 @@ def try_compile_create_intent_with_assembly(
     return _lower_assembly_plan(plan)
 
 
-def _assemble_linear_create_intent(
+def _assemble_create_intent(
     intent: CreateFlowIntent,
     *,
     runtime_input_type: InputType,
@@ -148,7 +148,12 @@ def _assemble_linear_create_intent(
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> FlowAssemblyPlan | None:
-    if pattern_ids or chain_steps or aggregation_intent != "linear" or not intent.steps:
+    if (
+        pattern_ids
+        or chain_steps
+        or aggregation_intent not in {"linear", "aggregate", "compare"}
+        or not intent.steps
+    ):
         return None
     if runtime_input_type not in _SOURCE_INPUT_TYPES:
         return None
@@ -162,6 +167,10 @@ def _assemble_linear_create_intent(
         return None
     if terminal_output_schema is not None and (
         document_artifact_requested or final_output_type != OutputType.JSON
+    ):
+        return None
+    if aggregation_intent != "linear" and (
+        terminal_output_schema is not None or final_output_type == OutputType.JSON
     ):
         return None
     semantic_output_mode = OutputMode.PASS_THROUGH
@@ -195,11 +204,20 @@ def _assemble_linear_create_intent(
             and step_output_type != OutputType.JSON
         ):
             return None
-        input_source = (
-            InputSource.FLOW_INPUT if index == 0 else InputSource.PREVIOUS_STEP
+        input_source = _linear_step_input_source(
+            step_index=index,
+            semantic_step_count=len(intent.steps),
+            aggregation_intent=aggregation_intent,
         )
+        if input_source == InputSource.ALL_PREVIOUS_STEPS and (
+            semantic_step.uses_form_fields
+            or semantic_step.uses_previous_fields
+            or semantic_step.uses_previous_outputs
+        ):
+            return None
         input_type = _linear_step_input_type(
             step_index=index,
+            input_source=input_source,
             runtime_input_type=runtime_input_type,
             previous_output_type=previous_output_type,
             output_type=step_output_type,
@@ -221,7 +239,7 @@ def _assemble_linear_create_intent(
             output_type=step_output_type,
             output_mode=semantic_output_mode,
             underlag_channel=_linear_underlag_channel(
-                step_index=index,
+                input_source=input_source,
                 previous_field_refs=semantic_step.uses_previous_fields,
                 previous_output_refs=semantic_step.uses_previous_outputs,
             ),
@@ -322,6 +340,7 @@ def _linear_step_output_type(
 def _linear_step_input_type(
     *,
     step_index: int,
+    input_source: InputSource,
     runtime_input_type: InputType,
     previous_output_type: OutputType | None,
     output_type: OutputType,
@@ -329,6 +348,8 @@ def _linear_step_input_type(
 ) -> InputType:
     if step_index == 0:
         return runtime_input_type
+    if input_source == InputSource.ALL_PREVIOUS_STEPS:
+        return InputType.TEXT
     if previous_output_type == OutputType.JSON:
         if output_type == OutputType.TEXT and has_explicit_previous_refs:
             return InputType.TEXT
@@ -349,14 +370,32 @@ def _linear_step_role(
     return "transform"
 
 
-def _linear_underlag_channel(
+def _linear_step_input_source(
     *,
     step_index: int,
+    semantic_step_count: int,
+    aggregation_intent: str,
+) -> InputSource:
+    if step_index == 0:
+        return InputSource.FLOW_INPUT
+    if (
+        aggregation_intent in {"aggregate", "compare"}
+        and step_index == semantic_step_count - 1
+    ):
+        return InputSource.ALL_PREVIOUS_STEPS
+    return InputSource.PREVIOUS_STEP
+
+
+def _linear_underlag_channel(
+    *,
+    input_source: InputSource,
     previous_field_refs: Sequence[PreviousFieldRef],
     previous_output_refs: Sequence[PreviousOutputRef],
 ) -> UnderlagChannel:
-    if step_index == 0:
+    if input_source == InputSource.FLOW_INPUT:
         return "flow_input"
+    if input_source == InputSource.ALL_PREVIOUS_STEPS:
+        return "fan_in"
     if previous_field_refs:
         return "field_refs"
     if previous_output_refs:
