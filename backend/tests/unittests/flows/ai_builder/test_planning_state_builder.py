@@ -1055,7 +1055,7 @@ class TestRuntimeMetadataClassificationBoundaries:
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
 
-    def test_classifier_source_derived_report_fields_are_left_to_compile_filtering(
+    def test_classifier_source_derived_report_fields_do_not_become_runtime_metadata(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1090,11 +1090,10 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
-        assert slot.source == "model"
-        assert slot.confidence == "high"
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
 
-    def test_classifier_source_derived_document_sections_are_left_to_compile_filtering(
+    def test_classifier_source_derived_document_sections_do_not_become_runtime_metadata(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1133,9 +1132,8 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
-        assert slot.source == "model"
-        assert slot.confidence == "high"
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
 
@@ -1497,7 +1495,9 @@ class TestModelSlotMerge:
 
         assert "docx_output_mode" not in state.resolved_slots
 
-    def test_high_model_output_replaces_policy_default(self) -> None:
+    def test_high_model_runtime_metadata_replaces_policy_default_with_text_evidence(
+        self,
+    ) -> None:
         state = _state()
         state.resolved_slots = {
             "runtime_metadata_fields": _slot(
@@ -1519,7 +1519,9 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="b" * 64,
-            freeform_text="",
+            freeform_text=(
+                "Användaren ska fylla i ärendenummer och kommun vid körning."
+            ),
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
@@ -1528,6 +1530,40 @@ class TestModelSlotMerge:
         assert slot.evidence == [
             "model:runtime_metadata_fields:" + "b" * 64,
         ]
+
+    def test_high_model_runtime_metadata_without_text_evidence_keeps_policy_default(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "runtime_metadata_fields": _slot(
+                name="runtime_metadata_fields",
+                value="no_extra_metadata",
+                source="policy_default",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text=(
+                "Läs dokumentet och extrahera dokumenttyp, datum, författare "
+                "och slutsatser från källmaterialet."
+            ),
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
 
     def test_medium_model_output_does_not_replace_policy_default(self) -> None:
         state = _state()

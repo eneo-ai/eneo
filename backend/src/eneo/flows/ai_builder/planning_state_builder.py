@@ -56,6 +56,8 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    BASIC_CASE_METADATA,
+    DETAILED_CASE_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     infer_runtime_metadata_slot,
 )
@@ -111,6 +113,13 @@ def _text_evidences_structure_key_information(text: str) -> bool:
     return infer_post_processing_goal(text) == "structure_key_information"
 
 
+def _text_evidences_positive_runtime_metadata(text: str) -> bool:
+    return infer_runtime_metadata_slot(text) in {
+        BASIC_CASE_METADATA,
+        DETAILED_CASE_METADATA,
+    }
+
+
 _MODEL_VALUE_ACCEPTANCE_POLICIES: dict[tuple[str, str], _ModelValueAcceptancePolicy] = {
     # Register model values that need explicit user-text evidence before they
     # can become settled requirements; list values to drop with them as dependents.
@@ -125,6 +134,18 @@ _MODEL_VALUE_ACCEPTANCE_POLICIES: dict[tuple[str, str], _ModelValueAcceptancePol
         "structure_key_information",
     ): _ModelValueAcceptancePolicy(
         requires_text_evidence=_text_evidences_structure_key_information,
+    ),
+    (
+        "runtime_metadata_fields",
+        "basic_case_metadata",
+    ): _ModelValueAcceptancePolicy(
+        requires_text_evidence=_text_evidences_positive_runtime_metadata,
+    ),
+    (
+        "runtime_metadata_fields",
+        "detailed_case_metadata",
+    ): _ModelValueAcceptancePolicy(
+        requires_text_evidence=_text_evidences_positive_runtime_metadata,
     ),
 }
 
@@ -469,7 +490,7 @@ def merge_llm_resolved_slots(
             _clear_nonprotected_model_slot(state, classified_slot.slot_name)
             continue
         if (classified_slot.slot_name, classified_slot.value) in blocked_model_values:
-            _clear_nonprotected_model_slot(state, classified_slot.slot_name)
+            _clear_model_slot(state, classified_slot.slot_name)
             continue
         if classified_slot.value == UNKNOWN_SLOT_VALUE:
             _clear_nonprotected_model_slot(state, classified_slot.slot_name)
@@ -560,6 +581,12 @@ def _clear_nonprotected_model_slot(state: PlanningState, slot_name: str) -> None
         existing_slot is not None
         and existing_slot.source not in _MODEL_PROTECTED_SOURCES
     ):
+        state.resolved_slots.pop(slot_name, None)
+
+
+def _clear_model_slot(state: PlanningState, slot_name: str) -> None:
+    existing_slot = state.resolved_slots.get(slot_name)
+    if existing_slot is not None and existing_slot.source == "model":
         state.resolved_slots.pop(slot_name, None)
 
 
