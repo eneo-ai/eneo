@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, Self, TypeAlias, cast
+from typing import Any, Literal, Optional, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import (
@@ -42,6 +42,7 @@ from eneo.flows.flow_run_error import FlowRunError, parse_flow_run_error
 # Flow domain models load persisted JSONB rows before each writer path has a
 # strict serializer boundary. Tighten fields one by one at those chokepoints.
 FlowPersistedJsonObject: TypeAlias = dict[str, Any]
+RuntimeInputExecutionMode: TypeAlias = Literal["single_call", "per_source"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +104,7 @@ class FlowRuntimeInputConfig(BaseModel):
     required: StrictBool = False
     max_files: StrictInt | None = None
     input_format: FlowRuntimeInputFormat = FlowRuntimeInputFormat.DOCUMENT
+    execution_mode: RuntimeInputExecutionMode = "single_call"
     accepted_mimetypes_override: list[str] | None = None
     label: str | None = None
     description: str | None = None

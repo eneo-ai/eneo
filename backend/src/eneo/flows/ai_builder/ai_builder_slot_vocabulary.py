@@ -30,6 +30,7 @@ KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
         "docx_output_mode",
         "pdf_generation_mode",
         "document_material_scope",
+        "report_disposition",
         "post_processing_goal",
         "structured_io_contract",
         "runtime_metadata_fields",

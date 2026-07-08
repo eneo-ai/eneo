@@ -39,7 +39,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 4
+FCM_VERSION: int = 5
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -486,6 +486,46 @@ def _seed_citation_sidecar_capability() -> FlowCapability:
     )
 
 
+def _seed_per_source_reader_execution_capability() -> FlowCapability:
+    return FlowCapability(
+        id="per_source_reader_execution",
+        label="Per-source reader execution",
+        description=(
+            "Runs a multi-source document/file reader once per uploaded source, "
+            "then assembles the reader's documents[] output in source order."
+        ),
+        applies_to_tuples=(),
+        required_config=(ConfigRequirement(key="input_config.runtime_input.execution_mode"),),
+        invariants=(
+            InvariantSpec(
+                id="requires_documents_array_contract",
+                description=(
+                    "Per-source reader execution requires a JSON output contract "
+                    "shaped as exactly one top-level `documents[]` array; "
+                    "corpus-level synthesis belongs to a downstream writer step."
+                ),
+            ),
+            InvariantSpec(
+                id="runtime_sets_source_identity",
+                description=(
+                    "The runtime, not the model, sets `source_label` and "
+                    "`source_file_id` from uploaded file metadata before "
+                    "assembling the final documents[] payload."
+                ),
+            ),
+            InvariantSpec(
+                id="bounded_concurrent_source_calls",
+                description=(
+                    "Source calls are mapped with a named runtime concurrency "
+                    "bound and fail-fast at step-attempt granularity."
+                ),
+            ),
+        ),
+        exposure="builder",
+        not_exposed_reason=None,
+    )
+
+
 CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
     {
         **{
@@ -498,6 +538,7 @@ CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
         },
         "mcp_policy": _seed_mcp_policy_capability(),
         "citation_sidecar": _seed_citation_sidecar_capability(),
+        "per_source_reader_execution": _seed_per_source_reader_execution_capability(),
     }
 )
 

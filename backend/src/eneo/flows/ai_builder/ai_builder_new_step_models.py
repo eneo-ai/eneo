@@ -4,6 +4,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from eneo.flows.domain.flow import RuntimeInputExecutionMode
 from eneo.flows.flow_authoring_spec import (
     InputSource,
     InputType,
@@ -142,6 +143,7 @@ class NewStepDraft(BaseModel):
     mcp_tool_refs: list[str] = Field(default_factory=list)
     runtime_required: bool = False
     runtime_max_files: int | None = None
+    runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call"
     uses_form_fields: list[str] = Field(default_factory=list)
     uses_previous_fields: list[PreviousFieldRef] = Field(
         default_factory=lambda: cast(list[PreviousFieldRef], [])

@@ -1229,12 +1229,14 @@ class FlowRunExecutor:
         match mode:
             case FlowOutputMode.PASS_THROUGH:
                 return PassThroughStepHandler(
-                    prepare_assistant_step=self._prepare_assistant_step
+                    prepare_assistant_step=self._prepare_assistant_step,
+                    list_step_input_file_ids=self._list_step_input_file_ids,
                 )
             case FlowOutputMode.HTTP_POST:
                 return HttpPostStepHandler(
                     completion_handler=PassThroughStepHandler(
-                        prepare_assistant_step=self._prepare_assistant_step
+                        prepare_assistant_step=self._prepare_assistant_step,
+                        list_step_input_file_ids=self._list_step_input_file_ids,
                     )
                 )
             case FlowOutputMode.TRANSCRIBE_ONLY:
@@ -1298,13 +1300,17 @@ class FlowRunExecutor:
         state: RunExecutionState,
         version_metadata: FlowPersistedJsonObject | None,
         attempt_no: int,
+        requested_file_ids_override: Sequence[UUID] | None = None,
     ) -> PreparedAssistantStep:
         execution_deps = self._build_step_execution_runtime_deps(step=step)
-        requested_file_ids = await self._list_step_input_file_ids(
-            step=step,
-            run=run,
-            attempt_no=attempt_no,
-        )
+        if requested_file_ids_override is None:
+            requested_file_ids = await self._list_step_input_file_ids(
+                step=step,
+                run=run,
+                attempt_no=attempt_no,
+            )
+        else:
+            requested_file_ids = list(requested_file_ids_override)
         prepared = await prepare_step_execution(
             step=step,
             run=run,

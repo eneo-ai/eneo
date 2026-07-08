@@ -460,6 +460,58 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
 )
 
 
+_REPORT_DISPOSITION = QuestionTemplate(
+    id="report_disposition",
+    question_sv="Hur ska rapporten hantera flera källdokument?",
+    question_en="How should the report handle multiple source documents?",
+    help_sv=(
+        "När flera dokument laddas upp kan rapporten antingen ha ett avsnitt "
+        "per källa, en samlad översikt eller båda."
+    ),
+    help_en=(
+        "When several documents are uploaded, the report can either use one "
+        "section per source, one synthesized overview, or both."
+    ),
+    options=(
+        _option(
+            id="per_source_sections",
+            label_sv="Avsnitt per källa",
+            label_en="Sections per source",
+            description_sv="Skriv ett tydligt rapportavsnitt för varje uppladdat dokument.",
+            description_en="Write a clear report section for each uploaded document.",
+            value="per_source_sections",
+        ),
+        _option(
+            id="synthesized_overview",
+            label_sv="Samlad översikt",
+            label_en="Synthesized overview",
+            description_sv="Slå ihop källorna till en gemensam sammanfattning eller analys.",
+            description_en="Combine the sources into one shared summary or analysis.",
+            value="synthesized_overview",
+        ),
+        _option(
+            id="both",
+            label_sv="Både avsnitt och översikt",
+            label_en="Both",
+            description_sv="Ha källspecifika avsnitt och avsluta med en samlad slutsats.",
+            description_en="Use source-specific sections and end with a synthesized conclusion.",
+            value="both",
+        ),
+    ),
+    worked_examples_sv=(
+        "En sektion för varje dokument, därefter en samlad bedömning.",
+        "En kort helhetsbild utan separata dokumentavsnitt.",
+    ),
+    worked_examples_en=(
+        "One section for each consultation response, then an overall assessment.",
+        "A short overall view without separate document sections.",
+    ),
+    family="output_style",
+    priority_base=55,
+    impact="quality",
+)
+
+
 _POST_PROCESSING_GOAL = QuestionTemplate(
     id="post_processing_goal",
     question_sv="Vad ska flödet hjälpa dig göra med materialet?",
@@ -696,6 +748,7 @@ _ALL_TEMPLATES: tuple[QuestionTemplate, ...] = (
     _DOCX_OUTPUT_MODE,
     _PDF_GENERATION_MODE,
     _DOCUMENT_MATERIAL_SCOPE,
+    _REPORT_DISPOSITION,
     _POST_PROCESSING_GOAL,
     _STRUCTURED_IO_CONTRACT,
     _RUNTIME_METADATA_FIELDS,

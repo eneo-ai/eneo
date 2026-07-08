@@ -209,7 +209,10 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
     )
     assistant.completion_model_kwargs.model_dump.return_value = {}
     assistant.completion_model = SimpleNamespace(
-        id=uuid4(), name="test", provider_type="test"
+        id=uuid4(),
+        name="test",
+        provider_type="test",
+        litellm_model_name=None,
     )
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -569,6 +572,18 @@ async def test_resolve_step_input_document_loads_files(user):
                 "text_length": len("Extracted document text"),
                 "has_text": True,
                 "has_transcription": False,
+            }
+        ],
+        "source_headers": [
+            {
+                "source_number": 1,
+                "source_label": "underlag.pdf",
+                "source_marker": "[SOURCE 1]",
+                "file_id": str(file_id),
+                "file_name": "underlag.pdf",
+                "has_file_name": True,
+                "has_text": True,
+                "text_length": len("Extracted document text"),
             }
         ],
         "total_file_size": 128,
@@ -1837,6 +1852,123 @@ async def test_file_input_uses_extracted_file_text(user):
 
     assert output.input_text == "[SOURCE 1]\n\nExtracted file text"
     assert output.full_text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_executes_one_model_call_per_file_and_sets_identity(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    first_file = SimpleNamespace(
+        id=first_file_id,
+        text="Alpha document text",
+        name="alpha.pdf",
+        checksum="checksum-a",
+        size=100,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    second_file = SimpleNamespace(
+        id=second_file_id,
+        text="Beta document text",
+        name="beta.pdf",
+        checksum="checksum-b",
+        size=200,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    files_by_id = {first_file_id: first_file, second_file_id: second_file}
+
+    async def get_files_by_id(*, ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in ids]
+
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(side_effect=get_files_by_id)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                completion='{"title":"Alpha"}',
+                total_token_count=11,
+            ),
+            SimpleNamespace(
+                completion='{"title":"Beta"}',
+                total_token_count=13,
+            ),
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    output_contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_label": {"type": "string"},
+                        "source_file_id": {"type": "string"},
+                        "title": {"type": "string"},
+                    },
+                    "required": ["source_label", "source_file_id", "title"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract=output_contract,
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert assistant.get_response.await_count == 2
+    questions = [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    assert any("Alpha document text" in question for question in questions)
+    assert any("Beta document text" in question for question in questions)
+    assert not any(
+        "Alpha document text" in question and "Beta document text" in question
+        for question in questions
+    )
+    assert output.structured_output == {
+        "documents": [
+            {
+                "title": "Alpha",
+                "source_label": "alpha.pdf",
+                "source_file_id": str(first_file_id),
+            },
+            {
+                "title": "Beta",
+                "source_label": "beta.pdf",
+                "source_file_id": str(second_file_id),
+            },
+        ]
+    }
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["capture_mode"] == "runtime_input_per_source"
+    assert output.runtime_input_metadata["file_ids"] == [
+        str(first_file_id),
+        str(second_file_id),
+    ]
+    assert len(output.runtime_input_metadata["per_source_calls"]) == 2
 
 
 @pytest.mark.asyncio

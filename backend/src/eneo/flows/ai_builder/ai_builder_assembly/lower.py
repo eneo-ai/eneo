@@ -153,6 +153,7 @@ def _new_step_draft_from_planned_step(
         mcp_tool_refs=list(step.mcp_tool_refs),
         runtime_required=step.runtime_required,
         runtime_max_files=step.runtime_max_files,
+        runtime_input_execution_mode=step.runtime_input_execution_mode,
         uses_form_fields=list(step.form_field_refs),
         uses_previous_fields=list(step.previous_field_refs),
         output_fields=list(step.output_fields) if emit_output_fields else None,

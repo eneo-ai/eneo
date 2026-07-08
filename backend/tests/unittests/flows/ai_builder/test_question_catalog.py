@@ -1056,6 +1056,60 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
         "allow_custom": True,
         "exposure": "user_requirement",
     },
+    ("report_disposition", "sv"): {
+        "question_id": "report_disposition",
+        "question": "Hur ska rapporten hantera flera källdokument?",
+        "options": (
+            (
+                "per_source_sections",
+                "Avsnitt per källa",
+                "Skriv ett tydligt rapportavsnitt för varje uppladdat dokument.",
+                "per_source_sections",
+            ),
+            (
+                "synthesized_overview",
+                "Samlad översikt",
+                "Slå ihop källorna till en gemensam sammanfattning eller analys.",
+                "synthesized_overview",
+            ),
+            (
+                "both",
+                "Både avsnitt och översikt",
+                "Ha källspecifika avsnitt och avsluta med en samlad slutsats.",
+                "both",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("report_disposition", "en"): {
+        "question_id": "report_disposition",
+        "question": "How should the report handle multiple source documents?",
+        "options": (
+            (
+                "per_source_sections",
+                "Sections per source",
+                "Write a clear report section for each uploaded document.",
+                "per_source_sections",
+            ),
+            (
+                "synthesized_overview",
+                "Synthesized overview",
+                "Combine the sources into one shared summary or analysis.",
+                "synthesized_overview",
+            ),
+            (
+                "both",
+                "Both",
+                "Use source-specific sections and end with a synthesized conclusion.",
+                "both",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
     ("post_processing_goal", "sv"): {
         "question_id": "post_processing_goal",
         "question": "Vad ska flödet hjälpa dig göra med materialet?",

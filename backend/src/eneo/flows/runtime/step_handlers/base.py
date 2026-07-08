@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
+from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.enums import FlowOutputMode
@@ -28,7 +30,18 @@ class PrepareAssistantStepFn(Protocol):
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
         attempt_no: int,
+        requested_file_ids_override: Sequence[UUID] | None = None,
     ) -> PreparedAssistantStep: ...
+
+
+class ListStepInputFileIdsFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        attempt_no: int,
+    ) -> list[UUID]: ...
 
 
 class StepHandler(Protocol):

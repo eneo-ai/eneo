@@ -675,6 +675,8 @@ def _model_slot_is_persistable(slot_name: str) -> bool:
 
 
 def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
+    if slot_name == "report_disposition":
+        return _report_disposition_slot_is_relevant(state)
     if slot_name != "structured_io_contract":
         return True
     primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
@@ -684,6 +686,27 @@ def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
         and primary_runtime_input.value == "json"
         and terminal_output is not None
         and terminal_output.value == "structured_json"
+    )
+
+
+def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
+    primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
+    terminal_output = state.resolved_slots.get("terminal_output")
+    document_material_scope = state.resolved_slots.get("document_material_scope")
+    docx_output_mode = state.resolved_slots.get("docx_output_mode")
+    return (
+        primary_runtime_input is not None
+        and primary_runtime_input.value in {"document", "documents", "text_and_documents"}
+        and terminal_output is not None
+        and terminal_output.value in {"pdf_document", "docx_document"}
+        and not (
+            terminal_output.value == "docx_document"
+            and docx_output_mode is not None
+            and docx_output_mode.value == "template_fill_docx"
+        )
+        and document_material_scope is not None
+        and document_material_scope.value
+        in {"multiple_documents_case", "flexible_document_case"}
     )
 
 
@@ -820,6 +843,24 @@ def _resolve_slots(
             freeform_text=freeform_text,
             summary_field=None,
             slot_value=document_material_scope,
+        )
+
+    report_disposition = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="report_disposition",
+    )
+    if report_disposition is not None:
+        slots["report_disposition"] = _build_slot(
+            name="report_disposition",
+            value=report_disposition,
+            question_id="report_disposition",
+            conversation=conversation,
+            flow_defaults=flow_defaults,
+            requirements_state=requirements_state,
+            freeform_text=freeform_text,
+            summary_field=None,
+            slot_value=report_disposition,
         )
 
     # No policy default: ambiguous comparison prompts must ask for architecture.

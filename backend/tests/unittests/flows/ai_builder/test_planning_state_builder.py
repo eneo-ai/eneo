@@ -49,6 +49,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+    llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
@@ -1298,6 +1299,38 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_report_disposition_is_classified_only_for_multi_source_documents(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="pdf_document",
+                source="structured_answer",
+            ),
+            "document_material_scope": _slot(
+                name="document_material_scope",
+                value="multiple_documents_case",
+                source="structured_answer",
+            ),
+        }
+
+        assert "report_disposition" in llm_resolvable_slot_values_for_state(state)
+
+        state.resolved_slots["document_material_scope"] = _slot(
+            name="document_material_scope",
+            value="single_document_case",
+            source="structured_answer",
+        )
+
+        assert "report_disposition" not in llm_resolvable_slot_values_for_state(state)
+
     def test_model_output_preserves_user_and_flow_sources_but_can_correct_summary(
         self,
     ) -> None:

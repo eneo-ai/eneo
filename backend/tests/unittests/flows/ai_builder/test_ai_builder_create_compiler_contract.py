@@ -41,20 +41,12 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.input_binding_contract_rules import effective_question_binding
-from eneo.flows.runtime.step_input_resolution import (
-    RUNTIME_INPUT_SOURCE_FILE_NAME_KEY,
-    RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE,
-)
 
 
 def _question(input_bindings: dict[str, object] | None) -> str:
     question = effective_question_binding(input_bindings)
     assert question is not None
     return question
-
-
-def _runtime_source_header_sample() -> str:
-    return RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number="n")
 
 
 def _slot(name: str, value: str) -> ResolvedSlot:
@@ -164,6 +156,19 @@ def test_compile_context_derives_analysis_fields_from_result_obligations() -> No
         "recommended_action",
     ]
     assert context.source_reader_required_fields == ()
+
+
+def test_compile_context_carries_report_disposition() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "both",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.report_disposition == "both"
 
 
 def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
@@ -1664,15 +1669,18 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
             runtime_max_files=4,
             aggregation_intent=cast(AggregationIntent, "linear"),
             ui_language="sv",
+            report_disposition="both",
         ),
     )
 
     reader_step = compiled.steps[0]
+    body_writer_step = compiled.steps[1]
     assert reader_step.output_contract is not None
     documents_schema = reader_step.output_contract["properties"]["documents"]
     item_properties = documents_schema["items"]["properties"]
     assert list(item_properties) == [
         "source_label",
+        "source_file_id",
         "title",
         "date_or_year",
         "author_or_sender",
@@ -1681,10 +1689,17 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert "sammanfattning" not in item_properties
     assert "documents" not in item_properties
     reader_instructions = reader_step.assistant_spec.instructions
-    assert "exakt en post per källdokument" in reader_instructions
-    assert "blanda inte uppgifter mellan dokument" in reader_instructions
-    assert _runtime_source_header_sample() in reader_instructions
-    assert RUNTIME_INPUT_SOURCE_FILE_NAME_KEY in reader_instructions
+    assert "körs en gång per uppladdad källa" in reader_instructions
+    assert "runtime fyller source_label och source_file_id" in reader_instructions
+    assert "file_name" not in reader_instructions
+    assert reader_step.input_config is not None
+    assert (
+        reader_step.input_config["runtime_input"]["execution_mode"] == "per_source"
+    )
+    assert '"Källa: {source_label}"' in body_writer_step.assistant_spec.instructions
+    assert "Skriv källspecifika avsnitt" in (
+        body_writer_step.assistant_spec.instructions
+    )
     assert validate_spec(compiled).valid
 
 
@@ -1737,13 +1752,17 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     assert reader_step.output_contract is not None
     documents_schema = reader_step.output_contract["properties"]["documents"]
     assert documents_schema["items"]["type"] == "object"
-    assert list(documents_schema["items"]["properties"]) == ["source_label"]
-    assert documents_schema["items"]["required"] == ["source_label"]
+    assert list(documents_schema["items"]["properties"]) == [
+        "source_label",
+        "source_file_id",
+    ]
+    assert documents_schema["items"]["required"] == [
+        "source_label",
+        "source_file_id",
+    ]
     reader_instructions = reader_step.assistant_spec.instructions
-    assert "exakt en post per källdokument" in reader_instructions
-    assert "blanda inte uppgifter mellan dokument" in reader_instructions
-    assert _runtime_source_header_sample() in reader_instructions
-    assert RUNTIME_INPUT_SOURCE_FILE_NAME_KEY in reader_instructions
+    assert "körs en gång per uppladdad källa" in reader_instructions
+    assert "runtime fyller source_label och source_file_id" in reader_instructions
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 

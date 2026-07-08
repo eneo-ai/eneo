@@ -227,14 +227,39 @@ def _unresolved_slots_for_derived_commit(
     commit = derive_architecture_commit_draft(session_state)
     if commit is None:
         return frozenset()
-    required_slots = frozenset(
+    required_slots = {
         slot_name
         for pattern_id in commit.chosen_patterns
         if pattern_id in PATTERN_REGISTRY
         for slot_name in PATTERN_REGISTRY[pattern_id].required_architectural_slots
         if _is_user_requirement_question(slot_name)
+    }
+    if _report_disposition_is_required(session_state):
+        required_slots.add("report_disposition")
+    return frozenset(required_slots) - commit_grade_slot_names
+
+
+def _report_disposition_is_required(session_state: PlanningState) -> bool:
+    primary_runtime_input = session_state.resolved_slots.get("primary_runtime_input")
+    terminal_output = session_state.resolved_slots.get("terminal_output")
+    document_material_scope = session_state.resolved_slots.get(
+        "document_material_scope"
     )
-    return required_slots - commit_grade_slot_names
+    docx_output_mode = session_state.resolved_slots.get("docx_output_mode")
+    return (
+        primary_runtime_input is not None
+        and primary_runtime_input.value in {"document", "documents", "text_and_documents"}
+        and terminal_output is not None
+        and terminal_output.value in {"pdf_document", "docx_document"}
+        and not (
+            terminal_output.value == "docx_document"
+            and docx_output_mode is not None
+            and docx_output_mode.value == "template_fill_docx"
+        )
+        and document_material_scope is not None
+        and document_material_scope.value
+        in {"multiple_documents_case", "flexible_document_case"}
+    )
 
 
 def _is_user_requirement_question(slot_name: str) -> bool:

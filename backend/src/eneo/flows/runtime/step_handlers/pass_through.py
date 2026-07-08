@@ -7,12 +7,20 @@ from eneo.flows.enums import FlowOutputMode
 from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import complete_step_execution
-from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
+from eneo.flows.runtime.step_handlers.base import (
+    ListStepInputFileIdsFn,
+    PrepareAssistantStepFn,
+)
+from eneo.flows.runtime.step_handlers.per_source_reader import (
+    execute_per_source_reader,
+    should_execute_per_source_reader,
+)
 
 
 @dataclass(frozen=True)
 class PassThroughStepHandler:
     prepare_assistant_step: PrepareAssistantStepFn
+    list_step_input_file_ids: ListStepInputFileIdsFn | None = None
     output_mode: FlowOutputMode = FlowOutputMode.PASS_THROUGH
 
     async def execute(
@@ -24,6 +32,18 @@ class PassThroughStepHandler:
         version_metadata: dict[str, object] | None,
         attempt_no: int,
     ) -> StepExecutionResult:
+        if should_execute_per_source_reader(step):
+            if self.list_step_input_file_ids is None:
+                raise RuntimeError("Per-source reader execution requires file-id listing.")
+            return await execute_per_source_reader(
+                step=step,
+                run=run,
+                state=state,
+                version_metadata=version_metadata,
+                attempt_no=attempt_no,
+                prepare_assistant_step=self.prepare_assistant_step,
+                list_step_input_file_ids=self.list_step_input_file_ids,
+            )
         prepared_step = await self.prepare_assistant_step(
             step=step,
             run=run,

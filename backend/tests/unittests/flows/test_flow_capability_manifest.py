@@ -59,8 +59,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_four() -> None:
-    assert FCM_VERSION == 4
+def test_fcm_version_is_five() -> None:
+    assert FCM_VERSION == 5
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -1057,7 +1057,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V4: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V5: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1087,6 +1087,7 @@ _FCM_SURFACE_FINGERPRINT_V4: tuple[object, ...] = (
         "output_mode_render_verbatim",
         "output_mode_template_fill",
         "output_mode_transcribe_only",
+        "per_source_reader_execution",
     ),
     (
         (
@@ -1337,6 +1338,32 @@ _FCM_SURFACE_FINGERPRINT_V4: tuple[object, ...] = (
             ),
             (),
         ),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "bounded_concurrent_source_calls",
+                    "Source calls are mapped with a named runtime concurrency "
+                    "bound and fail-fast at step-attempt granularity.",
+                ),
+                (
+                    "requires_documents_array_contract",
+                    "Per-source reader execution requires a JSON output contract "
+                    "shaped as exactly one top-level `documents[]` array; "
+                    "corpus-level synthesis belongs to a downstream writer step.",
+                ),
+                (
+                    "runtime_sets_source_identity",
+                    "The runtime, not the model, sets `source_label` and "
+                    "`source_file_id` from uploaded file metadata before assembling "
+                    "the final documents[] payload.",
+                ),
+            ),
+            ("input_config.runtime_input.execution_mode",),
+        ),
     ),
     (
         ("docx", "any"),
@@ -1379,11 +1406,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V4, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V5, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V4}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V5}\n\n"
         f"Actual:   {actual}"
     )
 

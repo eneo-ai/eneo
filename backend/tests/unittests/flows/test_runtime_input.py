@@ -14,6 +14,7 @@ def test_parse_runtime_input_config_accepts_valid_json_contract_values() -> None
                 "required": True,
                 "max_files": 2,
                 "input_format": "document",
+                "execution_mode": "per_source",
             }
         }
     )
@@ -22,6 +23,7 @@ def test_parse_runtime_input_config_accepts_valid_json_contract_values() -> None
     assert config.required is True
     assert config.max_files == 2
     assert config.input_format == "document"
+    assert config.execution_mode == "per_source"
 
 
 @pytest.mark.parametrize(
@@ -47,6 +49,7 @@ def test_parse_runtime_input_config_supports_literal_bool_shortcuts(
         {"required": "false"},
         {"max_files": "2"},
         {"max_files": True},
+        {"execution_mode": "per_document"},
         0,
     ],
 )

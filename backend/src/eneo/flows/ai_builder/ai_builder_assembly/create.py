@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
+    add_runtime_source_file_id_field,
     complete_structured_source_reader_fields,
     log_dropped_source_contract_shadow_fields,
     source_capture_fields_from_terminal_schema,
@@ -53,10 +54,6 @@ from eneo.flows.flow_authoring_spec import (
     InputType,
     OutputMode,
     OutputType,
-)
-from eneo.flows.runtime.step_input_resolution import (
-    RUNTIME_INPUT_SOURCE_FILE_NAME_KEY,
-    RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE,
 )
 from eneo.json_types import JsonObject
 
@@ -235,6 +232,7 @@ def try_compile_create_intent_with_assembly(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    report_disposition: str | None,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -252,6 +250,7 @@ def try_compile_create_intent_with_assembly(
             terminal_output_schema=terminal_output_schema,
             source_reader_required_fields=source_reader_required_fields,
             result_contract_output_fields=result_contract_output_fields,
+            report_disposition=report_disposition,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
@@ -276,6 +275,7 @@ def _assemble_create_intent(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    report_disposition: str | None,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -498,8 +498,17 @@ def _assemble_create_intent(
         terminal_output_schema=terminal_output_schema,
         required_fields=source_reader_required_fields,
     )
-    completed_steps = _annotate_multi_document_source_readers(
+    completed_steps = _apply_per_source_reader_execution(
         completed_steps,
+        ui_language=ui_language,
+    )
+    completed_steps = _annotate_document_section_source_attribution(
+        completed_steps,
+        ui_language=ui_language,
+    )
+    completed_steps = _annotate_report_disposition(
+        completed_steps,
+        report_disposition=report_disposition,
         ui_language=ui_language,
     )
     completed_steps, admitted_form_fields = (
@@ -929,7 +938,7 @@ def _assemble_docx_template_fill(
         terminal_output_schema=None,
         required_fields=source_reader_required_fields,
     )
-    completed_steps = _annotate_multi_document_source_readers(
+    completed_steps = _apply_per_source_reader_execution(
         completed_steps,
         ui_language=ui_language,
     )
@@ -1190,7 +1199,7 @@ def _complete_planned_source_reader_contracts(
     return tuple(updated_steps)
 
 
-def _annotate_multi_document_source_readers(
+def _apply_per_source_reader_execution(
     planned_steps: tuple[PlannedStep, ...],
     *,
     ui_language: str | None,
@@ -1201,46 +1210,152 @@ def _annotate_multi_document_source_readers(
         if not (
             planned_step_is_source_reader(planned_step)
             and structured_fields_have_document_items(planned_step.output_fields)
+            and planned_step.input_type in _FILE_INPUT_TYPES
+            and planned_step.runtime_max_files != 1
         ):
             updated_steps.append(planned_step)
             continue
         annotated_step = replace(
             planned_step,
-            instructions=_append_multi_document_source_reader_instruction(
+            instructions=_append_per_source_reader_instruction(
+                planned_step.instructions,
+                ui_language=ui_language,
+            ),
+            output_fields=add_runtime_source_file_id_field(
+                planned_step.output_fields
+            ),
+            runtime_input_execution_mode="per_source",
+        )
+        updated_steps.append(annotated_step)
+        changed = changed or annotated_step != planned_step
+    if not changed:
+        return planned_steps
+    return tuple(updated_steps)
+
+
+def _append_per_source_reader_instruction(
+    instructions: str,
+    *,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "en":
+        addition = (
+            "This document reader runs once per uploaded source. Extract facts "
+            "only from the current source document and return one document object; "
+            "the runtime fills source_label and source_file_id from file metadata."
+        )
+    else:
+        addition = (
+            "Den här dokumentläsaren körs en gång per uppladdad källa. Extrahera "
+            "bara fakta från det aktuella källdokumentet och returnera ett "
+            "dokumentobjekt; runtime fyller source_label och source_file_id från "
+            "filmetadata."
+        )
+    if addition in instructions:
+        return instructions
+    return f"{instructions}\n\n{addition}"
+
+
+def _annotate_document_section_source_attribution(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    ui_language: str | None,
+) -> tuple[PlannedStep, ...]:
+    if not any(
+        planned_step_is_source_reader(step)
+        and step.runtime_input_execution_mode == "per_source"
+        for step in planned_steps
+    ):
+        return planned_steps
+    updated_steps: list[PlannedStep] = []
+    changed = False
+    for planned_step in planned_steps:
+        if planned_step.role != "body_writer":
+            updated_steps.append(planned_step)
+            continue
+        annotated_step = replace(
+            planned_step,
+            instructions=_append_document_section_source_attribution(
                 planned_step.instructions,
                 ui_language=ui_language,
             ),
         )
         updated_steps.append(annotated_step)
         changed = changed or annotated_step.instructions != planned_step.instructions
-    if not changed:
-        return planned_steps
-    return tuple(updated_steps)
+    return tuple(updated_steps) if changed else planned_steps
 
 
-def _append_multi_document_source_reader_instruction(
+def _append_document_section_source_attribution(
     instructions: str,
     *,
     ui_language: str | None,
 ) -> str:
-    source_header_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number="n")
-    if ui_language == "en":
-        addition = (
-            "For documents[] output, create exactly one item per source document. "
-            "Keep every item's facts scoped to that one source only; do not merge "
-            "facts across documents. Set source_label to the "
-            f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY} in the {source_header_label} "
-            f"header when present, otherwise use the {source_header_label} label."
-        )
-    else:
-        addition = (
-            "För documents[]-utdata ska du skapa exakt en post per källdokument. "
-            "Håll varje posts fakta avgränsade till just den källan; blanda inte "
-            "uppgifter mellan dokument. Sätt source_label till "
-            f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY} i {source_header_label}-rubriken "
-            f"när den finns, annars {source_header_label}-etiketten."
-        )
+    addition = (
+        'End each source-specific document section with "Source: {source_label}" '
+        "when source_label is available."
+        if ui_language == "en"
+        else 'Avsluta varje källspecifikt dokumentavsnitt med "Källa: {source_label}" '
+        "när source_label finns."
+    )
     if addition in instructions:
+        return instructions
+    return f"{instructions}\n\n{addition}"
+
+
+def _annotate_report_disposition(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    report_disposition: str | None,
+    ui_language: str | None,
+) -> tuple[PlannedStep, ...]:
+    if report_disposition is None:
+        return planned_steps
+    updated_steps: list[PlannedStep] = []
+    changed = False
+    for planned_step in planned_steps:
+        if planned_step.role != "body_writer":
+            updated_steps.append(planned_step)
+            continue
+        annotated_step = replace(
+            planned_step,
+            instructions=_append_report_disposition_instruction(
+                planned_step.instructions,
+                report_disposition=report_disposition,
+                ui_language=ui_language,
+            ),
+        )
+        updated_steps.append(annotated_step)
+        changed = changed or annotated_step.instructions != planned_step.instructions
+    return tuple(updated_steps) if changed else planned_steps
+
+
+def _append_report_disposition_instruction(
+    instructions: str,
+    *,
+    report_disposition: str,
+    ui_language: str | None,
+) -> str:
+    additions = (
+        {
+            "per_source_sections": "Write the report as one clear section per source.",
+            "synthesized_overview": "Write the report as one synthesized overview across all sources.",
+            "both": (
+                "Write source-specific sections and end with a synthesized "
+                "conclusion across all sources."
+            ),
+        }
+        if ui_language == "en"
+        else {
+            "per_source_sections": "Skriv rapporten som ett tydligt avsnitt per källa.",
+            "synthesized_overview": "Skriv rapporten som en samlad översikt över alla källor.",
+            "both": (
+                "Skriv källspecifika avsnitt och avsluta med en samlad "
+                "slutsats över alla källor."
+            ),
+        }
+    )
+    addition = additions.get(report_disposition)
+    if addition is None or addition in instructions:
         return instructions
     return f"{instructions}\n\n{addition}"
 

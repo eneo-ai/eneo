@@ -249,6 +249,84 @@ def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() ->
     assert policy.allowed_ask_question_targets == ("document_material_scope",)
 
 
+def test_policy_asks_report_disposition_for_multi_source_pdf_report() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("report_disposition",)
+
+
+def test_policy_accepts_classifier_inferred_report_disposition() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "per_source_sections",
+        source="model",
+        confidence="high",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
+def test_policy_does_not_ask_report_disposition_for_docx_template_fill() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "template_fill_docx",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
 def test_policy_never_exposes_resolved_slots_as_question_targets() -> None:
     policy = build_planner_action_policy(
         session_state=_state_with_resolved_slots("primary_runtime_input"),
@@ -405,6 +483,10 @@ def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -
     state.resolved_slots["document_material_scope"] = _slot(
         "document_material_scope",
         "flexible_document_case",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "both",
     )
 
     policy = build_planner_action_policy(

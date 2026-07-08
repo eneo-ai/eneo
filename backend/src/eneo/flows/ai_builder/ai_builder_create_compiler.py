@@ -85,6 +85,7 @@ class CreateCompileContext:
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
+    report_disposition: str | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
@@ -169,6 +170,7 @@ def compile_create_intent_to_spec(
         result_contract_output_fields=(
             context.result_contract_output_fields if context is not None else ()
         ),
+        report_disposition=context.report_disposition if context is not None else None,
         runtime_required=context.runtime_required if context is not None else True,
         runtime_max_files=context.runtime_max_files if context is not None else None,
         ui_language=context.ui_language if context is not None else None,
@@ -346,7 +348,15 @@ def create_compile_context_from_planning_state(
                 ui_language=ui_language,
             )
         ),
+        report_disposition=_report_disposition_from_planning_state(planning_state),
     )
+
+
+def _report_disposition_from_planning_state(
+    planning_state: PlanningState,
+) -> str | None:
+    slot = planning_state.resolved_slots.get("report_disposition")
+    return slot.value if slot is not None else None
 
 
 def _source_reader_required_fields_from_planning_state(

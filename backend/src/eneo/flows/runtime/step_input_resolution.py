@@ -465,6 +465,13 @@ def _build_runtime_input_metadata(
         "file_ids": [str(file_id) for file_id in requested_ids],
         "files_count": len(file_metadata),
         "files": file_metadata,
+        "source_headers": [
+            _build_runtime_source_header_metadata(
+                file=file,
+                source_number=source_number,
+            )
+            for source_number, file in enumerate(files, start=1)
+        ],
         "total_file_size": sum(
             metadata["size"]
             for metadata in file_metadata
@@ -473,6 +480,28 @@ def _build_runtime_input_metadata(
         "extracted_text_length": len(text),
         "input_format": input_format,
         "capture_mode": capture_mode,
+    }
+
+
+def _build_runtime_source_header_metadata(
+    *,
+    file: Any,
+    source_number: int,
+) -> dict[str, Any]:
+    file_name = _runtime_source_file_name(file)
+    source_marker = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
+        source_number=source_number
+    )
+    text_value = getattr(file, "text", None)
+    return {
+        "source_number": source_number,
+        "source_label": file_name or source_marker,
+        "source_marker": source_marker,
+        "file_id": str(getattr(file, "id")),
+        "file_name": file_name,
+        "has_file_name": file_name is not None,
+        "has_text": isinstance(text_value, str) and text_value.strip() != "",
+        "text_length": len(text_value) if isinstance(text_value, str) else None,
     }
 
 

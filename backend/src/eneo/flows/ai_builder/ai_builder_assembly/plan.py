@@ -12,9 +12,11 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
     source_capture_fields_from_terminal_schema,
     source_reader_leaf_field_name,
+    structured_fields_have_document_items,
     structured_fields_have_source_leaf,
 )
 from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.domain.flow import RuntimeInputExecutionMode
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -68,6 +70,7 @@ class PlannedStep:
     document_delivery_mode: DocumentDeliveryMode = "not_applicable"
     runtime_required: bool = False
     runtime_max_files: int | None = None
+    runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call"
     form_field_refs: tuple[str, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()
@@ -147,6 +150,7 @@ class FlowAssemblyPlan:
             terminal_output_schema=self.terminal_output_schema,
             required_fields=self.source_reader_required_fields,
         )
+        _validate_per_source_reader_contracts(self.steps)
 
 
 def _validate_underlag_channel_shape(step: PlannedStep) -> None:
@@ -366,4 +370,19 @@ def _validate_source_reader_contracts_complete(
         raise ValueError(
             "FlowAssemblyPlan source-reader output fields must be complete "
             f"before lowering: {', '.join(sorted(missing_names))}."
+        )
+
+
+def _validate_per_source_reader_contracts(steps: tuple[PlannedStep, ...]) -> None:
+    for step in steps:
+        if step.runtime_input_execution_mode != "per_source":
+            continue
+        if (
+            len(step.output_fields) == 1
+            and structured_fields_have_document_items(step.output_fields)
+        ):
+            continue
+        raise ValueError(
+            "Per-source source-reader steps must output exactly one documents[] "
+            f"field; {step.name!r} declares a corpus-level reader contract."
         )

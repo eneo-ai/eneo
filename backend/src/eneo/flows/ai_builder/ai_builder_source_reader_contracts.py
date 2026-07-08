@@ -262,6 +262,12 @@ def structured_fields_have_document_items(
     return any(_structured_field_is_documents_array(field) for field in fields)
 
 
+def add_runtime_source_file_id_field(
+    fields: tuple[StructuredFieldDraft, ...],
+) -> tuple[StructuredFieldDraft, ...]:
+    return tuple(_add_runtime_source_file_id_field(list(fields)))
+
+
 def source_reader_leaf_field_name(field_path: str) -> str:
     return _leaf_field_name(field_path)
 
@@ -437,6 +443,32 @@ def _ensure_source_label_field(
         ),
         *fields,
     ]
+
+
+def _add_runtime_source_file_id_field(
+    fields: list[StructuredFieldDraft],
+) -> list[StructuredFieldDraft]:
+    updated_fields: list[StructuredFieldDraft] = []
+    for field in fields:
+        if not _structured_field_is_documents_array(field):
+            updated_fields.append(field)
+            continue
+        item_fields = list(field.item_fields or [])
+        if any(item.name == "source_file_id" for item in item_fields):
+            updated_fields.append(field)
+            continue
+        insert_index = 1 if item_fields and item_fields[0].name == "source_label" else 0
+        updated_item_fields = [
+            *item_fields[:insert_index],
+            StructuredFieldDraft(
+                name="source_file_id",
+                field_type="string",
+                description="Runtime file id for this source document.",
+            ),
+            *item_fields[insert_index:],
+        ]
+        updated_fields.append(field.model_copy(update={"item_fields": updated_item_fields}))
+    return updated_fields
 
 
 def _structured_field_is_documents_array(field: StructuredFieldDraft) -> bool:

@@ -196,6 +196,12 @@ def document_material_scope_question(
     return _catalog_question("document_material_scope", language=language)
 
 
+def report_disposition_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("report_disposition", language=language)
+
+
 def post_processing_goal_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
@@ -476,6 +482,7 @@ def question_suggestion_for_id(
         "flow_input_architecture": flow_input_architecture_question,
         "document_kind": document_kind_question,
         "document_material_scope": document_material_scope_question,
+        "report_disposition": report_disposition_question,
         "post_processing_goal": post_processing_goal_question,
         "structured_io_contract": structured_io_contract_question,
         "comparison_scope": comparison_scope_question,
