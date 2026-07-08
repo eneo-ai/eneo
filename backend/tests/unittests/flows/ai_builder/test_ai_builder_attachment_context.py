@@ -138,35 +138,6 @@ def test_build_ai_builder_attachment_context_distinguishes_template_and_referenc
     assert "File role: reference_material" in result.context
 
 
-def test_build_ai_builder_attachment_context_detects_example_output_from_content() -> (
-    None
-):
-    result = build_ai_builder_attachment_context(
-        [
-            _make_file(
-                name="bilaga.pdf",
-                text=(
-                    "Exempelrapport\n"
-                    "Titel: Dokumentanalys\n"
-                    "Sammanfattning: Så här ska rapporten se ut.\n"
-                    "Källor: en rad per analyserat dokument."
-                ),
-                mimetype="application/pdf",
-                file_type=FileType.DOCUMENT,
-            ),
-        ]
-    )
-
-    assert result is not None
-    evidence = result.evidence[0]
-    assert evidence.inferred_role == "example_output"
-    assert evidence.role_confidence == "medium"
-    assert evidence.role_evidence == ("content:example_output_marker",)
-    assert result.discovery_context is not None
-    assert "inferred_role: example_output" in result.discovery_context
-    assert "role_evidence: content:example_output_marker" in result.discovery_context
-
-
 def test_build_ai_builder_attachment_context_preserves_conflicting_role_candidates() -> (
     None
 ):
@@ -226,28 +197,6 @@ def test_build_ai_builder_attachment_context_avoids_substring_role_false_positiv
         "context_only",
         "context_only",
     ]
-
-
-def test_build_ai_builder_attachment_context_does_not_treat_report_layout_as_example() -> (
-    None
-):
-    result = build_ai_builder_attachment_context(
-        [
-            _make_file(
-                name="rapport.pdf",
-                text=(
-                    "Rapport\n"
-                    "Sammanfattning: Projektet har avslutats.\n"
-                    "Slutsatser: Nästa steg är uppföljning."
-                ),
-                mimetype="application/pdf",
-                file_type=FileType.DOCUMENT,
-            ),
-        ]
-    )
-
-    assert result is not None
-    assert result.evidence[0].inferred_role == "context_only"
 
 
 def test_build_ai_builder_attachment_context_surfaces_unreadable_files_for_discovery() -> (

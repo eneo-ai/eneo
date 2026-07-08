@@ -102,23 +102,6 @@ _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
     "context_only",
 )
 
-_EXAMPLE_OUTPUT_CONTENT_MARKERS: tuple[str, ...] = (
-    "exempelrapport",
-    "exempel på rapport",
-    "exempel på slutrapport",
-    "example report",
-    "sample report",
-    "example output",
-    "sample output",
-    "färdigt resultat",
-    "fardigt resultat",
-    "önskat resultat",
-    "onskat resultat",
-    "förväntat resultat",
-    "forvantat resultat",
-    "så här ska rapporten se ut",
-    "sa har ska rapporten se ut",
-)
 _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
 
 
@@ -201,14 +184,6 @@ def _infer_file_role(
             role="example_output",
             confidence="medium",
             evidence="filename:example_keyword",
-        )
-    if any(marker in text for marker in _EXAMPLE_OUTPUT_CONTENT_MARKERS):
-        _add_role_candidate(
-            candidate_confidence,
-            candidate_evidence,
-            role="example_output",
-            confidence="medium",
-            evidence="content:example_output_marker",
         )
     if not candidate_confidence:
         _add_role_candidate(
