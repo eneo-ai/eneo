@@ -165,6 +165,7 @@ def test_output_mode_outbound_delivery_predicate_classifies_every_mode() -> None
 
     assert classified == {
         FlowOutputMode.PASS_THROUGH: False,
+        FlowOutputMode.COMPOSE_TEXT: False,
         FlowOutputMode.HTTP_POST: True,
         FlowOutputMode.TRANSCRIBE_ONLY: False,
         FlowOutputMode.TEMPLATE_FILL: False,

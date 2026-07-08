@@ -75,6 +75,34 @@ def test_parse_runtime_steps_accepts_transcribe_only_output_mode():
     assert parsed[0].output_mode == "transcribe_only"
 
 
+def test_parse_runtime_steps_accepts_compose_text_output_mode():
+    parsed = parse_runtime_steps(
+        _definition(
+            _step_snapshot(
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+            )
+        )
+    )
+
+    assert len(parsed) == 1
+    assert parsed[0].output_mode == "compose_text"
+
+
+def test_parse_runtime_steps_rejects_compose_text_non_text_output():
+    with pytest.raises(BadRequestException, match="compose_text.*output_type 'text'"):
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    input_type="text",
+                    output_type="json",
+                    output_mode="compose_text",
+                )
+            )
+        )
+
+
 @pytest.mark.parametrize("output_type", ["pdf", "docx"])
 def test_parse_runtime_steps_rejects_text_document_pass_through(
     output_type: str,

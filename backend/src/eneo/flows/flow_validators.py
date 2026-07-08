@@ -57,6 +57,7 @@ from eneo.flows.input_binding_contract_rules import (
     validate_source_refs_binding,
 )
 from eneo.flows.output_modes import (
+    compose_text_violation,
     render_verbatim_violation,
     text_document_pass_through_violation,
     transcribe_only_violation,
@@ -266,6 +267,20 @@ def collect_step_graph_issues(
                 _flow_step_issue(
                     code=FlowGraphIssueCode.FLOW_STEP_INVALID,
                     message=render_verbatim_error,
+                    step_order=step.step_order,
+                )
+            )
+        compose_text_error = compose_text_violation(
+            step_order=step.step_order,
+            input_type=step.input_type,
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+        )
+        if compose_text_error is not None:
+            issues.append(
+                _flow_step_issue(
+                    code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                    message=compose_text_error,
                     step_order=step.step_order,
                 )
             )

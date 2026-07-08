@@ -581,6 +581,31 @@ def test_render_verbatim_accepts_text_to_pdf(user):
     service._validate_steps(steps)
 
 
+def test_compose_text_requires_text_output(user):
+    service = _service(user)
+    steps = [
+        _step(
+            input_type="text",
+            output_mode="compose_text",
+            output_type="json",
+        ),
+    ]
+    with pytest.raises(BadRequestException, match="compose_text.*output_type 'text'"):
+        service._validate_steps(steps)
+
+
+def test_compose_text_accepts_text_to_text(user):
+    service = _service(user)
+    steps = [
+        _step(
+            input_type="text",
+            output_mode="compose_text",
+            output_type="text",
+        ),
+    ]
+    service._validate_steps(steps)
+
+
 def test_image_input_blocked_publish(user):
     """image input type should be blocked at publish."""
     service = _service(user)

@@ -39,7 +39,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 5
+FCM_VERSION: int = 6
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -281,6 +281,25 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
                 ),
             ),
         ),
+        FlowOutputMode.COMPOSE_TEXT: (
+            "Deterministic text compose",
+            (
+                "Non-LLM composition pathway: resolved text input is persisted "
+                "as text output without calling a completion model. Use this "
+                "when prior structured references have already been lowered "
+                "into the final body text."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_text_input_text_output",
+                    description=(
+                        "Steps using `compose_text` must have `input_type=TEXT` "
+                        "and `output_type=TEXT`; any other IO pair is rejected "
+                        "by `supports_step_io_tuple`."
+                    ),
+                ),
+            ),
+        ),
         FlowOutputMode.TRANSCRIBE_ONLY: (
             "Audio transcription (transcribe-only)",
             (
@@ -446,8 +465,8 @@ def _seed_citation_sidecar_capability() -> FlowCapability:
             "output, tracking which context sources were cited via inline "
             "`[[inref:...]]` tags. Activated by `output_config.citation_mode="
             "'inline_inref_sidecar'`; compatible only with TEXT-output LLM "
-            "steps that are not running in template-fill or transcribe-only "
-            "mode."
+            "steps that are not running in compose-text, template-fill, "
+            "transcribe-only, or render-verbatim mode."
         ),
         applies_to_tuples=(),
         required_config=(),
@@ -464,10 +483,9 @@ def _seed_citation_sidecar_capability() -> FlowCapability:
                 id="forbids_template_fill_or_transcribe_only",
                 description=(
                     "Citation capability is disabled when `output_mode` is "
-                    "`template_fill` (a docx-artefact pathway) or "
-                    "`transcribe_only` or `render_verbatim` (non-LLM "
-                    "pathways). Any other output_mode preserves capability "
-                    "when the rest holds."
+                    "`compose_text`, `template_fill`, `transcribe_only`, or "
+                    "`render_verbatim` (non-LLM pathways). Any other "
+                    "output_mode preserves capability when the rest holds."
                 ),
             ),
             InvariantSpec(
@@ -613,6 +631,7 @@ def supports_step_io_tuple(
 
     Rules:
 
+    - `COMPOSE_TEXT` is legal only for `TEXT` input → `TEXT` output.
     - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
     - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
     - `PASS_THROUGH` is not legal for `TEXT` input → `PDF`/`DOCX` output;
@@ -641,6 +660,8 @@ def supports_step_io_tuple(
         return output_type is FlowOutputType.DOCX
     if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
         return input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
+    if output_mode is FlowOutputMode.COMPOSE_TEXT:
+        return input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT
     if output_mode is FlowOutputMode.RENDER_VERBATIM:
         return input_type is FlowInputType.TEXT and output_type in {
             FlowOutputType.PDF,
@@ -662,6 +683,7 @@ def requires_completion_model(output_mode: FlowOutputMode) -> bool:
     assistant completion model.
     """
     return output_mode not in {
+        FlowOutputMode.COMPOSE_TEXT,
         FlowOutputMode.TRANSCRIBE_ONLY,
         FlowOutputMode.RENDER_VERBATIM,
     }
@@ -714,9 +736,10 @@ def is_citation_capable_step(
       `inline_inref_sidecar` citation mode, AND
     - `output_type` is `TEXT` (the only artefact the citation sidecar
       attaches to today), AND
-    - `output_mode` is neither `TEMPLATE_FILL`, `TRANSCRIBE_ONLY`, nor
-      `RENDER_VERBATIM` (template-fill and render-verbatim are document
-      rendering pathways; transcribe-only has no source documents to cite).
+    - `output_mode` is neither `COMPOSE_TEXT`, `TEMPLATE_FILL`,
+      `TRANSCRIBE_ONLY`, nor `RENDER_VERBATIM` (compose-text is deterministic,
+      template-fill and render-verbatim are document rendering pathways, and
+      transcribe-only has no source documents to cite).
 
     `output_config` stays typed as `object` because `resolve_citation_mode`
     itself already tolerates any shape — a non-dict payload collapses to
@@ -736,6 +759,7 @@ def is_citation_capable_step(
     if output_type is not FlowOutputType.TEXT:
         return False
     return output_mode not in {
+        FlowOutputMode.COMPOSE_TEXT,
         FlowOutputMode.TEMPLATE_FILL,
         FlowOutputMode.TRANSCRIBE_ONLY,
         FlowOutputMode.RENDER_VERBATIM,

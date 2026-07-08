@@ -19,6 +19,7 @@ from eneo.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
     WebhookPayloadRef,
@@ -29,6 +30,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 )
 from eneo.flows.runtime.step_handlers import resolve_handler_mode
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
+from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
 from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from eneo.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
@@ -101,11 +103,13 @@ def _prepared_assistant_step(
     *,
     assistant: MagicMock | None = None,
     apply_output_cap: AsyncMock | None = None,
+    process_typed_output: AsyncMock | None = None,
 ) -> PreparedAssistantStep:
     resolved_assistant = assistant or MagicMock()
     resolved_apply_output_cap = apply_output_cap or AsyncMock(
         return_value=("Transcript", [])
     )
+    resolved_process_typed_output = process_typed_output or AsyncMock()
     prepared = PreparedStepExecution(
         assistant=resolved_assistant,
         step_input=StepInputValue(
@@ -130,7 +134,7 @@ def _prepared_assistant_step(
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
         retrieve_rag_chunks=AsyncMock(),
-        process_typed_output=AsyncMock(),
+        process_typed_output=resolved_process_typed_output,
         apply_output_cap=resolved_apply_output_cap,
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {},
@@ -160,6 +164,7 @@ class _OutputOnlyHandler:
     ("mode", "expected_type"),
     [
         (FlowOutputMode.PASS_THROUGH, PassThroughStepHandler),
+        (FlowOutputMode.COMPOSE_TEXT, ComposeTextStepHandler),
         (FlowOutputMode.HTTP_POST, HttpPostStepHandler),
         (FlowOutputMode.TRANSCRIBE_ONLY, TranscribeOnlyStepHandler),
         (FlowOutputMode.TEMPLATE_FILL, TemplateFillStepHandler),
@@ -171,11 +176,12 @@ def test_executor_builds_expected_step_handler(
 ) -> None:
     executor = cast(
         FlowRunExecutor,
-        SimpleNamespace(
-            _prepare_assistant_step=AsyncMock(),
-            _template_fill_runtime_deps=MagicMock(),
-        ),
-    )
+            SimpleNamespace(
+                _prepare_assistant_step=AsyncMock(),
+                _list_step_input_file_ids=AsyncMock(),
+                _template_fill_runtime_deps=MagicMock(),
+            ),
+        )
 
     handler = FlowRunExecutor._build_step_handler(executor, mode)
 
@@ -282,6 +288,55 @@ async def test_template_fill_handler_wraps_template_fill_output(monkeypatch) -> 
         run=run,
         state=state,
         deps=deps,
+    )
+
+
+@pytest.mark.asyncio
+async def test_compose_text_handler_skips_llm_and_rag() -> None:
+    assistant = MagicMock()
+    assistant.get_response = AsyncMock()
+    process_typed_output = AsyncMock(
+        return_value=TypedOutputProcessingResult(
+            structured_output=None,
+            artifacts=None,
+            diagnostics=[],
+        )
+    )
+    prepared_step = _prepared_assistant_step(
+        assistant=assistant,
+        process_typed_output=process_typed_output,
+    )
+
+    async def _prepare(
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: dict[str, object] | None,
+        attempt_no: int,
+    ) -> PreparedAssistantStep:
+        return prepared_step
+
+    handler = ComposeTextStepHandler(prepare_assistant_step=_prepare)
+    result = await handler.execute(
+        step=_step(output_mode="compose_text"),
+        run=_run(),
+        state=_state(),
+        version_metadata=None,
+        attempt_no=1,
+    )
+
+    assistant.get_response.assert_not_awaited()
+    prepared_step.deps.retrieve_rag_chunks.assert_not_awaited()
+    process_typed_output.assert_awaited_once()
+    assert result.output.full_text == "Transcript"
+    assert result.output.persisted_text == "Transcript"
+    assert result.output.num_tokens_input == 0
+    assert result.output.num_tokens_output == 0
+    assert result.output.model_parameters_json == {"mode": "compose_text"}
+    assert any(
+        diagnostic.code == "compose_text_used"
+        for diagnostic in result.output.diagnostics
     )
 
 

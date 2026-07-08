@@ -60,7 +60,7 @@ def _flow_capability_manifest_source() -> Path:
 
 
 def test_fcm_version_is_five() -> None:
-    assert FCM_VERSION == 5
+    assert FCM_VERSION == 6
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -272,6 +272,7 @@ def test_requires_completion_model_rejects_transcribe_only(
     output_mode: FlowOutputMode,
 ) -> None:
     expected = output_mode not in {
+        FlowOutputMode.COMPOSE_TEXT,
         FlowOutputMode.TRANSCRIBE_ONLY,
         FlowOutputMode.RENDER_VERBATIM,
     }
@@ -413,6 +414,20 @@ def test_supports_step_io_tuple_rejects_transcribe_only_for_non_audio_text() -> 
             assert legal is expected
 
 
+def test_supports_step_io_tuple_rejects_compose_text_for_non_text_text() -> None:
+    for input_type in FlowInputType:
+        for output_type in FlowOutputType:
+            legal = supports_step_io_tuple(
+                input_type=input_type,
+                output_type=output_type,
+                output_mode=FlowOutputMode.COMPOSE_TEXT,
+            )
+            expected = (
+                input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT
+            )
+            assert legal is expected
+
+
 def test_supports_step_io_tuple_rejects_render_verbatim_for_non_text_document() -> None:
     for input_type in FlowInputType:
         for output_type in FlowOutputType:
@@ -510,6 +525,7 @@ def test_is_citation_capable_step_rejects_template_fill_and_transcribe_only() ->
             output_config=enabled_config,
         )
         expected = output_mode not in {
+            FlowOutputMode.COMPOSE_TEXT,
             FlowOutputMode.TEMPLATE_FILL,
             FlowOutputMode.TRANSCRIBE_ONLY,
             FlowOutputMode.RENDER_VERBATIM,
@@ -678,6 +694,10 @@ _EXPECTED_OUTPUT_MODE_CAPABILITIES: dict[FlowOutputMode, tuple[str, frozenset[st
     FlowOutputMode.HTTP_POST: (
         "output_mode_http_post",
         frozenset({"requires_http_output_config"}),
+    ),
+    FlowOutputMode.COMPOSE_TEXT: (
+        "output_mode_compose_text",
+        frozenset({"requires_text_input_text_output"}),
     ),
     FlowOutputMode.TRANSCRIBE_ONLY: (
         "output_mode_transcribe_only",
@@ -1057,7 +1077,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V5: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V6: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1082,6 +1102,7 @@ _FCM_SURFACE_FINGERPRINT_V5: tuple[object, ...] = (
         "input_json",
         "input_text",
         "mcp_policy",
+        "output_mode_compose_text",
         "output_mode_http_post",
         "output_mode_pass_through",
         "output_mode_render_verbatim",
@@ -1099,8 +1120,8 @@ _FCM_SURFACE_FINGERPRINT_V5: tuple[object, ...] = (
                 (
                     "forbids_template_fill_or_transcribe_only",
                     "Citation capability is disabled when `output_mode` is "
-                    "`template_fill` (a docx-artefact pathway) or "
-                    "`transcribe_only` or `render_verbatim` (non-LLM pathways). "
+                    "`compose_text`, `template_fill`, `transcribe_only`, or "
+                    "`render_verbatim` (non-LLM pathways). "
                     "Any other output_mode preserves capability when the rest holds.",
                 ),
                 (
@@ -1233,6 +1254,21 @@ _FCM_SURFACE_FINGERPRINT_V5: tuple[object, ...] = (
                     "`ALLOWED_MCP_POLICIES` (i.e. every `FlowMcpPolicy` member). "
                     '`flow_validators.py:183` raises `"Step {order}: unsupported '
                     "mcp_policy '{value}'.\"` when the policy falls outside this set.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "requires_text_input_text_output",
+                    "Steps using `compose_text` must have `input_type=TEXT` and "
+                    "`output_type=TEXT`; any other IO pair is rejected by "
+                    "`supports_step_io_tuple`.",
                 ),
             ),
             (),
@@ -1406,11 +1442,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V5, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V6, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V5}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V6}\n\n"
         f"Actual:   {actual}"
     )
 
@@ -1508,6 +1544,17 @@ class TestResolveCapabilityForTuple:
         assert caps is not None
         ids = [cap.id for cap in caps]
         assert ids == ["input_text", "output_mode_http_post"]
+
+    def test_compose_text_legal_tuple_returns_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.PREVIOUS_STEP,
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.COMPOSE_TEXT,
+        )
+        assert caps is not None
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_text", "output_mode_compose_text"]
 
     def test_transcribe_only_legal_tuple_returns_caps(self) -> None:
         caps = resolve_capability_for_tuple(

@@ -42,6 +42,22 @@ def render_verbatim_violation(
     return None
 
 
+def compose_text_violation(
+    *,
+    step_order: int,
+    input_type: str,
+    output_type: str,
+    output_mode: str,
+) -> str | None:
+    if output_mode != "compose_text":
+        return None
+    if input_type != "text":
+        return f"Step {step_order}: output_mode 'compose_text' requires input_type 'text'."
+    if output_type != "text":
+        return f"Step {step_order}: output_mode 'compose_text' requires output_type 'text'."
+    return None
+
+
 def text_document_pass_through_violation(
     *,
     step_order: int,

@@ -63,6 +63,7 @@ class FlowOutputType(str, Enum):
 
 class FlowOutputMode(str, Enum):
     PASS_THROUGH = "pass_through"
+    COMPOSE_TEXT = "compose_text"
     HTTP_POST = "http_post"
     TRANSCRIBE_ONLY = "transcribe_only"
     TEMPLATE_FILL = "template_fill"
