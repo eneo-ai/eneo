@@ -232,16 +232,21 @@ def _file_roles_block(planning_state: PlanningState) -> str | None:
     return "\n".join(
         f"- {item.filename}: {item.role} "
         f"({item.source}, {item.confidence} confidence"
-        f"{_candidate_roles_prompt_suffix(item)})"
+        f"{_file_role_detail_prompt_suffix(item)})"
         for item in planning_state.file_roles
     )
 
 
-def _candidate_roles_prompt_suffix(item: FileRoleEvidence) -> str:
+def _file_role_detail_prompt_suffix(item: FileRoleEvidence) -> str:
+    details: list[str] = []
     candidate_roles = tuple(item.candidate_roles)
-    if not candidate_roles or candidate_roles == (item.role,):
+    if candidate_roles and candidate_roles != (item.role,):
+        details.append("candidates: " + ", ".join(candidate_roles))
+    if item.evidence:
+        details.append("evidence: " + ", ".join(item.evidence[:6]))
+    if not details:
         return ""
-    return "; candidates: " + ", ".join(candidate_roles)
+    return "; " + "; ".join(details)
 
 
 def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:

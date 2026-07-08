@@ -131,6 +131,8 @@ def test_build_ai_builder_attachment_context_distinguishes_template_and_referenc
         "template",
         "reference_material",
     ]
+    assert "content:template_placeholder:kundnamn" in result.evidence[0].role_evidence
+    assert "content:template_placeholder:datum" in result.evidence[0].role_evidence
     assert result.context is not None
     assert "File role: template" in result.context
     assert "File role: reference_material" in result.context

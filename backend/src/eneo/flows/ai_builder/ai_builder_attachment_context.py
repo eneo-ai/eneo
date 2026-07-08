@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     SignalConfidence,
 )
+from eneo.flows.variable_resolver import iter_template_expressions
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +119,7 @@ _EXAMPLE_OUTPUT_CONTENT_MARKERS: tuple[str, ...] = (
     "så här ska rapporten se ut",
     "sa har ska rapporten se ut",
 )
+_MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
 
 
 def _infer_file_role(
@@ -156,6 +158,14 @@ def _infer_file_role(
             confidence="medium",
             evidence="content:template_marker",
         )
+        for evidence in _template_placeholder_evidence(text):
+            _add_role_candidate(
+                candidate_confidence,
+                candidate_evidence,
+                role="template",
+                confidence="medium",
+                evidence=evidence,
+            )
     reference_tokens = (
         "lag",
         "lagstod",
@@ -236,6 +246,20 @@ def _add_role_candidate(
 ) -> None:
     candidate_confidence.setdefault(role, confidence)
     candidate_evidence.setdefault(role, []).append(evidence)
+
+
+def _template_placeholder_evidence(text: str) -> tuple[str, ...]:
+    evidence: list[str] = []
+    seen: set[str] = set()
+    for expression in iter_template_expressions(text):
+        normalized = " ".join(expression.split())
+        if not normalized or normalized in seen:
+            continue
+        evidence.append(f"content:template_placeholder:{normalized[:80]}")
+        seen.add(normalized)
+        if len(evidence) >= _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
+            break
+    return tuple(evidence)
 
 
 def build_ai_builder_attachment_context(

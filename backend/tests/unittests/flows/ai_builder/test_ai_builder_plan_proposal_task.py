@@ -243,6 +243,11 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
             role="template",
             source="heuristic",
             confidence="medium",
+            evidence=[
+                "content:template_marker",
+                "content:template_placeholder:kundnamn",
+                "content:template_placeholder:datum",
+            ],
             candidate_roles=["template", "reference_material"],
         ),
         FileRoleEvidence(
@@ -268,7 +273,9 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
     assert "Uploaded file roles:" in prompt
     assert (
         "- avtalsmall.docx: template (heuristic, medium confidence; "
-        "candidates: template, reference_material)"
+        "candidates: template, reference_material; evidence: "
+        "content:template_marker, content:template_placeholder:kundnamn, "
+        "content:template_placeholder:datum)"
     ) in prompt
     assert "- lagstod.pdf: reference_material (heuristic, medium confidence)" in prompt
 
