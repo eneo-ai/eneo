@@ -1937,7 +1937,7 @@ def test_flags_missing_input_bindings_for_field_reuse() -> None:
     assert "uses_previous_fields" in feedback
 
 
-def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
+def test_flags_missing_explicit_fan_in_for_multi_document_compare() -> None:
     conversation = [
         {
             "role": "user",
@@ -1968,10 +1968,72 @@ def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
         aggregation_intent="compare",
     )
     assert feedback is not None
-    assert "all_previous_steps" in feedback
+    assert "source_refs" in feedback
 
 
-def test_does_not_require_all_previous_steps_for_aggregate_intent() -> None:
+def test_accepts_source_refs_fan_in_for_multi_document_compare() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Jämför flera dokument i samma körning och skriv en sammanfattning.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Jämförelse",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera avtal A",
+                "Extrahera viktiga villkor från första avtalet.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "terms": {"type": "array", "items": {"type": "string"}}
+                    },
+                },
+            ),
+            _step(
+                "step_b",
+                "Extrahera avtal B",
+                "Extrahera viktiga villkor från andra avtalet.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "terms": {"type": "array", "items": {"type": "string"}}
+                    },
+                },
+            ),
+            _step(
+                "step_c",
+                "Jämför avtalen",
+                "Jämför villkoren och skriv en kort sammanfattning.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_bindings={
+                    "source_refs": [
+                        {"step_ref": "step_a", "output": "structured"},
+                        {"step_ref": "step_b", "output": "structured"},
+                    ]
+                },
+            ),
+        ],
+    )
+
+    context = build_conversation_critic_context(
+        conversation,
+        spec,
+        flow=_edit_flow(),
+        aggregation_intent="compare",
+    )
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+
+    assert "multi_document_compare_requires_all_previous_steps" not in issue_ids
+
+
+def test_does_not_require_explicit_fan_in_for_aggregate_intent() -> None:
     conversation = [
         {
             "role": "user",
@@ -2000,7 +2062,7 @@ def test_does_not_require_all_previous_steps_for_aggregate_intent() -> None:
         spec,
         aggregation_intent="aggregate",
     )
-    assert feedback is None or "all_previous_steps" not in feedback
+    assert feedback is None or "source_refs" not in feedback
 
 
 def test_does_not_infer_fan_in_from_conversation_words_without_architecture() -> None:
@@ -3541,8 +3603,9 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
     create-mode shapes the auto-binder does not yet cover.
 
     Suppression mirrors the remaining semantic exceptions:
-    - `aggregation_intent` in {aggregate, compare}: those flows go
-      through `multi_document_compare_requires_all_previous_steps`.
+    - `aggregation_intent` in {aggregate, compare}: compare flows go through
+      the explicit fan-in invariant, while aggregate intent is frequently
+      inferred from document-output language.
     - All priors are text-typed: there are no structured fields to
       pull, so no nudge is possible.
     - The composer's `input_bindings.question` already targets ≥2
@@ -3756,9 +3819,9 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
         assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
     def test_silent_on_compare_intent(self) -> None:
-        """`multi_document_compare_requires_all_previous_steps` owns the
-        true compare case. This rule must defer rather than nudge toward
-        `previous_step` against the compare-shape requirement."""
+        """The compare fan-in invariant owns true compare cases. This rule
+        must defer rather than nudge toward `previous_step` against the
+        compare-shape requirement."""
 
         spec = FlowDraftSpecCore(
             flow_name="Aggregeringsflöde",

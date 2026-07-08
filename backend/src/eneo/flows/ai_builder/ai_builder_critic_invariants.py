@@ -58,7 +58,10 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.input_binding_contract_rules import (
+    effective_question_binding,
+    source_ref_bindings,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -261,6 +264,35 @@ def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
     return any(
         step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in spec.steps
     )
+
+
+def _spec_uses_explicit_prior_source_ref_fan_in(spec: FlowDraftSpecCore) -> bool:
+    for step_index, step in enumerate(spec.steps):
+        if _is_renderer_step(step):
+            continue
+        if _prior_content_source_ref_count(spec=spec, step_index=step_index) >= 2:
+            return True
+    return False
+
+
+def _prior_content_source_ref_count(*, spec: FlowDraftSpecCore, step_index: int) -> int:
+    prior_content_refs = {
+        step.plan_step_ref
+        for step in spec.steps[:step_index]
+        if not _is_renderer_step(step)
+    }
+    referenced_prior_steps = {
+        source_ref.step_ref
+        for source_ref in source_ref_bindings(spec.steps[step_index].input_bindings)
+        if source_ref.step_ref in prior_content_refs
+    }
+    return len(referenced_prior_steps)
+
+
+def _spec_uses_compare_fan_in(spec: FlowDraftSpecCore) -> bool:
+    if _spec_uses_all_previous_steps(spec):
+        return True
+    return _spec_uses_explicit_prior_source_ref_fan_in(spec)
 
 
 def _mcp_selection_lacks_semantic_support(context: CriticContext) -> bool:
@@ -736,7 +768,7 @@ def _multi_document_compare_requires_all_previous_steps_evidence(
     return (
         context.aggregation_intent == "compare"
         and _spec_has_multiple_content_steps(context.spec)
-        and not _spec_uses_all_previous_steps(context.spec)
+        and not _spec_uses_compare_fan_in(context.spec)
     )
 
 
@@ -779,18 +811,21 @@ def _spec_has_multiple_content_steps(spec: FlowDraftSpecCore) -> bool:
     return len(content_steps) >= 2
 
 
-_MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS = CriticInvariant(
+_MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN = CriticInvariant(
     id="multi_document_compare_requires_all_previous_steps",
     kind="architecture",
     description=(
-        "When the conversation describes comparing multiple documents, at least "
-        "one step must use `input_source=all_previous_steps`."
+        "When the conversation describes comparing multiple documents, one "
+        "non-renderer step must explicitly fan in multiple prior content steps "
+        "through targeted `input_bindings.source_refs` or the legacy "
+        "`input_source=all_previous_steps` transport."
     ),
     evidence=_multi_document_compare_requires_all_previous_steps_evidence,
     remediation=(
-        "Konversationen beskriver jämförelse av flera dokument, men inget steg använder "
-        '`input_source="all_previous_steps"`. Använd en jämförande koppling när flera '
-        "dokument ska ställas mot varandra."
+        "Konversationen beskriver jämförelse av flera dokument, men inget "
+        "icke-renderande steg väver uttryckligen in flera tidigare resultat. "
+        "Använd riktade `input_bindings.source_refs` till de tidigare stegen "
+        'eller, för äldre manuella specifikationer, `input_source="all_previous_steps"`.'
     ),
 )
 
@@ -1306,12 +1341,12 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     This critic rule covers the under-bind shape where the composer reads
     `previous_step` and only sees the most recent JSON predecessor — even
     though earlier predecessors carry distinct fields the composer almost
-    certainly needs. Broad `all_previous_steps` topology is compiler-owned.
+    certainly needs. Explicit fan-in topology is compiler-owned.
 
     Suppression cases:
-    - aggregation_intent == compare: true document-comparison flows
-      intentionally need broad fan-in. Aggregate intent is not exempt
-      because it is often inferred from document-output language.
+    - aggregation_intent == compare: document-comparison flows are handled by
+      the compare fan-in invariant. Aggregate intent is not exempt because it
+      is often inferred from document-output language.
     - <2 prior content steps emit JSON+output_contract: there is no
       fan-in to surface, only a 2-step refinement chain.
     - The composer's `input_bindings.question` already targets ≥2
@@ -1575,7 +1610,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
-    _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS,
+    _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
