@@ -379,6 +379,12 @@ def _assemble_create_intent(
         final_semantic_output_type=terminal_semantic_output_type,
         result_contract_output_fields=result_contract_output_fields,
     )
+    semantic_steps = _semantic_steps_with_overview_folded_into_body_writer(
+        semantic_steps,
+        final_semantic_output_type=terminal_semantic_output_type,
+        report_disposition=report_disposition,
+        ui_language=ui_language,
+    )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
     if runtime_input_type == InputType.AUDIO:
@@ -741,6 +747,95 @@ def _complete_result_contract_output_fields(
             continue
         completed_fields.append(required_field)
     return tuple(completed_fields)
+
+
+def _semantic_steps_with_overview_folded_into_body_writer(
+    steps: Sequence[SemanticStepIntent],
+    *,
+    final_semantic_output_type: OutputType,
+    report_disposition: str | None,
+    ui_language: str | None,
+) -> tuple[SemanticStepIntent, ...]:
+    semantic_steps = tuple(steps)
+    if (
+        report_disposition != "both"
+        or final_semantic_output_type != OutputType.TEXT
+        or len(semantic_steps) < 3
+    ):
+        return semantic_steps
+
+    overview_step = semantic_steps[-2]
+    body_step = semantic_steps[-1]
+    if (
+        not _semantic_step_outputs_only_overview(overview_step)
+        or _linear_step_output_type(
+            output_type=body_step.output_type,
+            output_fields=body_step.output_fields,
+            final_output_type=final_semantic_output_type,
+            is_terminal=True,
+        )
+        != OutputType.TEXT
+        or _semantic_step_has_external_side_effects(overview_step)
+    ):
+        return semantic_steps
+
+    folded_body_step = body_step.model_copy(
+        update={
+            "instructions": _append_folded_overview_instruction(
+                body_step.instructions,
+                overview_step.instructions,
+                ui_language=ui_language,
+            )
+        }
+    )
+    logger.info(
+        "ai_builder_both_disposition_overview_step_folded",
+        extra={"step_name": overview_step.name},
+    )
+    return (*semantic_steps[:-2], folded_body_step)
+
+
+def _semantic_step_outputs_only_overview(step: SemanticStepIntent) -> bool:
+    output_fields = tuple(step.output_fields or ())
+    return (
+        step.output_type == OutputType.JSON
+        and len(output_fields) == 1
+        and output_fields[0].name == "overview"
+    )
+
+
+def _semantic_step_has_external_side_effects(step: SemanticStepIntent) -> bool:
+    return bool(
+        step.uses_form_fields
+        or step.uses_previous_fields
+        or step.uses_previous_outputs
+        or step.knowledge_refs
+        or step.mcp_server_refs
+        or step.mcp_tool_refs
+        or step.citations_requested
+        or step.review_mode is not None
+    )
+
+
+def _append_folded_overview_instruction(
+    body_instructions: str,
+    overview_instructions: str,
+    *,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "en":
+        addition = (
+            "Also write the synthesized overview directly in the final report, "
+            f"using this overview task: {overview_instructions}"
+        )
+    else:
+        addition = (
+            "Skriv också den samlade översikten direkt i slutrapporten utifrån "
+            f"den här översiktsuppgiften: {overview_instructions}"
+        )
+    if addition in body_instructions:
+        return body_instructions
+    return f"{body_instructions}\n\n{addition}"
 
 
 def _structured_fields_have_leaf(

@@ -1711,6 +1711,106 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert validate_spec(compiled).valid
 
 
+def test_report_disposition_both_folds_standalone_overview_into_body_writer() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Rapport över dokument",
+            "plan_rationale": "Läs källor, skriv källavsnitt och slutrapport.",
+            "steps": [
+                {
+                    "name": "Läs dokumenten",
+                    "instructions": "Läs varje dokument och strukturera fakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Titel.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Bygg källavsnitt",
+                    "instructions": "Skriv ett rapportavsnitt per källa.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_sections",
+                            "field_type": "array",
+                            "description": "Avsnitt per källa.",
+                            "item_fields": [
+                                {
+                                    "name": "section_text",
+                                    "field_type": "string",
+                                    "description": "Färdig avsnittstext.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv översikt",
+                    "instructions": "Skriv en samlad översikt över alla källor.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Samlad översikt.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Sätt ihop slutrapport",
+                    "instructions": "Sätt ihop slutrapporten.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+            ui_language="sv",
+            report_disposition="both",
+        ),
+    )
+
+    assert [step.name for step in compiled.steps] == [
+        "Läs dokumenten",
+        "Bygg källavsnitt",
+        "Sätt ihop slutrapport",
+        "Rendera PDF",
+    ]
+    body_writer_step = compiled.steps[2]
+    assert body_writer_step.input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert "Skriv en samlad översikt över alla källor." in (
+        body_writer_step.assistant_spec.instructions
+    )
+    assert "Skriv källspecifika avsnitt" in (
+        body_writer_step.assistant_spec.instructions
+    )
+    assert validate_spec(compiled).valid
+
+
 def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     outline = parse_create_flow_intent_arguments(
         {
