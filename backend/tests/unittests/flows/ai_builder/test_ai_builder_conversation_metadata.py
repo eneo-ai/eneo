@@ -455,6 +455,35 @@ def test_slot_classification_writer_keeps_valid_slots_when_one_slot_is_invalid()
     assert [slot.slot_name for slot in classification.slots] == ["terminal_output"]
 
 
+def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_text",
+                    confidence="high",
+                    reason="first valid slot",
+                    evidence=("first quote",),
+                ),
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_json",
+                    confidence="high",
+                    reason="duplicate valid slot",
+                    evidence=("second quote",),
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+    )
+
+    assert classification is not None
+    assert [(slot.slot_name, slot.value) for slot in classification.slots] == [
+        ("terminal_output", "structured_text")
+    ]
+
+
 def test_slot_classification_model_rejects_duplicate_slots() -> None:
     metadata = {
         "prompt_hash": "a" * 64,

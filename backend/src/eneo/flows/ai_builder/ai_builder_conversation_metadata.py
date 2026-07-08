@@ -503,11 +503,17 @@ def slot_classification_metadata_from_result(
     *,
     prompt_hash: str,
 ) -> SlotClassificationMetadata | None:
-    slot_payloads = [
-        payload
-        for slot in result.slots
-        if (payload := _slot_classification_slot_payload(slot)) is not None
-    ]
+    slot_payloads: list[dict[str, object]] = []
+    seen_slot_names: set[str] = set()
+    for slot in result.slots:
+        payload = _slot_classification_slot_payload(slot)
+        if payload is None:
+            continue
+        slot_name = payload.get("slot_name")
+        if not isinstance(slot_name, str) or slot_name in seen_slot_names:
+            continue
+        slot_payloads.append(payload)
+        seen_slot_names.add(slot_name)
     form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
     secondary_obligations = [
         obligation
