@@ -405,6 +405,30 @@ def test_slot_classification_prompt_explains_report_disposition_values() -> None
     assert "each uploaded source" in prompt
 
 
+def test_slot_classification_prompt_explains_example_output_evidence() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        text="Bygg en rapport utifrån uppladdade dokument.",
+        uploaded_file_evidence=(
+            "filename: bilaga.pdf\n"
+            "inferred_role: example_output\n"
+            "role_evidence: content:example_output_marker"
+        ),
+        allowed_slot_values={
+            "report_disposition": frozenset(
+                {"both", "per_source_sections", "synthesized_overview"}
+            ),
+        },
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "inferred_role example_output" in prompt
+    assert "desired report layout" in prompt
+    assert "attachment-only conclusions as medium confidence" in prompt
+    assert "filename: bilaga.pdf" in prompt
+    assert "role_evidence: content:example_output_marker" in prompt
+
+
 def test_slot_classification_system_prompt_stays_domain_neutral() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         text="Skapa ett generellt flöde.",

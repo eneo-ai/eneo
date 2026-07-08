@@ -362,6 +362,11 @@ def _build_slot_classification_prompt(
         "classify synthesized_overview when they want the sources combined into "
         "one shared summary or analysis; classify both when they ask for source "
         "sections plus a shared overview, comparison, or conclusion. "
+        "If uploaded-file evidence includes inferred_role example_output, use it "
+        "as evidence about desired report layout, tone, section structure, and "
+        "report_disposition. Treat attachment-only conclusions as medium "
+        "confidence unless the conversation independently confirms the same "
+        "requirement. "
         "If still ambiguous, use value `unknown` with confidence `low` and explain "
         "what question should be asked in contradictions."
     )
