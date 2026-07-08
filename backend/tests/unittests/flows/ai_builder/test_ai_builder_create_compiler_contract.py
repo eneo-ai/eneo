@@ -251,6 +251,42 @@ def test_assembly_plan_value_error_becomes_typed_architecture_failure() -> None:
     )
 
 
+def test_missing_document_report_compose_topology_is_typed_architecture_failure() -> (
+    None
+):
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Broken report",
+            "plan_rationale": "No source-section topology can be derived.",
+            "steps": [
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the report body.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.TEXT,
+                final_output_type=OutputType.PDF,
+                final_output_mode=OutputMode.RENDER_VERBATIM,
+                aggregation_intent=cast(AggregationIntent, "aggregate"),
+                report_disposition="both",
+            ),
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_document_report_compose_topology_missing"
+    )
+    assert "deterministic compose_text body writer" in exc_info.value.detail
+
+
 def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag() -> (
     None
 ):
