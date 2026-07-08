@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pdfplumber
+
 PLACEHOLDER_LABELS = ("uploaded_source_", "[SOURCE", "okänt", "unknown", "unspecified")
 Json = dict[str, object]
 
@@ -18,11 +20,13 @@ def main() -> int:
     if not isinstance(raw_evidence, dict):
         raise ValueError("Evidence file must contain a JSON object.")
     evidence = cast(Json, raw_evidence)
+    rendered_pdf_text = "\n\n".join(_extract_pdf_text(Path(path)) for path in args.pdf)
     checks = check_evidence(
         evidence,
         expected_source_count=args.expected_source_count,
         max_per_source_input_tokens=args.max_per_source_input_tokens,
         required_extraction_warning_files=set(args.require_extraction_warning_file),
+        rendered_pdf_text=rendered_pdf_text or None,
     )
     failed = [check for check in checks if not check["passed"]]
     for check in checks:
@@ -44,6 +48,12 @@ def _parse_args() -> argparse.Namespace:
         default=[],
         help="Filename that must carry an extraction warning. Repeat as needed.",
     )
+    parser.add_argument(
+        "--pdf",
+        action="append",
+        default=[],
+        help="Rendered PDF artifact to inspect for source attribution. Repeat as needed.",
+    )
     return parser.parse_args()
 
 
@@ -53,6 +63,7 @@ def check_evidence(
     expected_source_count: int | None,
     max_per_source_input_tokens: int,
     required_extraction_warning_files: set[str],
+    rendered_pdf_text: str | None = None,
 ) -> list[Json]:
     bundle = evidence.get("bundle")
     if not isinstance(bundle, dict):
@@ -125,9 +136,29 @@ def check_evidence(
     )
     add(_check("source_lines_in_final_text", final_text.count("Källa:") >= expected_count, final_text.count("Källa:")))
     add(_check("source_labels_in_final_text", all(f"Källa: {label}" in final_text for label in document_labels), document_labels))
+    if rendered_pdf_text is not None:
+        add(
+            _check(
+                "source_lines_in_pdf",
+                rendered_pdf_text.count("Källa:") >= expected_count,
+                rendered_pdf_text.count("Källa:"),
+            )
+        )
+        add(
+            _check(
+                "source_labels_in_pdf",
+                all(f"Källa: {label}" in rendered_pdf_text for label in document_labels),
+                document_labels,
+            )
+        )
     for filename in sorted(required_extraction_warning_files):
         add(_check(f"extraction_warning:{filename}", _has_extraction_warning(runtime_input, filename), filename))
     return checks
+
+
+def _extract_pdf_text(path: Path) -> str:
+    with pdfplumber.open(path) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
 def _find_reader_step(step_results: list[Json]) -> Json:

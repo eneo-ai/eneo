@@ -7,6 +7,8 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = BACKEND_ROOT / "scripts" / "check_flow_run_evidence_acceptance.py"
+sys.path.append(str(SCRIPT.parent))
+import check_flow_run_evidence_acceptance as acceptance  # noqa: E402
 
 
 def test_evidence_acceptance_script_accepts_per_source_run(tmp_path: Path) -> None:
@@ -33,6 +35,32 @@ def test_evidence_acceptance_script_accepts_per_source_run(tmp_path: Path) -> No
     assert "PASS extraction_warning:FULLTEXT01.pdf" in result.stdout
 
 
+def test_evidence_acceptance_checks_rendered_pdf_text() -> None:
+    checks = acceptance.check_evidence(
+        _evidence(),
+        expected_source_count=2,
+        max_per_source_input_tokens=100_000,
+        required_extraction_warning_files=set(),
+        rendered_pdf_text="Rapport\nKälla: FULLTEXT01.pdf\nKälla: Socialpsykologi.pdf",
+    )
+
+    assert _passed(checks, "source_lines_in_pdf")
+    assert _passed(checks, "source_labels_in_pdf")
+
+
+def test_evidence_acceptance_rejects_rendered_pdf_without_source_labels(
+) -> None:
+    checks = acceptance.check_evidence(
+        _evidence(),
+        expected_source_count=2,
+        max_per_source_input_tokens=100_000,
+        required_extraction_warning_files=set(),
+        rendered_pdf_text="Rapport utan källrader",
+    )
+
+    assert not _passed(checks, "source_lines_in_pdf")
+
+
 def test_evidence_acceptance_script_rejects_placeholder_source_labels(
     tmp_path: Path,
 ) -> None:
@@ -57,6 +85,10 @@ def test_evidence_acceptance_script_rejects_placeholder_source_labels(
 
     assert result.returncode == 1
     assert "FAIL no_placeholder_source_labels" in result.stdout
+
+
+def _passed(checks: list[dict[str, object]], name: str) -> bool:
+    return any(check["name"] == name and check["passed"] is True for check in checks)
 
 
 def _evidence(*, first_label: str = "FULLTEXT01.pdf") -> dict[str, object]:
