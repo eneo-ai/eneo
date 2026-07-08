@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from collections.abc import Mapping
@@ -29,7 +28,9 @@ from eneo.flows.runtime.step_handlers.base import (
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.main.exceptions import TypedIOValidationException
 
-PER_SOURCE_READER_CONCURRENCY = 4
+# ponytail: this executor owns one AsyncSession; raise only after per-source
+# calls get isolated session ownership.
+PER_SOURCE_READER_CONCURRENCY = 1
 PER_SOURCE_METADATA_PREVIEW_CHARS = 2000
 RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
@@ -91,11 +92,10 @@ async def execute_per_source_reader(
         )
         return StepExecutionResult(output=output)
 
-    semaphore = asyncio.Semaphore(PER_SOURCE_READER_CONCURRENCY)
-
-    async def execute_source(source_number: int, file_id: UUID) -> PerSourceReaderCall:
-        async with semaphore:
-            return await _execute_one_source(
+    per_source_calls: list[PerSourceReaderCall] = []
+    for source_number, file_id in enumerate(file_ids, start=1):
+        per_source_calls.append(
+            await _execute_one_source(
                 source_number=source_number,
                 file_id=file_id,
                 step=step,
@@ -106,13 +106,7 @@ async def execute_per_source_reader(
                 attempt_no=attempt_no,
                 prepare_assistant_step=prepare_assistant_step,
             )
-
-    per_source_calls = await asyncio.gather(
-        *(
-            execute_source(source_number, file_id)
-            for source_number, file_id in enumerate(file_ids, start=1)
         )
-    )
     return StepExecutionResult(
         output=await _assemble_per_source_output(
             step=step,

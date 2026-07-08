@@ -6,6 +6,7 @@ input contract validation, file resolution, canary flag, error propagation.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 from datetime import datetime, timezone
@@ -1963,6 +1964,20 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         ]
     )
     executor._load_assistant = AsyncMock(return_value=assistant)
+    original_prepare = executor._prepare_assistant_step
+    prepare_in_progress = False
+
+    async def guarded_prepare(**kwargs):
+        nonlocal prepare_in_progress
+        assert prepare_in_progress is False
+        prepare_in_progress = True
+        await asyncio.sleep(0)
+        try:
+            return await original_prepare(**kwargs)
+        finally:
+            prepare_in_progress = False
+
+    executor._prepare_assistant_step = guarded_prepare
     output_contract = {
         "type": "object",
         "properties": {
