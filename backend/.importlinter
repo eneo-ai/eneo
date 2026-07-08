@@ -29,7 +29,6 @@ source_modules =
     eneo.flows.flow_authoring_transcription
     eneo.flows.flow_authoring_variable_rewriting
     eneo.flows.flow_capability_manifest
-    eneo.flows.flow_care_data_policy
     eneo.flows.flow_document_limits
     eneo.flows.flow_error_taxonomy
     eneo.flows.flow_evidence_policy
