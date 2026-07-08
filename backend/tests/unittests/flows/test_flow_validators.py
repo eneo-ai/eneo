@@ -507,6 +507,182 @@ def test_validate_steps_allows_question_binding_without_input_contract():
     )
 
 
+def _source_sections_contract() -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "source_sections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "section_title": {"type": "string"},
+                        "section_body": {"type": "string"},
+                        "source_label": {"type": "string"},
+                    },
+                },
+            },
+            "report_title": {"type": "string"},
+        },
+    }
+
+
+def test_validate_steps_accepts_compose_item_template_source_refs() -> None:
+    validate_steps(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(2, output_type="text"),
+            _step(
+                3,
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "source_sections",
+                            "item_template": "## {section_title}\n\n{section_body}\n\nKälla: {source_label}",
+                        },
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "report_title",
+                            "label": "Titel",
+                        },
+                    ]
+                },
+            ),
+        ]
+    )
+
+
+def test_validate_steps_rejects_compose_array_ref_without_item_template() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "source_sections",
+                        }
+                    ]
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="structured array source_refs require item_template",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+    )
+
+
+def test_validate_steps_rejects_compose_item_template_unknown_field() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "source_sections",
+                            "item_template": "{missing}",
+                        }
+                    ]
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="unknown item field 'missing'",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+    )
+
+
+def test_validate_steps_rejects_item_template_on_llm_step() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "source_sections",
+                            "item_template": "{section_title}",
+                        }
+                    ]
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="item_template is only supported for output_mode 'compose_text'",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+    )
+
+
+def test_validate_steps_rejects_compose_structured_object_ref_without_string_leaf() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [{"step_ref": "step_1", "output": "structured"}]
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="without item_template must resolve to a string field",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+    )
+
+
 def test_validate_steps_rejects_audio_document_flow_without_transcript_step():
     with pytest.raises(
         BadRequestException,

@@ -422,6 +422,76 @@ async def test_resolve_step_input_question_binding_rejects_capped_text_ref(user)
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_compose_source_refs_render_item_template_without_json(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="source section json",
+            structured={
+                "source_sections": [
+                    {
+                        "section_title": "Examensarbete om unga",
+                        "section_body": "Färdig avsnittstext.",
+                        "source_label": "FULLTEXT01.pdf",
+                    },
+                    {
+                        "section_title": "Socialpsykologi",
+                        "section_body": "Andra avsnittet.",
+                        "source_label": "Socialpsykologi.pdf",
+                    },
+                ],
+                "report_title": "Rapporttitel",
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "question": "# {{ step_1.output.structured.report_title }}",
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "source_sections",
+                    "item_template": "## {section_title}\n\n{section_body}\n\nKälla: {source_label}",
+                }
+            ],
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == (
+        "# Rapporttitel\n\n"
+        "## Examensarbete om unga\n\n"
+        "Färdig avsnittstext.\n\n"
+        "Källa: FULLTEXT01.pdf\n\n"
+        "## Socialpsykologi\n\n"
+        "Andra avsnittet.\n\n"
+        "Källa: Socialpsykologi.pdf"
+    )
+    assert '{"' not in resolved.text
+    assert "source_sections" not in resolved.text
+    assert resolved.used_question_binding is True
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_json_previous_step_parses_text_when_structured_missing(
     user,
 ):

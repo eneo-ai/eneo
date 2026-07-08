@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
@@ -9,7 +10,10 @@ SOURCE_REFS_BINDING_KEY = "source_refs"
 SUPPORTED_INPUT_BINDING_KEYS = frozenset({"question", SOURCE_REFS_BINDING_KEY})
 SourceRefOutput = Literal["text", "structured"]
 _SOURCE_REF_OUTPUTS: frozenset[SourceRefOutput] = frozenset(("text", "structured"))
-_SOURCE_REF_KEYS = frozenset({"step_ref", "output", "field_path", "label"})
+_SOURCE_REF_KEYS = frozenset(
+    {"step_ref", "output", "field_path", "label", "item_template"}
+)
+_ITEM_TEMPLATE_FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class InputBindingContractError(ValueError):
@@ -24,10 +28,14 @@ class SourceRefBinding:
     output: SourceRefOutput
     field_path: tuple[str, ...] = ()
     label: str | None = None
+    item_template: str | None = None
 
     def template_expression(self) -> str:
         path = ".".join(("output", self.output, *self.field_path))
         return f"{{{{ {self.step_ref}.{path} }}}}"
+
+    def dedupe_key(self) -> tuple[str, str | None]:
+        return (self.template_expression(), self.item_template)
 
     def rendered_section(self) -> str:
         expression = self.template_expression()
@@ -44,6 +52,8 @@ class SourceRefBinding:
             payload["field_path"] = ".".join(self.field_path)
         if self.label is not None:
             payload["label"] = self.label
+        if self.item_template is not None:
+            payload["item_template"] = self.item_template
         return payload
 
 
@@ -51,12 +61,12 @@ def dedupe_source_refs(
     source_refs: Iterable[SourceRefBinding],
 ) -> tuple[SourceRefBinding, ...]:
     deduped: list[SourceRefBinding] = []
-    indexes_by_expression: dict[str, int] = {}
+    indexes_by_expression: dict[tuple[str, str | None], int] = {}
     for ref in source_refs:
-        expression = ref.template_expression()
-        existing_index = indexes_by_expression.get(expression)
+        key = ref.dedupe_key()
+        existing_index = indexes_by_expression.get(key)
         if existing_index is None:
-            indexes_by_expression[expression] = len(deduped)
+            indexes_by_expression[key] = len(deduped)
             deduped.append(ref)
             continue
         existing = deduped[existing_index]
@@ -87,18 +97,78 @@ def field_refs_cover_whole_structured_object(
 
 def duplicate_source_ref_expressions(input_bindings: object) -> tuple[str, ...]:
     source_refs = source_ref_bindings(input_bindings)
-    seen: set[str] = set()
+    seen: set[tuple[str, str | None]] = set()
     duplicates: list[str] = []
-    duplicate_seen: set[str] = set()
+    duplicate_seen: set[tuple[str, str | None]] = set()
     for ref in source_refs:
-        expression = ref.template_expression()
-        if expression not in seen:
-            seen.add(expression)
+        key = ref.dedupe_key()
+        if key not in seen:
+            seen.add(key)
             continue
-        if expression not in duplicate_seen:
-            duplicates.append(expression)
-            duplicate_seen.add(expression)
+        if key not in duplicate_seen:
+            duplicates.append(ref.template_expression())
+            duplicate_seen.add(key)
     return tuple(duplicates)
+
+
+def item_template_field_names(
+    template: str,
+    *,
+    index: int | None = None,
+) -> tuple[str, ...]:
+    """Return field names from the intentionally tiny item-template grammar."""
+
+    fields: list[str] = []
+    position = 0
+    while position < len(template):
+        char = template[position]
+        if char == "{":
+            if position + 1 < len(template) and template[position + 1] == "{":
+                raise InputBindingContractError(
+                    _item_template_error_message(
+                        index=index,
+                        detail="must use single braces, not '{{'.",
+                    )
+                )
+            close_position = template.find("}", position + 1)
+            if close_position == -1:
+                raise InputBindingContractError(
+                    _item_template_error_message(
+                        index=index,
+                        detail="contains an unclosed field.",
+                    )
+                )
+            field_name = template[position + 1 : close_position].strip()
+            if not _ITEM_TEMPLATE_FIELD_NAME.fullmatch(field_name):
+                raise InputBindingContractError(
+                    _item_template_error_message(
+                        index=index,
+                        detail=(
+                            "fields must be simple ASCII identifiers like "
+                            "{section_title}."
+                        ),
+                    )
+                )
+            fields.append(field_name)
+            position = close_position + 1
+            continue
+        if char == "}":
+            raise InputBindingContractError(
+                _item_template_error_message(
+                    index=index,
+                    detail="contains an unopened closing brace.",
+                )
+            )
+        position += 1
+
+    if not fields:
+        raise InputBindingContractError(
+            _item_template_error_message(
+                index=index,
+                detail="must reference at least one item field.",
+            )
+        )
+    return tuple(fields)
 
 
 def question_binding(input_bindings: object) -> str | None:
@@ -205,11 +275,13 @@ def _parse_source_ref(raw_ref: object, *, index: int) -> SourceRefBinding:
             f"[{index}].field_path is only valid for structured output."
         )
     label = _optional_label(ref.get("label"), index=index)
+    item_template = _item_template(ref.get("item_template"), index=index)
     return SourceRefBinding(
         step_ref=step_ref,
         output=output,
         field_path=field_path,
         label=label,
+        item_template=item_template,
     )
 
 
@@ -260,3 +332,22 @@ def _optional_label(value: object, *, index: int) -> str | None:
             f"input_bindings.source_refs[{index}].label must not contain templates."
         )
     return label
+
+
+def _item_template(value: object, *, index: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise InputBindingContractError(
+            f"input_bindings.source_refs[{index}].item_template must be a non-empty string."
+        )
+    template = value.strip()
+    item_template_field_names(template, index=index)
+    return template
+
+
+def _item_template_error_message(*, index: int | None, detail: str) -> str:
+    prefix = "input_bindings.source_refs.item_template"
+    if index is not None:
+        prefix = f"input_bindings.source_refs[{index}].item_template"
+    return f"{prefix} {detail}"

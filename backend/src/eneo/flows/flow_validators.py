@@ -52,7 +52,9 @@ from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     effective_question_binding,
     input_contract_conflicts_with_question_binding,
-    lower_source_refs_to_question_binding,
+    item_template_field_names,
+    question_binding,
+    source_ref_bindings,
     unsupported_input_binding_key,
     validate_source_refs_binding,
 )
@@ -188,6 +190,7 @@ def collect_step_graph_issues(
         )
 
     terminal_step_order = sorted_steps[-1].step_order
+    steps_by_order = {step.step_order: step for step in sorted_steps}
     seen: set[int] = set()
     for step in sorted_steps:
         seen.add(step.step_order)
@@ -386,6 +389,14 @@ def collect_step_graph_issues(
                     input_bindings=input_bindings,
                     current_step_order=step.step_order,
                     available_orders=seen,
+                ),
+            )
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.FLOW_STEP_INVALID,
+                lambda: _validate_compose_source_ref_contracts(
+                    step=step,
+                    steps_by_order=steps_by_order,
                 ),
             )
         _capture_flow_step_validation(
@@ -810,7 +821,7 @@ def _validate_binding_references(
     available_orders: set[int],
 ) -> None:
     try:
-        reference_payload = lower_source_refs_to_question_binding(input_bindings)
+        source_refs = source_ref_bindings(input_bindings)
     except InputBindingContractError as exc:
         raise FlowStepValidationError(
             f"Step {current_step_order}: {exc}",
@@ -818,8 +829,11 @@ def _validate_binding_references(
             context={"field": "input_bindings", "key": exc.key},
             step_order=current_step_order,
         ) from exc
-    binding_payload = json.dumps(reference_payload or input_bindings)
-    for expression in iter_template_expressions(binding_payload):
+    expressions = list(
+        iter_template_expressions(json.dumps({"question": question_binding(input_bindings)}))
+    )
+    expressions.extend(ref.step_ref for ref in source_refs)
+    for expression in expressions:
         if expression.startswith("step_input"):
             continue
         if not expression.startswith("step_"):
@@ -847,6 +861,191 @@ def _validate_binding_references(
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER.value,
                 step_order=current_step_order,
             )
+
+
+def _validate_compose_source_ref_contracts(
+    *,
+    step: FlowStepValidationView,
+    steps_by_order: dict[int, FlowStepValidationView],
+) -> None:
+    try:
+        source_refs = source_ref_bindings(step.input_bindings)
+    except InputBindingContractError as exc:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: {exc}",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": exc.key},
+            step_order=step.step_order,
+        ) from exc
+    if not source_refs:
+        return
+
+    if step.output_mode != "compose_text":
+        for ref in source_refs:
+            if ref.item_template is not None:
+                raise FlowStepValidationError(
+                    f"Step {step.step_order}: input_bindings.source_refs.item_template "
+                    "is only supported for output_mode 'compose_text'.",
+                    code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                    context={"field": "input_bindings", "key": "source_refs"},
+                    step_order=step.step_order,
+                )
+        return
+
+    for ref in source_refs:
+        if ref.output == "text":
+            if ref.item_template is not None:
+                raise FlowStepValidationError(
+                    f"Step {step.step_order}: item_template is only valid for structured array refs.",
+                    code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                    context={"field": "input_bindings", "key": "source_refs"},
+                    step_order=step.step_order,
+                )
+            continue
+
+        referenced_step = _referenced_step_for_source_ref(
+            ref_step=ref.step_ref,
+            steps_by_order=steps_by_order,
+        )
+        if referenced_step is None or referenced_step.output_contract is None:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: compose_text structured source_refs require "
+                "the referenced step to declare output_contract.",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=step.step_order,
+            )
+        target_schema = _source_ref_schema(
+            contract=referenced_step.output_contract,
+            field_path=ref.field_path,
+            current_step_order=step.step_order,
+        )
+        target_type = _schema_type_hint(target_schema)
+        if target_type == "array":
+            _validate_compose_array_source_ref(
+                step_order=step.step_order,
+                schema=target_schema,
+                item_template=ref.item_template,
+            )
+            continue
+        if ref.item_template is not None:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: item_template is only valid for structured array refs.",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=step.step_order,
+            )
+        if target_type != "string":
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: compose_text structured source_refs without "
+                "item_template must resolve to a string field.",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=step.step_order,
+            )
+
+
+def _referenced_step_for_source_ref(
+    *,
+    ref_step: str,
+    steps_by_order: dict[int, FlowStepValidationView],
+) -> FlowStepValidationView | None:
+    step_ref = _STEP_REFERENCE_PATTERN.match(ref_step)
+    if step_ref is None:
+        return None
+    return steps_by_order.get(int(step_ref.group(1)))
+
+
+def _source_ref_schema(
+    *,
+    contract: FlowPersistedJsonObject,
+    field_path: tuple[str, ...],
+    current_step_order: int,
+) -> FlowPersistedJsonObject:
+    current: FlowPersistedJsonObject = contract
+    for segment in field_path:
+        if _schema_type_hint(current) != "object":
+            raise FlowStepValidationError(
+                f"Step {current_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                "does not resolve through an object contract.",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=current_step_order,
+            )
+        raw_properties = current.get("properties")
+        if not isinstance(raw_properties, dict):
+            raise FlowStepValidationError(
+                f"Step {current_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                "references a contract without object properties.",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=current_step_order,
+            )
+        properties = cast(dict[str, object], raw_properties)
+        next_schema = properties.get(segment)
+        if not isinstance(next_schema, dict):
+            raise FlowStepValidationError(
+                f"Step {current_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                f"references unknown field '{segment}'.",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=current_step_order,
+            )
+        current = cast(FlowPersistedJsonObject, next_schema)
+    return current
+
+
+def _validate_compose_array_source_ref(
+    *,
+    step_order: int,
+    schema: FlowPersistedJsonObject,
+    item_template: str | None,
+) -> None:
+    if item_template is None:
+        raise FlowStepValidationError(
+            f"Step {step_order}: compose_text structured array source_refs require item_template.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+            step_order=step_order,
+        )
+    raw_items = schema.get("items")
+    if not isinstance(raw_items, dict):
+        raise FlowStepValidationError(
+            f"Step {step_order}: compose_text item_template requires an array of objects.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+            step_order=step_order,
+        )
+    items = cast(FlowPersistedJsonObject, raw_items)
+    if _schema_type_hint(items) != "object":
+        raise FlowStepValidationError(
+            f"Step {step_order}: compose_text item_template requires an array of objects.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+            step_order=step_order,
+        )
+    raw_properties = items.get("properties")
+    if not isinstance(raw_properties, dict):
+        raise FlowStepValidationError(
+            f"Step {step_order}: compose_text item_template requires item properties.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+            step_order=step_order,
+        )
+    properties = cast(dict[str, object], raw_properties)
+    unknown_fields = [
+        field
+        for field in item_template_field_names(item_template)
+        if field not in properties
+    ]
+    if unknown_fields:
+        raise FlowStepValidationError(
+            f"Step {step_order}: item_template references unknown item field "
+            f"'{unknown_fields[0]}'.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+            step_order=step_order,
+        )
 
 
 def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> None:

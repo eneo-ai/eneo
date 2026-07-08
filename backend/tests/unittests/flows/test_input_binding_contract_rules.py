@@ -9,6 +9,7 @@ from eneo.flows.input_binding_contract_rules import (
     effective_question_binding,
     field_refs_cover_whole_structured_object,
     input_contract_conflicts_with_question_binding,
+    item_template_field_names,
     lower_source_refs_to_question_binding,
     question_binding,
     source_ref_bindings,
@@ -169,6 +170,64 @@ def test_dedupe_source_refs_prefers_labeled_ref_and_first_labeled_tie() -> None:
     ] == [{"step_ref": "step_a", "output": "text", "label": "Step 1 output"}]
 
 
+def test_dedupe_source_refs_keeps_distinct_item_templates() -> None:
+    assert [
+        ref.binding_payload()
+        for ref in dedupe_source_refs(
+            (
+                SourceRefBinding(
+                    step_ref="step_a",
+                    output="structured",
+                    field_path=("items",),
+                    item_template="{title}",
+                ),
+                SourceRefBinding(
+                    step_ref="step_a",
+                    output="structured",
+                    field_path=("items",),
+                    item_template="{title}\n{body}",
+                ),
+            )
+        )
+    ] == [
+        {
+            "step_ref": "step_a",
+            "output": "structured",
+            "field_path": "items",
+            "item_template": "{title}",
+        },
+        {
+            "step_ref": "step_a",
+            "output": "structured",
+            "field_path": "items",
+            "item_template": "{title}\n{body}",
+        },
+    ]
+
+
+def test_source_ref_item_template_uses_single_brace_fields() -> None:
+    refs = source_ref_bindings(
+        {
+            "source_refs": [
+                {
+                    "step_ref": "step_a",
+                    "output": "structured",
+                    "field_path": "source_sections",
+                    "item_template": "## {section_title}\n\n{section_body}",
+                }
+            ]
+        }
+    )
+
+    assert refs[0].item_template == "## {section_title}\n\n{section_body}"
+    item_template = refs[0].item_template
+    assert item_template is not None
+    assert item_template_field_names(item_template) == (
+        "section_title",
+        "section_body",
+    )
+
+
 def test_source_refs_empty_list_lowers_to_absent_binding() -> None:
     assert lower_source_refs_to_question_binding({"source_refs": []}) is None
 
@@ -187,6 +246,24 @@ def test_source_refs_empty_list_lowers_to_absent_binding() -> None:
         {
             "source_refs": [
                 {"step_ref": "step_a", "output": "text", "label": "{{ bad }}"}
+            ]
+        },
+        {
+            "source_refs": [
+                {
+                    "step_ref": "step_a",
+                    "output": "structured",
+                    "item_template": "{{ bad }}",
+                }
+            ]
+        },
+        {
+            "source_refs": [
+                {
+                    "step_ref": "step_a",
+                    "output": "structured",
+                    "item_template": "{bad.field}",
+                }
             ]
         },
         {"source_refs": [{"step_ref": "step_a", "output": "text", "unexpected": True}]},

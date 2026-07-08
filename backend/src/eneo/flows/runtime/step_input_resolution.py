@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Final, Sequence
+from typing import Any, Awaitable, Callable, Final, Sequence, cast
 from uuid import UUID
 
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING, TextExtractor
@@ -12,7 +12,13 @@ from eneo.flows.domain.flow import FlowRun, FlowStepResult
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
-from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.input_binding_contract_rules import (
+    InputBindingContractError,
+    effective_question_binding,
+    item_template_field_names,
+    question_binding,
+    source_ref_bindings,
+)
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.models import (
@@ -60,6 +66,13 @@ class StepInputResolutionDeps:
     max_audio_files: int | None
     max_inline_text_bytes: int
     logger: Any
+
+
+@dataclass(frozen=True)
+class ResolvedSourceRefsInput:
+    text: str
+    reference_count: int
+    template_reference_count: int
 
 
 async def resolve_step_input(
@@ -185,51 +198,78 @@ async def resolve_step_input(
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is not None:
-        question_template = effective_question_binding(bindings)
-        if question_template is not None:
-            references = analyze_template(
-                question_template,
-                step_refs=state.step_ref_mapping if state is not None else {},
-                form_field_names=set(),
+        source_refs_input = (
+            _resolve_compose_source_refs_input(
+                step=step,
+                bindings=bindings,
+                run=run,
+                prior_results=prior_results,
+                state=state,
+                runtime_input_metadata=runtime_input_metadata,
+                deps=deps,
             )
-            _raise_if_text_template_references_overflowed_output(
-                references=references,
-                prior_results=state.completed_by_order.values()
-                if state is not None
-                else prior_results,
-                consuming_step_order=step.step_order,
-                input_source="input_bindings.question",
-            )
-            interpolation_context = deps.variable_resolver.build_context(
-                run.input_payload_json,
-                prior_results,
-                current_step_order=step.step_order,
-                step_names_by_order=state.step_names_by_order if state else None,
-                current_step_input=runtime_input_metadata,
-            )
-            interpolated_question = deps.variable_resolver.interpolate(
-                question_template,
-                interpolation_context,
-            )
-            input_text = interpolated_question
+            if step.output_mode == "compose_text"
+            else None
+        )
+        if source_refs_input is not None:
+            input_text = source_refs_input.text
             used_question_binding = True
             diagnostics.append(
                 StepDiagnostic(
                     code="flow_underlag_summary",
                     message=(
-                        f"Resolved underlag from {len(references)} template sources "
-                        f"({len(interpolated_question.encode('utf-8'))} bytes)."
+                        f"Resolved underlag from {source_refs_input.reference_count} "
+                        f"source refs ({len(input_text.encode('utf-8'))} bytes)."
                     ),
                     severity="info",
                 )
             )
-            if runtime_input_metadata is not None and not consumes_runtime_input(
-                references
-            ):
-                raise TypedIOValidationException(
-                    f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
-                    code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
+        else:
+            question_template = effective_question_binding(bindings)
+            if question_template is not None:
+                references = analyze_template(
+                    question_template,
+                    step_refs=state.step_ref_mapping if state is not None else {},
+                    form_field_names=set(),
                 )
+                _raise_if_text_template_references_overflowed_output(
+                    references=references,
+                    prior_results=state.completed_by_order.values()
+                    if state is not None
+                    else prior_results,
+                    consuming_step_order=step.step_order,
+                    input_source="input_bindings.question",
+                )
+                interpolation_context = deps.variable_resolver.build_context(
+                    run.input_payload_json,
+                    prior_results,
+                    current_step_order=step.step_order,
+                    step_names_by_order=state.step_names_by_order if state else None,
+                    current_step_input=runtime_input_metadata,
+                )
+                interpolated_question = deps.variable_resolver.interpolate(
+                    question_template,
+                    interpolation_context,
+                )
+                input_text = interpolated_question
+                used_question_binding = True
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="flow_underlag_summary",
+                        message=(
+                            f"Resolved underlag from {len(references)} template sources "
+                            f"({len(interpolated_question.encode('utf-8'))} bytes)."
+                        ),
+                        severity="info",
+                    )
+                )
+                if runtime_input_metadata is not None and not consumes_runtime_input(
+                    references
+                ):
+                    raise TypedIOValidationException(
+                        f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
+                        code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
+                    )
 
     if (
         runtime_input_config.enabled
@@ -338,6 +378,195 @@ async def resolve_step_input(
         transcription_metadata=transcription_metadata,
         runtime_input_metadata=runtime_input_metadata,
     )
+
+
+def _resolve_compose_source_refs_input(
+    *,
+    step: RuntimeStep,
+    bindings: dict[str, Any],
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    runtime_input_metadata: dict[str, Any] | None,
+    deps: StepInputResolutionDeps,
+) -> ResolvedSourceRefsInput | None:
+    try:
+        source_refs = source_ref_bindings(bindings)
+    except InputBindingContractError as exc:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        ) from exc
+    if not source_refs:
+        return None
+
+    sections: list[str] = []
+    template_reference_count = 0
+    question_template = question_binding(bindings)
+    if question_template is not None:
+        references = analyze_template(
+            question_template,
+            step_refs=state.step_ref_mapping if state is not None else {},
+            form_field_names=set(),
+        )
+        template_reference_count = len(references)
+        _raise_if_text_template_references_overflowed_output(
+            references=references,
+            prior_results=state.completed_by_order.values()
+            if state is not None
+            else prior_results,
+            consuming_step_order=step.step_order,
+            input_source="input_bindings.question",
+        )
+        interpolation_context = deps.variable_resolver.build_context(
+            run.input_payload_json,
+            prior_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order if state else None,
+            current_step_input=runtime_input_metadata,
+        )
+        rendered_question = deps.variable_resolver.interpolate(
+            question_template,
+            interpolation_context,
+        )
+        if rendered_question.strip():
+            sections.append(rendered_question)
+
+    results_by_order = _prior_results_by_order(prior_results=prior_results, state=state)
+    for ref in source_refs:
+        referenced_order = _source_ref_step_order(ref.step_ref, state=state)
+        if referenced_order is None:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: source_ref references unknown step '{ref.step_ref}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        result = results_by_order.get(referenced_order)
+        if result is None:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: source_ref references unknown step '{ref.step_ref}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        value = _source_ref_runtime_value(
+            ref_output=ref.output,
+            field_path=ref.field_path,
+            result=result,
+            consuming_step_order=step.step_order,
+        )
+        rendered = _render_source_ref_value(
+            value=value,
+            item_template=ref.item_template,
+            step_order=step.step_order,
+        )
+        if ref.label is not None and rendered.strip():
+            rendered = f"{ref.label}:\n{rendered}"
+        if rendered.strip():
+            sections.append(rendered)
+
+    return ResolvedSourceRefsInput(
+        text="\n\n".join(sections),
+        reference_count=len(source_refs),
+        template_reference_count=template_reference_count,
+    )
+
+
+def _prior_results_by_order(
+    *,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+) -> dict[int, FlowStepResult]:
+    if state is not None:
+        return dict(state.completed_by_order)
+    return {result.step_order: result for result in prior_results}
+
+
+def _source_ref_step_order(
+    step_ref: str,
+    *,
+    state: RunExecutionState | None,
+) -> int | None:
+    if step_ref.startswith("step_"):
+        step_number = step_ref.removeprefix("step_")
+        if step_number.isdigit():
+            return int(step_number)
+    if state is not None:
+        return state.step_ref_mapping.get(step_ref)
+    return None
+
+
+def _source_ref_runtime_value(
+    *,
+    ref_output: str,
+    field_path: tuple[str, ...],
+    result: FlowStepResult,
+    consuming_step_order: int,
+) -> Any:
+    payload = result.output_payload_json if isinstance(result.output_payload_json, dict) else {}
+    if ref_output == "text":
+        _raise_if_output_text_overflowed(
+            result,
+            consuming_step_order=consuming_step_order,
+            input_source="input_bindings.source_refs",
+        )
+        return payload.get("text", "")
+    current: Any = payload.get("structured")
+    for segment in field_path:
+        if not isinstance(current, dict):
+            raise TypedIOValidationException(
+                f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                "did not resolve through an object value.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        current_mapping = cast(dict[str, Any], current)
+        if segment not in current_mapping:
+            raise TypedIOValidationException(
+                f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                f"references missing field '{segment}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        current = current_mapping[segment]
+    return current
+
+
+def _render_source_ref_value(
+    *,
+    value: Any,
+    item_template: str | None,
+    step_order: int,
+) -> str:
+    if item_template is None:
+        return _source_ref_value_to_text(value)
+    if not isinstance(value, list):
+        raise TypedIOValidationException(
+            f"Step {step_order}: item_template source_ref resolved to a non-array value.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+    rendered_items: list[str] = []
+    field_names = item_template_field_names(item_template)
+    for item_value in cast(list[object], value):
+        if not isinstance(item_value, dict):
+            raise TypedIOValidationException(
+                f"Step {step_order}: item_template source_ref array contains a non-object item.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        item = cast(dict[str, Any], item_value)
+        rendered = item_template
+        for field_name in field_names:
+            rendered = rendered.replace(
+                "{" + field_name + "}",
+                _source_ref_value_to_text(item.get(field_name)),
+            )
+        rendered_items.append(rendered.strip())
+    return "\n\n".join(item for item in rendered_items if item)
+
+
+def _source_ref_value_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 async def _load_runtime_files(
