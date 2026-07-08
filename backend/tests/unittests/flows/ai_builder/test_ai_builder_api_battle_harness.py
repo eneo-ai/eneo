@@ -347,6 +347,33 @@ def test_suite_reliability_counts_invalid_plan_errors() -> None:
     assert case_summary["error_code_counts"] == {"self_correction_invalid_plan": 2}
 
 
+def test_suite_reliability_deduplicates_assumptions_across_repetitions() -> None:
+    harness = _battle_harness()
+
+    summary = harness._suite_reliability_summary(
+        [
+            {
+                "case_id": "document_pdf_source_retention_balance",
+                "plan_id": "plan-1",
+                "assumptions": ["One section per source.", "Render as PDF."],
+                "event_summary": {},
+            },
+            {
+                "case_id": "document_pdf_source_retention_balance",
+                "plan_id": "plan-2",
+                "assumptions": ["Render as PDF.", "Keep source labels visible."],
+                "event_summary": {},
+            },
+        ]
+    )
+
+    assert summary["document_pdf_source_retention_balance"]["assumptions"] == [
+        "One section per source.",
+        "Render as PDF.",
+        "Keep source labels visible.",
+    ]
+
+
 def test_event_summary_extracts_failure_detail() -> None:
     harness = _battle_harness()
 
