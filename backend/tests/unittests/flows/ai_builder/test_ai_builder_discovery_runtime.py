@@ -12,7 +12,10 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
 )
-from eneo.flows.ai_builder.ai_builder_discovery import build_discovery_block_message
+from eneo.flows.ai_builder.ai_builder_discovery import (
+    analyze_discovery,
+    build_discovery_block_message,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     _targeted_classification_bias,
     build_discovery_runtime_result,
@@ -247,6 +250,62 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
     assert len(state.file_roles) == 1
     assert state.file_roles[0].file_id == file_id
     assert state.file_roles[0].role == "template"
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -> None:
+    file_id = uuid4()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Jag vill bygga ett flöde som ger en Word-fil i slutet.",
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    state = (
+        await build_runtime_discovery_context(
+            conversation,
+            litellm_client=AsyncMock(),
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+            allow_classification=False,
+            attachment_context=AIBuilderAttachmentContext(
+                context=None,
+                discovery_context=None,
+                evidence=(
+                    AIBuilderAttachmentEvidence(
+                        file_id=file_id,
+                        filename="mall.docx",
+                        file_type=FileType.DOCUMENT,
+                        mimetype=(
+                            "application/vnd.openxmlformats-officedocument."
+                            "wordprocessingml.document"
+                        ),
+                        has_readable_text=True,
+                        excerpt="Fyll i {{ kundnamn }}.",
+                        inferred_role="template",
+                        role_confidence="medium",
+                        role_evidence=("content:template_placeholder:kundnamn",),
+                    ),
+                ),
+                included_file_ids=[],
+                total_chars=0,
+                truncated=False,
+            ),
+        )
+    ).planning_state
+
+    slot = state.resolved_slots["docx_output_mode"]
+    assert slot.value == "template_fill_docx"
+    assert slot.source == "heuristic"
+    assert slot.confidence == "high"
+    assert slot.evidence == [f"file:{file_id}:content:template_placeholder:kundnamn"]
+
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" not in analysis.selected_question_ids
 
 
 @pytest.mark.asyncio

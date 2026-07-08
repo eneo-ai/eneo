@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
     PlanningState,
+    ResolvedSlot,
     SignalConfidence,
 )
 from eneo.flows.variable_resolver import iter_template_expressions
@@ -73,6 +74,35 @@ def apply_attachment_file_roles_to_planning_state(
             candidate_roles=list(item.candidate_roles),
         )
     state.file_roles = list(roles_by_id.values())
+    _apply_structural_template_docx_mode(state, attachment_context)
+
+
+def _apply_structural_template_docx_mode(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext,
+) -> None:
+    terminal_output = state.resolved_slots.get("terminal_output")
+    if terminal_output is None or terminal_output.value != "docx_document":
+        return
+    existing_mode = state.resolved_slots.get("docx_output_mode")
+    if existing_mode is not None and existing_mode.source != "policy_default":
+        return
+    evidence = [
+        f"file:{item.file_id}:{marker}"
+        for item in attachment_context.evidence
+        if item.inferred_role == "template"
+        for marker in item.role_evidence
+        if marker.startswith("content:template_placeholder:")
+    ]
+    if not evidence:
+        return
+    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+        name="docx_output_mode",
+        value="template_fill_docx",
+        source="heuristic",
+        evidence=evidence[:3],
+        confidence="high",
+    )
 
 
 def _bounded_text(value: str, max_chars: int) -> tuple[str, bool]:
