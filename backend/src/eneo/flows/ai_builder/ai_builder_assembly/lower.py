@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import cast
 
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
@@ -30,8 +32,10 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
     InputType,
+    OutputMode,
     StepSpec,
 )
+from eneo.flows.input_binding_contract_rules import SourceRefBinding
 from eneo.flows.source_identity import without_runtime_source_identity_draft_fields
 
 logger = logging.getLogger(__name__)
@@ -70,22 +74,27 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     ):
         if planned_step.output_mode != derive_new_step_output_mode(step_draft):
             raise ValueError("Planned step output_mode diverged during lowering.")
-        compiled_steps.append(
-            compile_new_step_draft(
-                step_draft=step_draft,
-                plan_step_ref=make_plan_step_ref(index),
-                prior_steps=compiled_steps,
-                source_capture_fields=source_capture_fields_by_index.get(index, ()),
-                assistant_output_fields=_assistant_output_fields_for_planned_step(
-                    planned_step,
-                    is_terminal_schema_step=(
-                        plan.terminal_output_schema is not None
-                        and index == len(plan.steps) - 1
-                    ),
+        compiled_step = compile_new_step_draft(
+            step_draft=step_draft,
+            plan_step_ref=make_plan_step_ref(index),
+            prior_steps=compiled_steps,
+            source_capture_fields=source_capture_fields_by_index.get(index, ()),
+            assistant_output_fields=_assistant_output_fields_for_planned_step(
+                planned_step,
+                is_terminal_schema_step=(
+                    plan.terminal_output_schema is not None
+                    and index == len(plan.steps) - 1
                 ),
+            ),
+            ui_language=plan.ui_language,
+        )
+        if planned_step.output_mode == OutputMode.COMPOSE_TEXT:
+            compiled_step = _with_compose_source_refs(
+                step=compiled_step,
+                prior_steps=compiled_steps,
                 ui_language=plan.ui_language,
             )
-        )
+        compiled_steps.append(compiled_step)
     compiled_steps = apply_terminal_output_schema(
         compiled_steps,
         terminal_output_schema=plan.terminal_output_schema,
@@ -147,6 +156,115 @@ def _complete_source_material_boundaries(
     return updated_steps if mutated else steps
 
 
+def _with_compose_source_refs(
+    *,
+    step: StepSpec,
+    prior_steps: list[StepSpec],
+    ui_language: str | None,
+) -> StepSpec:
+    section_step, section_array = _find_compose_section_source(prior_steps)
+    if section_step is None or section_array is None:
+        return step
+
+    source_refs: list[dict[str, object]] = [
+        SourceRefBinding(
+            step_ref=section_step.plan_step_ref,
+            output="structured",
+            field_path=(section_array,),
+            item_template=_compose_section_item_template(ui_language),
+        ).binding_payload()
+    ]
+    overview_step = _find_compose_overview_source(prior_steps)
+    question = _compose_report_title_question(
+        overview_step=overview_step,
+        ui_language=ui_language,
+    )
+    if overview_step is not None:
+        source_refs.append(
+            SourceRefBinding(
+                step_ref=overview_step.plan_step_ref,
+                output="structured",
+                field_path=("overall_overview",),
+                label=_compose_overview_label(ui_language),
+            ).binding_payload()
+        )
+    return step.model_copy(
+        update={
+            "input_bindings": {
+                "question": question,
+                "source_refs": source_refs,
+            },
+            "input_contract": None,
+        }
+    )
+
+
+def _find_compose_section_source(
+    prior_steps: list[StepSpec],
+) -> tuple[StepSpec | None, str | None]:
+    for prior_step in reversed(prior_steps):
+        properties = _schema_properties(prior_step.output_contract)
+        for field_name, schema in properties.items():
+            item_properties = _array_item_properties(schema)
+            if {"section_title", "section_body", "source_label"}.issubset(
+                item_properties
+            ):
+                return prior_step, field_name
+    return None, None
+
+
+def _find_compose_overview_source(prior_steps: list[StepSpec]) -> StepSpec | None:
+    for prior_step in reversed(prior_steps):
+        properties = _schema_properties(prior_step.output_contract)
+        if {"report_title", "overall_overview"}.issubset(properties):
+            return prior_step
+    return None
+
+
+def _schema_properties(schema: object) -> dict[str, object]:
+    if not isinstance(schema, Mapping):
+        return {}
+    typed_schema = cast(Mapping[str, object], schema)
+    raw_properties = typed_schema.get("properties")
+    if not isinstance(raw_properties, Mapping):
+        return {}
+    properties = cast(Mapping[object, object], raw_properties)
+    return {
+        key: value
+        for key, value in properties.items()
+        if isinstance(key, str) and isinstance(value, Mapping)
+    }
+
+
+def _array_item_properties(schema: object) -> set[str]:
+    if not isinstance(schema, Mapping):
+        return set()
+    typed_schema = cast(Mapping[str, object], schema)
+    raw_type = typed_schema.get("type")
+    if raw_type != "array":
+        return set()
+    return set(_schema_properties(typed_schema.get("items")))
+
+
+def _compose_report_title_question(
+    *,
+    overview_step: StepSpec | None,
+    ui_language: str | None,
+) -> str:
+    if overview_step is not None:
+        return f"# {{{{ {overview_step.plan_step_ref}.output.structured.report_title }}}}"
+    return "# Source report" if ui_language == "en" else "# Rapport per källa"
+
+
+def _compose_section_item_template(ui_language: str | None) -> str:
+    source_label = "Source" if ui_language == "en" else "Källa"
+    return f"## {{section_title}}\n\n{{section_body}}\n\n{source_label}: {{source_label}}"
+
+
+def _compose_overview_label(ui_language: str | None) -> str:
+    return "Overall overview" if ui_language == "en" else "Samlad översikt"
+
+
 def _new_step_draft_from_planned_step(
     step: PlannedStep,
     *,
@@ -157,6 +275,7 @@ def _new_step_draft_from_planned_step(
         instructions=step.instructions,
         input_source=step.input_source,
         input_type=step.input_type,
+        output_mode=step.output_mode,
         output_type=step.output_type,
         model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),

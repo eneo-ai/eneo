@@ -196,6 +196,8 @@ def derive_output_mode(
 
 
 def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
+    if step_draft.output_mode is not None:
+        return step_draft.output_mode
     return derive_output_mode(
         input_type=step_draft.input_type,
         output_type=step_draft.output_type,
@@ -369,25 +371,25 @@ def _render_deduped_input_sections(
 ) -> tuple[list[str], list[SourceRefBinding]]:
     # Preserve non-ref sections while letting a later labeled ref win its slot.
     deduped_refs_by_expression = {
-        ref.template_expression(): ref
+        ref.dedupe_key(): ref
         for ref in dedupe_source_refs(
             part for part in section_parts if isinstance(part, SourceRefBinding)
         )
     }
     rendered_sections: list[str] = []
     source_refs: list[SourceRefBinding] = []
-    rendered_ref_expressions: set[str] = set()
+    rendered_ref_keys: set[tuple[str, str | None]] = set()
     for part in section_parts:
         if not isinstance(part, SourceRefBinding):
             rendered_sections.append(part)
             continue
-        expression = part.template_expression()
-        if expression in rendered_ref_expressions:
+        ref_key = part.dedupe_key()
+        if ref_key in rendered_ref_keys:
             continue
-        ref = deduped_refs_by_expression[expression]
+        ref = deduped_refs_by_expression[ref_key]
         rendered_sections.append(ref.rendered_section())
         source_refs.append(ref)
-        rendered_ref_expressions.add(expression)
+        rendered_ref_keys.add(ref_key)
     return rendered_sections, source_refs
 
 

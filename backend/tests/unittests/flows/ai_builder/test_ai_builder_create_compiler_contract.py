@@ -1705,14 +1705,14 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert (
         reader_step.input_config["runtime_input"]["execution_mode"] == "per_source"
     )
-    assert '"Källa: {source_label}"' in body_writer_step.assistant_spec.instructions
+    assert '"Källa: {source_label}"' not in body_writer_step.assistant_spec.instructions
     assert "Skriv källspecifika avsnitt" in (
         body_writer_step.assistant_spec.instructions
     )
     assert validate_spec(compiled).valid
 
 
-def test_report_disposition_both_folds_standalone_overview_into_body_writer() -> None:
+def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Rapport över dokument",
@@ -1798,6 +1798,7 @@ def test_report_disposition_both_folds_standalone_overview_into_body_writer() ->
     assert [step.name for step in compiled.steps] == [
         "Läs dokumenten",
         "Bygg källavsnitt",
+        "Skriv översikt",
         "Sätt ihop slutrapport",
         "Rendera PDF",
     ]
@@ -1806,14 +1807,46 @@ def test_report_disposition_both_folds_standalone_overview_into_body_writer() ->
     assert "körs en gång per documents[]-post" in (
         section_step.assistant_spec.instructions
     )
-    body_writer_step = compiled.steps[2]
-    assert body_writer_step.input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert "Skriv en samlad översikt över alla källor." in (
-        body_writer_step.assistant_spec.instructions
-    )
-    assert "Skriv källspecifika avsnitt" in (
-        body_writer_step.assistant_spec.instructions
-    )
+    section_properties = section_step.output_contract["properties"]["source_sections"][
+        "items"
+    ]["properties"]
+    assert "section_title" in section_properties
+    assert "section_body" in section_properties
+    assert "source_label" in section_properties
+    assert "source_file_id" in section_properties
+
+    overview_step = compiled.steps[2]
+    assert overview_step.output_contract is not None
+    assert list(overview_step.output_contract["properties"]) == [
+        "report_title",
+        "overall_overview",
+    ]
+
+    body_writer_step = compiled.steps[3]
+    assert body_writer_step.input_source == InputSource.PREVIOUS_STEP
+    assert body_writer_step.output_mode == OutputMode.COMPOSE_TEXT
+    assert body_writer_step.input_bindings == {
+        "question": "# {{ step_c.output.structured.report_title }}",
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "source_sections",
+                "item_template": (
+                    "## {section_title}\n\n"
+                    "{section_body}\n\n"
+                    "Källa: {source_label}"
+                ),
+            },
+            {
+                "step_ref": "step_c",
+                "output": "structured",
+                "field_path": "overall_overview",
+                "label": "Samlad översikt",
+            },
+        ],
+    }
+    assert all(step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps)
     assert validate_spec(compiled).valid
 
 

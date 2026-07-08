@@ -1,19 +1,36 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, Protocol, TypeVar, cast
 
-if TYPE_CHECKING:
-    from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+_DraftFieldT = TypeVar("_DraftFieldT", bound="RuntimeSourceIdentityDraftField")
+
+
+class RuntimeSourceIdentityDraftField(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def field_type(self) -> str: ...
+
+    @property
+    def item_fields(self) -> Sequence["RuntimeSourceIdentityDraftField"] | None: ...
+
+    def model_copy(
+        self: _DraftFieldT,
+        *,
+        update: Mapping[str, object] | None = None,
+        deep: bool = False,
+    ) -> _DraftFieldT: ...
 
 RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 
 def without_runtime_source_identity_draft_fields(
-    fields: list[StructuredFieldDraft],
-) -> list[StructuredFieldDraft]:
-    projected_fields: list[StructuredFieldDraft] = []
+    fields: Sequence[_DraftFieldT],
+) -> list[_DraftFieldT]:
+    projected_fields: list[_DraftFieldT] = []
     for field in fields:
         if field.field_type != "array":
             projected_fields.append(field)

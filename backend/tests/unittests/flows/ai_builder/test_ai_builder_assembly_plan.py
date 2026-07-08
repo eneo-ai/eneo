@@ -94,19 +94,20 @@ def test_planned_step_rejects_unsupported_capability_tuple() -> None:
         )
 
 
-def test_lowering_rejects_planned_output_mode_divergence() -> None:
+def test_lowering_preserves_explicit_compose_output_mode() -> None:
     plan = _plan(
         steps=(
             _text_step(
-                name="Fill DOCX",
-                output_type=OutputType.DOCX,
-                output_mode=OutputMode.TEMPLATE_FILL,
+                name="Compose report",
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.COMPOSE_TEXT,
             ),
         )
     )
 
-    with pytest.raises(ValueError, match="output_mode diverged"):
-        lower_assembly_plan(plan)
+    lowered = lower_assembly_plan(plan)
+
+    assert lowered.steps[0].output_mode == OutputMode.COMPOSE_TEXT
 
 
 def test_fixed_assembly_steps_default_to_swedish_copy() -> None:

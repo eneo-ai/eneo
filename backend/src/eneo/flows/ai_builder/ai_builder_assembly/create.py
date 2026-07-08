@@ -379,12 +379,6 @@ def _assemble_create_intent(
         final_semantic_output_type=terminal_semantic_output_type,
         result_contract_output_fields=result_contract_output_fields,
     )
-    semantic_steps = _semantic_steps_with_overview_folded_into_body_writer(
-        semantic_steps,
-        final_semantic_output_type=terminal_semantic_output_type,
-        report_disposition=report_disposition,
-        ui_language=ui_language,
-    )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
     if runtime_input_type == InputType.AUDIO:
@@ -512,8 +506,10 @@ def _assemble_create_intent(
         completed_steps,
         ui_language=ui_language,
     )
-    completed_steps = _annotate_document_section_source_attribution(
+    completed_steps = _replace_document_report_body_writer_with_compose(
         completed_steps,
+        report_disposition=report_disposition,
+        final_output_type=final_output_type,
         ui_language=ui_language,
     )
     completed_steps = _annotate_report_disposition(
@@ -751,95 +747,6 @@ def _complete_result_contract_output_fields(
             continue
         completed_fields.append(required_field)
     return tuple(completed_fields)
-
-
-def _semantic_steps_with_overview_folded_into_body_writer(
-    steps: Sequence[SemanticStepIntent],
-    *,
-    final_semantic_output_type: OutputType,
-    report_disposition: str | None,
-    ui_language: str | None,
-) -> tuple[SemanticStepIntent, ...]:
-    semantic_steps = tuple(steps)
-    if (
-        report_disposition != "both"
-        or final_semantic_output_type != OutputType.TEXT
-        or len(semantic_steps) < 3
-    ):
-        return semantic_steps
-
-    overview_step = semantic_steps[-2]
-    body_step = semantic_steps[-1]
-    if (
-        not _semantic_step_outputs_only_overview(overview_step)
-        or _linear_step_output_type(
-            output_type=body_step.output_type,
-            output_fields=body_step.output_fields,
-            final_output_type=final_semantic_output_type,
-            is_terminal=True,
-        )
-        != OutputType.TEXT
-        or _semantic_step_has_external_side_effects(overview_step)
-    ):
-        return semantic_steps
-
-    folded_body_step = body_step.model_copy(
-        update={
-            "instructions": _append_folded_overview_instruction(
-                body_step.instructions,
-                overview_step.instructions,
-                ui_language=ui_language,
-            )
-        }
-    )
-    logger.info(
-        "ai_builder_both_disposition_overview_step_folded",
-        extra={"step_name": overview_step.name},
-    )
-    return (*semantic_steps[:-2], folded_body_step)
-
-
-def _semantic_step_outputs_only_overview(step: SemanticStepIntent) -> bool:
-    output_fields = tuple(step.output_fields or ())
-    return (
-        step.output_type == OutputType.JSON
-        and len(output_fields) == 1
-        and output_fields[0].name == "overview"
-    )
-
-
-def _semantic_step_has_external_side_effects(step: SemanticStepIntent) -> bool:
-    return bool(
-        step.uses_form_fields
-        or step.uses_previous_fields
-        or step.uses_previous_outputs
-        or step.knowledge_refs
-        or step.mcp_server_refs
-        or step.mcp_tool_refs
-        or step.citations_requested
-        or step.review_mode is not None
-    )
-
-
-def _append_folded_overview_instruction(
-    body_instructions: str,
-    overview_instructions: str,
-    *,
-    ui_language: str | None,
-) -> str:
-    if ui_language == "en":
-        addition = (
-            "Also write the synthesized overview directly in the final report, "
-            f"using this overview task: {overview_instructions}"
-        )
-    else:
-        addition = (
-            "Skriv också den samlade översikten direkt i slutrapporten utifrån "
-            f"den här översiktsuppgiften: {overview_instructions}"
-        )
-    if addition in body_instructions:
-        return body_instructions
-    return f"{body_instructions}\n\n{addition}"
 
 
 def _structured_fields_have_leaf(
@@ -1423,50 +1330,222 @@ def _append_previous_document_item_map_instruction(
     return f"{instructions}\n\n{addition}"
 
 
-def _annotate_document_section_source_attribution(
+def _replace_document_report_body_writer_with_compose(
     planned_steps: tuple[PlannedStep, ...],
     *,
+    report_disposition: str | None,
+    final_output_type: OutputType,
     ui_language: str | None,
 ) -> tuple[PlannedStep, ...]:
-    if not any(
-        planned_step_is_source_reader(step)
-        and step.runtime_input_execution_mode == "per_source"
-        for step in planned_steps
+    if (
+        final_output_type not in _DOCUMENT_OUTPUT_TYPES
+        or report_disposition not in {"both", "per_source_sections"}
+        or len(planned_steps) < 4
+        or planned_steps[-1].role != "renderer"
+        or planned_steps[-2].role != "body_writer"
     ):
         return planned_steps
-    updated_steps: list[PlannedStep] = []
-    changed = False
-    for planned_step in planned_steps:
-        if planned_step.role != "body_writer":
-            updated_steps.append(planned_step)
-            continue
-        annotated_step = replace(
-            planned_step,
-            instructions=_append_document_section_source_attribution(
-                planned_step.instructions,
-                ui_language=ui_language,
-            ),
+
+    renderer_step = planned_steps[-1]
+    body_writer_step = planned_steps[-2]
+    body_writer_index = len(planned_steps) - 2
+    section_index = _source_section_item_map_index(
+        planned_steps[:body_writer_index]
+    )
+    if section_index is None:
+        return planned_steps
+    overview_index = (
+        _overview_writer_index(
+            planned_steps=planned_steps,
+            after_index=section_index,
+            before_index=body_writer_index,
         )
-        updated_steps.append(annotated_step)
-        changed = changed or annotated_step.instructions != planned_step.instructions
-    return tuple(updated_steps) if changed else planned_steps
+        if report_disposition == "both"
+        else None
+    )
+    if report_disposition == "both" and overview_index is None:
+        return planned_steps
+
+    updated_steps = list(planned_steps[:body_writer_index])
+    updated_steps[section_index] = _complete_source_section_fields_for_compose(
+        updated_steps[section_index],
+        ui_language=ui_language,
+    )
+    if overview_index is not None:
+        updated_steps[overview_index] = replace(
+            updated_steps[overview_index],
+            output_fields=_report_overview_fields(ui_language),
+        )
+
+    compose_step = PlannedStep(
+        role="body_writer",
+        name=body_writer_step.name,
+        instructions=_compose_step_instructions(ui_language),
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.TEXT,
+        output_mode=OutputMode.COMPOSE_TEXT,
+        underlag_channel="whole_object",
+    )
+    return (*updated_steps, compose_step, renderer_step)
 
 
-def _append_document_section_source_attribution(
-    instructions: str,
+def _source_section_item_map_index(
+    planned_steps: tuple[PlannedStep, ...],
+) -> int | None:
+    for index in range(len(planned_steps) - 1, -1, -1):
+        planned_step = planned_steps[index]
+        if (
+            planned_step.previous_item_map_enabled
+            and _single_output_array_field_name(planned_step.output_fields) is not None
+        ):
+            return index
+    return None
+
+
+def _overview_writer_index(
+    *,
+    planned_steps: tuple[PlannedStep, ...],
+    after_index: int,
+    before_index: int,
+) -> int | None:
+    for index in range(before_index - 1, after_index, -1):
+        planned_step = planned_steps[index]
+        if (
+            planned_step.output_type == OutputType.JSON
+            and not planned_step.previous_item_map_enabled
+            and planned_step.output_fields
+        ):
+            return index
+    return None
+
+
+def _complete_source_section_fields_for_compose(
+    planned_step: PlannedStep,
     *,
     ui_language: str | None,
-) -> str:
-    addition = (
-        'End each source-specific document section with "Source: {source_label}" '
-        "when source_label is available."
-        if ui_language == "en"
-        else 'Avsluta varje källspecifikt dokumentavsnitt med "Källa: {source_label}" '
-        "när source_label finns."
+) -> PlannedStep:
+    if len(planned_step.output_fields) != 1:
+        return planned_step
+    array_field = planned_step.output_fields[0]
+    if array_field.field_type != "array":
+        return planned_step
+    item_fields = list(array_field.item_fields or ())
+    item_fields = _ensure_structured_field(
+        item_fields,
+        _section_title_field(ui_language),
     )
-    if addition in instructions:
-        return instructions
-    return f"{instructions}\n\n{addition}"
+    item_fields = _ensure_structured_field(
+        item_fields,
+        _section_body_field(ui_language),
+    )
+    item_fields = _ensure_structured_field(
+        item_fields,
+        _runtime_source_label_field(ui_language),
+    )
+    item_fields = _ensure_structured_field(
+        item_fields,
+        _runtime_source_file_id_field(ui_language),
+    )
+    completed_array_field = array_field.model_copy(update={"item_fields": item_fields})
+    return replace(planned_step, output_fields=(completed_array_field,))
+
+
+def _ensure_structured_field(
+    fields: list[StructuredFieldDraft],
+    field: StructuredFieldDraft,
+) -> list[StructuredFieldDraft]:
+    if any(existing.name == field.name for existing in fields):
+        return fields
+    return [*fields, field]
+
+
+def _section_title_field(ui_language: str | None) -> StructuredFieldDraft:
+    description = (
+        "Human-readable section heading from the document title or topic, not the uploaded filename."
+        if ui_language == "en"
+        else "Mänsklig avsnittsrubrik från dokumentets titel eller ämne, inte uppladdat filnamn."
+    )
+    return StructuredFieldDraft(
+        name="section_title",
+        field_type="string",
+        description=description,
+    )
+
+
+def _section_body_field(ui_language: str | None) -> StructuredFieldDraft:
+    description = (
+        "Finished source-specific report section body."
+        if ui_language == "en"
+        else "Färdig källspecifik rapporttext för avsnittet."
+    )
+    return StructuredFieldDraft(
+        name="section_body",
+        field_type="string",
+        description=description,
+    )
+
+
+def _runtime_source_label_field(ui_language: str | None) -> StructuredFieldDraft:
+    description = (
+        "Runtime-owned uploaded source label. The runtime fills this field."
+        if ui_language == "en"
+        else "Runtimeägd källetikett för uppladdad fil. Runtime fyller fältet."
+    )
+    return StructuredFieldDraft(
+        name="source_label",
+        field_type="string",
+        description=description,
+    )
+
+
+def _runtime_source_file_id_field(ui_language: str | None) -> StructuredFieldDraft:
+    description = (
+        "Runtime-owned uploaded source file id. The runtime fills this field."
+        if ui_language == "en"
+        else "Runtimeägt fil-id för uppladdad källa. Runtime fyller fältet."
+    )
+    return StructuredFieldDraft(
+        name="source_file_id",
+        field_type="string",
+        description=description,
+    )
+
+
+def _report_overview_fields(
+    ui_language: str | None,
+) -> tuple[StructuredFieldDraft, ...]:
+    if ui_language == "en":
+        return (
+            StructuredFieldDraft(
+                name="report_title",
+                field_type="string",
+                description="Final report title.",
+            ),
+            StructuredFieldDraft(
+                name="overall_overview",
+                field_type="string",
+                description="Synthesized overview or conclusion across all sources.",
+            ),
+        )
+    return (
+        StructuredFieldDraft(
+            name="report_title",
+            field_type="string",
+            description="Slutrapportens titel.",
+        ),
+        StructuredFieldDraft(
+            name="overall_overview",
+            field_type="string",
+            description="Samlad översikt eller slutsats över alla källor.",
+        ),
+    )
+
+
+def _compose_step_instructions(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return "Assemble the final report deterministically from completed sections."
+    return "Sätt ihop slutrapporten deterministiskt från färdiga avsnitt."
 
 
 def _annotate_report_disposition(
@@ -1480,7 +1559,10 @@ def _annotate_report_disposition(
     updated_steps: list[PlannedStep] = []
     changed = False
     for planned_step in planned_steps:
-        if planned_step.role != "body_writer":
+        if (
+            planned_step.role != "body_writer"
+            or planned_step.output_mode == OutputMode.COMPOSE_TEXT
+        ):
             updated_steps.append(planned_step)
             continue
         annotated_step = replace(

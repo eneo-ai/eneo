@@ -84,7 +84,9 @@ source_modules =
     eneo.flows.runtime
     eneo.flows.runtime_input
     eneo.flows.source_display
+    eneo.flows.source_identity
     eneo.flows.step_chain_rules
+    eneo.flows.step_item_map
     eneo.flows.step_lineage
     eneo.flows.template_reference_analyzer
     eneo.flows.transcription_config

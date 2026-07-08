@@ -8,6 +8,7 @@ from eneo.flows.domain.flow import RuntimeInputExecutionMode
 from eneo.flows.flow_authoring_spec import (
     InputSource,
     InputType,
+    OutputMode,
     OutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
@@ -136,6 +137,7 @@ class NewStepDraft(BaseModel):
     instructions: str | None = None
     input_source: InputSource | None = None
     input_type: InputType = InputType.TEXT
+    output_mode: OutputMode | None = None
     output_type: OutputType = OutputType.TEXT
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
