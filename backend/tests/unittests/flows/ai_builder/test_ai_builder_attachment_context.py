@@ -90,8 +90,8 @@ def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> N
     assert result.evidence[0].file_id == files[0].id
     assert result.evidence[0].filename == "beslutsmall.docx"
     assert result.evidence[0].file_type == FileType.DOCUMENT
-    assert result.evidence[0].inferred_role == "template"
-    assert result.evidence[0].role_confidence == "medium"
+    assert result.evidence[0].inferred_role == "context_only"
+    assert result.evidence[0].role_confidence == "low"
     assert result.evidence[1].file_id == files[1].id
     assert result.evidence[1].filename == "meeting.m4a"
     assert result.evidence[1].file_type == FileType.AUDIO
@@ -101,13 +101,13 @@ def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> N
     assert f"file_id: {files[0].id}" in result.discovery_context
     assert "filename: beslutsmall.docx" in result.discovery_context
     assert "file_type: document" in result.discovery_context
-    assert "inferred_role: template" in result.discovery_context
+    assert "inferred_role: context_only" in result.discovery_context
     assert "filename: meeting.m4a" in result.discovery_context
     assert "file_type: audio" in result.discovery_context
     assert "inferred_role: runtime_input_sample" in result.discovery_context
 
 
-def test_build_ai_builder_attachment_context_distinguishes_template_and_reference() -> (
+def test_build_ai_builder_attachment_context_detects_structural_template_placeholders() -> (
     None
 ):
     files = [
@@ -130,22 +130,20 @@ def test_build_ai_builder_attachment_context_distinguishes_template_and_referenc
     assert result is not None
     assert [item.inferred_role for item in result.evidence] == [
         "template",
-        "reference_material",
+        "context_only",
     ]
     assert "content:template_placeholder:kundnamn" in result.evidence[0].role_evidence
     assert "content:template_placeholder:datum" in result.evidence[0].role_evidence
     assert result.context is not None
     assert "File role: template" in result.context
-    assert "File role: reference_material" in result.context
+    assert "File role: context_only" in result.context
 
 
-def test_build_ai_builder_attachment_context_preserves_conflicting_role_candidates() -> (
-    None
-):
+def test_build_ai_builder_attachment_context_does_not_infer_semantic_roles() -> None:
     result = build_ai_builder_attachment_context(
         [
             _make_file(
-                name="lagmall.docx",
+                name="exempel-lagmall.docx",
                 text="Lagstöd och föreskrifter som ska användas vid bedömning.",
                 mimetype=(
                     "application/vnd.openxmlformats-officedocument.wordprocessingml."
@@ -158,12 +156,12 @@ def test_build_ai_builder_attachment_context_preserves_conflicting_role_candidat
 
     assert result is not None
     evidence = result.evidence[0]
-    assert evidence.inferred_role == "template"
-    assert evidence.candidate_roles == ("template", "reference_material")
-    assert "filename:template_keyword" in evidence.role_evidence
-    assert "content:reference_keyword" in evidence.role_evidence
+    assert evidence.inferred_role == "context_only"
+    assert evidence.role_confidence == "low"
+    assert evidence.candidate_roles == ("context_only",)
+    assert evidence.role_evidence == ("fallback:unclassified_file",)
     assert result.discovery_context is not None
-    assert "candidate_roles: template, reference_material" in result.discovery_context
+    assert "inferred_role: context_only" in result.discovery_context
 
 
 def test_build_ai_builder_attachment_context_avoids_substring_role_false_positives() -> (

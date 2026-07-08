@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -82,18 +81,6 @@ def _bounded_text(value: str, max_chars: int) -> tuple[str, bool]:
     return value[:max_chars], True
 
 
-def _contains_token(value: str, tokens: tuple[str, ...]) -> bool:
-    words = set(re.findall(r"[\wåäöÅÄÖ]+", value.casefold()))
-    return bool(words.intersection(tokens))
-
-
-def _filename_has_template_keyword(filename: str) -> bool:
-    words = re.findall(r"[\wåäöÅÄÖ]+", filename.casefold())
-    return "template" in words or any(
-        "mall" in word and word != "small" for word in words
-    )
-
-
 _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
     "runtime_input_sample",
     "template",
@@ -109,8 +96,7 @@ def _infer_file_role(
     file: File,
     readable_text: str | None,
 ) -> tuple[FileRole, SignalConfidence, tuple[str, ...], tuple[FileRole, ...]]:
-    filename = file.name.casefold()
-    text = (readable_text or "").casefold()
+    text = readable_text or ""
     candidate_confidence: dict[FileRole, SignalConfidence] = {}
     candidate_evidence: dict[FileRole, list[str]] = {}
 
@@ -122,26 +108,9 @@ def _infer_file_role(
             confidence="high",
             evidence="file_type:audio",
         )
-    if _filename_has_template_keyword(filename):
-        _add_role_candidate(
-            candidate_confidence,
-            candidate_evidence,
-            role="template",
-            confidence="medium",
-            evidence="filename:template_keyword",
-        )
-    if "{{" in text or any(
-        marker in text
-        for marker in ("fyll i", "placeholder", "template variable", "mallfält")
-    ):
-        _add_role_candidate(
-            candidate_confidence,
-            candidate_evidence,
-            role="template",
-            confidence="medium",
-            evidence="content:template_marker",
-        )
-        for evidence in _template_placeholder_evidence(text):
+    placeholder_evidence = _template_placeholder_evidence(text)
+    if placeholder_evidence:
+        for evidence in placeholder_evidence:
             _add_role_candidate(
                 candidate_confidence,
                 candidate_evidence,
@@ -149,42 +118,6 @@ def _infer_file_role(
                 confidence="medium",
                 evidence=evidence,
             )
-    reference_tokens = (
-        "lag",
-        "lagstod",
-        "lagstöd",
-        "föreskrift",
-        "riktlinje",
-        "policy",
-        "regel",
-        "regler",
-        "referens",
-        "reference",
-    )
-    if _contains_token(filename, reference_tokens):
-        _add_role_candidate(
-            candidate_confidence,
-            candidate_evidence,
-            role="reference_material",
-            confidence="medium",
-            evidence="filename:reference_keyword",
-        )
-    if _contains_token(text, reference_tokens):
-        _add_role_candidate(
-            candidate_confidence,
-            candidate_evidence,
-            role="reference_material",
-            confidence="medium",
-            evidence="content:reference_keyword",
-        )
-    if _contains_token(filename, ("exempel", "example", "sample", "output")):
-        _add_role_candidate(
-            candidate_confidence,
-            candidate_evidence,
-            role="example_output",
-            confidence="medium",
-            evidence="filename:example_keyword",
-        )
     if not candidate_confidence:
         _add_role_candidate(
             candidate_confidence,
