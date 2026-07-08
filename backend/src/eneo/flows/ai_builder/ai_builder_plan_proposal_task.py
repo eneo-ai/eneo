@@ -255,6 +255,16 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
         return None
     fields = top_level_schema_property_names(evidence.json_schema)
     field_text = ", ".join(fields) if fields else "top-level object"
+    if evidence.source == "template_placeholders":
+        return "\n".join(
+            [
+                f"- source: {evidence.source}, {evidence.confidence} confidence",
+                f"- template placeholder fields: {field_text}",
+                "- Prefer source-derived output_fields for placeholders that can be "
+                "extracted from uploaded documents; use input_fields only for values "
+                "the user must provide at runtime.",
+            ]
+        )
     return "\n".join(
         [
             f"- source: {evidence.source}, {evidence.confidence} confidence",

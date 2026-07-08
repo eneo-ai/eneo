@@ -313,6 +313,38 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
     assert "additionalProperties" not in prompt
 
 
+def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
+    state = PlanningState.empty()
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {
+                "kundnamn": {"type": "string"},
+                "datum": {"type": "string"},
+            },
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=["file:file_id:content:template_placeholder:kundnamn"],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="Fill the uploaded DOCX template."
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "template placeholder fields: kundnamn, datum" in prompt
+    assert "Prefer source-derived output_fields" in prompt
+    assert "use input_fields only for values the user must provide at runtime" in prompt
+    assert "Use output_fields consistent with these user-declared fields." not in prompt
+
+
 def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
