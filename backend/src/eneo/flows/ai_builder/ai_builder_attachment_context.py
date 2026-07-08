@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
+    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     SignalConfidence,
 )
 from eneo.flows.variable_resolver import iter_template_expressions
+from eneo.json_types import JsonObject
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +77,85 @@ def apply_attachment_file_roles_to_planning_state(
             candidate_roles=list(item.candidate_roles),
         )
     state.file_roles = list(roles_by_id.values())
+    _apply_template_placeholder_output_schema(state, attachment_context)
     _apply_structural_template_docx_mode(state, attachment_context)
+
+
+_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX = "content:template_placeholder:"
+
+_FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
+    "runtime_input_sample",
+    "template",
+    "reference_material",
+    "example_output",
+    "context_only",
+)
+
+_MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
+
+
+def _apply_template_placeholder_output_schema(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext,
+) -> None:
+    if state.output_schema_evidence is not None:
+        return
+    placeholders = _template_placeholder_items(attachment_context)
+    if not placeholders:
+        return
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema=_template_placeholder_schema(
+            tuple(placeholder for placeholder, _ in placeholders)
+        ),
+        source="template_placeholders",
+        confidence="high",
+        evidence=[evidence for _, evidence in placeholders],
+    )
+
+
+def _template_placeholder_items(
+    attachment_context: AIBuilderAttachmentContext,
+) -> tuple[tuple[str, str], ...]:
+    placeholders: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in attachment_context.evidence:
+        if item.inferred_role != "template":
+            continue
+        for marker in item.role_evidence:
+            placeholder = _template_placeholder_from_evidence(marker)
+            if placeholder is None or placeholder in seen:
+                continue
+            placeholders.append((placeholder, f"file:{item.file_id}:{marker}"))
+            seen.add(placeholder)
+            if len(placeholders) >= _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
+                return tuple(placeholders)
+    return tuple(placeholders)
+
+
+def _template_placeholder_from_evidence(marker: str) -> str | None:
+    if not marker.startswith(_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX):
+        return None
+    placeholder = marker.removeprefix(_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
+    if not placeholder:
+        return None
+    return placeholder
+
+
+def _template_placeholder_schema(placeholders: tuple[str, ...]) -> JsonObject:
+    properties = {
+        placeholder: {
+            "type": "string",
+            "description": f"Value for template placeholder '{placeholder}'.",
+        }
+        for placeholder in placeholders
+    }
+    return cast(
+        JsonObject,
+        {
+            "type": "object",
+            "properties": properties,
+        },
+    )
 
 
 def _apply_structural_template_docx_mode(
@@ -92,7 +173,7 @@ def _apply_structural_template_docx_mode(
         for item in attachment_context.evidence
         if item.inferred_role == "template"
         for marker in item.role_evidence
-        if marker.startswith("content:template_placeholder:")
+        if marker.startswith(_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
     ]
     if not evidence:
         return
@@ -109,17 +190,6 @@ def _bounded_text(value: str, max_chars: int) -> tuple[str, bool]:
     if len(value) <= max_chars:
         return value, False
     return value[:max_chars], True
-
-
-_FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
-    "runtime_input_sample",
-    "template",
-    "reference_material",
-    "example_output",
-    "context_only",
-)
-
-_MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
 
 
 def _infer_file_role(
@@ -193,7 +263,7 @@ def _template_placeholder_evidence(text: str) -> tuple[str, ...]:
         normalized = " ".join(expression.split())
         if not normalized or normalized in seen:
             continue
-        evidence.append(f"content:template_placeholder:{normalized[:80]}")
+        evidence.append(f"{_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{normalized[:80]}")
         seen.add(normalized)
         if len(evidence) >= _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
             break

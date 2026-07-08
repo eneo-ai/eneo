@@ -318,6 +318,16 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
     assert slot.source == "heuristic"
     assert slot.confidence == "high"
     assert slot.evidence == [f"file:{file_id}:content:template_placeholder:kundnamn"]
+    evidence = state.output_schema_evidence
+    assert evidence is not None
+    assert evidence.source == "template_placeholders"
+    assert evidence.confidence == "high"
+    assert evidence.evidence == [
+        f"file:{file_id}:content:template_placeholder:kundnamn"
+    ]
+    properties = evidence.json_schema["properties"]
+    assert isinstance(properties, dict)
+    assert list(properties) == ["kundnamn"]
 
     analysis = analyze_discovery(conversation, planning_state=state)
     assert "docx_output_mode" not in analysis.selected_question_ids

@@ -41,7 +41,7 @@ from eneo.json_types import JsonObject
 
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 4
+BUILDER_SCHEMA_VERSION: int = 5
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
@@ -78,6 +78,7 @@ FileRole = Literal[
 ]
 
 FileRoleSource = Literal["structured_answer", "heuristic", "model"]
+OutputSchemaEvidenceSource = Literal["freeform_text", "template_placeholders"]
 
 StepOutputType = Literal["text", "json", "pdf", "docx"]
 StepOutputMode = Literal[
@@ -227,7 +228,7 @@ class FileRoleEvidence(_PlanningModel):
 
 class OutputSchemaEvidence(_PlanningModel):
     json_schema: JsonObject
-    source: Literal["freeform_text"]
+    source: OutputSchemaEvidenceSource
     confidence: SignalConfidence
     evidence: list[str] = Field(default_factory=list[str])
 

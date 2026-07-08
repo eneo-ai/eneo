@@ -36,8 +36,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_four(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 4
+    def test_builder_schema_version_is_five(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 5
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -68,6 +68,21 @@ class TestEmptyConstruction:
         assert state.file_roles == []
         assert state.output_schema_evidence is None
         assert state.architecture_commit is None
+
+
+class TestOutputSchemaEvidence:
+    def test_accepts_template_placeholder_source(self) -> None:
+        evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {"kundnamn": {"type": "string"}},
+            },
+            source="template_placeholders",
+            confidence="high",
+            evidence=["file:file_id:content:template_placeholder:kundnamn"],
+        )
+
+        assert evidence.source == "template_placeholders"
 
 
 class TestRoundTrip:

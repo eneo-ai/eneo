@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.pattern_registry import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
+    OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -69,6 +70,31 @@ def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> No
 
     assert context is not None
     assert context.runtime_input_type == InputType.DOCUMENT
+
+
+def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_schema() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"kundnamn": {"type": "string"}},
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=["file:file_id:content:template_placeholder:kundnamn"],
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.final_output_type == OutputType.DOCX
+    assert context.terminal_output_schema is None
 
 
 def test_compile_context_requires_only_summary_source_reader_obligation() -> None:

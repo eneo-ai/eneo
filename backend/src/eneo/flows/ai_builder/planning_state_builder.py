@@ -345,6 +345,8 @@ def _reconcile_output_schema_evidence(
     evidence = state.output_schema_evidence
     if evidence is None:
         return
+    if evidence.source != "freeform_text":
+        return
 
     terminal_output = state.resolved_slots.get("terminal_output")
     if terminal_output is not None and terminal_output.value == "structured_json":
