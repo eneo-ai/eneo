@@ -208,11 +208,14 @@ They are not the mechanism for transporting a large corpus through one prompt.
 Use targeted step references and typed JSON contracts for downstream facts, not
 `all_previous_steps` as a raw document-text bus.
 
-Current hardening gap: runtime still needs a model-window guard that measures the
-actual packaged prompt for a call against the selected model's usable context
-window and fails with an actionable error before the provider rejects or truncates
-the request. Do not add a compile-time token estimator for this; the same
-published Flow can run later with different files and different model settings.
+Runtime measures the packaged prompt for each assistant call against the selected
+model's usable context window before sending it to the provider. Oversized calls
+fail with `typed_io_input_exceeds_model_window` and an actionable message naming
+the step and token limit. Keep this as an execution-time guard, not a compile-time
+token estimator; the same published Flow can run later with different files and
+different model settings. See
+`backend/src/eneo/flows/runtime/step_execution_runtime.py:377` and
+`backend/src/eneo/flows/flow_error_taxonomy.py:611`.
 
 ## Step Behavior And Output Format
 
