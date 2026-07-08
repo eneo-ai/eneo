@@ -38,7 +38,6 @@ def test_source_reader_completion_does_not_nest_existing_array_container() -> No
         required_fields=(
             SourceCaptureField(name="documents"),
             SourceCaptureField(name="summary"),
-            SourceCaptureField(name="sammanfattning"),
         ),
     )
 
@@ -61,7 +60,7 @@ def test_source_reader_completion_canonicalizes_source_item_fields() -> None:
                     _field("title", description="Dokumenttitel."),
                     _field("date", description="Datum eller år."),
                     _field("author", description="Författare eller avsändare."),
-                    _field("sammanfattning", description="Kort sammanfattning."),
+                    _field("brief_summary", description="Kort sammanfattning."),
                     _field("summary", description="Duplicerad sammanfattning."),
                     _field("documents", description="Felaktigt nästlad container."),
                 ],

@@ -869,17 +869,17 @@ def test_assembly_places_server_owned_runtime_field_hints() -> None:
                     "name": "Läs ansökan",
                     "instructions": "Extrahera uppgifter från ansökan.",
                     "output_type": "json",
-                    "output_fields": [
-                        {
-                            "name": "sammanfattning",
-                            "field_type": "string",
-                            "description": "Kort sammanfattning.",
-                        },
-                        {
-                            "name": "saknade_uppgifter",
-                            "field_type": "string",
-                            "description": "Saknade uppgifter.",
-                        },
+                        "output_fields": [
+                            {
+                                "name": "summary",
+                                "field_type": "string",
+                                "description": "Kort sammanfattning.",
+                            },
+                            {
+                                "name": "missing_information",
+                                "field_type": "string",
+                                "description": "Saknade uppgifter.",
+                            },
                     ],
                 },
                 {
@@ -1319,12 +1319,12 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                     "instructions": "Extrahera risker och rekommendationer.",
                     "output_type": "json",
                     "uses_form_fields": ["referensnummer"],
-                    "output_fields": [
-                        {
-                            "name": "sammanfattning",
-                            "field_type": "string",
-                            "description": "Kort sammanfattning.",
-                        }
+                        "output_fields": [
+                            {
+                                "name": "summary",
+                                "field_type": "string",
+                                "description": "Kort sammanfattning.",
+                            }
                     ],
                 },
                 {
@@ -1332,12 +1332,12 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                     "instructions": "Skriv slutrapport med specifika datapunkter.",
                     "output_type": "text",
                     "uses_previous_fields": [
-                        {
-                            "from_step": 1,
-                            "field_path": "sammanfattning",
-                            "label": "Sammanfattning",
-                        }
-                    ],
+                            {
+                                "from_step": 1,
+                                "field_path": "summary",
+                                "label": "Sammanfattning",
+                            }
+                        ],
                 },
             ],
         }
@@ -1638,7 +1638,7 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
                                     "description": "Sammanfattning.",
                                 },
                                 {
-                                    "name": "sammanfattning",
+                                    "name": "brief_summary",
                                     "field_type": "string",
                                     "description": "Duplicerad sammanfattning.",
                                 },

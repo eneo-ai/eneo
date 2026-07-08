@@ -55,6 +55,7 @@ UnderlagChannel = Literal[
     "field_refs",
     "fan_in",
 ]
+_LOCALIZED_SCHEMA_KEYS = frozenset({"sammanfattning"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +146,7 @@ class FlowAssemblyPlan:
                 "FlowAssemblyPlan source_reader_required_fields require a "
                 "source-reader planned step."
             )
+        _validate_output_field_schema_keys(self.steps)
         _validate_source_reader_contracts_complete(
             steps=self.steps,
             terminal_output_schema=self.terminal_output_schema,
@@ -371,6 +373,42 @@ def _validate_source_reader_contracts_complete(
             "FlowAssemblyPlan source-reader output fields must be complete "
             f"before lowering: {', '.join(sorted(missing_names))}."
         )
+
+
+def _validate_output_field_schema_keys(steps: tuple[PlannedStep, ...]) -> None:
+    invalid_paths = [
+        f"{step.name}.{field_path}"
+        for step in steps
+        for field_path, field_name in _structured_field_paths(step.output_fields)
+        if not _is_ascii_english_schema_key(field_name)
+    ]
+    if invalid_paths:
+        raise ValueError(
+            "FlowAssemblyPlan output field keys must be ASCII English schema "
+            "keys; put localized labels in descriptions instead: "
+            f"{', '.join(invalid_paths)}."
+        )
+
+
+def _structured_field_paths(
+    fields: tuple[StructuredFieldDraft, ...] | list[StructuredFieldDraft],
+    *,
+    parent_path: str | None = None,
+) -> tuple[tuple[str, str], ...]:
+    paths: list[tuple[str, str]] = []
+    for field in fields:
+        field_path = (
+            f"{parent_path}.{field.name}" if parent_path is not None else field.name
+        )
+        paths.append((field_path, field.name))
+        nested_fields = field.fields if field.field_type == "object" else field.item_fields
+        if nested_fields:
+            paths.extend(_structured_field_paths(nested_fields, parent_path=field_path))
+    return tuple(paths)
+
+
+def _is_ascii_english_schema_key(field_name: str) -> bool:
+    return field_name.isascii() and field_name.casefold() not in _LOCALIZED_SCHEMA_KEYS
 
 
 def _validate_per_source_reader_contracts(steps: tuple[PlannedStep, ...]) -> None:

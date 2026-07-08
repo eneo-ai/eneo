@@ -77,7 +77,6 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
     "requirements": "requirement",
     "rule": "rule",
     "rules": "rule",
-    "sammanfattning": "summary",
     "secret": "confidentiality",
     "secrecy": "confidentiality",
     "sekretess": "confidentiality",

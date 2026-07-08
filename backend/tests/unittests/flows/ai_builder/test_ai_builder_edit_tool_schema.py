@@ -305,6 +305,10 @@ class TestBuildEditFlowToolSchema:
         assert "document_delivery_mode" not in add_payload["properties"]
         assert "instructions" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
+        field_name_schema = add_payload["properties"]["output_fields"]["items"][
+            "properties"
+        ]["name"]
+        assert "ASCII English JSON schema key" in field_name_schema["description"]
         assert "uses_previous_fields" not in add_payload["properties"]
         assert "uses_previous_outputs" not in add_payload["properties"]
         assert add_payload["properties"]["review_mode"]["enum"] == [
@@ -395,6 +399,11 @@ class TestBuildEditFlowToolSchema:
 
         previous_fields = modify_step["properties"]["uses_previous_fields"]
         assert previous_fields["items"]["required"] == ["from_step", "field_path"]
+        field_path_description = previous_fields["items"]["properties"]["field_path"][
+            "description"
+        ]
+        assert "`summary`" in field_path_description
+        assert "sammanfattning" not in field_path_description
         assert "input_bindings" not in modify_step["properties"]
         assert "input_contract" not in modify_step["properties"]
         assert "input_config" not in modify_step["properties"]

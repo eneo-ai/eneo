@@ -63,6 +63,11 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
     )
     _add_signal(
         signals,
+        "report_disposition",
+        _infer_report_disposition(normalized),
+    )
+    _add_signal(
+        signals,
         "pdf_generation_mode",
         _infer_pdf_generation_mode(normalized),
     )
@@ -93,8 +98,11 @@ _MULTI_SOURCE_FILE_PHRASES: tuple[str, ...] = (
     "flera filer",
     "flera dokumentfiler",
     "flera källfiler",
+    "flera uppladdade dokument",
     "several source files",
     "multiple source files",
+    "several uploaded documents",
+    "multiple uploaded documents",
     "several files",
     "multiple files",
     "uploaded reports",
@@ -663,6 +671,57 @@ def _looks_like_report_creation_goal(text: str) -> bool:
             "notes",
         ),
     )
+
+
+def _infer_report_disposition(text: str) -> str | None:
+    per_source = _contains_any(
+        text,
+        (
+            "avsnitt per källa",
+            "avsnitt per kalla",
+            "avsnitt per dokument",
+            "en sektion per källa",
+            "en sektion per kalla",
+            "en sektion per dokument",
+            "one section per source",
+            "section per source",
+            "section per document",
+            "per source section",
+            "per document section",
+            "for each source",
+            "for each document",
+        ),
+    )
+    synthesized = _contains_any(
+        text,
+        (
+            "samlad översikt",
+            "samlad oversikt",
+            "samlad sammanfattning",
+            "gemensam analys",
+            "gemensam sammanfattning",
+            "helhetsbild",
+            "synthesized overview",
+            "combined overview",
+            "shared summary",
+            "combine the sources",
+            "combine sources",
+        ),
+    ) or _contains_any_prefix(
+        text,
+        (
+            "jämför",
+            "jamfor",
+            "compar",
+        ),
+    )
+    if per_source and synthesized:
+        return "both"
+    if per_source:
+        return "per_source_sections"
+    if synthesized:
+        return "synthesized_overview"
+    return None
 
 
 def _looks_like_transcript_into_document_goal(text: str) -> bool:

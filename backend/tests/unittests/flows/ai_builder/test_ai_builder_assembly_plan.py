@@ -405,3 +405,15 @@ def test_plan_rejects_incomplete_source_reader_contract() -> None:
             aggregation_intent="linear",
             ui_language=None,
         )
+
+
+def test_plan_rejects_localized_output_field_schema_keys() -> None:
+    source_reader = _text_step(
+        name="Extract facts",
+        input_type=InputType.DOCUMENT,
+        output_type=OutputType.JSON,
+        output_fields=(_field("sammanfattning"),),
+    )
+
+    with pytest.raises(ValueError, match="ASCII English schema keys"):
+        _plan(steps=(source_reader,))

@@ -232,9 +232,10 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
             expected_type=ConfirmRequirements,
         ),
         TurnDecisionCase(
-            id="commit-grade architecture drift revises before confirmation",
+            id="commit-grade document drift asks report disposition before revision",
             state=_committed_state_with_commit_grade_output_drift(),
-            expected_type=ReviseArchitecture,
+            expected_type=AskCanonicalQuestion,
+            expected_slot_name="report_disposition",
         ),
         TurnDecisionCase(
             id="weak architecture drift reopens canonical output question",

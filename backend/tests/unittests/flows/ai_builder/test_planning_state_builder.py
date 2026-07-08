@@ -694,6 +694,55 @@ class TestPolicyDefaults:
         )
         assert "comparison_scope" not in state.resolved_slots
 
+    def test_multi_source_comparison_infers_synthesized_report_disposition(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill ladda upp ett eller flera PDF-dokument, jämföra "
+                        "dem och skapa en DOCX-rapport."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["report_disposition"]
+        assert slot.value == "synthesized_overview"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+
+    def test_multi_source_sections_and_overview_infer_both_report_disposition(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa en PDF-rapport med avsnitt per källa och en samlad "
+                        "översikt i slutet från flera uppladdade dokument."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["report_disposition"].value == "both"
+
+    def test_plain_multi_source_report_leaves_report_disposition_open(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Skapa en PDF-rapport från flera uppladdade dokument.",
+                )
+            ]
+        )
+
+        assert "report_disposition" not in state.resolved_slots
+
     def test_document_input_defaults_to_no_extra_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
             [

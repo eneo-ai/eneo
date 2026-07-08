@@ -374,14 +374,10 @@ def _source_reader_required_fields_from_planning_state(
         return ()
     return (
         SourceCaptureField(
-            name=_summary_source_reader_field_name(ui_language),
+            name="summary",
             description=_summary_source_reader_field_description(ui_language),
         ),
     )
-
-
-def _summary_source_reader_field_name(ui_language: str | None) -> str:
-    return "summary"
 
 
 def _summary_source_reader_field_description(ui_language: str | None) -> str:

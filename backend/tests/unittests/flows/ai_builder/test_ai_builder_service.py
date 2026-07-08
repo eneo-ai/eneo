@@ -1649,13 +1649,14 @@ class TestRevisePlan:
 
 class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
-    async def test_duplicate_output_question_alias_is_suppressed_when_budget_exhausted(
+    async def test_duplicate_output_question_alias_allows_report_disposition_followup(
         self,
     ):
-        """When the question budget is exhausted (5 answers given, budget is 3),
-        a duplicate final_output_mode from the LLM is suppressed and no backend
-        followup question is emitted either — the service falls through to
-        non-question continuation.
+        """A duplicate terminal-output question is suppressed.
+
+        Generated multi-source document reports still get the server-owned
+        report-disposition follow-up because it changes the final document
+        contract, not just polish.
         """
         user = _make_user()
         repo = AsyncMock()
@@ -1766,7 +1767,10 @@ class TestSendMessageStructuredQuestion:
             )
 
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
-        assert len(question_events) == 0
+        assert len(question_events) == 1
+        assert json.loads(question_events[0]["data"])["question_id"] == (
+            "report_disposition"
+        )
 
     @pytest.mark.anyio
     async def test_unsupported_model_question_is_replaced_by_framework_question(self):

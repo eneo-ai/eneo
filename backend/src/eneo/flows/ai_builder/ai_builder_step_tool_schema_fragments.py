@@ -30,7 +30,7 @@ def build_previous_field_refs_schema() -> dict[str, Any]:
                     "type": "string",
                     "description": (
                         "Dot path inside the earlier step's structured JSON output, "
-                        "for example `sammanfattning` or `risker.0.rubrik`."
+                        "for example `summary` or `risks.0.title`."
                     ),
                 },
                 "label": {
@@ -144,7 +144,13 @@ def _structured_field_schema(*, depth: int) -> dict[str, Any]:
         "type": "object",
         "required": ["name", "field_type", "description", "required"],
         "properties": {
-            "name": {"type": "string"},
+            "name": {
+                "type": "string",
+                "description": (
+                    "ASCII English JSON schema key, for example `summary` or "
+                    "`date_or_year`. Put localized wording in the description."
+                ),
+            },
             "field_type": {"type": "string", "enum": field_type_enum},
             "description": {"type": "string"},
             "required": {"type": "boolean"},

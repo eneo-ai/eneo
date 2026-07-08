@@ -694,18 +694,35 @@ def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
     terminal_output = state.resolved_slots.get("terminal_output")
     document_material_scope = state.resolved_slots.get("document_material_scope")
     docx_output_mode = state.resolved_slots.get("docx_output_mode")
+    return _report_disposition_values_are_relevant(
+        primary_runtime_input=(
+            primary_runtime_input.value if primary_runtime_input is not None else None
+        ),
+        terminal_output=terminal_output.value if terminal_output is not None else None,
+        document_material_scope=(
+            document_material_scope.value
+            if document_material_scope is not None
+            else None
+        ),
+        docx_output_mode=docx_output_mode.value if docx_output_mode is not None else None,
+    )
+
+
+def _report_disposition_values_are_relevant(
+    *,
+    primary_runtime_input: str | None,
+    terminal_output: str | None,
+    document_material_scope: str | None,
+    docx_output_mode: str | None,
+) -> bool:
     return (
-        primary_runtime_input is not None
-        and primary_runtime_input.value in {"document", "documents", "text_and_documents"}
-        and terminal_output is not None
-        and terminal_output.value in {"pdf_document", "docx_document"}
+        primary_runtime_input in {"document", "documents", "text_and_documents"}
+        and terminal_output in {"pdf_document", "docx_document"}
         and not (
-            terminal_output.value == "docx_document"
-            and docx_output_mode is not None
-            and docx_output_mode.value == "template_fill_docx"
+            terminal_output == "docx_document"
+            and docx_output_mode == "template_fill_docx"
         )
-        and document_material_scope is not None
-        and document_material_scope.value
+        and document_material_scope
         in {"multiple_documents_case", "flexible_document_case"}
     )
 
@@ -850,7 +867,12 @@ def _resolve_slots(
         flow_defaults=flow_defaults,
         question_id="report_disposition",
     )
-    if report_disposition is not None:
+    if report_disposition is not None and _report_disposition_values_are_relevant(
+        primary_runtime_input=primary_runtime_input,
+        terminal_output=output_intent.terminal_output,
+        document_material_scope=document_material_scope,
+        docx_output_mode=output_intent.docx_output_mode,
+    ):
         slots["report_disposition"] = _build_slot(
             name="report_disposition",
             value=report_disposition,
@@ -1094,7 +1116,11 @@ def _heuristic_slot_confidence(
         return _heuristic_docx_output_mode_confidence(slot_value, freeform_text)
     if question_id == "pdf_generation_mode":
         return _heuristic_pdf_generation_mode_confidence(slot_value, freeform_text)
-    if question_id in {"document_material_scope", "comparison_scope"}:
+    if question_id in {
+        "document_material_scope",
+        "comparison_scope",
+        "report_disposition",
+    }:
         return _heuristic_text_signal_confidence(
             question_id=question_id,
             slot_value=slot_value,
