@@ -607,6 +607,7 @@ def _merge_model_file_roles(
         if existing_role is None:
             continue
         if not _model_file_role_can_replace(
+            existing_role=existing_role.role,
             existing_role_source=existing_role.source,
             existing_role_confidence=existing_role.confidence,
             classified_role=classified_role,
@@ -635,6 +636,7 @@ def _merge_model_file_roles(
 
 def _model_file_role_can_replace(
     *,
+    existing_role: FileRole,
     existing_role_source: str,
     existing_role_confidence: str,
     classified_role: ClassifiedFileRole,
@@ -644,6 +646,8 @@ def _model_file_role_can_replace(
     if not classified_role.evidence:
         return False
     if existing_role_source == "structured_answer":
+        return False
+    if existing_role_source == "heuristic" and existing_role != "context_only":
         return False
     if existing_role_source == "heuristic" and existing_role_confidence == "high":
         return False

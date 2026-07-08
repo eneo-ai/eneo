@@ -2226,6 +2226,44 @@ class TestModelSlotMerge:
         assert role.source == "heuristic"
         assert role.evidence == ["file_type:audio"]
 
+    def test_model_file_role_does_not_replace_structural_template(self) -> None:
+        file_id = "00000000-0000-0000-0000-000000000704"
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="mall.docx",
+                file_type="document",
+                mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                role="template",
+                source="heuristic",
+                confidence="medium",
+                evidence=["content:template_placeholder:kundnamn"],
+            )
+        ]
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=UUID(file_id),
+                        role="example_output",
+                        confidence="high",
+                        reason="semantic role from conversation",
+                        evidence=("så här ska rapporten se ut",),
+                    ),
+                )
+            ),
+            prompt_hash="j" * 64,
+            freeform_text="",
+        )
+
+        role = state.file_roles[0]
+        assert role.role == "template"
+        assert role.source == "heuristic"
+        assert role.evidence == ["content:template_placeholder:kundnamn"]
+
     def test_prompt_hash_is_required(self) -> None:
         state = _state()
 

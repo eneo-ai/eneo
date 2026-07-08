@@ -103,7 +103,7 @@ def _attachment_context() -> AIBuilderAttachmentContext:
                 excerpt=None,
                 inferred_role="template",
                 role_confidence="medium",
-                role_evidence=("filename:template_keyword",),
+                role_evidence=("content:template_placeholder:kundnamn",),
             ),
         ),
         included_file_ids=[],
@@ -222,10 +222,10 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
                 file_type=FileType.DOCUMENT,
                 mimetype="application/pdf",
                 has_readable_text=True,
-                excerpt="Lagstöd som ska användas vid bedömning.",
-                inferred_role="reference_material",
+                excerpt="Fyll i {{ kundnamn }}.",
+                inferred_role="template",
                 role_confidence="medium",
-                role_evidence=("filename:reference_keyword",),
+                role_evidence=("content:template_placeholder:kundnamn",),
             ),
         ),
         included_file_ids=[],
@@ -246,7 +246,7 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
 
     assert len(state.file_roles) == 1
     assert state.file_roles[0].file_id == file_id
-    assert state.file_roles[0].role == "reference_material"
+    assert state.file_roles[0].role == "template"
 
 
 @pytest.mark.asyncio
@@ -412,6 +412,84 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
     assert "Unconfirmed uploaded-file evidence" in prompt
     assert "filename: beslutsmall.docx" in prompt
     assert "has_readable_text: false" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() -> None:
+    file_id = uuid4()
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "medium",
+                        "reason": "conversation ties the upload to desired output",
+                        "evidence": ["så här ska rapporten se ut"],
+                    }
+                ],
+            }
+        )
+    )
+
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag bifogar en rapport som visar ungefär så här ska "
+                        "rapporten se ut."
+                    ),
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+            attachment_context=AIBuilderAttachmentContext(
+                context=None,
+                discovery_context=(
+                    "Unconfirmed uploaded-file evidence:\n"
+                    f"file_id: {file_id}\n"
+                    "filename: exempelrapport.pdf\n"
+                    "file_type: document\n"
+                    "mimetype: application/pdf\n"
+                    "has_readable_text: true\n"
+                    "inferred_role: context_only\n"
+                    "role_confidence: low\n"
+                    "excerpt: Titel\nSammanfattning\nRekommendation"
+                ),
+                evidence=(
+                    AIBuilderAttachmentEvidence(
+                        file_id=file_id,
+                        filename="exempelrapport.pdf",
+                        file_type=FileType.DOCUMENT,
+                        mimetype="application/pdf",
+                        has_readable_text=True,
+                        excerpt="Titel\nSammanfattning\nRekommendation",
+                        inferred_role="context_only",
+                        role_confidence="low",
+                        role_evidence=("fallback:unclassified_file",),
+                    ),
+                ),
+                included_file_ids=[],
+                total_chars=0,
+                truncated=False,
+            ),
+        )
+    ).planning_state
+
+    role = state.file_roles[0]
+    assert role.role == "example_output"
+    assert role.source == "model"
+    assert role.confidence == "medium"
+    assert "quote:så här ska rapporten se ut" in role.evidence
 
 
 @pytest.mark.asyncio
