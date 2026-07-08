@@ -31,6 +31,7 @@ from eneo.flows.output_modes import (
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_chain_rules import find_first_step_chain_violation
+from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.main.exceptions import BadRequestException
 
 ALLOWED_INPUT_SOURCES = {
@@ -308,6 +309,7 @@ def _parse_input_fields(item: Mapping[str, object]) -> _StepInputFields:
         input_source=input_source,
     )
     build_runtime_input_config(raw_input_config)
+    build_step_item_map_config(raw_input_config)
 
     input_type = _field_string(item.get("input_type"), "text")
     if input_type not in ALLOWED_INPUT_TYPES:

@@ -68,6 +68,7 @@ from eneo.flows.output_processing import (
 )
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_chain_rules import iter_step_chain_violations
+from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.flows.template_reference_analyzer import (
     analyze_template,
     consumes_runtime_input,
@@ -391,6 +392,12 @@ def collect_step_graph_issues(
             issues,
             FlowGraphIssueCode.FLOW_STEP_INVALID,
             lambda: _validate_runtime_input_publish_rules(step=step),
+        )
+        _capture_bad_request_validation(
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            validate=lambda: _validate_step_item_map_config(step=step),
+            step_order=step.step_order,
         )
 
     _capture_bad_request_validation(
@@ -871,3 +878,7 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
                 f"Step {step.step_order}: explicit question bindings must reference step_input.* when runtime input is enabled.",
                 step_order=step.step_order,
             )
+
+
+def _validate_step_item_map_config(*, step: FlowStepValidationView) -> None:
+    build_step_item_map_config(step.input_config)

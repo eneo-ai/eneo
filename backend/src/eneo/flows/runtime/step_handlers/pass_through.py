@@ -12,11 +12,16 @@ from eneo.flows.runtime.step_handlers.base import (
     ListStepInputFileIdsFn,
     PrepareAssistantStepFn,
 )
+from eneo.flows.runtime.step_handlers.per_item_map import (
+    execute_per_item_map,
+    should_execute_per_item_map,
+)
 from eneo.flows.runtime.step_handlers.per_source_reader import (
     execute_per_source_reader,
     should_execute_per_source_reader,
 )
 from eneo.flows.runtime_input import build_runtime_input_config
+from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -47,11 +52,27 @@ class PassThroughStepHandler:
                 prepare_assistant_step=self.prepare_assistant_step,
                 list_step_input_file_ids=self.list_step_input_file_ids,
             )
+        if should_execute_per_item_map(step):
+            return await execute_per_item_map(
+                step=step,
+                run=run,
+                state=state,
+                version_metadata=version_metadata,
+                attempt_no=attempt_no,
+                prepare_assistant_step=self.prepare_assistant_step,
+            )
         runtime_input = build_runtime_input_config(step.input_config)
         if runtime_input.execution_mode == "per_source":
             raise TypedIOValidationException(
                 "Per-source execution is configured but the step is not a "
                 "supported per-source document reader.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        item_map = build_step_item_map_config(step.input_config)
+        if item_map.enabled:
+            raise TypedIOValidationException(
+                "Per-item map execution is configured but the step is not a "
+                "supported previous-step JSON map.",
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
         prepared_step = await self.prepare_assistant_step(

@@ -2072,6 +2072,140 @@ async def test_per_source_config_fails_closed_when_step_is_not_document_reader(u
 
 
 @pytest.mark.asyncio
+async def test_per_item_map_executes_one_model_call_per_previous_document(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                completion='{"sections":[{"heading":"Alpha","body":"Alpha section"}]}',
+                total_token_count=17,
+            ),
+            SimpleNamespace(
+                completion='{"sections":[{"heading":"Beta","body":"Beta section"}]}',
+                total_token_count=19,
+            ),
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[{"title":"Alpha"},{"title":"Beta"}]}',
+        structured={
+            "documents": [
+                {
+                    "title": "Alpha",
+                    "summary": "Alpha document text",
+                    "source_label": "alpha.pdf",
+                    "source_file_id": "file-alpha",
+                },
+                {
+                    "title": "Beta",
+                    "summary": "Beta document text",
+                    "source_label": "beta.pdf",
+                    "source_file_id": "file-beta",
+                },
+            ]
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["heading", "body"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True}},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert assistant.get_response.await_count == 2
+    questions = [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    assert "Alpha document text" in questions[0]
+    assert "Beta document text" not in questions[0]
+    assert "Beta document text" in questions[1]
+    assert "Alpha document text" not in questions[1]
+    assert output.structured_output == {
+        "sections": [
+            {"heading": "Alpha", "body": "Alpha section"},
+            {"heading": "Beta", "body": "Beta section"},
+        ]
+    }
+    assert output.model_parameters_json["item_map_execution_mode"] == "per_item"
+    assert output.model_parameters_json["per_item_call_count"] == 2
+    assert output.num_tokens_input == 36
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["capture_mode"] == "previous_step_item_map"
+    assert output.runtime_input_metadata["item_count"] == 2
+    assert len(output.runtime_input_metadata["per_item_calls"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_config_fails_closed_when_step_is_not_previous_json(user):
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(
+        input_source="flow_input",
+        input_type="text",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True}},
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_contract_violation"
+
+
+@pytest.mark.asyncio
 async def test_document_previous_step_rejected_with_specific_code(user):
     """Legacy snapshots using previous_step+document should fail deterministically."""
     executor, _, _, _ = _build_executor(user)

@@ -904,6 +904,7 @@ async def prepare_step_execution(
     version_metadata: dict[str, Any] | None,
     requested_file_ids: Sequence[UUID],
     deps: StepExecutionRuntimeDeps,
+    step_input_override: StepInputValue | None = None,
 ) -> PreparedStepExecution:
     context_results = [
         item
@@ -925,22 +926,25 @@ async def prepare_step_execution(
         "input_source": step.input_source,
         "used_question_binding": False,
     }
-    try:
-        step_input = await deps.resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=state.prior_results,
-            state=state,
-            version_metadata=version_metadata,
-            requested_file_ids=requested_file_ids,
-        )
-    except TypedIOValidationException as exc:
-        raise deps.attach_typed_failure_context(
-            exc,
-            input_payload_for_result=input_payload_for_result,
-            effective_prompt=effective_prompt,
-        ) from exc
+    if step_input_override is None:
+        try:
+            step_input = await deps.resolve_step_input(
+                step=step,
+                context=context,
+                run=run,
+                prior_results=state.prior_results,
+                state=state,
+                version_metadata=version_metadata,
+                requested_file_ids=requested_file_ids,
+            )
+        except TypedIOValidationException as exc:
+            raise deps.attach_typed_failure_context(
+                exc,
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
+            ) from exc
+    else:
+        step_input = step_input_override
 
     input_payload_for_result.update(
         {

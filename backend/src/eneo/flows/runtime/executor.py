@@ -1306,6 +1306,7 @@ class FlowRunExecutor:
         version_metadata: FlowPersistedJsonObject | None,
         attempt_no: int,
         requested_file_ids_override: Sequence[UUID] | None = None,
+        step_input_override: StepInputValue | None = None,
     ) -> PreparedAssistantStep:
         execution_deps = self._build_step_execution_runtime_deps(step=step)
         if requested_file_ids_override is None:
@@ -1323,6 +1324,7 @@ class FlowRunExecutor:
             version_metadata=version_metadata,
             requested_file_ids=requested_file_ids,
             deps=execution_deps,
+            step_input_override=step_input_override,
         )
         requested_model = _requested_model_from_assistant(prepared.assistant)
         provider = _provider_from_assistant(prepared.assistant)

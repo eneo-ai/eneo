@@ -7,7 +7,7 @@ from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.enums import FlowOutputMode
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
+from eneo.flows.runtime.models import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
@@ -31,6 +31,7 @@ class PrepareAssistantStepFn(Protocol):
         version_metadata: dict[str, object] | None,
         attempt_no: int,
         requested_file_ids_override: Sequence[UUID] | None = None,
+        step_input_override: StepInputValue | None = None,
     ) -> PreparedAssistantStep: ...
 
 
