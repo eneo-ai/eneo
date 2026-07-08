@@ -1443,6 +1443,61 @@ class TestModelSlotMerge:
 
         assert "report_disposition" not in llm_resolvable_slot_values_for_state(state)
 
+    def test_structured_io_contract_can_be_classified_when_json_side_is_unresolved(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="json",
+                source="heuristic",
+            ),
+        }
+
+        assert "structured_io_contract" in llm_resolvable_slot_values_for_state(state)
+
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="pdf_document",
+            source="structured_answer",
+        )
+
+        assert "structured_io_contract" not in llm_resolvable_slot_values_for_state(
+            state
+        )
+
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_json",
+                source="heuristic",
+            ),
+        }
+
+        assert "structured_io_contract" in llm_resolvable_slot_values_for_state(state)
+
+    def test_structured_io_contract_is_not_classified_for_document_to_json(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_json",
+                source="heuristic",
+            ),
+        }
+
+        assert "structured_io_contract" not in llm_resolvable_slot_values_for_state(
+            state
+        )
+
     def test_model_output_preserves_user_and_flow_sources_but_can_correct_summary(
         self,
     ) -> None:

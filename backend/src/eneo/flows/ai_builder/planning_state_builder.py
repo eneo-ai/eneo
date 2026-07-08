@@ -829,12 +829,13 @@ def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
         return True
     primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
     terminal_output = state.resolved_slots.get("terminal_output")
-    return (
-        primary_runtime_input is not None
-        and primary_runtime_input.value == "json"
-        and terminal_output is not None
-        and terminal_output.value == "structured_json"
+    input_incompatible = (
+        primary_runtime_input is not None and primary_runtime_input.value != "json"
     )
+    output_incompatible = (
+        terminal_output is not None and terminal_output.value != "structured_json"
+    )
+    return not input_incompatible and not output_incompatible
 
 
 def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:

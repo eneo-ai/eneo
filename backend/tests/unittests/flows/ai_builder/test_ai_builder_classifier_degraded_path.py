@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
@@ -61,6 +62,18 @@ KEYWORD_BASELINE_CASES = (
         id="runtime-metadata-fields",
     ),
 )
+
+
+def test_keyword_baseline_cases_cover_all_llm_resolvable_slots() -> None:
+    covered_slots = {
+        slot_name
+        for _text, expected_slots, _forbidden_questions in (
+            case.values for case in KEYWORD_BASELINE_CASES
+        )
+        for slot_name in expected_slots
+    }
+
+    assert covered_slots == LLM_RESOLVABLE_SLOT_NAMES
 
 
 def _classifier_result_for(
@@ -125,6 +138,58 @@ async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
     assert context.slot_classification_result is None
     for slot_name, expected_value in expected_slots.items():
         assert context.planning_state.resolved_slots[slot_name].value == expected_value
+    assert forbidden_questions.isdisjoint(analysis.selected_question_ids)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "expected_slots", "forbidden_questions"),
+    KEYWORD_BASELINE_CASES,
+)
+async def test_classifier_primary_path_suppresses_keyword_baseline_questions(
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    expected_slots: dict[str, str],
+    forbidden_questions: set[str],
+) -> None:
+    async def classifier_result(**kwargs: object) -> SlotClassificationResult:
+        allowed_slot_values = kwargs["allowed_slot_values"]
+        assert isinstance(allowed_slot_values, dict)
+        assert expected_slots.keys() <= allowed_slot_values.keys()
+        return _classifier_result_for(text, expected_slots)
+
+    monkeypatch.setattr(
+        ai_builder_discovery_runtime,
+        "classify_slots",
+        classifier_result,
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=text,
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=object(),
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    analysis = analyze_discovery(
+        conversation,
+        planning_state=context.planning_state,
+        slot_classification_result=context.slot_classification_result,
+    )
+
+    assert context.slot_classification_result is not None
+    for slot_name, expected_value in expected_slots.items():
+        slot = context.planning_state.resolved_slots[slot_name]
+        assert slot.value == expected_value
+        assert slot.source == "model"
     assert forbidden_questions.isdisjoint(analysis.selected_question_ids)
 
 
