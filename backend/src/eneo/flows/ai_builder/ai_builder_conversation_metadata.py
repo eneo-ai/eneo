@@ -74,9 +74,17 @@ LLMResolvableSlotName: TypeAlias = Literal[
 ]
 
 _MAX_SLOT_CLASSIFICATION_REASON_LENGTH = 500
+_MAX_SLOT_CLASSIFICATION_EVIDENCE_LENGTH = 240
+_MAX_SLOT_CLASSIFICATION_EVIDENCE_ITEMS = 3
 _MAX_SLOT_CLASSIFICATION_NOTE_LENGTH = 500
 _MAX_SLOT_CLASSIFICATION_NOTES = 10
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
+
+
+SlotClassificationEvidence: TypeAlias = Annotated[
+    str,
+    Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_EVIDENCE_LENGTH),
+]
 
 
 class SlotClassificationSlotMetadata(BaseModel):
@@ -86,6 +94,10 @@ class SlotClassificationSlotMetadata(BaseModel):
     value: str = Field(min_length=1, max_length=128)
     confidence: SlotClassificationConfidence
     reason: str = Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_REASON_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        min_length=1,
+        max_length=_MAX_SLOT_CLASSIFICATION_EVIDENCE_ITEMS,
+    )
 
     @model_validator(mode="after")
     def validate_slot_value(self) -> "SlotClassificationSlotMetadata":
@@ -100,6 +112,7 @@ class SlotClassificationSlotMetadata(BaseModel):
             value=self.value,
             confidence=self.confidence,
             reason=self.reason,
+            evidence=tuple(self.evidence),
         )
 
 
@@ -320,11 +333,16 @@ def _raw_tool_call_values_from_message(message: object) -> Sequence[object] | No
     return _object_sequence(raw_tool_calls)
 
 
-def _bounded_metadata_text(value: str, *, fallback: str) -> str:
+def _bounded_metadata_text(
+    value: str,
+    *,
+    fallback: str,
+    max_length: int = _MAX_SLOT_CLASSIFICATION_NOTE_LENGTH,
+) -> str:
     stripped = value.strip()
     if not stripped:
         return fallback
-    return stripped[:_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH]
+    return stripped[:max_length]
 
 
 def requirements_confirmation_from_question_answer(
@@ -461,12 +479,23 @@ def slot_classification_metadata_from_result(
         return None
 
 
-def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, str] | None:
+def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object] | None:
     if slot.slot_name not in LLM_RESOLVABLE_SLOT_NAMES:
         return None
     if slot.confidence == "low" or slot.value == UNKNOWN_SLOT_VALUE:
         return None
     if slot.value not in legal_slot_values(slot.slot_name):
+        return None
+    evidence = [
+        _bounded_metadata_text(
+            value,
+            fallback="slot evidence",
+            max_length=_MAX_SLOT_CLASSIFICATION_EVIDENCE_LENGTH,
+        )
+        for value in slot.evidence
+        if value.strip()
+    ][:_MAX_SLOT_CLASSIFICATION_EVIDENCE_ITEMS]
+    if not evidence:
         return None
     return {
         "slot_name": slot.slot_name,
@@ -476,6 +505,7 @@ def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, str] | 
             slot.reason,
             fallback="slot classification",
         ),
+        "evidence": evidence,
     }
 
 

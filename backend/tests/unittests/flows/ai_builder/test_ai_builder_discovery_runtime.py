@@ -159,6 +159,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
                         "value": "basic_case_metadata",
                         "confidence": "high",
                         "reason": "runtime fields requested",
+                        "evidence": ["Användaren ska ange målgrupp och detaljnivå"],
                     }
                 ]
             }
@@ -278,12 +279,14 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
                         "value": "text",
                         "confidence": "high",
                         "reason": "mentions text input",
+                        "evidence": ["klistra in ett kundmeddelande"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "medium",
                         "reason": "asks for a summary",
+                        "evidence": ["få en tydlig sammanfattning"],
                     },
                 ]
             }
@@ -396,12 +399,14 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
                         "value": "json",
                         "confidence": "high",
                         "reason": "the runtime source is a JSON payload",
+                        "evidence": ["tar emot JSON"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_json",
                         "confidence": "high",
                         "reason": "the user asks for JSON output",
+                        "evidence": ["returnerar JSON"],
                     },
                 ]
             }
@@ -469,6 +474,7 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
                         "value": UNKNOWN_SLOT_VALUE,
                         "confidence": "high",
                         "reason": "user_explicit_uncertain",
+                        "evidence": ["Jag vet inte exakt vilket format"],
                     },
                 ],
             }
@@ -521,12 +527,14 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
                         "value": "documents",
                         "confidence": "high",
                         "reason": "incorrect model guess",
+                        "evidence": ["sammanfatta detta"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "high",
                         "reason": "summary requested",
+                        "evidence": ["sammanfatta detta"],
                     },
                 ]
             }
@@ -581,12 +589,14 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
                         "value": "text",
                         "confidence": "high",
                         "reason": "the source material is user-provided prose",
+                        "evidence": ["klistrar in ett kundmeddelande"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_json",
                         "confidence": "high",
                         "reason": "structured data is requested for downstream use",
+                        "evidence": ["strukturerad data"],
                     },
                 ]
             }
@@ -644,12 +654,14 @@ async def test_runtime_discovery_asks_output_question_when_model_guesses_uncerta
                         "value": "audio",
                         "confidence": "high",
                         "reason": "the source material is a meeting recording",
+                        "evidence": ["svensk ljudinspelning från ett möte"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "high",
                         "reason": "a readable result is implied",
+                        "evidence": ["något användbart som jag kan dela"],
                     },
                 ],
             }
@@ -706,18 +718,21 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
                         "value": "documents",
                         "confidence": "high",
                         "reason": "the source material is uploaded documents",
+                        "evidence": ["flera relaterade dokument"],
                     },
                     {
                         "slot_name": "document_material_scope",
                         "value": "multiple_documents_case",
                         "confidence": "high",
                         "reason": "the user says several related files",
+                        "evidence": ["flera relaterade dokument"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_json",
                         "confidence": "high",
                         "reason": "structured JSON is requested for another system",
+                        "evidence": ["skicka vidare till ett annat system"],
                     },
                 ]
             }
@@ -771,12 +786,14 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
                         "value": "text",
                         "confidence": "high",
                         "reason": "the user provides text",
+                        "evidence": ["klistrar in intervjusvar"],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "high",
                         "reason": "a readable summary is requested",
+                        "evidence": ["läsbar sammanfattning"],
                     },
                 ]
             }

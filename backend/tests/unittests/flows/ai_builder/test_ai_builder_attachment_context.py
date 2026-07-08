@@ -98,6 +98,7 @@ def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> N
     assert result.evidence[1].inferred_role == "runtime_input_sample"
     assert result.evidence[1].role_confidence == "high"
     assert result.discovery_context is not None
+    assert f"file_id: {files[0].id}" in result.discovery_context
     assert "filename: beslutsmall.docx" in result.discovery_context
     assert "file_type: document" in result.discovery_context
     assert "inferred_role: template" in result.discovery_context

@@ -5,13 +5,14 @@ import json
 import time
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
 )
+from eneo.flows.ai_builder.planning_state import FileRole
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -22,8 +23,10 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 6
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 8
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
+_MAX_CLASSIFICATION_EVIDENCE_ITEMS = 3
+_MAX_CLASSIFICATION_EVIDENCE_LENGTH = 240
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,11 +35,22 @@ class ClassifiedSlot:
     value: str
     confidence: SlotClassificationConfidence
     reason: str
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiedFileRole:
+    file_id: UUID
+    role: FileRole
+    confidence: SlotClassificationConfidence
+    reason: str
+    evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
+    file_roles: tuple[ClassifiedFileRole, ...] = ()
     secondary_obligations: tuple[ResultObligation, ...] = ()
     assumptions: tuple[str, ...] = ()
     contradictions: tuple[str, ...] = ()
@@ -116,7 +130,7 @@ async def classify_slots(
             ),
             stream=False,
             drop_params=True,
-            max_tokens=500,
+            max_tokens=900,
             temperature=0.0,
             **completion_kwargs,
         )
@@ -192,6 +206,7 @@ def parse_slot_classification_response(
         value = item_dict.get("value")
         confidence = item_dict.get("confidence")
         reason = item_dict.get("reason")
+        evidence = _parse_classification_evidence(item_dict.get("evidence", []))
         if not isinstance(slot_name, str) or slot_name not in slot_values:
             continue
         if slot_name in seen_slot_names:
@@ -206,14 +221,19 @@ def parse_slot_classification_response(
             continue
         if confidence not in {"high", "medium", "low"}:
             continue
+        confidence_value = cast(SlotClassificationConfidence, confidence)
         slots.append(
             ClassifiedSlot(
                 slot_name=slot_name,
                 value=normalized_value,
-                confidence=confidence,
+                confidence=_downgrade_unsupported_confidence(
+                    confidence_value,
+                    evidence,
+                ),
                 reason=reason.strip()
                 if isinstance(reason, str) and reason.strip()
                 else "slot classification",
+                evidence=evidence,
             )
         )
         seen_slot_names.add(slot_name)
@@ -231,12 +251,92 @@ def parse_slot_classification_response(
     secondary_obligations = _parse_secondary_obligations(
         raw_dict.get("secondary_obligations", [])
     )
+    file_roles = _parse_file_roles(raw_dict.get("file_roles", []))
     return SlotClassificationResult(
         slots=tuple(slots),
+        file_roles=file_roles,
         secondary_obligations=secondary_obligations,
         assumptions=assumptions,
         contradictions=contradictions,
     )
+
+
+def _parse_file_roles(raw_value: object) -> tuple[ClassifiedFileRole, ...]:
+    if not isinstance(raw_value, list):
+        return ()
+    allowed_roles = set(get_args(FileRole))
+    roles: list[ClassifiedFileRole] = []
+    seen_file_ids: set[UUID] = set()
+    for item in cast(list[object], raw_value):
+        if not isinstance(item, dict):
+            continue
+        item_dict = cast(dict[str, Any], item)
+        file_id_raw = item_dict.get("file_id")
+        role = item_dict.get("role")
+        confidence = item_dict.get("confidence")
+        reason = item_dict.get("reason")
+        evidence = _parse_classification_evidence(item_dict.get("evidence", []))
+        if not isinstance(file_id_raw, str):
+            continue
+        try:
+            file_id = UUID(file_id_raw)
+        except ValueError:
+            continue
+        if file_id in seen_file_ids:
+            continue
+        if role not in allowed_roles:
+            continue
+        if confidence not in {"high", "medium", "low"}:
+            continue
+        role_value = cast(FileRole, role)
+        confidence_value = cast(SlotClassificationConfidence, confidence)
+        roles.append(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role=role_value,
+                confidence=_downgrade_unsupported_confidence(
+                    confidence_value,
+                    evidence,
+                ),
+                reason=reason.strip()
+                if isinstance(reason, str) and reason.strip()
+                else "file role classification",
+                evidence=evidence,
+            )
+        )
+        seen_file_ids.add(file_id)
+    return tuple(roles)
+
+
+def _parse_classification_evidence(raw_value: object) -> tuple[str, ...]:
+    raw_items: list[object]
+    if isinstance(raw_value, str):
+        raw_items = [raw_value]
+    elif isinstance(raw_value, list):
+        raw_items = cast(list[object], raw_value)
+    else:
+        return ()
+
+    evidence: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if not value:
+            continue
+        evidence.append(value[:_MAX_CLASSIFICATION_EVIDENCE_LENGTH])
+        if len(evidence) >= _MAX_CLASSIFICATION_EVIDENCE_ITEMS:
+            break
+    return tuple(evidence)
+
+
+def _downgrade_unsupported_confidence(
+    confidence: SlotClassificationConfidence,
+    evidence: tuple[str, ...],
+) -> SlotClassificationConfidence:
+    if evidence:
+        return confidence
+    return "low"
 
 
 def slot_classification_prompt_hash(
@@ -312,6 +412,9 @@ def _build_slot_classification_prompt(
         "You classify unresolved flow-builder intent into constrained slot values. "
         "Return JSON only. Never explain outside the schema. "
         "Use a slot only when the conversation provides real evidence. "
+        "Every slot and file_role classification must include evidence: exact "
+        "quoted user words or uploaded-file excerpt lines supporting the claim. "
+        "If you cannot cite exact evidence, emit confidence low. "
         "Interpret natural Swedish and English phrasing by meaning, not by exact "
         "keywords. The allowed values are framework concepts, so choose a value only "
         "when a normal product user would reasonably expect that architecture. "
@@ -322,6 +425,15 @@ def _build_slot_classification_prompt(
         "primary_runtime_input as json. Do not classify JSON as runtime input "
         "when the user asks to extract JSON from documents or only requests JSON "
         "as the final output. "
+        "When uploaded-file evidence is present, you may also classify file_roles "
+        "for the listed file_id values. Use runtime_input_sample, template, "
+        "reference_material, example_output, or context_only. Use the conversation "
+        "and file evidence together: example_output means the user attached a file "
+        "as an example of the desired result, not merely that the file looks like a "
+        "report; reference_material means the file should guide rules or knowledge; "
+        "template means the file is a structure to fill. Emit file_roles only for "
+        "listed uploads. Attachment-only semantic conclusions should be medium "
+        "confidence unless the conversation independently confirms the role. "
         "A requested final document is terminal_output, not primary input. "
         "If the final deliverable is a DOCX, Word, PDF, or document artifact, choose "
         "that artifact as terminal_output even when the document contains a readable "
@@ -382,7 +494,8 @@ def _build_slot_classification_prompt(
         f"{obligation_values}\n\n"
         "Return JSON with this shape:\n"
         "{"
-        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str}], '
+        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [str]}], '
+        '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [str]}], '
         '"secondary_obligations": [str], '
         '"assumptions": [str], '
         '"contradictions": [str]'

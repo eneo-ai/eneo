@@ -352,6 +352,7 @@ def _render_discovery_context(
     ]
     for item in evidence:
         lines = [
+            f"file_id: {item.file_id}",
             f"filename: {item.filename}",
             f"file_type: {item.file_type.value}",
             f"mimetype: {item.mimetype or 'unknown'}",

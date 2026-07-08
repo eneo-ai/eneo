@@ -375,6 +375,7 @@ def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> No
                     value=UNKNOWN_SLOT_VALUE,
                     confidence="high",
                     reason="user_explicit_uncertain",
+                    evidence=("not sure what the final output should be",),
                 ),
             )
         ),
@@ -420,6 +421,7 @@ def test_classifier_uncertainty_keeps_protected_output_sources_resolved(
                     value=UNKNOWN_SLOT_VALUE,
                     confidence="high",
                     reason="user_explicit_uncertain",
+                    evidence=("not sure what the final output should be",),
                 ),
             )
         ),

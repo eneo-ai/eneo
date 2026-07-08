@@ -106,6 +106,7 @@ def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, obj
                     value=value,
                     confidence="medium",
                     reason="classified terminal output",
+                    evidence=("ändra output filen till pdf",),
                 ),
             )
         ),

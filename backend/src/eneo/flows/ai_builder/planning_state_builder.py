@@ -64,6 +64,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
+    ClassifiedFileRole,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
@@ -73,6 +74,7 @@ from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    FileRole,
     OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
@@ -483,6 +485,11 @@ def merge_llm_resolved_slots(
         classification_result=classification_result,
         prompt_hash=prompt_hash,
     )
+    _merge_model_file_roles(
+        state,
+        classification_result=classification_result,
+        prompt_hash=prompt_hash,
+    )
 
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
@@ -492,6 +499,8 @@ def merge_llm_resolved_slots(
             continue
         if (classified_slot.slot_name, classified_slot.value) in blocked_model_values:
             _clear_model_slot(state, classified_slot.slot_name)
+            continue
+        if not classified_slot.evidence:
             continue
         if classified_slot.value == UNKNOWN_SLOT_VALUE:
             _clear_nonprotected_model_slot(state, classified_slot.slot_name)
@@ -514,9 +523,85 @@ def merge_llm_resolved_slots(
             source="model",
             evidence=[
                 f"model:{classified_slot.slot_name}:{prompt_hash}",
+                *[f"quote:{item}" for item in classified_slot.evidence],
             ],
             confidence=classified_slot.confidence,
         )
+
+
+def _merge_model_file_roles(
+    state: PlanningState,
+    *,
+    classification_result: SlotClassificationResult,
+    prompt_hash: str,
+) -> None:
+    if not classification_result.file_roles or not state.file_roles:
+        return
+    roles_by_id = {item.file_id: item for item in state.file_roles}
+    changed = False
+    for classified_role in classification_result.file_roles:
+        existing_role = roles_by_id.get(classified_role.file_id)
+        if existing_role is None:
+            continue
+        if not _model_file_role_can_replace(
+            existing_role_source=existing_role.source,
+            existing_role_confidence=existing_role.confidence,
+            classified_role=classified_role,
+        ):
+            continue
+        roles_by_id[classified_role.file_id] = existing_role.model_copy(
+            update={
+                "role": classified_role.role,
+                "source": "model",
+                "confidence": classified_role.confidence,
+                "evidence": [
+                    *existing_role.evidence,
+                    f"model:file_role:{prompt_hash}",
+                    *[f"quote:{item}" for item in classified_role.evidence],
+                ],
+                "candidate_roles": _merged_file_role_candidates(
+                    existing_role.candidate_roles or [existing_role.role],
+                    classified_role.role,
+                ),
+            }
+        )
+        changed = True
+    if changed:
+        state.file_roles = [roles_by_id[item.file_id] for item in state.file_roles]
+
+
+def _model_file_role_can_replace(
+    *,
+    existing_role_source: str,
+    existing_role_confidence: str,
+    classified_role: ClassifiedFileRole,
+) -> bool:
+    if classified_role.confidence == "low":
+        return False
+    if not classified_role.evidence:
+        return False
+    if existing_role_source == "structured_answer":
+        return False
+    if existing_role_source == "heuristic" and existing_role_confidence == "high":
+        return False
+    if (
+        existing_role_source == "model"
+        and existing_role_confidence == "high"
+        and classified_role.confidence != "high"
+    ):
+        return False
+    return True
+
+
+def _merged_file_role_candidates(
+    existing_candidates: list[FileRole],
+    classified_role: FileRole,
+) -> list[FileRole]:
+    merged: list[FileRole] = []
+    for candidate in (*existing_candidates, classified_role):
+        if candidate not in merged:
+            merged.append(candidate)
+    return merged
 
 
 def _merge_model_result_obligations(
@@ -704,7 +789,9 @@ def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
             if document_material_scope is not None
             else None
         ),
-        docx_output_mode=docx_output_mode.value if docx_output_mode is not None else None,
+        docx_output_mode=docx_output_mode.value
+        if docx_output_mode is not None
+        else None,
     )
 
 

@@ -55,6 +55,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
                         "value": "pdf_document",
                         "confidence": "high",
                         "reason": "explicit PDF report",
+                        "evidence": ["Slutrapporten ska vara en pdf fil"],
                     },
                     {
                         "slot_name": "terminal_output",
@@ -79,6 +80,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
                         "value": "unknown",
                         "confidence": "low",
                         "reason": "ambiguous input",
+                        "evidence": ["en eller flera filer"],
                     },
                 ],
                 "assumptions": ["PDF is requested"],
@@ -98,8 +100,41 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     ]
     assert result.slots[0].value == "pdf_document"
     assert result.slots[1].value == "unknown"
+    assert result.slots[0].evidence == ("Slutrapporten ska vara en pdf fil",)
     assert result.assumptions == ("PDF is requested",)
     assert result.contradictions == ("input is ambiguous",)
+
+
+def test_parse_slot_classification_response_downgrades_unsupported_claims() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "unsupported",
+                    },
+                ],
+                "file_roles": [
+                    {
+                        "file_id": str(uuid4()),
+                        "role": "example_output",
+                        "confidence": "high",
+                        "reason": "unsupported file role",
+                    },
+                ],
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+    )
+
+    assert result is not None
+    assert result.slots[0].confidence == "low"
+    assert result.slots[0].evidence == ()
+    assert result.file_roles[0].confidence == "low"
+    assert result.file_roles[0].evidence == ()
 
 
 def test_parse_slot_classification_response_filters_secondary_obligations() -> None:
@@ -122,6 +157,52 @@ def test_parse_slot_classification_response_filters_secondary_obligations() -> N
     assert result.secondary_obligations == ("risks", "actions")
 
 
+def test_parse_slot_classification_response_filters_file_roles() -> None:
+    file_id = uuid4()
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "medium",
+                        "reason": "user says this PDF shows the desired report",
+                        "evidence": ["den här PDF:en visar önskad rapport"],
+                    },
+                    {
+                        "file_id": str(file_id),
+                        "role": "reference_material",
+                        "confidence": "high",
+                        "reason": "duplicate file id",
+                    },
+                    {
+                        "file_id": str(uuid4()),
+                        "role": "invented",
+                        "confidence": "high",
+                        "reason": "invalid role",
+                    },
+                    {
+                        "file_id": "not-a-uuid",
+                        "role": "example_output",
+                        "confidence": "high",
+                        "reason": "invalid file id",
+                    },
+                ],
+            }
+        ),
+        allowed_slot_values={},
+    )
+
+    assert result is not None
+    assert len(result.file_roles) == 1
+    assert result.file_roles[0].file_id == file_id
+    assert result.file_roles[0].role == "example_output"
+    assert result.file_roles[0].confidence == "medium"
+    assert result.file_roles[0].evidence == ("den här PDF:en visar önskad rapport",)
+
+
 def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> None:
     result = parse_slot_classification_response(
         json.dumps(
@@ -132,6 +213,7 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
                         "value": "unknown",
                         "confidence": "high",
                         "reason": "user_explicit_uncertain",
+                        "evidence": ["Jag vet inte exakt vilket format"],
                     },
                 ],
             }
@@ -146,6 +228,7 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
     assert slot.value == "unknown"
     assert slot.confidence == "high"
     assert slot.reason == "user_explicit_uncertain"
+    assert slot.evidence == ("Jag vet inte exakt vilket format",)
 
 
 def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
@@ -177,7 +260,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 6,
+                    "schema_version": 8,
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -315,6 +398,7 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
                         "value": "pdf_document",
                         "confidence": "high",
                         "reason": "PDF report requested",
+                        "evidence": ["få en PDF-rapport"],
                     }
                 ]
             }
@@ -409,9 +493,9 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         text="Bygg en rapport utifrån uppladdade dokument.",
         uploaded_file_evidence=(
+            "file_id: 00000000-0000-0000-0000-000000000111\n"
             "filename: bilaga.pdf\n"
-            "inferred_role: example_output\n"
-            "role_evidence: content:example_output_marker"
+            "excerpt: så här ska rapporten se ut"
         ),
         allowed_slot_values={
             "report_disposition": frozenset(
@@ -422,11 +506,13 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     )
 
     prompt = "\n".join(message["content"] for message in messages)
-    assert "inferred_role example_output" in prompt
-    assert "desired report layout" in prompt
+    assert "example_output means the user attached a file as an example" in prompt
+    assert '"evidence": [str]' in prompt
     assert "attachment-only conclusions as medium confidence" in prompt
+    assert '"file_roles": [{"file_id": str, "role": str' in prompt
+    assert "Use the conversation and file evidence together" in prompt
     assert "filename: bilaga.pdf" in prompt
-    assert "role_evidence: content:example_output_marker" in prompt
+    assert "så här ska rapporten se ut" in prompt
 
 
 def test_slot_classification_system_prompt_stays_domain_neutral() -> None:

@@ -234,6 +234,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
                 value=value,
                 confidence="high",
                 reason=f"{slot_name} evidence",
+                evidence=(f"{slot_name} quote",),
             )
             for slot_name, value in values_by_slot.items()
         ),
@@ -269,6 +270,7 @@ def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:
                             "value": "structured_text",
                             "confidence": "high",
                             "reason": "report output",
+                            "evidence": ["user asked for a report"],
                             "extra": "not persisted",
                         }
                     ],
@@ -291,6 +293,28 @@ def test_slot_classification_metadata_rejects_overlong_reason() -> None:
                             "value": "structured_text",
                             "confidence": "high",
                             "reason": "x" * 501,
+                            "evidence": ["user asked for a report"],
+                        }
+                    ],
+                }
+            }
+        )
+        is None
+    )
+
+
+def test_slot_classification_metadata_rejects_missing_evidence() -> None:
+    assert (
+        slot_classification_from_metadata(
+            {
+                "slot_classification": {
+                    "prompt_hash": "a" * 64,
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "high",
+                            "reason": "old unsupported shape",
                         }
                     ],
                 }
@@ -309,6 +333,7 @@ def test_slot_classification_writer_bounds_reason_text() -> None:
                     value="structured_text",
                     confidence="high",
                     reason="x" * 800,
+                    evidence=("user asked for a report",),
                 ),
             )
         ),
@@ -317,6 +342,7 @@ def test_slot_classification_writer_bounds_reason_text() -> None:
 
     assert classification is not None
     assert len(classification.slots[0].reason) == 500
+    assert classification.slots[0].evidence == ["user asked for a report"]
 
 
 def test_slot_classification_writer_keeps_valid_slots_when_one_slot_is_invalid() -> (
@@ -330,18 +356,21 @@ def test_slot_classification_writer_keeps_valid_slots_when_one_slot_is_invalid()
                     value="structured_text",
                     confidence="high",
                     reason="valid",
+                    evidence=("valid quote",),
                 ),
                 ClassifiedSlot(
                     slot_name="runtime_metadata_fields",
                     value="not_a_runtime_metadata_value",
                     confidence="high",
                     reason="invalid",
+                    evidence=("invalid quote",),
                 ),
                 ClassifiedSlot(
                     slot_name="primary_runtime_input",
                     value="unknown",
                     confidence="low",
                     reason="ignored",
+                    evidence=("ignored quote",),
                 ),
             )
         ),
@@ -361,12 +390,14 @@ def test_slot_classification_model_rejects_duplicate_slots() -> None:
                 "value": "structured_text",
                 "confidence": "high",
                 "reason": "first",
+                "evidence": ["first quote"],
             },
             {
                 "slot_name": "terminal_output",
                 "value": "structured_json",
                 "confidence": "high",
                 "reason": "second",
+                "evidence": ["second quote"],
             },
         ],
     }
@@ -386,6 +417,7 @@ def test_slot_classification_model_rejects_non_llm_slot_name() -> None:
                             "value": "generated_docx",
                             "confidence": "high",
                             "reason": "not LLM resolvable",
+                            "evidence": ["not LLM resolvable quote"],
                         }
                     ],
                 }

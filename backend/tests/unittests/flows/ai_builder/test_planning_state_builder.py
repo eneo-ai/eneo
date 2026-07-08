@@ -10,6 +10,7 @@ layer, not two containers deep.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
 
@@ -27,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedFileRole,
     ClassifiedSlot,
     SlotClassificationConfidence,
     SlotClassificationResult,
@@ -119,12 +121,15 @@ def _classified(
     slot_name: str,
     value: str,
     confidence: SlotClassificationConfidence,
+    *,
+    evidence: tuple[str, ...] | None = None,
 ) -> ClassifiedSlot:
     return ClassifiedSlot(
         slot_name=slot_name,
         value=value,
         confidence=confidence,
         reason=f"{slot_name} classified",
+        evidence=evidence or (f"{slot_name} evidence",),
     )
 
 
@@ -1326,7 +1331,31 @@ class TestSlotClassificationMetadataReplay:
 
         slot = state.resolved_slots["terminal_output"]
         assert slot.value == "structured_text"
-        assert slot.evidence == ["model:terminal_output:" + "a" * 64]
+        assert slot.evidence == [
+            "model:terminal_output:" + "a" * 64,
+            "quote:terminal_output evidence",
+        ]
+
+    def test_model_slot_without_quoted_evidence_is_ignored(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="terminal_output",
+                        value="structured_text",
+                        confidence="high",
+                        reason="unsupported",
+                    ),
+                )
+            ),
+            prompt_hash="h" * 64,
+            freeform_text="",
+        )
+
+        assert "terminal_output" not in state.resolved_slots
 
     def test_legacy_metadata_without_slot_classification_replays_without_error(
         self,
@@ -1642,6 +1671,7 @@ class TestModelSlotMerge:
         assert slot.source == "model"
         assert slot.evidence == [
             "model:runtime_metadata_fields:" + "b" * 64,
+            "quote:runtime_metadata_fields evidence",
         ]
 
     def test_high_model_runtime_metadata_without_text_evidence_keeps_policy_default(
@@ -1934,6 +1964,125 @@ class TestModelSlotMerge:
         )
 
         assert state.resolved_slots == {}
+
+    def test_model_file_role_overlays_unconfirmed_context_only_role(self) -> None:
+        file_id = "00000000-0000-0000-0000-000000000701"
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="bilaga.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                role="context_only",
+                source="heuristic",
+                confidence="low",
+                evidence=["fallback:unclassified_file"],
+            )
+        ]
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=UUID(file_id),
+                        role="example_output",
+                        confidence="medium",
+                        reason="conversation says the upload is an example report",
+                        evidence=("så här ska rapporten se ut",),
+                    ),
+                )
+            ),
+            prompt_hash="h" * 64,
+            freeform_text="",
+        )
+
+        role = state.file_roles[0]
+        assert role.role == "example_output"
+        assert role.source == "model"
+        assert role.confidence == "medium"
+        assert role.evidence == [
+            "fallback:unclassified_file",
+            f"model:file_role:{'h' * 64}",
+            "quote:så här ska rapporten se ut",
+        ]
+        assert role.candidate_roles == ["context_only", "example_output"]
+
+    def test_model_file_role_without_quoted_evidence_is_ignored(self) -> None:
+        file_id = "00000000-0000-0000-0000-000000000703"
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="bilaga.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                role="context_only",
+                source="heuristic",
+                confidence="low",
+                evidence=["fallback:unclassified_file"],
+            )
+        ]
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=UUID(file_id),
+                        role="example_output",
+                        confidence="medium",
+                        reason="unsupported file role",
+                    ),
+                )
+            ),
+            prompt_hash="h" * 64,
+            freeform_text="",
+        )
+
+        role = state.file_roles[0]
+        assert role.role == "context_only"
+        assert role.source == "heuristic"
+        assert role.evidence == ["fallback:unclassified_file"]
+
+    def test_model_file_role_does_not_replace_structural_runtime_sample(self) -> None:
+        file_id = "00000000-0000-0000-0000-000000000702"
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="meeting.m4a",
+                file_type="audio",
+                mimetype="audio/mp4",
+                role="runtime_input_sample",
+                source="heuristic",
+                confidence="high",
+                evidence=["file_type:audio"],
+            )
+        ]
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=UUID(file_id),
+                        role="example_output",
+                        confidence="medium",
+                        reason="speculative file role",
+                        evidence=("maybe an example",),
+                    ),
+                )
+            ),
+            prompt_hash="i" * 64,
+            freeform_text="",
+        )
+
+        role = state.file_roles[0]
+        assert role.role == "runtime_input_sample"
+        assert role.source == "heuristic"
+        assert role.evidence == ["file_type:audio"]
 
     def test_prompt_hash_is_required(self) -> None:
         state = _state()

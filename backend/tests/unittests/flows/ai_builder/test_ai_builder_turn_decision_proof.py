@@ -111,6 +111,7 @@ def _output_uncertain_state() -> PlanningState:
                     value=UNKNOWN_SLOT_VALUE,
                     confidence="high",
                     reason="user_explicit_uncertain",
+                    evidence=("not sure what the final output should be",),
                 ),
             )
         ),

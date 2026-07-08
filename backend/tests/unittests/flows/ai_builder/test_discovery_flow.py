@@ -1560,6 +1560,7 @@ class TestExtendedClarificationHints:
                         value="summarize_or_overview",
                         confidence="high",
                         reason="The model guessed a useful document summary.",
+                        evidence=("skapa något användbart",),
                     ),
                 )
             )
@@ -1611,6 +1612,7 @@ class TestExtendedClarificationHints:
                         value="summarize_or_overview",
                         confidence="high",
                         reason="The model guessed a transcript summary.",
+                        evidence=("transkriberingsflöde",),
                     ),
                 )
             )
@@ -1899,6 +1901,7 @@ class TestExtendedClarificationHints:
                         value="no_runtime_metadata",
                         confidence="high",
                         reason="No separate runtime metadata requested.",
+                        evidence=("summarize the uploaded policy",),
                     ),
                 )
             )
@@ -1938,12 +1941,14 @@ class TestExtendedClarificationHints:
                         value="extract_key_information",
                         confidence="high",
                         reason="OCR suggests extracting readable text.",
+                        evidence=("OCR-flöde",),
                     ),
                     ClassifiedSlot(
                         slot_name="terminal_output",
                         value="structured_text",
                         confidence="high",
                         reason="OCR commonly returns text.",
+                        evidence=("OCR-flöde",),
                     ),
                 )
             )
@@ -2001,12 +2006,14 @@ class TestExtendedClarificationHints:
                         value="stop_after_primary_operation",
                         confidence="high",
                         reason="transcription flow",
+                        evidence=("transkriberingsflöde",),
                     ),
                     ClassifiedSlot(
                         slot_name="structured_analysis_need",
                         value="text_only_analysis",
                         confidence="high",
                         reason="raw transcription",
+                        evidence=("transkriberingsflöde",),
                     ),
                 )
             )
