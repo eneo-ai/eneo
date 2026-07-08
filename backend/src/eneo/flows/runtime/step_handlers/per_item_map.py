@@ -21,6 +21,11 @@ from eneo.flows.runtime.step_execution_runtime import (
     complete_step_execution,
 )
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
+from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    mapped_output_diagnostics,
+    mapped_rag_metadata,
+    sum_optional_token_counts,
+)
 from eneo.flows.source_identity import (
     runtime_source_identity_fields_for_array_items,
     without_runtime_source_identity_json_fields,
@@ -237,7 +242,7 @@ async def _assemble_per_item_output(
             ),
             severity="info",
         ),
-        *(diagnostic for call in item_calls for diagnostic in call.output.diagnostics),
+        *mapped_output_diagnostics(call.output for call in item_calls),
         *typed_output.diagnostics,
     ]
     final_structured_output: dict[str, Any] | list[Any] | None = (
@@ -254,8 +259,12 @@ async def _assemble_per_item_output(
         persisted_text=persisted_text,
         generated_file_ids=generated_file_ids,
         tool_calls_metadata=_item_map_tool_metadata(item_calls),
-        num_tokens_input=_sum_optional(call.output.num_tokens_input for call in item_calls),
-        num_tokens_output=_sum_optional(call.output.num_tokens_output for call in item_calls),
+        num_tokens_input=sum_optional_token_counts(
+            call.output.num_tokens_input for call in item_calls
+        ),
+        num_tokens_output=sum_optional_token_counts(
+            call.output.num_tokens_output for call in item_calls
+        ),
         effective_prompt=first_output.effective_prompt,
         model_parameters_json={
             **first_output.model_parameters_json,
@@ -487,17 +496,11 @@ def _item_map_tool_metadata(
 def _item_map_rag_metadata(
     item_calls: list[PerItemMapCall],
 ) -> dict[str, Any] | None:
-    metadata = [
-        call.output.rag_metadata
-        for call in item_calls
-        if call.output.rag_metadata is not None
-    ]
-    if not metadata:
-        return None
-    return {
-        "execution_mode": "per_item",
-        "items": metadata,
-    }
+    return mapped_rag_metadata(
+        execution_mode="per_item",
+        collection_key="items",
+        outputs=(call.output for call in item_calls),
+    )
 
 
 def _optional_string(value: object) -> str | None:
@@ -505,13 +508,3 @@ def _optional_string(value: object) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
-
-
-def _sum_optional(values: Any) -> int | None:
-    total = 0
-    observed = False
-    for value in values:
-        if isinstance(value, int):
-            total += value
-            observed = True
-    return total if observed else None

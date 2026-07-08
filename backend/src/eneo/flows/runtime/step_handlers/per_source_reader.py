@@ -25,6 +25,11 @@ from eneo.flows.runtime.step_handlers.base import (
     ListStepInputFileIdsFn,
     PrepareAssistantStepFn,
 )
+from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    mapped_output_diagnostics,
+    mapped_rag_metadata,
+    sum_optional_token_counts,
+)
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.source_identity import without_runtime_source_identity_json_fields
 from eneo.main.exceptions import TypedIOValidationException
@@ -228,11 +233,7 @@ async def _assemble_per_source_output(
             ),
             severity="info",
         ),
-        *(
-            diagnostic
-            for call in per_source_calls
-            for diagnostic in call.output.diagnostics
-        ),
+        *mapped_output_diagnostics(call.output for call in per_source_calls),
         *typed_output.diagnostics,
     ]
     final_structured_output: dict[str, Any] | list[Any] | None = (
@@ -249,8 +250,10 @@ async def _assemble_per_source_output(
         persisted_text=persisted_text,
         generated_file_ids=generated_file_ids,
         tool_calls_metadata=_per_source_tool_metadata(per_source_calls),
-        num_tokens_input=_sum_optional(call.output.num_tokens_input for call in per_source_calls),
-        num_tokens_output=_sum_optional(
+        num_tokens_input=sum_optional_token_counts(
+            call.output.num_tokens_input for call in per_source_calls
+        ),
+        num_tokens_output=sum_optional_token_counts(
             call.output.num_tokens_output for call in per_source_calls
         ),
         effective_prompt=first_output.effective_prompt,
@@ -522,24 +525,8 @@ def _per_source_tool_metadata(
 def _per_source_rag_metadata(
     per_source_calls: list[PerSourceReaderCall],
 ) -> dict[str, Any] | None:
-    metadata = [
-        call.output.rag_metadata
-        for call in per_source_calls
-        if call.output.rag_metadata is not None
-    ]
-    if not metadata:
-        return None
-    return {
-        "execution_mode": "per_source",
-        "sources": metadata,
-    }
-
-
-def _sum_optional(values: Any) -> int | None:
-    total = 0
-    observed = False
-    for value in values:
-        if isinstance(value, int):
-            total += value
-            observed = True
-    return total if observed else None
+    return mapped_rag_metadata(
+        execution_mode="per_source",
+        collection_key="sources",
+        outputs=(call.output for call in per_source_calls),
+    )
