@@ -13,6 +13,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
+from eneo.files.file_reference import url_only_file_ids
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.sessions.session import SessionUpdate
@@ -236,11 +237,13 @@ class ConversationService:
             if assistant_prompt is not None:
                 prompt_text = assistant_prompt
             prompt_tokens = count_tokens(prompt_text or "", model_name)
+            # Assistant attachments are exempt from URL-only mode: the send
+            # path always inlines their text (they get no URL references), so
+            # count them fully regardless of inline_file_text.
             assistant_attachment_tokens, _ = await self._count_preflight_files(
                 files=attachments,
                 model=model,
                 model_name=model_name,
-                inline_file_text=inline_file_text,
             )
 
         return PreflightResponse(
@@ -267,18 +270,12 @@ class ConversationService:
         # ones with inlinable text.
         document_files = [f for f in files if f.file_type == FileType.TEXT]
 
-        # When the assistant does not inline file text, a document whose original
-        # is reachable via a signed URL is sent as that URL (a tiny block), not
-        # its extracted text — so it must not be counted here at all and reads as
-        # excluded. Mirror completion_service: a URL is minted only when a base
-        # URL is set and the file has a storage_key.
-        if not inline_file_text:
-            app_settings = get_settings()
-            base_url = (
-                app_settings.file_reference_base_url or app_settings.public_origin
-            )
-            if base_url:
-                document_files = [f for f in document_files if not f.storage_key]
+        # A URL-only document is sent as its signed URL (a tiny block), not its
+        # extracted text or derived images — so it must not be counted here at
+        # all and reads as excluded. Same predicate as the send path.
+        url_only = url_only_file_ids(document_files, inline_file_text)
+        if url_only:
+            document_files = [f for f in document_files if f.id not in url_only]
         image_files = (
             [f for f in files if f.file_type == FileType.IMAGE] if model.vision else []
         )

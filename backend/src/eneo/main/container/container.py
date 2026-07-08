@@ -805,6 +805,17 @@ class Container(containers.DeclarativeContainer):
     audit_session_service = providers.Factory(
         AuditSessionService,
     )
+    # Feature flag service for audit logging and other toggles
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
+    audit_service = providers.Factory(
+        AuditService,
+        repository=audit_log_repo,
+        audit_config_service=audit_config_service,
+        feature_flag_service=feature_flag_service,
+    )
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
@@ -816,6 +827,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         session=session,
         redis_client=redis_client,
+        audit_service=audit_service,
     )
 
     # Datastore
@@ -899,17 +911,6 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     auth_service = providers.Factory(AuthService)
-    # Feature flag service for audit logging and other toggles
-    feature_flag_service = providers.Factory(
-        FeatureFlagService,
-        feature_flag_repo=feature_flag_repo,
-    )
-    audit_service = providers.Factory(
-        AuditService,
-        repository=audit_log_repo,
-        audit_config_service=audit_config_service,
-        feature_flag_service=feature_flag_service,
-    )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
         session=session,

@@ -13,9 +13,13 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.signed_urls import build_signed_download_url
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
-from eneo.files.file_models import File
+from eneo.files.file_models import File, FileType
+from eneo.files.file_reference import file_reference_base_url
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings, get_settings
 from eneo.main.logging import get_logger
@@ -30,6 +34,7 @@ from eneo.tokens.token_utils import log_token_count_drift
 from eneo.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
+    from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         CompletionModelAdapter,
     )
@@ -58,9 +63,11 @@ class CompletionService:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
+        audit_service: Optional["AuditService"] = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
+        self.audit_service = audit_service
         self.config = config or SETTINGS
         if encryption_service is None:
             encryption_settings: Settings | None = (
@@ -149,16 +156,17 @@ class CompletionService:
         Empty when there is no public origin or tenant context, or no file has a
         ``storage_key`` (storage unconfigured or upload degraded gracefully).
         """
-        # Prefer an explicit tool-facing base URL (reachable server-to-server by
-        # the MCP tool); fall back to the browser-facing public origin.
-        base_url = self.config.file_reference_base_url or self.config.public_origin
+        base_url = file_reference_base_url(self.config)
         if not base_url or self.tenant is None:
             return {}
 
         expires_in = self.config.file_reference_url_expiry_seconds
         urls: dict[UUID, str] = {}
         for file in files:
-            if getattr(file, "storage_key", None):
+            # Only TEXT files are surfaced in the reference block (images ride
+            # as vision inputs), so mint only what can actually be exposed —
+            # which also keeps the mint audit truthful.
+            if file.file_type == FileType.TEXT and file.storage_key:
                 urls[file.id] = build_signed_download_url(
                     file_id=file.id,
                     base_url=base_url,
@@ -167,6 +175,45 @@ class CompletionService:
                     variant="original",
                 )
         return urls
+
+    async def _audit_file_reference_mints(
+        self,
+        files: list[File],
+        file_reference_urls: dict[UUID, str],
+        session: SessionInDB | None,
+    ) -> None:
+        """Audit the signed-URL mints for this turn's newly attached files.
+
+        History files are re-minted every turn but represent the same exposure
+        of the same file to the same session — the initial mint is the audited
+        event, so only current-turn files are logged. Skipped without a user
+        (worker/service contexts): the mint has no attributable actor.
+        """
+        if self.audit_service is None or self.tenant is None or self.user is None:
+            return
+        for file in files:
+            if file.id not in file_reference_urls:
+                continue
+            await self.audit_service.log_async(
+                tenant_id=self.tenant.id,
+                user=self.user,
+                action=ActionType.FILE_SIGNED_URL_MINTED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=(
+                    f"Minted signed URL for file '{file.name}' for LLM/MCP context"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=file,
+                    extra={
+                        "source": "completion",
+                        "variant": "original",
+                        "expires_in": self.config.file_reference_url_expiry_seconds,
+                        "session_id": str(session.id) if session else None,
+                    },
+                ),
+            )
 
     @staticmethod
     def is_valid_arguments(arguments: str):
@@ -299,6 +346,9 @@ class CompletionService:
             for file in question.files
         ]
         file_reference_urls = self._build_file_reference_urls(files + history_files)
+        await self._audit_file_reference_mints(
+            files=files, file_reference_urls=file_reference_urls, session=session
+        )
 
         # Create MCP proxy session before building the context, so the tool
         # definitions it will register can be counted toward the token budget.
