@@ -416,12 +416,18 @@ def _assemble_create_intent(
                 "source_file_first_step_requires_json",
                 step_index=index + 1,
             )
+        aggregate_terminal_previous_refs = _aggregate_terminal_previous_structured_refs(
+            planned_steps=tuple(planned_steps),
+            aggregation_intent=aggregation_intent,
+            is_terminal_semantic_step=is_terminal_semantic_step,
+        )
         input_source = _linear_step_input_source(
             step_index=index,
             semantic_step_count=len(semantic_steps),
             aggregation_intent=aggregation_intent,
             has_source_prefix=has_source_prefix,
             prior_step_count=len(planned_steps),
+            aggregate_terminal_uses_source_refs=bool(aggregate_terminal_previous_refs),
         )
         if input_source == InputSource.ALL_PREVIOUS_STEPS and (
             semantic_step.uses_form_fields
@@ -441,12 +447,15 @@ def _assemble_create_intent(
         previous_planned_step = (
             planned_steps[-1] if input_source == InputSource.PREVIOUS_STEP else None
         )
-        previous_field_refs = _derived_terminal_text_previous_field_refs(
-            planned_steps=tuple(planned_steps),
-            input_source=input_source,
-            input_type=input_type,
-            output_type=step_output_type,
-            is_terminal_semantic_step=is_terminal_semantic_step,
+        previous_field_refs = (
+            aggregate_terminal_previous_refs
+            or _derived_terminal_text_previous_field_refs(
+                planned_steps=tuple(planned_steps),
+                input_source=input_source,
+                input_type=input_type,
+                output_type=step_output_type,
+                is_terminal_semantic_step=is_terminal_semantic_step,
+            )
         )
         planned_step = PlannedStep(
             role=_linear_step_role(
@@ -1018,6 +1027,30 @@ def _derived_terminal_text_previous_field_refs(
     )
 
 
+def _aggregate_terminal_previous_structured_refs(
+    *,
+    planned_steps: tuple[PlannedStep, ...],
+    aggregation_intent: AggregationIntent,
+    is_terminal_semantic_step: bool,
+) -> tuple[PreviousFieldRef, ...]:
+    if (
+        aggregation_intent not in {"aggregate", "compare"}
+        or not is_terminal_semantic_step
+        or len(planned_steps) < 2
+    ):
+        return ()
+    if any(
+        step.output_type != OutputType.JSON or not step.output_fields
+        for step in planned_steps
+    ):
+        return ()
+    return tuple(
+        PreviousFieldRef(from_step=index, field_path=field.name)
+        for index, step in enumerate(planned_steps, start=1)
+        for field in step.output_fields
+    )
+
+
 def _is_pure_audio_transcription_request(
     *,
     runtime_input_type: InputType,
@@ -1137,6 +1170,7 @@ def _linear_step_input_source(
     aggregation_intent: str,
     has_source_prefix: bool,
     prior_step_count: int,
+    aggregate_terminal_uses_source_refs: bool,
 ) -> InputSource:
     if step_index == 0 and not has_source_prefix:
         return InputSource.FLOW_INPUT
@@ -1145,6 +1179,8 @@ def _linear_step_input_source(
         and step_index == semantic_step_count - 1
         and prior_step_count > 1
     ):
+        if aggregate_terminal_uses_source_refs:
+            return InputSource.PREVIOUS_STEP
         return InputSource.ALL_PREVIOUS_STEPS
     return InputSource.PREVIOUS_STEP
 

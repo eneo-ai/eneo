@@ -923,7 +923,10 @@ def test_assembly_places_server_owned_runtime_field_hints() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in() -> None:
+@pytest.mark.parametrize("aggregation_intent", ["aggregate", "compare"])
+def test_compiler_uses_source_refs_for_structured_terminal_fan_in(
+    aggregation_intent: AggregationIntent,
+) -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Aggregate report",
@@ -936,11 +939,88 @@ def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in() -> Non
                     "output_type": "json",
                     "output_fields": [
                         {
-                            "name": "facts",
-                            "field_type": "array",
-                            "description": "Source facts.",
+                            "name": "source_summary",
+                            "field_type": "string",
+                            "description": "Source summary.",
                         }
                     ],
+                },
+                {
+                    "name": "Analyze facts",
+                    "instructions": "Analyze the extracted facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "analysis",
+                            "field_type": "string",
+                            "description": "Analysis summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the final report body from prior work.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent=aggregation_intent,
+        ),
+    )
+
+    body_step = compiled.steps[-2]
+    renderer_step = compiled.steps[-1]
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    assert body_step.input_source == InputSource.PREVIOUS_STEP
+    assert body_step.input_type == InputType.TEXT
+    assert body_step.input_bindings == {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "source_summary",
+                "label": "source summary",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "analysis",
+                "label": "analysis",
+            },
+        ]
+    }
+    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
+    assert renderer_step.input_type == InputType.TEXT
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.input_bindings is None
+    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
+    assert validate_spec(compiled).valid
+
+
+def test_aggregate_document_body_keeps_fan_in_when_prior_contract_is_missing() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Aggregate report",
+            "flow_description": "Extract, analyze, and render a PDF report.",
+            "plan_rationale": "The body writer aggregates mixed prior work.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract source facts without a stable schema.",
+                    "output_type": "json",
                 },
                 {
                     "name": "Analyze facts",
@@ -974,21 +1054,8 @@ def test_compiler_uses_assembly_path_for_aggregate_document_body_fan_in() -> Non
     )
 
     body_step = compiled.steps[-2]
-    renderer_step = compiled.steps[-1]
-    assert [step.output_type for step in compiled.steps] == [
-        OutputType.JSON,
-        OutputType.JSON,
-        OutputType.TEXT,
-        OutputType.PDF,
-    ]
     assert body_step.input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert body_step.input_type == InputType.TEXT
     assert body_step.input_bindings is None
-    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
-    assert renderer_step.input_type == InputType.TEXT
-    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
-    assert renderer_step.input_bindings is None
-    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
     assert validate_spec(compiled).valid
 
 
