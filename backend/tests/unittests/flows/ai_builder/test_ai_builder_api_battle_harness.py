@@ -379,6 +379,56 @@ def test_event_summary_extracts_failure_detail() -> None:
     assert failure_summary["error_details"][0]["message"] == "Quality retry failed."
 
 
+def test_event_summary_records_assumptions_for_posture_goldens(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+
+    summary = harness._interaction_event_summary(
+        [
+            {
+                "events": [
+                    {
+                        "event": "requirements_summary",
+                        "data": {"assumptions": ["One section per source.", ""]},
+                    },
+                    {
+                        "event": "plan",
+                        "data": {
+                            "proposal": {
+                                "assumptions": [
+                                    "One section per source.",
+                                    "Render as PDF.",
+                                ]
+                            }
+                        },
+                    },
+                ]
+            }
+        ]
+    )
+    result = harness._suite_result(
+        {
+            "case": {"id": "document_pdf_source_retention_balance"},
+            "session_id": "session-1",
+            "plan_id": "plan-1",
+            "repetition": 1,
+            "plan_summary": {"step_count": 2},
+            "event_summary": summary,
+            "quality_report": {"checks": [], "warnings": [], "metrics": {}},
+        },
+        tmp_path / "bundle.json",
+    )
+    reliability = harness._suite_reliability_summary([result])
+
+    assert summary["assumptions"] == ["One section per source.", "Render as PDF."]
+    assert result["assumptions"] == ["One section per source.", "Render as PDF."]
+    assert reliability["document_pdf_source_retention_balance"]["assumptions"] == [
+        "One section per source.",
+        "Render as PDF.",
+    ]
+
+
 def test_suite_returns_failure_when_quality_checks_fail(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

@@ -804,6 +804,7 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "warnings": warnings if isinstance(warnings, list) else [],
         "metrics": metrics if isinstance(metrics, Mapping) else {},
         "event_summary": dict(event_summary),
+        "assumptions": _string_list(event_summary.get("assumptions")),
         "failure_summary": bundle.get("failure_summary")
         if isinstance(bundle.get("failure_summary"), Mapping)
         else _failure_summary(event_summary),
@@ -838,8 +839,10 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
         repair_failure_count = 0
         invalid_plan_count = 0
         text_only_question_count = 0
+        assumptions: list[str] = []
         error_code_counts: dict[str, int] = {}
         for result in case_results:
+            _extend_unique_strings(assumptions, _string_list(result.get("assumptions")))
             event_summary = result.get("event_summary")
             if not isinstance(event_summary, Mapping):
                 continue
@@ -863,6 +866,7 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
             "self_correction_invalid_plan_count": invalid_plan_count,
             "self_correction_quality_failure_count": repair_failure_count,
             "server_ask_question_text_only_count": text_only_question_count,
+            "assumptions": assumptions,
         }
     return summary
 
@@ -1294,6 +1298,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
     critic_issue_ids: list[str] = []
     repair_feedback_texts: list[str] = []
     question_like_text_events: list[str] = []
+    assumptions: list[str] = []
     server_ask_question_text_only_count = 0
     self_correction_quality_failure_count = 0
 
@@ -1317,6 +1322,16 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
                 question_id = data.get("question_id")
                 if isinstance(question_id, str) and question_id:
                     question_event_ids.append(question_id)
+            elif event_name == "requirements_summary" and isinstance(data, Mapping):
+                _extend_unique_strings(
+                    assumptions, _clean_strings(data.get("assumptions"))
+                )
+            elif event_name == "plan" and isinstance(data, Mapping):
+                proposal = data.get("proposal")
+                if isinstance(proposal, Mapping):
+                    _extend_unique_strings(
+                        assumptions, _clean_strings(proposal.get("assumptions"))
+                    )
             elif event_name == "text":
                 text = _event_text(data)
                 if text and _looks_like_question_text(text):
@@ -1346,6 +1361,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
         "question_like_text_event_count": len(question_like_text_events),
         "question_like_text_events": question_like_text_events[:5],
         "server_ask_question_text_only_count": server_ask_question_text_only_count,
+        "assumptions": assumptions,
         "error_codes": error_codes,
         "self_correction_quality_failure_count": (
             self_correction_quality_failure_count
@@ -2015,6 +2031,10 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _clean_strings(value: object) -> list[str]:
+    return [item.strip() for item in _string_list(value) if item.strip()]
 
 
 def _string_values_from_keys(
