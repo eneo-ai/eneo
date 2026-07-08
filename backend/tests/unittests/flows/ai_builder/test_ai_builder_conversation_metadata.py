@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 
+from eneo.flows.ai_builder import ai_builder_conversation_metadata as metadata_module
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
@@ -33,6 +34,18 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
 )
+
+
+def _capture_metadata_warnings(monkeypatch) -> list[tuple[str, dict[str, object]]]:
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def capture_warning(
+        message: str, *, extra: dict[str, object] | None = None
+    ) -> None:
+        warnings.append((message, extra or {}))
+
+    monkeypatch.setattr(metadata_module.logger, "warning", capture_warning)
+    return warnings
 
 
 def test_question_answer_request_discriminator_is_not_persisted() -> None:
@@ -301,6 +314,58 @@ def test_slot_classification_metadata_rejects_overlong_reason() -> None:
         )
         is None
     )
+
+
+def test_slot_classification_metadata_logs_invalid_persisted_shape(monkeypatch) -> None:
+    warnings = _capture_metadata_warnings(monkeypatch)
+
+    assert (
+        slot_classification_from_metadata(
+            {
+                "slot_classification": {
+                    "prompt_hash": "a" * 64,
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "high",
+                            "reason": "x" * 501,
+                            "evidence": ["user asked for a report"],
+                        }
+                    ],
+                }
+            }
+        )
+        is None
+    )
+
+    assert warnings
+    message, extra = warnings[0]
+    assert message == "AI Builder ignored invalid persisted conversation metadata"
+    assert extra["metadata_kind"] == "slot_classification"
+
+
+def test_requirements_summary_metadata_logs_invalid_persisted_shape(
+    monkeypatch,
+) -> None:
+    warnings = _capture_metadata_warnings(monkeypatch)
+
+    assert (
+        requirements_summary_from_metadata(
+            {
+                "requirements_summary": {
+                    "summary_markdown": "missing required version field"
+                },
+                "requirements_version": "req_1",
+            }
+        )
+        is None
+    )
+
+    assert warnings
+    message, extra = warnings[0]
+    assert message == "AI Builder ignored invalid persisted conversation metadata"
+    assert extra["metadata_kind"] == "requirements_summary"
 
 
 def test_slot_classification_metadata_rejects_missing_evidence() -> None:

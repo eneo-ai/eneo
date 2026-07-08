@@ -40,6 +40,8 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultObligation,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+    CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
     SlotClassificationConfidence,
@@ -50,6 +52,9 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
 REQUIREMENTS_CONFIRMED_METADATA_KEY = "requirements_confirmed"
@@ -74,8 +79,6 @@ LLMResolvableSlotName: TypeAlias = Literal[
 ]
 
 _MAX_SLOT_CLASSIFICATION_REASON_LENGTH = 500
-_MAX_SLOT_CLASSIFICATION_EVIDENCE_LENGTH = 240
-_MAX_SLOT_CLASSIFICATION_EVIDENCE_ITEMS = 3
 _MAX_SLOT_CLASSIFICATION_NOTE_LENGTH = 500
 _MAX_SLOT_CLASSIFICATION_NOTES = 10
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
@@ -83,7 +86,7 @@ _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 
 SlotClassificationEvidence: TypeAlias = Annotated[
     str,
-    Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_EVIDENCE_LENGTH),
+    Field(min_length=1, max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH),
 ]
 
 
@@ -96,7 +99,7 @@ class SlotClassificationSlotMetadata(BaseModel):
     reason: str = Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_REASON_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
         min_length=1,
-        max_length=_MAX_SLOT_CLASSIFICATION_EVIDENCE_ITEMS,
+        max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     )
 
     @model_validator(mode="after")
@@ -345,6 +348,19 @@ def _bounded_metadata_text(
     return stripped[:max_length]
 
 
+def _warn_invalid_persisted_metadata(
+    metadata_kind: str,
+    error: ValidationError,
+) -> None:
+    logger.warning(
+        "AI Builder ignored invalid persisted conversation metadata",
+        extra={
+            "metadata_kind": metadata_kind,
+            "validation_errors": error.errors(include_input=False, include_url=False),
+        },
+    )
+
+
 def requirements_confirmation_from_question_answer(
     value: AIBuilderQuestionAnswerInput | None,
 ) -> RequirementsConfirmationMetadata | None:
@@ -388,7 +404,15 @@ def question_answer_from_metadata(
     answer = _mapping_value(metadata_map.get(QUESTION_ANSWER_METADATA_KEY))
     if answer is None:
         return None
-    return structured_question_answer_from_input(answer)
+    data = dict(answer)
+    data.setdefault("kind", "structured_question_answer")
+    if data.get("requirements_confirmed") is True:
+        return None
+    try:
+        return StructuredQuestionAnswerMetadata.model_validate(data)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(QUESTION_ANSWER_METADATA_KEY, error)
+        return None
 
 
 def question_answer_to_metadata(
@@ -436,7 +460,8 @@ def requirements_confirmation_from_metadata(
                 ),
             }
         )
-    except ValidationError:
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(REQUIREMENTS_CONFIRMED_METADATA_KEY, error)
         return None
 
 
@@ -490,11 +515,11 @@ def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object]
         _bounded_metadata_text(
             value,
             fallback="slot evidence",
-            max_length=_MAX_SLOT_CLASSIFICATION_EVIDENCE_LENGTH,
+            max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH,
         )
         for value in slot.evidence
         if value.strip()
-    ][:_MAX_SLOT_CLASSIFICATION_EVIDENCE_ITEMS]
+    ][:CLASSIFICATION_EVIDENCE_MAX_ITEMS]
     if not evidence:
         return None
     return {
@@ -531,7 +556,8 @@ def slot_classification_from_metadata(
         return None
     try:
         return SlotClassificationMetadata.model_validate(classification)
-    except ValidationError:
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(SLOT_CLASSIFICATION_METADATA_KEY, error)
         return None
 
 
@@ -583,7 +609,8 @@ def requirements_summary_from_metadata(
                 ),
             }
         )
-    except ValidationError:
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(REQUIREMENTS_SUMMARY_METADATA_KEY, error)
         return None
 
 
@@ -631,32 +658,6 @@ def question_answer_has_real_payload(
         if any(_text_from_scalar(value) for value in raw_values):
             return True
     return False
-
-
-def question_answer_text_candidates(
-    answer: StructuredQuestionAnswerMetadata | Mapping[str, Any],
-) -> set[str]:
-    payload = _question_answer_payload(answer)
-    candidates: set[str] = set()
-    for key in (
-        "selected_option_id",
-        "selected_value",
-        "answer",
-        "custom_value",
-    ):
-        raw_value = payload.get(key)
-        text = _text_from_scalar(raw_value)
-        if text is not None:
-            candidates.add(text.casefold())
-    for key in ("selected_option_ids", "selected_values"):
-        raw_values = _object_sequence(payload.get(key))
-        if raw_values is None:
-            continue
-        for raw_value in raw_values:
-            text = _text_from_scalar(raw_value)
-            if text is not None:
-                candidates.add(text.casefold())
-    return candidates
 
 
 def question_answer_values(
@@ -815,7 +816,8 @@ def persisted_assistant_tool_call_from_raw(
         return None
     try:
         return PersistedAssistantToolCall.model_validate(value_map)
-    except ValidationError:
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata("tool_call", error)
         return None
 
 

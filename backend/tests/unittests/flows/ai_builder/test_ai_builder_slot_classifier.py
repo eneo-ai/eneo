@@ -260,7 +260,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 8,
+                    "schema_version": 9,
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -364,6 +364,20 @@ def test_classification_prompt_includes_unconfirmed_uploaded_file_evidence() -> 
     assert "not confirmed user requirements" in prompt
     assert "filename: beslutsmall.docx" in prompt
     assert "has_readable_text: false" in prompt
+
+
+def test_classification_prompt_places_evidence_bounds_in_model_contract() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        text="Jag vill ha en PDF-rapport.",
+        allowed_slot_values={"terminal_output": frozenset({"pdf_document"})},
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+
+    assert f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes" in prompt
+    assert f"at most {classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH}" in prompt
+    assert "exact_quote_str" in prompt
 
 
 def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
@@ -507,7 +521,7 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "example_output means the user attached a file as an example" in prompt
-    assert '"evidence": [str]' in prompt
+    assert '"evidence": [exact_quote_str]' in prompt
     assert "attachment-only conclusions as medium confidence" in prompt
     assert '"file_roles": [{"file_id": str, "role": str' in prompt
     assert "Use the conversation and file evidence together" in prompt

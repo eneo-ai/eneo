@@ -23,10 +23,10 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 8
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 9
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
-_MAX_CLASSIFICATION_EVIDENCE_ITEMS = 3
-_MAX_CLASSIFICATION_EVIDENCE_LENGTH = 240
+CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
+CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,8 +324,8 @@ def _parse_classification_evidence(raw_value: object) -> tuple[str, ...]:
         value = item.strip()
         if not value:
             continue
-        evidence.append(value[:_MAX_CLASSIFICATION_EVIDENCE_LENGTH])
-        if len(evidence) >= _MAX_CLASSIFICATION_EVIDENCE_ITEMS:
+        evidence.append(value[:CLASSIFICATION_EVIDENCE_MAX_LENGTH])
+        if len(evidence) >= CLASSIFICATION_EVIDENCE_MAX_ITEMS:
             break
     return tuple(evidence)
 
@@ -414,6 +414,10 @@ def _build_slot_classification_prompt(
         "Use a slot only when the conversation provides real evidence. "
         "Every slot and file_role classification must include evidence: exact "
         "quoted user words or uploaded-file excerpt lines supporting the claim. "
+        f"Use 1-{CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes per "
+        f"classification, each at most {CLASSIFICATION_EVIDENCE_MAX_LENGTH} "
+        "characters. Shorten by selecting a shorter exact span, never by "
+        "paraphrasing. "
         "If you cannot cite exact evidence, emit confidence low. "
         "Interpret natural Swedish and English phrasing by meaning, not by exact "
         "keywords. The allowed values are framework concepts, so choose a value only "
@@ -494,8 +498,8 @@ def _build_slot_classification_prompt(
         f"{obligation_values}\n\n"
         "Return JSON with this shape:\n"
         "{"
-        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [str]}], '
-        '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [str]}], '
+        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]}], '
+        '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]}], '
         '"secondary_obligations": [str], '
         '"assumptions": [str], '
         '"contradictions": [str]'

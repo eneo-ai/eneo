@@ -22,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
     question_answer_has_real_payload,
     question_answer_question_id,
-    question_answer_text_candidates,
     question_answer_values,
     structured_question_payload_from_tool_arguments,
     tool_calls_from_message,
@@ -382,7 +381,7 @@ def _looks_like_structured_answer_echo(
     if not question_answer_has_real_payload(question_answer):
         return False
 
-    candidates = question_answer_text_candidates(question_answer)
+    candidates = question_answer_values(question_answer)
 
     if normalized_content in candidates:
         return True
