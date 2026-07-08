@@ -43,6 +43,27 @@ Closest supported alternative: Convert the image into a supported document or te
 - Compare and decide: yes. See [Designing Flows](/guides/flows/designing-flows#compare-and-decide).
 - Form intake to artifact: yes. See [Designing Flows](/guides/flows/designing-flows#form-intake-to-artifact).
 
+## How should I handle many files or very large files?
+
+Start by deciding whether the flow must read every source or only find relevant passages.
+
+- If the flow must inspect every uploaded source, use runtime file inputs and a document-reader design that extracts bounded JSON before report-writing or artifact steps.
+- If the flow answers questions over a large library, use knowledge retrieval instead of pushing the whole library through one Flow step.
+- If the caller needs to choose options such as language, date range, or report disposition, use form fields in `input_payload_json`.
+- If a later step only needs facts from an earlier step, pass typed JSON fields or targeted step references rather than full prose.
+
+Many-source document report flows built by Flow AI Builder can read sources one at a time and then compose the typed result. This avoids the common failure mode where one first step receives all files, exceeds the selected model's usable context window, or loses source boundaries.
+
+Current constraint: one very large document can still exceed the selected model's context window. Use a larger-context model, split the document, or use retrieval when the task only needs relevant passages.
+
+See [Designing Flows: Large files, many files, and context windows](/guides/flows/designing-flows#large-files-many-files-and-context-windows).
+
+## Why does a generated report show `Källa: filename.pdf`?
+
+The section heading should name the document's human title or topic. The `Källa` line names the uploaded artifact that produced that section.
+
+Keep both identities. A filename can be ugly, but it is the audit pointer to the exact uploaded source. Eneo cleans unsafe display characters, deduplicates repeated names, and falls back to numbered source labels when the original filename is missing.
+
 ## Capability and endpoint pitfalls
 
 | What you can do                     | Endpoint owner                                                                                                                             | Trap                                                                 | Consumer action                                                                                                                 |

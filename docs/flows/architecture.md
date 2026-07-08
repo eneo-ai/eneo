@@ -165,6 +165,55 @@ The run lifecycle is database-first:
    run from persisted result state. See
    `backend/src/eneo/flows/runtime/executor.py:881`.
 
+## Large Runtime Input And Context-Window Policy
+
+Large-input handling is a runtime execution concern, not a static file-count
+rule. The risk variable is the token volume packaged into each model call. A
+run may attach many small files safely, while one long document may exceed the
+selected model's usable context window.
+
+Use two different designs:
+
+| Case | Correct shape | Owner |
+| --- | --- | --- |
+| Exhaustive work where every uploaded source must be read, extracted, cited, or summarized | Map the reader over bounded source units, then compose typed outputs downstream. | `PassThroughStepHandler` dispatches valid per-source readers and fails closed for invalid `per_source` configuration. See `backend/src/eneo/flows/runtime/step_handlers/pass_through.py:38` and `backend/src/eneo/flows/runtime/step_handlers/pass_through.py:50`. |
+| Selective question answering over a large library where only relevant passages matter | Use knowledge retrieval/RAG so the model receives selected chunks, not the full corpus. | Retrieval stays an assistant/knowledge concern, not a Flow step-input transport. |
+
+For Flow AI Builder-generated multi-source document readers, the current
+runtime map is explicit:
+
+1. Builder lowering carries `runtime_input_execution_mode` from the planned step
+   into the compiled step draft. See
+   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py:167`.
+2. Builder lowering removes runtime-owned source identity fields from the
+   model-facing output guidance while preserving them in the persisted step
+   contract. See
+   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py:177` and
+   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py:189`.
+3. `PerSourceReader` lists the bound runtime file ids and executes one model
+   call per source file. See
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:73` and
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:106`.
+4. The runtime stamps `source_label` and `source_file_id` after each call, so the
+   model does not own source identity. See
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:365`.
+5. Per-source diagnostics preserve source count, token totals, per-source token
+   records, input text previews, and extraction diagnostics. See
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:221`,
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:250`, and
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:502`.
+
+`Underlag till text` / source-material bindings are bounded inter-step dataflow.
+They are not the mechanism for transporting a large corpus through one prompt.
+Use targeted step references and typed JSON contracts for downstream facts, not
+`all_previous_steps` as a raw document-text bus.
+
+Current hardening gap: runtime still needs a model-window guard that measures the
+actual packaged prompt for a call against the selected model's usable context
+window and fails with an actionable error before the provider rejects or truncates
+the request. Do not add a compile-time token estimator for this; the same
+published Flow can run later with different files and different model settings.
+
 ## Step Behavior And Output Format
 
 Flows separate the two axes that used to drift together:

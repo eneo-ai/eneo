@@ -16,6 +16,17 @@ All content is:
 4. **Stored** in PostgreSQL with pgvector
 5. **Retrieved** when relevant to queries
 
+Use document processing when a user asks selective questions over a large
+corpus. Retrieval searches the indexed chunks and sends the most relevant
+passages to the model.
+
+Use Eneo Flows when a run must process specific uploaded files and produce a
+structured output, report, PDF, or DOCX artifact. For many-source reports,
+design the Flow so each source is read separately and later steps compose the
+bounded results. Do not use a knowledge base as a hidden replacement for a flow
+that must audit every uploaded source, and do not use a single Flow step to
+stuff an entire large corpus into one prompt.
+
 ---
 
 ## Uploading Documents
