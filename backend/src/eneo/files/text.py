@@ -2,7 +2,7 @@ import logging
 import zipfile
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import magic
 import pdfplumber
@@ -103,6 +103,29 @@ class TextMimeTypes(MimeTypesBase):
 # Text Processing
 # =============================================================================
 
+PDF_TEXT_LIKELY_REVERSED_WARNING: Final = "pdf_text_likely_reversed"
+_PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING: Final = 40
+_PDF_TEXT_MIN_REVERSED_COMMON_TOKENS: Final = 5
+_PDF_TEXT_COMMON_WORDS: Final = frozenset(
+    (
+        "och",
+        "att",
+        "det",
+        "den",
+        "som",
+        "med",
+        "till",
+        "eller",
+        "ska",
+        "har",
+        "kan",
+        "inte",
+    )
+)
+_PDF_TEXT_REVERSED_COMMON_WORDS: Final = frozenset(
+    word[::-1] for word in _PDF_TEXT_COMMON_WORDS
+)
+
 
 class TextSanitizer:
     @staticmethod
@@ -164,6 +187,40 @@ class TextExtractor:
             padded = row + [""] * (len(rows[0]) - len(row))
             lines.append("| " + " | ".join(padded[: len(rows[0])]) + " |")
         return "\n".join(lines)
+
+    @classmethod
+    def pdf_text_quality_warnings(cls, text: str) -> tuple[str, ...]:
+        if cls._looks_likely_reversed_pdf_text(text):
+            return (PDF_TEXT_LIKELY_REVERSED_WARNING,)
+        return ()
+
+    @classmethod
+    def _looks_likely_reversed_pdf_text(cls, text: str) -> bool:
+        tokens = cls._text_quality_tokens(text)
+        if len(tokens) < _PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING:
+            return False
+        reversed_hits = sum(
+            1 for token in tokens if token in _PDF_TEXT_REVERSED_COMMON_WORDS
+        )
+        if reversed_hits < _PDF_TEXT_MIN_REVERSED_COMMON_TOKENS:
+            return False
+        common_hits = sum(1 for token in tokens if token in _PDF_TEXT_COMMON_WORDS)
+        return reversed_hits > common_hits
+
+    @staticmethod
+    def _text_quality_tokens(text: str) -> list[str]:
+        tokens: list[str] = []
+        token: list[str] = []
+        for char in text.casefold():
+            if char.isalpha():
+                token.append(char)
+                continue
+            if token:
+                tokens.append("".join(token))
+                token = []
+        if token:
+            tokens.append("".join(token))
+        return tokens
 
     @classmethod
     def _extract_pdf_page(cls, page: Any) -> str:

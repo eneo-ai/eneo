@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from eneo.files.text import (
+    PDF_TEXT_LIKELY_REVERSED_WARNING,
     CorruptFileError,
     EncryptedFileError,
     ExtractionError,
@@ -244,6 +245,20 @@ class TestTextExtractorPDF:
 
             assert "\x00" not in result
             assert "HelloWorld" in result
+
+    def test_pdf_text_quality_warnings_flags_likely_reversed_text(self):
+        reversed_words = "hco tta ted ned mos dem llit relle aks rah nak etni "
+        text = reversed_words * 4
+
+        assert TextExtractor.pdf_text_quality_warnings(text) == (
+            PDF_TEXT_LIKELY_REVERSED_WARNING,
+        )
+
+    def test_pdf_text_quality_warnings_ignores_normal_text(self):
+        normal_words = "och att det den som med till eller ska har kan inte "
+        text = normal_words * 4
+
+        assert TextExtractor.pdf_text_quality_warnings(text) == ()
 
 
 class TestTextExtractorDOCX:

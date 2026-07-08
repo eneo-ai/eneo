@@ -20,6 +20,7 @@ import eneo.flows.runtime.executor as executor_module
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
@@ -572,6 +573,7 @@ async def test_resolve_step_input_document_loads_files(user):
                 "text_length": len("Extracted document text"),
                 "has_text": True,
                 "has_transcription": False,
+                "extraction_warnings": [],
             }
         ],
         "source_headers": [
@@ -584,6 +586,7 @@ async def test_resolve_step_input_document_loads_files(user):
                 "has_file_name": True,
                 "has_text": True,
                 "text_length": len("Extracted document text"),
+                "extraction_warnings": [],
             }
         ],
         "total_file_size": 128,
@@ -723,6 +726,58 @@ async def test_resolve_step_input_document_preserves_empty_source_slot(
     assert diagnostic.severity == "warning"
     assert "[SOURCE 2] (second.pdf)" in diagnostic.message
     assert "flow_executor.runtime_input_source_text_unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_warns_when_pdf_text_looks_reversed(
+    user,
+    caplog,
+):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    reversed_words = "hco tta ted ned mos dem llit relle aks rah nak etni "
+    fake_file = SimpleNamespace(
+        id=file_id,
+        text=f"[PAGE 1]\n{reversed_words * 4}",
+        name="reversed.pdf",
+        checksum="checksum-1",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with caplog.at_level("WARNING"):
+        resolved = await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[file_id],
+        )
+
+    assert len(resolved.diagnostics) == 1
+    diagnostic = resolved.diagnostics[0]
+    assert diagnostic.code == PDF_TEXT_LIKELY_REVERSED_WARNING
+    assert diagnostic.severity == "warning"
+    assert "[SOURCE 1] (reversed.pdf)" in diagnostic.message
+    assert "looks reversed or garbled" in diagnostic.message
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["files"][0]["extraction_warnings"] == [
+        PDF_TEXT_LIKELY_REVERSED_WARNING
+    ]
+    assert resolved.runtime_input_metadata["source_headers"][0][
+        "extraction_warnings"
+    ] == [PDF_TEXT_LIKELY_REVERSED_WARNING]
+    assert "flow_executor.runtime_input_source_extraction_warning" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1892,11 +1947,17 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     assistant.get_response = AsyncMock(
         side_effect=[
             SimpleNamespace(
-                completion='{"title":"Alpha"}',
+                completion=(
+                    '{"source_label":"uploaded_source_1",'
+                    '"source_file_id":"unspecified","title":"Alpha"}'
+                ),
                 total_token_count=11,
             ),
             SimpleNamespace(
-                completion='{"title":"Beta"}',
+                completion=(
+                    '{"source_label":"uploaded_source_2",'
+                    '"source_file_id":"unspecified","title":"Beta"}'
+                ),
                 total_token_count=13,
             ),
         ]

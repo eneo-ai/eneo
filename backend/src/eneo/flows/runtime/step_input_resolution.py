@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Final, Sequence
 from uuid import UUID
 
+from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING, TextExtractor
 from eneo.flows.domain.flow import FlowRun, FlowStepResult
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
@@ -407,7 +408,56 @@ def _extract_text_from_files(
                 text=text_value.strip(),
             )
         )
+        for warning in _runtime_source_extraction_warnings(file=file, text=text_value):
+            diagnostics.append(
+                _runtime_source_extraction_warning_diagnostic(
+                    step_order=step_order,
+                    source_number=source_number,
+                    file=file,
+                    warning=warning,
+                )
+            )
+            if logger is not None:
+                logger.warning(
+                    "flow_executor.runtime_input_source_extraction_warning "
+                    "step_order=%d source_number=%d file_id=%s file_name=%s warning=%s",
+                    step_order,
+                    source_number,
+                    getattr(file, "id", None),
+                    _runtime_source_file_name(file),
+                    warning,
+                )
     return "\n\n".join(extracted), diagnostics
+
+
+def _runtime_source_extraction_warnings(*, file: Any, text: str) -> list[str]:
+    if getattr(file, "mimetype", None) != "application/pdf":
+        return []
+    return list(TextExtractor.pdf_text_quality_warnings(text))
+
+
+def _runtime_source_extraction_warning_diagnostic(
+    *,
+    step_order: int,
+    source_number: int,
+    file: Any,
+    warning: str,
+) -> StepDiagnostic:
+    source_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
+        source_number=source_number
+    )
+    file_name = _runtime_source_file_name(file)
+    source_description = (
+        f"{source_label} ({file_name})" if file_name is not None else source_label
+    )
+    if warning == PDF_TEXT_LIKELY_REVERSED_WARNING:
+        reason = "extracted PDF text looks reversed or garbled"
+    else:
+        reason = f"extracted text quality warning: {warning}"
+    return StepDiagnostic(
+        code=warning,
+        message=f"Step {step_order}: {reason} for {source_description}.",
+    )
 
 
 def _runtime_source_empty_text_diagnostic(
@@ -493,6 +543,11 @@ def _build_runtime_source_header_metadata(
         source_number=source_number
     )
     text_value = getattr(file, "text", None)
+    extraction_warnings = (
+        _runtime_source_extraction_warnings(file=file, text=text_value)
+        if isinstance(text_value, str)
+        else []
+    )
     return {
         "source_number": source_number,
         "source_label": file_name or source_marker,
@@ -502,6 +557,7 @@ def _build_runtime_source_header_metadata(
         "has_file_name": file_name is not None,
         "has_text": isinstance(text_value, str) and text_value.strip() != "",
         "text_length": len(text_value) if isinstance(text_value, str) else None,
+        "extraction_warnings": extraction_warnings,
     }
 
 
@@ -515,6 +571,11 @@ def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
         file_type = None
     text_value = getattr(file, "text", None)
     transcription_value = getattr(file, "transcription", None)
+    extraction_warnings = (
+        _runtime_source_extraction_warnings(file=file, text=text_value)
+        if isinstance(text_value, str)
+        else []
+    )
     return {
         "id": str(getattr(file, "id")),
         "name": getattr(file, "name", None),
@@ -527,6 +588,7 @@ def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
         "has_transcription": (
             isinstance(transcription_value, str) and transcription_value.strip() != ""
         ),
+        "extraction_warnings": extraction_warnings,
     }
 
 
