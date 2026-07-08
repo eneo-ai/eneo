@@ -100,7 +100,7 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 | -------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------- |
 | `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post`       | Explicit per step |
 | `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `image`, `any`                        | Explicit per step |
-| `output_mode`                    | How the step produces its result                   | `pass_through`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill` | Explicit per step |
+| `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill` | Explicit per step |
 | `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                      | Explicit per step |
 | `mcp_policy`                     | How MCP tool access is handled for the step        | `inherit`, `restricted`                                                            | Usually `inherit` |
 | `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                          | No override       |
@@ -111,7 +111,7 @@ The backend sorts steps by `step_order`. A later step can:
 
 - reuse the original flow input
 - consume the previous step's output
-- aggregate all previous step outputs
+- aggregate previous step outputs, preferably through targeted structured refs
 - fetch input from HTTP
 
 The flow graph endpoint and the web editor both expose this structure directly.
@@ -155,10 +155,24 @@ If a published flow exposes form fields, the client sends those values inside `i
 | `output_mode`     | What it is for                                    | Constraints                                                                          |
 | ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `pass_through`    | Standard LLM-backed generation                    | Historical name; the step still runs an LLM and returns the configured `output_type` |
+| `compose_text`    | Deterministic text assembly from resolved refs     | Requires `input_type=text`, `output_type=text`, and authored input bindings         |
 | `http_post`       | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config                                                  |
 | `transcribe_only` | Audio transcription                               | Requires `input_type=audio` and `output_type=text`                                   |
 | `render_verbatim` | Zero-LLM PDF/DOCX rendering from resolved text    | Requires `input_type=text` and `output_type=pdf` or `output_type=docx`               |
 | `template_fill`   | DOCX document assembly                            | Requires `output_type=docx`                                                          |
+
+### `compose_text`
+
+`compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools. AI Builder uses it for source-section document reports after semantic steps have already produced the section body, source label, source file id, and optional overview fields.
+
+Current validation rules are strict:
+
+- `input_type` must be `text`
+- `output_type` must be `text`
+- array `source_refs` require an `item_template` that references known structured fields
+- unknown template fields are rejected before runtime
+
+Use this when a later renderer needs deterministic text from already-structured facts, not another model rewrite.
 
 ### `http_post`
 

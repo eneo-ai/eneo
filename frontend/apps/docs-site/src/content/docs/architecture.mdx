@@ -143,7 +143,7 @@ Eneo Flows is a backend product surface with authoring, publishing, runtime exec
 | Run contract               | `FlowRunContractService`                                                                          |
 | Run creation and dispatch  | `FlowRunService` and Flow runtime tasks                                                           |
 | Step execution             | `FlowRunExecutor` and runtime `StepHandler` implementations                                       |
-| Output rendering           | Output format specs plus `render_verbatim`, `transcribe_only`, `template_fill`, and step handlers |
+| Output rendering           | Output format specs plus `compose_text`, `render_verbatim`, `transcribe_only`, `template_fill`, and step handlers |
 | Evidence and artifacts     | `FlowRunEvidenceService`, evidence bundle/export modules, and artifact file services              |
 
 **Flow AI Builder create compilation:**
@@ -168,7 +168,7 @@ Create-mode no longer has a separate create-dataflow or step-skeleton compiler p
 
 The lowering layer is the only writer of compiled source refs and input bindings for assembly-backed create plans. Later passes must not silently rewrite underlag channels, renderer modes, transcription mechanics, or template-fill mechanics.
 
-Generated PDF/DOCX final artifacts use a body-writer step followed by `render_verbatim`. Audio transcription uses `transcribe_only`, and DOCX templates use `template_fill`. These fixed runtime modes avoid unnecessary LLM calls; the semantic LLM work happens before the fixed renderer, transcriber, or filler step.
+Generated PDF/DOCX final artifacts use a body-writer step followed by `render_verbatim`. Source-section document reports require a deterministic `compose_text` body writer immediately before the renderer. Audio transcription uses `transcribe_only`, and DOCX templates use `template_fill`. These fixed runtime modes avoid unnecessary LLM calls; the semantic LLM work happens before the fixed composer, renderer, transcriber, or filler step.
 
 Create-mode proposal schemas keep input/output mechanics backend-owned: the model supplies semantic step instructions, JSON `output_fields`, form-field usage, and resource refs, while assembly derives concrete output types, previous-output material, and final render steps.
 

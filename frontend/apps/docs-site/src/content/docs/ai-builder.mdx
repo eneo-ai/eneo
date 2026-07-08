@@ -47,7 +47,7 @@ For create-plan compilation, supported shapes now pass through an explicit compi
 
 That spine is compile-time only; it is not persisted and it is not a second Flow definition. Its job is to make mechanical choices once, then lower them into normal Flow authoring data.
 
-`FlowAssemblyPlan` is the construction-time guardrail. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering. Linear plans reject fan-in; aggregate and compare plans may use fan-in only where the body writer intentionally combines compacted prior outputs.
+`FlowAssemblyPlan` is the construction-time guardrail. It validates capability support, step order, previous-output references, form-field placement, source exposure, source-reader obligations, UI language, and aggregation intent before lowering. Linear plans reject broad fan-in. Aggregate and compare terminal steps use targeted `source_refs` when prior steps have structured output contracts; they fall back to `all_previous_steps` only when a prior step has no structured contract to bind.
 
 There is no parallel create-dataflow or step-skeleton materializer for create plans. Those legacy paths were removed so new Builder work has one assembly owner to extend or delete.
 
@@ -57,11 +57,11 @@ Current assembly-backed create shapes include:
 
 - linear text, JSON, and document-source flows
 - generated PDF/DOCX artifact flows with a body-writer step followed by a `render_verbatim` renderer
-- aggregate and compare document flows where the body writer intentionally fans in prior compacted step outputs
+- aggregate and compare document flows where the body writer reads targeted structured outputs from prior steps
 - pure audio transcription and audio-derived report flows
 - DOCX template-fill flows with a template-variable reader, content-preparation step, and `template_fill` step
 
-Generated document artifacts use `render_verbatim` for the final renderer. Audio transcription uses `transcribe_only`. Both are zero-LLM runtime pathways; the LLM work happens in semantic preparation steps before those fixed runtime modes.
+Generated document artifacts use `render_verbatim` for the final renderer. Source-section document reports insert a deterministic `compose_text` body writer immediately before that renderer. Audio transcription uses `transcribe_only`. These are zero-LLM runtime pathways; the LLM work happens in semantic preparation steps before the fixed composer, renderer, transcriber, or filler step.
 
 Create-mode proposal tools do not expose per-step input sources, input types, output types, output modes, previous-step refs, or raw bindings. `output_fields` describe semantic JSON fields; the compiler derives the concrete Flow output type and renderer mechanics from the committed architecture.
 
@@ -121,7 +121,7 @@ That is different from instructions:
 
 AI Builder should normally let the backend compose material from flow input, form fields, files, and previous outputs. That is more robust than asking the language model to hand-write fragile prompt templates. Use advanced material overrides only when the default material assembly is not precise enough.
 
-For assembly-backed create plans, the underlag channel is part of `FlowAssemblyPlan`: implicit previous output, whole-object refs, field refs, text anchors, or fan-in. The selected channel is lowered into normal Flow bindings once. Later validation may reject invalid output, but it must not silently choose a different channel.
+For assembly-backed create plans, the underlag channel is part of `FlowAssemblyPlan`: implicit previous output, whole-object refs, field refs, targeted `source_refs`, text anchors, or broad fan-in. The selected channel is lowered into normal Flow bindings once. Later validation may reject invalid output, but it must not silently choose a different channel.
 
 See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Advanced step input templates</a> for the runtime mental model.
 
