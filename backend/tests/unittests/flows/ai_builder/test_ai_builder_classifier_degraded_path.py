@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.ai_builder import ai_builder_discovery_runtime
+from eneo.flows.ai_builder.ai_builder_action_policy import build_planner_action_policy
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_runtime_discovery_context,
@@ -15,10 +16,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
-KEYWORD_BASELINE_CASES = (
+CLASSIFIER_EVAL_CASES = (
     pytest.param(
         "Jag vill transkribera ljud och få en PDF-rapport.",
         {
@@ -63,12 +64,54 @@ KEYWORD_BASELINE_CASES = (
     ),
 )
 
+KEYWORD_OUTAGE_FALLBACK_CASES = (
+    pytest.param(
+        "Jag vill transkribera ljud och få en PDF-rapport.",
+        {
+            "primary_runtime_input": "audio",
+            "terminal_output": "pdf_document",
+        },
+        {"primary_runtime_input", "terminal_output"},
+        id="audio-to-pdf-report",
+    ),
+    pytest.param(
+        (
+            "Jag vill ladda upp flera dokument och få en PDF-rapport med "
+            "avsnitt per dokument och en samlad översikt."
+        ),
+        {"document_material_scope": "multiple_documents_case"},
+        {"document_material_scope"},
+        id="multi-document-fallback-keeps-cardinality-only",
+    ),
+    pytest.param(
+        "Jag vill ladda upp text och plocka ut beslut, nästa steg och ansvariga.",
+        {"post_processing_goal": "action_followup"},
+        {"post_processing_goal"},
+        id="action-followup",
+    ),
+    pytest.param(
+        "Bygg ett flöde som tar JSON och extraherar fält till ny JSON.",
+        {"structured_io_contract": "extract_or_compute_fields"},
+        {"structured_io_contract"},
+        id="json-field-extraction",
+    ),
+    pytest.param(
+        (
+            "Bygg ett flöde som tar ljud och användaren ska ange ärendenummer "
+            "och handläggare vid körning."
+        ),
+        {"runtime_metadata_fields": "detailed_case_metadata"},
+        {"runtime_metadata_fields"},
+        id="runtime-metadata-fields",
+    ),
+)
 
-def test_keyword_baseline_cases_cover_all_llm_resolvable_slots() -> None:
+
+def test_classifier_eval_cases_cover_all_llm_resolvable_slots() -> None:
     covered_slots = {
         slot_name
         for _text, expected_slots, _forbidden_questions in (
-            case.values for case in KEYWORD_BASELINE_CASES
+            case.values for case in CLASSIFIER_EVAL_CASES
         )
         for slot_name in expected_slots
     }
@@ -94,10 +137,20 @@ def _classifier_result_for(
     )
 
 
+def _slot(name: str, value: str) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source="structured_answer",
+        evidence=[f"test:{name}"],
+        confidence="high",
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("text", "expected_slots", "forbidden_questions"),
-    KEYWORD_BASELINE_CASES,
+    KEYWORD_OUTAGE_FALLBACK_CASES,
 )
 async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
     monkeypatch: pytest.MonkeyPatch,
@@ -142,11 +195,59 @@ async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
 
 
 @pytest.mark.asyncio
+async def test_classifier_outage_asks_report_disposition_instead_of_keyword_guess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classifier_outage(**_: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        ai_builder_discovery_runtime,
+        "classify_slots",
+        classifier_outage,
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Jag vill ladda upp flera dokument och få en PDF-rapport med "
+                "avsnitt per dokument och en samlad översikt."
+            ),
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=object(),
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    assert "report_disposition" not in context.planning_state.resolved_slots
+    context.planning_state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "summarize_or_overview",
+    )
+    context.planning_state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    policy = build_planner_action_policy(
+        session_state=context.planning_state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert "report_disposition" in policy.allowed_ask_question_targets
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("text", "expected_slots", "forbidden_questions"),
-    KEYWORD_BASELINE_CASES,
+    CLASSIFIER_EVAL_CASES,
 )
-async def test_classifier_primary_path_suppresses_keyword_baseline_questions(
+async def test_classifier_primary_path_suppresses_eval_baseline_questions(
     monkeypatch: pytest.MonkeyPatch,
     text: str,
     expected_slots: dict[str, str],
@@ -195,9 +296,9 @@ async def test_classifier_primary_path_suppresses_keyword_baseline_questions(
 
 @pytest.mark.parametrize(
     ("text", "expected_slots", "_forbidden_questions"),
-    KEYWORD_BASELINE_CASES,
+    CLASSIFIER_EVAL_CASES,
 )
-def test_keyword_baseline_cases_are_classifier_shape_ready(
+def test_classifier_eval_cases_are_classifier_shape_ready(
     text: str,
     expected_slots: dict[str, str],
     _forbidden_questions: set[str],

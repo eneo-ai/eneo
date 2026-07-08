@@ -701,7 +701,7 @@ class TestPolicyDefaults:
         )
         assert "comparison_scope" not in state.resolved_slots
 
-    def test_multi_source_comparison_infers_synthesized_report_disposition(
+    def test_multi_source_comparison_leaves_report_disposition_to_classifier(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -716,12 +716,9 @@ class TestPolicyDefaults:
             ]
         )
 
-        slot = state.resolved_slots["report_disposition"]
-        assert slot.value == "synthesized_overview"
-        assert slot.source == "heuristic"
-        assert slot.confidence == "high"
+        assert "report_disposition" not in state.resolved_slots
 
-    def test_multi_source_sections_and_overview_infer_both_report_disposition(
+    def test_multi_source_sections_and_overview_leave_report_disposition_to_classifier(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -736,7 +733,7 @@ class TestPolicyDefaults:
             ]
         )
 
-        assert state.resolved_slots["report_disposition"].value == "both"
+        assert "report_disposition" not in state.resolved_slots
 
     def test_plain_multi_source_report_leaves_report_disposition_open(self) -> None:
         state = build_planning_state_from_conversation(
