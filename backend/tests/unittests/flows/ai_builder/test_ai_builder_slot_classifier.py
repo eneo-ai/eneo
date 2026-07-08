@@ -633,6 +633,8 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     assert "attachment-only conclusions as medium confidence" in prompt
     assert '"file_roles": [{"file_id": str, "role": str' in prompt
     assert "Use the conversation and file evidence together" in prompt
+    assert "Do not wait for deterministic inferred_role example_output" in prompt
+    assert "report_disposition, terminal_output" in prompt
     assert "filename: bilaga.pdf" in prompt
     assert "så här ska rapporten se ut" in prompt
 

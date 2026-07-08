@@ -847,20 +847,30 @@ def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
     terminal_output = state.resolved_slots.get("terminal_output")
     document_material_scope = state.resolved_slots.get("document_material_scope")
     docx_output_mode = state.resolved_slots.get("docx_output_mode")
-    return _report_disposition_values_are_relevant(
-        primary_runtime_input=(
-            primary_runtime_input.value if primary_runtime_input is not None else None
-        ),
-        terminal_output=terminal_output.value if terminal_output is not None else None,
-        document_material_scope=(
-            document_material_scope.value
-            if document_material_scope is not None
-            else None
-        ),
-        docx_output_mode=docx_output_mode.value
-        if docx_output_mode is not None
-        else None,
-    )
+    if primary_runtime_input is not None and primary_runtime_input.value not in {
+        "document",
+        "documents",
+        "text_and_documents",
+    }:
+        return False
+    if terminal_output is not None and terminal_output.value not in {
+        "pdf_document",
+        "docx_document",
+    }:
+        return False
+    if (
+        terminal_output is not None
+        and terminal_output.value == "docx_document"
+        and docx_output_mode is not None
+        and docx_output_mode.value == "template_fill_docx"
+    ):
+        return False
+    if document_material_scope is not None and document_material_scope.value not in {
+        "multiple_documents_case",
+        "flexible_document_case",
+    }:
+        return False
+    return True
 
 
 def _report_disposition_values_are_relevant(

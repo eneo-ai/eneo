@@ -552,6 +552,133 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
 
 
 @pytest.mark.asyncio
+async def test_runtime_planning_state_classifies_example_output_shape_in_one_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_id = uuid4()
+    initial_state = PlanningState.empty()
+    initial_state.resolved_slots = {
+        "primary_runtime_input": _slot(
+            "primary_runtime_input",
+            "documents",
+            source="structured_answer",
+        ),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "multiple_documents_case",
+            source="structured_answer",
+        ),
+    }
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        lambda *_args, **_kwargs: initial_state,
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "user requests a PDF report",
+                        "evidence": ["PDF-rapport med samma upplägg"],
+                    },
+                    {
+                        "slot_name": "report_disposition",
+                        "value": "both",
+                        "confidence": "high",
+                        "reason": "example report shows sections and overview",
+                        "evidence": ["samma upplägg som bifogad exempelrapport"],
+                    },
+                ],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "high",
+                        "reason": "conversation ties the upload to desired output",
+                        "evidence": ["bifogad exempelrapport"],
+                    }
+                ],
+            }
+        )
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Jag vill analysera flera dokument och skapa en PDF-rapport med "
+                "samma upplägg som bifogad exempelrapport."
+            ),
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+        attachment_context=AIBuilderAttachmentContext(
+            context=None,
+            discovery_context=(
+                "Unconfirmed uploaded-file evidence:\n"
+                f"file_id: {file_id}\n"
+                "filename: exempelrapport.pdf\n"
+                "file_type: document\n"
+                "mimetype: application/pdf\n"
+                "has_readable_text: true\n"
+                "inferred_role: context_only\n"
+                "role_confidence: low\n"
+                "excerpt: Inledning\nAvsnitt per källa\nSamlad bedömning"
+            ),
+            evidence=(
+                AIBuilderAttachmentEvidence(
+                    file_id=file_id,
+                    filename="exempelrapport.pdf",
+                    file_type=FileType.DOCUMENT,
+                    mimetype="application/pdf",
+                    has_readable_text=True,
+                    excerpt="Inledning\nAvsnitt per källa\nSamlad bedömning",
+                    inferred_role="context_only",
+                    role_confidence="low",
+                    role_evidence=("fallback:unclassified_file",),
+                ),
+            ),
+            included_file_ids=[],
+            total_chars=0,
+            truncated=False,
+        ),
+    )
+
+    assert context.planning_state.resolved_slots["terminal_output"].value == (
+        "pdf_document"
+    )
+    assert context.planning_state.resolved_slots["report_disposition"].value == "both"
+    assert context.planning_state.file_roles[0].role == "example_output"
+    allowed_schema = litellm_client.acompletion.await_args.kwargs["response_format"][
+        "json_schema"
+    ]["schema"]
+    offered_slots = {
+        variant["properties"]["slot_name"]["enum"][0]
+        for variant in allowed_schema["properties"]["slots"]["items"]["anyOf"]
+    }
+    assert "report_disposition" in offered_slots
+
+    analysis = analyze_discovery(
+        conversation,
+        planning_state=context.planning_state,
+        slot_classification_result=context.slot_classification_result,
+    )
+    assert "report_disposition" not in analysis.selected_question_ids
+
+
+@pytest.mark.asyncio
 async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_terminal_output() -> (
     None
 ):

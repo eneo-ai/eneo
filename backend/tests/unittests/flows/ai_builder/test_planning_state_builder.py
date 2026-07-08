@@ -1443,6 +1443,25 @@ class TestModelSlotMerge:
 
         assert "report_disposition" not in llm_resolvable_slot_values_for_state(state)
 
+    def test_report_disposition_can_be_classified_with_unresolved_terminal_output(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "document_material_scope": _slot(
+                name="document_material_scope",
+                value="multiple_documents_case",
+                source="structured_answer",
+            ),
+        }
+
+        assert "report_disposition" in llm_resolvable_slot_values_for_state(state)
+
     def test_structured_io_contract_can_be_classified_when_json_side_is_unresolved(
         self,
     ) -> None:
