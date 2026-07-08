@@ -24,7 +24,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    SlotClassificationResult,
+)
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -113,6 +116,18 @@ def _attachment_context() -> AIBuilderAttachmentContext:
         total_chars=0,
         truncated=False,
     )
+
+
+def test_discovery_analysis_carries_classifier_assumptions() -> None:
+    analysis = analyze_discovery(
+        [ConversationMessage(role="user", content="Build a document summary flow.")],
+        planning_state=_resolved_state(),
+        slot_classification_result=SlotClassificationResult(
+            assumptions=("The output can be a short summary.",)
+        ),
+    )
+
+    assert analysis.assumptions == ("The output can be a short summary.",)
 
 
 @pytest.mark.asyncio

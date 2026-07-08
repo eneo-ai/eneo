@@ -60,6 +60,7 @@ def _request(
     new_messages_start: int = 0,
     planning_state: PlanningState | None = None,
     requirements_confirmed: bool = False,
+    discovery_assumptions: tuple[str, ...] = (),
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -76,6 +77,7 @@ def _request(
             used_auxiliary_llm=False,
         ),
         planning_state=planning_state or PlanningState.empty(),
+        discovery_assumptions=discovery_assumptions,
     )
 
 
@@ -233,13 +235,21 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
     decision = CommitArchitecture(architecture_commit=_draft_for_state(state))
 
     result = await dispatch_server_decision(
-        _request(repo=repo, decision=decision, conversation=conversation)
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=conversation,
+            discovery_assumptions=("The report should keep one section per source.",),
+        )
     )
 
     assert [event.event for event in result.events] == [
         "status",
         "requirements_summary",
     ]
+    assert "The report should keep one section per source." in (
+        result.events[1].data.assumptions
+    )
     assert repo.commit_turn.await_count == 2
     first_commit = repo.commit_turn.await_args_list[0].kwargs
     assert first_commit["architecture_commit"] is not None

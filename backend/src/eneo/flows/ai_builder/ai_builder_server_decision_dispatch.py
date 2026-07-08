@@ -88,6 +88,7 @@ class ServerDecisionDispatchRequest:
     ui_language: str | None
     telemetry: ServerDecisionTelemetry
     planning_state: PlanningState
+    discovery_assumptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +227,7 @@ async def _dispatch_architecture_commit(
         selected_discovery_question_ids=(),
         requirements_confirmed=request.requirements_confirmed,
         ui_language=request.ui_language,
+        discovery_assumptions=request.discovery_assumptions,
     )
     if isinstance(turn_control.decision, ConfirmRequirements):
         chained = await dispatch_server_decision(
@@ -240,6 +242,7 @@ async def _dispatch_architecture_commit(
                 ui_language=request.ui_language,
                 telemetry=request.telemetry,
                 planning_state=session_state,
+                discovery_assumptions=request.discovery_assumptions,
             )
         )
         events.extend(chained.events)

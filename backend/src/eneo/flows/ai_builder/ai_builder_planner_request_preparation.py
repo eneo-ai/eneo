@@ -200,6 +200,7 @@ async def prepare_planner_request(
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
         requirements_confirmed=requirements_state.confirmed,
         ui_language=ui_language,
+        discovery_assumptions=discovery_analysis.assumptions,
     )
     if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(

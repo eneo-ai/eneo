@@ -149,12 +149,26 @@ def _make_file(text: str = "Reference") -> File:
 
 
 def _runtime_result(
-    discovery_analysis: object,
+    discovery_analysis: DiscoveryAnalysis,
     planning_state: PlanningState,
 ) -> DiscoveryRuntimeResult:
     return DiscoveryRuntimeResult(
-        discovery_analysis=cast(DiscoveryAnalysis, discovery_analysis),
+        discovery_analysis=discovery_analysis,
         planning_state=planning_state,
+    )
+
+
+def _discovery_analysis(
+    *,
+    mvs_met: bool = True,
+    selected_question_ids: tuple[str, ...] = (),
+    assumptions: tuple[str, ...] = (),
+) -> DiscoveryAnalysis:
+    return DiscoveryAnalysis(
+        issues=(),
+        mvs_met=mvs_met,
+        selected_question_ids=selected_question_ids,
+        assumptions=assumptions,
     )
 
 
@@ -686,7 +700,7 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    discovery_analysis = _discovery_analysis()
 
     with (
         patch(
@@ -742,7 +756,7 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
         )
     ]
     requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = SimpleNamespace(
+    discovery_analysis = _discovery_analysis(
         mvs_met=False,
         selected_question_ids=("primary_runtime_input",),
     )
@@ -800,7 +814,7 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
         )
     ]
     requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    discovery_analysis = _discovery_analysis()
     planning_state = PlanningState.empty()
     planning_state.resolved_slots = {
         "primary_runtime_input": ResolvedSlot(
@@ -874,7 +888,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
         )
     ]
     requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    discovery_analysis = _discovery_analysis()
     planning_state = PlanningState.empty()
     planning_state.resolved_slots = {
         "primary_runtime_input": ResolvedSlot(
@@ -960,7 +974,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
     requirements_state = _requirements_state_confirmed()
-    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    discovery_analysis = _discovery_analysis()
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
         tuples_chain=[
@@ -1059,7 +1073,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     requirements_state = _requirements_state_confirmed()
-    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    discovery_analysis = _discovery_analysis()
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
         tuples_chain=[
@@ -1184,7 +1198,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     requirements_state = _requirements_state_confirmed()
-    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    discovery_analysis = _discovery_analysis()
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
         tuples_chain=[

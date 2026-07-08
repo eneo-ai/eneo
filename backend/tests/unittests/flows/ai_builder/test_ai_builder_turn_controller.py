@@ -62,12 +62,14 @@ def _decision(
     state: PlanningState,
     ui_language: str | None,
     requirements_confirmed: bool = False,
+    discovery_assumptions: tuple[str, ...] = (),
 ) -> object:
     return resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
         requirements_confirmed=requirements_confirmed,
         ui_language=ui_language,
+        discovery_assumptions=discovery_assumptions,
     ).decision
 
 
@@ -280,6 +282,33 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
     assert "Syfte med bearbetningen: Sammanfatta eller ge överblick" in (
         decision.payload.assumptions
     )
+
+
+def test_server_confirmation_includes_discovery_assumptions() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "pdf_document"),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "multiple_documents_case",
+        ),
+        "pdf_generation_mode": _slot("pdf_generation_mode", "generated_pdf"),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields",
+            "no_extra_metadata",
+        ),
+    }
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(
+        state=state,
+        ui_language="sv",
+        discovery_assumptions=("Rapporten får ett avsnitt per källa.",),
+    )
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert "Rapporten får ett avsnitt per källa." in decision.payload.assumptions
 
 
 def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:

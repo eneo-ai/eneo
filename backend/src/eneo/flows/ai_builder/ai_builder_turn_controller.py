@@ -88,6 +88,7 @@ def resolve_turn_control(
     selected_discovery_question_ids: tuple[str, ...],
     requirements_confirmed: bool,
     ui_language: str | None,
+    discovery_assumptions: tuple[str, ...] = (),
 ) -> BuilderTurnControl:
     action_policy = build_planner_action_policy(
         session_state=session_state,
@@ -98,6 +99,7 @@ def resolve_turn_control(
         decision=_decision_from_policy(
             action_policy=action_policy,
             session_state=session_state,
+            discovery_assumptions=discovery_assumptions,
             ui_language=ui_language,
         ),
     )
@@ -107,6 +109,7 @@ def _decision_from_policy(
     *,
     action_policy: PlannerActionPolicy,
     session_state: PlanningState,
+    discovery_assumptions: tuple[str, ...],
     ui_language: str | None,
 ) -> BuilderTurnDecision:
     if "ask_question" in action_policy.allowed_action_kinds:
@@ -135,6 +138,7 @@ def _decision_from_policy(
             payload=_confirm_requirements_payload(
                 session_state,
                 _locale(ui_language),
+                discovery_assumptions,
             )
         )
 
@@ -164,6 +168,7 @@ def _locale(ui_language: str | None) -> Locale:
 def _confirm_requirements_payload(
     session_state: PlanningState,
     locale: Locale,
+    discovery_assumptions: tuple[str, ...] = (),
 ) -> RequirementsSummaryPayload:
     resolved = session_state.resolved_slots
     key_decisions = [
@@ -194,6 +199,7 @@ def _confirm_requirements_payload(
                 for slot_name in sorted(resolved)
                 if not _slot_is_key_decision(resolved[slot_name])
             ],
+            *discovery_assumptions,
             *_assumptions(locale),
         ],
         manual_setup_notes=[],

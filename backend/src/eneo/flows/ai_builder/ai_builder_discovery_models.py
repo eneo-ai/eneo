@@ -104,6 +104,7 @@ class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
     mvs_met: bool = True
     selected_question_ids: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
 
     @property
     def blocking_issues(self) -> tuple[DiscoveryIssue, ...]:

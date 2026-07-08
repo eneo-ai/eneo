@@ -332,6 +332,9 @@ class AIBuilderPlanner:
                                     ),
                                 ),
                                 planning_state=planner_turn_request.planning_state,
+                                discovery_assumptions=(
+                                    planner_turn_request.discovery_analysis.assumptions
+                                ),
                             )
                         )
                     except AIBuilderBadRequestException as error:

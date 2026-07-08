@@ -174,7 +174,7 @@ def analyze_discovery(
 
     (
         selected_issues,
-        _assumptions,
+        assumptions,
         selected_question_ids,
     ) = _apply_discovery_decision_engine(
         issues=_dedupe_issues(raw_issues),
@@ -187,6 +187,7 @@ def analyze_discovery(
         issues=tuple(selected_issues),
         mvs_met=mvs_met,
         selected_question_ids=tuple(selected_question_ids),
+        assumptions=tuple(assumptions),
     )
 
 
