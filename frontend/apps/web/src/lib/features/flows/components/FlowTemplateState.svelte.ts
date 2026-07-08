@@ -19,7 +19,6 @@ import {
   type TemplateBindingSuggestionLabels,
   type FlowTemplateInspection
 } from "$lib/features/flows/templateFillConfig";
-import { getTemplateFillErrorMessage } from "$lib/features/flows/templateFillErrors";
 import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
 /**
@@ -78,10 +77,7 @@ export class FlowTemplateState {
           : [];
       this.filesLoaded = true;
     } catch (error) {
-      this.configError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.flow_template_fill_template_help())
-      );
+      this.configError = getFlowRuntimeErrorMessage(error, m.flow_template_fill_template_help());
     } finally {
       this.filesLoading = false;
     }
@@ -113,10 +109,7 @@ export class FlowTemplateState {
         );
       }
     } catch (error) {
-      this.configError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.flow_template_fill_template_help())
-      );
+      this.configError = getFlowRuntimeErrorMessage(error, m.flow_template_fill_template_help());
     } finally {
       this.inspecting = false;
     }
@@ -158,10 +151,7 @@ export class FlowTemplateState {
       await this.inspectFile(uploaded.id, { persist: true }, context);
       toast.success(m.flow_template_fill_upload_action());
     } catch (error) {
-      this.configError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.flow_template_fill_template_help())
-      );
+      this.configError = getFlowRuntimeErrorMessage(error, m.flow_template_fill_template_help());
     } finally {
       this.inspecting = false;
       if (input) input.value = "";
@@ -178,10 +168,7 @@ export class FlowTemplateState {
       window.open(url, "_blank");
     } catch (error) {
       console.error("Failed to download template", error);
-      this.configError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.error_downloading_file())
-      );
+      this.configError = getFlowRuntimeErrorMessage(error, m.error_downloading_file());
     }
   }
 

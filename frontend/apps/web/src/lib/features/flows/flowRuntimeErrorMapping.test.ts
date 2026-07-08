@@ -181,6 +181,35 @@ describe("flowRuntimeErrorMapping", () => {
     expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
   });
 
+  it("maps missing template file content errors from readable backend text", () => {
+    const error = new EneoError(
+      "Selected template file has no binary content.",
+      "RESPONSE",
+      400,
+      0,
+      {},
+      { endpoint: "GET@test" }
+    );
+
+    expect([
+      "The selected DOCX template could not be read because file content is missing.",
+      "Den valda DOCX-mallen kunde inte läsas eftersom filinnehållet saknas."
+    ]).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
+  });
+
+  it("passes through readable backend text for uncatalogued Flow errors", () => {
+    const error = new EneoError(
+      "Some other template error",
+      "RESPONSE",
+      400,
+      0,
+      {},
+      { endpoint: "GET@test" }
+    );
+
+    expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe("Some other template error");
+  });
+
   it.each([
     [
       "flow_run_access_denied",

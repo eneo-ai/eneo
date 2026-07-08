@@ -9,7 +9,7 @@ from eneo.authentication.auth_models import (
     ResourcePermissions,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
-from eneo.flows.flow_care_data_policy import resolve_flow_care_data_policy
+from eneo.flows.flow_metadata import FlowMetadataParseMode, parse_flow_metadata
 from eneo.main.exceptions import BadRequestException
 
 FLOW_EVIDENCE_POLICY_SETTINGS_KEY: Final[str] = "evidence_policy"
@@ -256,7 +256,10 @@ def _reject_unknown_fields(
 def flow_metadata_marks_sensitive(
     metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
 ) -> bool:
-    return resolve_flow_care_data_policy(metadata_json).sensitive
+    return parse_flow_metadata(
+        metadata_json,
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    ).care_data_policy.sensitive
 
 
 def resolve_service_key_evidence_capability(
