@@ -869,17 +869,17 @@ def test_assembly_places_server_owned_runtime_field_hints() -> None:
                     "name": "Läs ansökan",
                     "instructions": "Extrahera uppgifter från ansökan.",
                     "output_type": "json",
-                        "output_fields": [
-                            {
-                                "name": "summary",
-                                "field_type": "string",
-                                "description": "Kort sammanfattning.",
-                            },
-                            {
-                                "name": "missing_information",
-                                "field_type": "string",
-                                "description": "Saknade uppgifter.",
-                            },
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Kort sammanfattning.",
+                        },
+                        {
+                            "name": "missing_information",
+                            "field_type": "string",
+                            "description": "Saknade uppgifter.",
+                        },
                     ],
                 },
                 {
@@ -1319,12 +1319,12 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                     "instructions": "Extrahera risker och rekommendationer.",
                     "output_type": "json",
                     "uses_form_fields": ["referensnummer"],
-                        "output_fields": [
-                            {
-                                "name": "summary",
-                                "field_type": "string",
-                                "description": "Kort sammanfattning.",
-                            }
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Kort sammanfattning.",
+                        }
                     ],
                 },
                 {
@@ -1332,12 +1332,12 @@ def test_compiler_lowers_runtime_inputs_and_derived_whole_object_underlag() -> N
                     "instructions": "Skriv slutrapport med specifika datapunkter.",
                     "output_type": "text",
                     "uses_previous_fields": [
-                            {
-                                "from_step": 1,
-                                "field_path": "summary",
-                                "label": "Sammanfattning",
-                            }
-                        ],
+                        {
+                            "from_step": 1,
+                            "field_path": "summary",
+                            "label": "Sammanfattning",
+                        }
+                    ],
                 },
             ],
         }
@@ -1697,18 +1697,18 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
         "author_or_sender, summary."
     ) in reader_instructions
     assert (
-        "Allowed fields for items of documents: source_label"
-        not in reader_instructions
+        "Allowed fields for items of documents: source_label" not in reader_instructions
     )
     assert "file_name" not in reader_instructions
     assert reader_step.input_config is not None
-    assert (
-        reader_step.input_config["runtime_input"]["execution_mode"] == "per_source"
-    )
+    assert reader_step.input_config["runtime_input"]["execution_mode"] == "per_source"
     assert '"Källa: {source_label}"' not in section_step.assistant_spec.instructions
-    assert "section_title" in section_step.output_contract["properties"][
-        "source_sections"
-    ]["items"]["properties"]
+    assert (
+        "section_title"
+        in section_step.output_contract["properties"]["source_sections"]["items"][
+            "properties"
+        ]
+    )
     assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
     assert validate_spec(compiled).valid
 
@@ -1754,10 +1754,15 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                             "description": "Avsnitt per källa.",
                             "item_fields": [
                                 {
-                                    "name": "section_text",
+                                    "name": "section_title",
+                                    "field_type": "string",
+                                    "description": "Avsnittsrubrik.",
+                                },
+                                {
+                                    "name": "section_body",
                                     "field_type": "string",
                                     "description": "Färdig avsnittstext.",
-                                }
+                                },
                             ],
                         }
                     ],
@@ -1834,9 +1839,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                 "output": "structured",
                 "field_path": "source_sections",
                 "item_template": (
-                    "## {section_title}\n\n"
-                    "{section_body}\n\n"
-                    "Källa: {source_label}"
+                    "## {section_title}\n\n{section_body}\n\nKälla: {source_label}"
                 ),
             },
             {
@@ -1847,7 +1850,219 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
             },
         ],
     }
-    assert all(step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps)
+    assert all(
+        step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_report_disposition_both_ignores_source_section_name_without_shape() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Rapport över dokument",
+            "plan_rationale": "Läs källor, skriv fria källtexter och slutrapport.",
+            "steps": [
+                {
+                    "name": "Läs dokumenten",
+                    "instructions": "Läs varje dokument och strukturera fakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Titel.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv fria källtexter",
+                    "instructions": "Skriv källtexter.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_sections",
+                            "field_type": "array",
+                            "description": "Avsnitt per källa.",
+                            "item_fields": [
+                                {
+                                    "name": "section_text",
+                                    "field_type": "string",
+                                    "description": "Färdig avsnittstext.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Sätt ihop slutrapport",
+                    "instructions": "Sätt ihop slutrapporten.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+            ui_language="sv",
+            report_disposition="both",
+        ),
+    )
+
+    assert "Skriv fria källtexter" not in [step.name for step in compiled.steps]
+    assert [step.output_mode for step in compiled.steps] == [
+        OutputMode.PASS_THROUGH,
+        OutputMode.PASS_THROUGH,
+        OutputMode.PASS_THROUGH,
+        OutputMode.COMPOSE_TEXT,
+        OutputMode.RENDER_VERBATIM,
+    ]
+    section_step = compiled.steps[1]
+    assert section_step.name == "Bygg källavsnitt"
+    assert section_step.input_config == {"item_map": {"enabled": True}}
+    section_properties = section_step.output_contract["properties"]["source_sections"][
+        "items"
+    ]["properties"]
+    assert "section_title" in section_properties
+    assert "section_body" in section_properties
+
+    body_writer_step = compiled.steps[-2]
+    assert body_writer_step.output_mode == OutputMode.COMPOSE_TEXT
+    assert body_writer_step.input_bindings["source_refs"][0]["step_ref"] == "step_b"
+    assert body_writer_step.input_bindings["source_refs"][0]["field_path"] == (
+        "source_sections"
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Rapport över dokument",
+            "plan_rationale": "Läs källor, skriv källavsnitt och slutrapport.",
+            "steps": [
+                {
+                    "name": "Läs dokumenten",
+                    "instructions": "Läs varje dokument och strukturera fakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Titel.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Bygg rapportavsnitt",
+                    "instructions": "Skriv ett rapportavsnitt per dokument.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "section_text",
+                            "field_type": "string",
+                            "description": "Färdig rapporttext för dokumentet.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv samlad översikt",
+                    "instructions": "Skriv en samlad översikt.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Samlad översikt.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Sätt ihop slutrapport",
+                    "instructions": "Sätt ihop slutrapporten.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+            ui_language="sv",
+            report_disposition="both",
+        ),
+    )
+
+    assert [step.name for step in compiled.steps] == [
+        "Läs dokumenten",
+        "Bygg källavsnitt",
+        "Skriv samlad översikt",
+        "Sätt ihop slutrapport",
+        "Rendera PDF",
+    ]
+    assert [step.output_mode for step in compiled.steps] == [
+        OutputMode.PASS_THROUGH,
+        OutputMode.PASS_THROUGH,
+        OutputMode.PASS_THROUGH,
+        OutputMode.COMPOSE_TEXT,
+        OutputMode.RENDER_VERBATIM,
+    ]
+    body_writer_step = compiled.steps[-2]
+    assert body_writer_step.input_bindings == {
+        "question": "# {{ step_c.output.structured.report_title }}",
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "source_sections",
+                "item_template": (
+                    "## {section_title}\n\n{section_body}\n\nKälla: {source_label}"
+                ),
+            },
+            {
+                "step_ref": "step_c",
+                "output": "structured",
+                "field_path": "overall_overview",
+                "label": "Samlad översikt",
+            },
+        ],
+    }
     assert validate_spec(compiled).valid
 
 
@@ -1972,9 +2187,7 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                 "output": "structured",
                 "field_path": "source_sections",
                 "item_template": (
-                    "## {section_title}\n\n"
-                    "{section_body}\n\n"
-                    "Källa: {source_label}"
+                    "## {section_title}\n\n{section_body}\n\nKälla: {source_label}"
                 ),
             },
             {
@@ -1985,7 +2198,9 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
             },
         ],
     }
-    assert all(step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps)
+    assert all(
+        step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
+    )
     assert validate_spec(compiled).valid
 
 

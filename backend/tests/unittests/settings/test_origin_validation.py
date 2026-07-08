@@ -1,6 +1,10 @@
 """Tests for validate_public_origin() helper."""
 
+from pathlib import Path
+
 import pytest
+
+from eneo.main import config as main_config
 from eneo.main.config import (
     validate_public_origin,
     validate_redirect_path,
@@ -155,3 +159,22 @@ def test_redirect_uri_rejects_query_and_fragment(uri):
 def test_redirect_path_rejects_non_canonical_variants(path):
     with pytest.raises(ValueError):
         validate_redirect_path(path)
+
+
+def test_local_dev_app_version_uses_build_id(monkeypatch):
+    missing = Path("/tmp/eneo-missing-release-manifest.json")
+    monkeypatch.setattr(main_config, "_DOCKER_MANIFEST", missing)
+    monkeypatch.setattr(main_config, "_LOCAL_MANIFEST", missing)
+    monkeypatch.setenv("GIT_COMMIT", "abcdef1234567890")
+
+    assert main_config._set_app_version() == "DEV-abcdef123456"
+
+
+def test_local_dev_app_version_falls_back_to_process_start(monkeypatch):
+    missing = Path("/tmp/eneo-missing-release-manifest.json")
+    monkeypatch.setattr(main_config, "_DOCKER_MANIFEST", missing)
+    monkeypatch.setattr(main_config, "_LOCAL_MANIFEST", missing)
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+    monkeypatch.delenv("BUILD_ID", raising=False)
+
+    assert main_config._set_app_version().startswith("DEV-20")

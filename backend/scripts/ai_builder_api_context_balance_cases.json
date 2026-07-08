@@ -7,8 +7,20 @@
       "complexity": "medium",
       "domain": "municipality_records",
       "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
+      "scripted_question_answers": {
+        "report_disposition": "both"
+      },
       "expected": {
         "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_output_modes": [
+          "pass_through",
+          "pass_through",
+          "pass_through",
+          "compose_text",
+          "render_verbatim"
+        ],
+        "forbid_input_sources": ["all_previous_steps"],
         "min_steps": 2,
         "min_json_steps": 1,
         "max_all_previous_steps": 1,

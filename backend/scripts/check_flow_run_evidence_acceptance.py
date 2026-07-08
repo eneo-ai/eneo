@@ -71,6 +71,7 @@ def check_evidence(
     bundle = cast(Json, bundle)
     step_results = _dict_list(bundle.get("step_results"))
     reader = _find_reader_step(step_results)
+    compose = _find_compose_step(step_results)
     render = step_results[-1] if step_results else {}
     reader_input = _dict(reader.get("input_payload_json"))
     runtime_input = _dict(reader_input.get("runtime_input"))
@@ -78,7 +79,10 @@ def check_evidence(
     calls = _dict_list(runtime_input.get("per_source_calls"))
     files = _dict_list(runtime_input.get("files"))
     documents = _documents(reader)
+    source_sections = _source_sections(step_results)
     final_text = _string(_dict(render.get("output_payload_json")).get("text"))
+    compose_input_tokens = _int(compose.get("num_tokens_input"))
+    compose_output_tokens = _int(compose.get("num_tokens_output"))
     render_params = _dict(render.get("model_parameters_json"))
     render_input_tokens = _int(render.get("num_tokens_input"))
     render_output_tokens = _int(render.get("num_tokens_output"))
@@ -86,11 +90,18 @@ def check_evidence(
     checks: list[Json] = []
     add = checks.append
     source_count = len(calls)
-    expected_count = expected_source_count if expected_source_count is not None else source_count
-    max_tokens = max((_int(call.get("num_tokens_input")) or 0 for call in calls), default=0)
+    expected_count = (
+        expected_source_count if expected_source_count is not None else source_count
+    )
+    max_tokens = max(
+        (_int(call.get("num_tokens_input")) or 0 for call in calls), default=0
+    )
     labels = [_string(call.get("source_label")) for call in calls]
     file_names = [_string(file.get("name")) for file in files]
     document_labels = [_string(document.get("source_label")) for document in documents]
+    source_section_labels = [
+        _string(section.get("source_label")) for section in source_sections
+    ]
 
     add(
         _check(
@@ -116,10 +127,69 @@ def check_evidence(
     )
     add(_check("files_count", len(files) == expected_count, len(files)))
     add(_check("documents_count", len(documents) == expected_count, len(documents)))
-    add(_check("max_per_source_input_tokens", max_tokens < max_per_source_input_tokens, max_tokens))
-    add(_check("no_placeholder_source_labels", not _has_placeholder(labels + document_labels), labels + document_labels))
-    add(_check("source_labels_match_files", _labels_match_files(document_labels, file_names), {"labels": document_labels, "files": file_names}))
-    add(_check("source_file_ids_match_files", _document_ids_match_files(documents, files), [document.get("source_file_id") for document in documents]))
+    add(
+        _check(
+            "max_per_source_input_tokens",
+            max_tokens < max_per_source_input_tokens,
+            max_tokens,
+        )
+    )
+    add(
+        _check(
+            "no_placeholder_source_labels",
+            not _has_placeholder(labels + document_labels),
+            labels + document_labels,
+        )
+    )
+    add(
+        _check(
+            "source_labels_match_files",
+            _labels_match_files(document_labels, file_names),
+            {"labels": document_labels, "files": file_names},
+        )
+    )
+    add(
+        _check(
+            "source_file_ids_match_files",
+            _document_ids_match_files(documents, files),
+            [document.get("source_file_id") for document in documents],
+        )
+    )
+    add(
+        _check(
+            "compose_step_present",
+            bool(compose),
+            _dict(compose.get("model_parameters_json")).get("mode"),
+        )
+    )
+    add(
+        _check(
+            "compose_zero_tokens",
+            compose_input_tokens == 0 and compose_output_tokens == 0,
+            {"in": compose_input_tokens, "out": compose_output_tokens},
+        )
+    )
+    add(
+        _check(
+            "no_all_previous_steps",
+            not _all_previous_step_orders(step_results),
+            _all_previous_step_orders(step_results),
+        )
+    )
+    add(
+        _check(
+            "source_section_labels_match_files",
+            _labels_match_files(source_section_labels, file_names),
+            {"labels": source_section_labels, "files": file_names},
+        )
+    )
+    add(
+        _check(
+            "source_section_file_ids_match_files",
+            _section_ids_match_files(source_sections, files),
+            [section.get("source_file_id") for section in source_sections],
+        )
+    )
     add(
         _check(
             "render_verbatim_mode",
@@ -134,8 +204,27 @@ def check_evidence(
             {"in": render_input_tokens, "out": render_output_tokens},
         )
     )
-    add(_check("source_lines_in_final_text", final_text.count("Källa:") >= expected_count, final_text.count("Källa:")))
-    add(_check("source_labels_in_final_text", all(f"Källa: {label}" in final_text for label in document_labels), document_labels))
+    add(
+        _check(
+            "source_lines_in_final_text",
+            final_text.count("Källa:") >= expected_count,
+            final_text.count("Källa:"),
+        )
+    )
+    add(
+        _check(
+            "source_labels_in_final_text",
+            all(f"Källa: {label}" in final_text for label in document_labels),
+            document_labels,
+        )
+    )
+    add(
+        _check(
+            "source_labels_not_headings",
+            all(f"## {label}" not in final_text for label in document_labels),
+            document_labels,
+        )
+    )
     if rendered_pdf_text is not None:
         add(
             _check(
@@ -147,12 +236,20 @@ def check_evidence(
         add(
             _check(
                 "source_labels_in_pdf",
-                all(f"Källa: {label}" in rendered_pdf_text for label in document_labels),
+                all(
+                    f"Källa: {label}" in rendered_pdf_text for label in document_labels
+                ),
                 document_labels,
             )
         )
     for filename in sorted(required_extraction_warning_files):
-        add(_check(f"extraction_warning:{filename}", _has_extraction_warning(runtime_input, filename), filename))
+        add(
+            _check(
+                f"extraction_warning:{filename}",
+                _has_extraction_warning(runtime_input, filename),
+                filename,
+            )
+        )
     return checks
 
 
@@ -164,7 +261,9 @@ def _extract_pdf_text(path: Path) -> str:
 def _find_reader_step(step_results: list[Json]) -> Json:
     for step in step_results:
         model_params = _dict(step.get("model_parameters_json"))
-        runtime_input = _dict(_dict(step.get("input_payload_json")).get("runtime_input"))
+        runtime_input = _dict(
+            _dict(step.get("input_payload_json")).get("runtime_input")
+        )
         if (
             model_params.get("runtime_input_execution_mode") == "per_source"
             or runtime_input.get("execution_mode") == "per_source"
@@ -173,10 +272,28 @@ def _find_reader_step(step_results: list[Json]) -> Json:
     return {}
 
 
+def _find_compose_step(step_results: list[Json]) -> Json:
+    for step in step_results:
+        if _dict(step.get("model_parameters_json")).get("mode") == "compose_text":
+            return step
+    return {}
+
+
 def _documents(reader: Json) -> list[Json]:
     output = _dict(reader.get("output_payload_json"))
     structured = _dict(output.get("structured"))
     return _dict_list(structured.get("documents"))
+
+
+def _source_sections(step_results: list[Json]) -> list[Json]:
+    sections: list[Json] = []
+    for step in step_results:
+        structured = _dict(_dict(step.get("output_payload_json")).get("structured"))
+        for value in structured.values():
+            for item in _dict_list(value):
+                if {"section_title", "section_body"}.issubset(item):
+                    sections.append(item)
+    return sections
 
 
 def _has_placeholder(labels: list[str]) -> bool:
@@ -190,13 +307,36 @@ def _has_placeholder(labels: list[str]) -> bool:
 def _labels_match_files(labels: list[str], file_names: list[str]) -> bool:
     if len(labels) != len(file_names):
         return False
-    return all(label == file_name or label.startswith(f"{file_name} (") for label, file_name in zip(labels, file_names, strict=True))
+    return all(
+        label == file_name or label.startswith(f"{file_name} (")
+        for label, file_name in zip(labels, file_names, strict=True)
+    )
 
 
 def _document_ids_match_files(documents: list[Json], files: list[Json]) -> bool:
     if len(documents) != len(files):
         return False
-    return all(_string(document.get("source_file_id")) == _string(file.get("id")) for document, file in zip(documents, files, strict=True))
+    return all(
+        _string(document.get("source_file_id")) == _string(file.get("id"))
+        for document, file in zip(documents, files, strict=True)
+    )
+
+
+def _section_ids_match_files(sections: list[Json], files: list[Json]) -> bool:
+    if len(sections) != len(files):
+        return False
+    return all(
+        _string(section.get("source_file_id")) == _string(file.get("id"))
+        for section, file in zip(sections, files, strict=True)
+    )
+
+
+def _all_previous_step_orders(step_results: list[Json]) -> list[object]:
+    return [
+        step.get("step_order")
+        for step in step_results
+        if _string(step.get("input_source")) == "all_previous_steps"
+    ]
 
 
 def _has_extraction_warning(runtime_input: Json, filename: str) -> bool:
@@ -228,7 +368,9 @@ def _dict(value: object) -> Json:
 def _dict_list(value: object) -> list[Json]:
     if not isinstance(value, list):
         return []
-    return [cast(Json, item) for item in cast(list[object], value) if isinstance(item, dict)]
+    return [
+        cast(Json, item) for item in cast(list[object], value) if isinstance(item, dict)
+    ]
 
 
 def _list(value: object) -> list[object]:

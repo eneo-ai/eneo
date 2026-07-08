@@ -101,6 +101,7 @@ def test_server_commit_for_text_docx_has_resolvable_pattern() -> None:
 
     assert isinstance(decision, CommitArchitecture)
     assert decision.architecture_commit.chosen_patterns == ["text_to_artifact_report"]
+    assert decision.architecture_commit.tuples_chain[0].output_mode == "render_verbatim"
 
 
 def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:

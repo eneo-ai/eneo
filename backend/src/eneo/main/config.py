@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -19,6 +20,8 @@ _LOCAL_MANIFEST = (
     Path(__file__).resolve().parent.parent.parent.parent
     / ".release-please-manifest.json"
 )
+_PROCESS_STARTED_AT = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+_BUILD_ID_ENV_VARS = ("GIT_COMMIT", "BUILD_ID")
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -201,7 +204,11 @@ def _set_app_version():
 
         return version
     except FileNotFoundError:
-        return "DEV"
+        for env_var in _BUILD_ID_ENV_VARS:
+            build_id = os.environ.get(env_var)
+            if build_id:
+                return f"DEV-{build_id[:12]}"
+        return f"DEV-{_PROCESS_STARTED_AT}"
 
 
 class Settings(BaseSettings):

@@ -118,11 +118,17 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     report = harness._quality_report(
         plan=plan,
         summary=summary,
-        expected={"terminal_output_type": "pdf"},
+        expected={
+            "terminal_output_type": "pdf",
+            "expected_output_modes": ["pass_through", "render_verbatim"],
+            "forbid_input_sources": ["all_previous_steps"],
+        },
         event_summary={},
     )
 
     checks = {check["name"]: check for check in report["checks"]}
+    assert checks["expected_output_modes"]["passed"] is True
+    assert checks["forbid_input_sources"]["passed"] is True
     assert checks["terminal_document_output_mode"]["passed"] is True
     assert checks["terminal_document_output_mode"]["expected"] == "render_verbatim"
     assert checks["renderer_previous_step_bound"]["passed"] is True
@@ -136,11 +142,17 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     bad_report = harness._quality_report(
         plan=bad_plan,
         summary=bad_summary,
-        expected={"terminal_output_type": "pdf"},
+        expected={
+            "terminal_output_type": "pdf",
+            "expected_output_modes": ["pass_through", "render_verbatim"],
+            "forbid_input_sources": ["all_previous_steps"],
+        },
         event_summary={},
     )
 
     bad_checks = {check["name"]: check for check in bad_report["checks"]}
+    assert bad_checks["expected_output_modes"]["passed"] is False
+    assert bad_checks["forbid_input_sources"]["passed"] is False
     assert bad_checks["terminal_document_output_mode"]["passed"] is False
     assert bad_checks["renderer_previous_step_bound"]["passed"] is False
     assert bad_report["metrics"]["renderer_is_previous_step_bound"] is False

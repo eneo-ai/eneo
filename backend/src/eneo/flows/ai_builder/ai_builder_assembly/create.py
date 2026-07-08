@@ -108,6 +108,7 @@ CreateAssemblyRejectionReason = Literal[
     "audio_requires_linear",
     "docx_template_form_fields_mismatch",
     "docx_template_shape_unsupported",
+    "document_report_compose_topology_missing",
     "empty_steps",
     "explicit_refs_not_supported",
     "invalid_template_fill_mode",
@@ -141,6 +142,10 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
     "docx_template_shape_unsupported": (
         "DOCX template-fill flows require one text-writing semantic step for the "
         "template variables."
+    ),
+    "document_report_compose_topology_missing": (
+        "Document report flows with source sections must end with a deterministic "
+        "compose_text body writer before the renderer."
     ),
     "empty_steps": "The proposal must contain at least one semantic step.",
     "explicit_refs_not_supported": (
@@ -524,6 +529,12 @@ def _assemble_create_intent(
         final_output_type=final_output_type,
         ui_language=ui_language,
     )
+    if _document_report_compose_required(
+        completed_steps,
+        report_disposition=report_disposition,
+        final_output_type=final_output_type,
+    ) and not _has_terminal_compose_renderer_topology(completed_steps):
+        return _reject("document_report_compose_topology_missing")
     completed_steps = _annotate_report_disposition(
         completed_steps,
         report_disposition=report_disposition,
@@ -1239,9 +1250,7 @@ def _apply_per_source_reader_execution(
                 planned_step.instructions,
                 ui_language=ui_language,
             ),
-            output_fields=add_runtime_source_file_id_field(
-                planned_step.output_fields
-            ),
+            output_fields=add_runtime_source_file_id_field(planned_step.output_fields),
             runtime_input_execution_mode="per_source",
         )
         updated_steps.append(annotated_step)
@@ -1312,6 +1321,19 @@ def _ensure_document_report_section_writer(
         "ai_builder_document_report_section_writer_inserted",
         extra={"reader_step_name": reader_step.name},
     )
+    replaced_index = reader_index + 1
+    if replaced_index < len(planned_steps) and _step_outputs_weak_section_text(
+        planned_steps[replaced_index]
+    ):
+        logger.info(
+            "ai_builder_document_report_weak_section_writer_replaced",
+            extra={"replaced_step_name": planned_steps[replaced_index].name},
+        )
+        return (
+            *planned_steps[: reader_index + 1],
+            section_step,
+            *planned_steps[replaced_index + 1 :],
+        )
     return (
         *planned_steps[: reader_index + 1],
         section_step,
@@ -1348,18 +1370,30 @@ def _step_outputs_source_section_array(planned_step: PlannedStep) -> bool:
     if field.field_type != "array":
         return False
     item_field_names = {item.name for item in field.item_fields or ()}
-    if {"section_title", "section_body"}.issubset(item_field_names):
-        return True
-    return _source_section_array_name(field.name)
+    return {"section_title", "section_body"}.issubset(item_field_names)
 
 
-def _source_section_array_name(name: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_")
-    tokens = set(normalized.split("_"))
-    return normalized in {"source_sections", "source_section"} or (
-        bool(tokens.intersection({"source", "kalla", "kalldokument"}))
-        and bool(tokens.intersection({"section", "sections", "avsnitt"}))
+def _step_outputs_weak_section_text(planned_step: PlannedStep) -> bool:
+    if (
+        planned_step.input_source != InputSource.PREVIOUS_STEP
+        or planned_step.input_type != InputType.JSON
+        or planned_step.output_type != OutputType.JSON
+        or len(planned_step.output_fields) != 1
+    ):
+        return False
+    field = planned_step.output_fields[0]
+    if field.field_type == "string":
+        return _is_section_text_field_name(field.name)
+    if field.field_type != "array":
+        return False
+    return any(
+        item.field_type == "string" and _is_section_text_field_name(item.name)
+        for item in field.item_fields or ()
     )
+
+
+def _is_section_text_field_name(name: str) -> bool:
+    return name in {"section_text", "section_body"}
 
 
 def _document_report_section_writer_name(ui_language: str | None) -> str:
@@ -1488,9 +1522,7 @@ def _ensure_document_report_overview_writer(
         return planned_steps
 
     body_writer_index = len(planned_steps) - 2
-    section_index = _source_section_item_map_index(
-        planned_steps[:body_writer_index]
-    )
+    section_index = _source_section_item_map_index(planned_steps[:body_writer_index])
     if section_index is None:
         return planned_steps
     if (
@@ -1568,9 +1600,7 @@ def _replace_document_report_body_writer_with_compose(
     renderer_step = planned_steps[-1]
     body_writer_step = planned_steps[-2]
     body_writer_index = len(planned_steps) - 2
-    section_index = _source_section_item_map_index(
-        planned_steps[:body_writer_index]
-    )
+    section_index = _source_section_item_map_index(planned_steps[:body_writer_index])
     if section_index is None:
         return planned_steps
     overview_index = (
@@ -1607,6 +1637,31 @@ def _replace_document_report_body_writer_with_compose(
         underlag_channel="whole_object",
     )
     return (*updated_steps, compose_step, renderer_step)
+
+
+def _document_report_compose_required(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    report_disposition: str | None,
+    final_output_type: OutputType,
+) -> bool:
+    return (
+        final_output_type in _DOCUMENT_OUTPUT_TYPES
+        and report_disposition in {"both", "per_source_sections"}
+        and len(planned_steps) >= 2
+        and planned_steps[-1].role == "renderer"
+    )
+
+
+def _has_terminal_compose_renderer_topology(
+    planned_steps: tuple[PlannedStep, ...],
+) -> bool:
+    return (
+        len(planned_steps) >= 2
+        and planned_steps[-2].role == "body_writer"
+        and planned_steps[-2].output_mode == OutputMode.COMPOSE_TEXT
+        and planned_steps[-1].role == "renderer"
+    )
 
 
 def _source_section_item_map_index(

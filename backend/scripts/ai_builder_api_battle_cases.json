@@ -52,11 +52,22 @@
       "complexity": "medium",
       "domain": "municipality_records",
       "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer. Flödet ska läsa innehållet och avgöra vad filen handlar om. För varje dokument ska det dokumentera dokumenttyp, titel, datum eller år, eventuell författare eller avsändare, kategori som sociologi, psykologi, IT, ekonomi eller juridik, centrala slutsatser och en koncis sammanfattning. Slutrapporten ska vara en PDF.",
+      "scripted_question_answers": {
+        "report_disposition": "both"
+      },
       "expected": {
         "min_steps": 3,
         "max_steps": 7,
         "terminal_output_type": "pdf",
         "terminal_document_output_mode": "render_verbatim",
+        "expected_output_modes": [
+          "pass_through",
+          "pass_through",
+          "pass_through",
+          "compose_text",
+          "render_verbatim"
+        ],
+        "forbid_input_sources": ["all_previous_steps"],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 1,

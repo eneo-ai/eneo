@@ -1513,6 +1513,32 @@ def _quality_report(
             step_count,
             maximum,
         )
+    if expected_output_modes := _string_list(expected.get("expected_output_modes")):
+        actual_output_modes = [
+            str(step.get("output_mode"))
+            for step in _step_summaries(summary)
+            if isinstance(step.get("output_mode"), str)
+        ]
+        add_check(
+            "expected_output_modes",
+            actual_output_modes == expected_output_modes,
+            actual_output_modes,
+            expected_output_modes,
+        )
+    if forbidden_input_sources := set(
+        _string_list(expected.get("forbid_input_sources"))
+    ):
+        forbidden_step_orders = [
+            step.get("order")
+            for step in _step_summaries(summary)
+            if step.get("input_source") in forbidden_input_sources
+        ]
+        add_check(
+            "forbid_input_sources",
+            forbidden_step_orders == [],
+            forbidden_step_orders,
+            sorted(forbidden_input_sources),
+        )
     if (terminal := expected.get("terminal_output_type")) is not None:
         add_check(
             "terminal_output_type",
@@ -1729,6 +1755,13 @@ def _all_output_fields(summary: Mapping[str, Any]) -> list[str]:
             if isinstance(raw, list):
                 fields.extend(str(field) for field in raw)
     return list(dict.fromkeys(fields))
+
+
+def _step_summaries(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    steps = summary.get("steps")
+    if not isinstance(steps, list):
+        return []
+    return [step for step in steps if isinstance(step, Mapping)]
 
 
 def _field_expectation_groups(expected: Mapping[str, Any]) -> list[list[str]]:

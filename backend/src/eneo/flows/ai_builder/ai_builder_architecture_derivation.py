@@ -16,6 +16,7 @@ from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
+    StepOutputMode,
     StepTriple,
 )
 from eneo.flows.enums import (
@@ -67,12 +68,16 @@ def derive_architecture_commit_draft(
     if not chosen_patterns:
         return None
 
+    step_output_mode = _step_output_mode_value(output_mode)
+    if step_output_mode is None:
+        return None
+
     return ArchitectureCommitDraft(
         tuples_chain=[
             StepTriple(
                 input_type=AIBuilderInputType(input_type.value),
                 output_type=output_type.value,
-                output_mode=output_mode.value,
+                output_mode=step_output_mode,
             )
         ],
         chosen_patterns=chosen_patterns,
@@ -212,6 +217,22 @@ def _primary_pattern_id(
     if input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT:
         return "summarize_text"
     return None
+
+
+def _step_output_mode_value(output_mode: FlowOutputMode) -> StepOutputMode | None:
+    match output_mode:
+        case FlowOutputMode.PASS_THROUGH:
+            return "pass_through"
+        case FlowOutputMode.HTTP_POST:
+            return "http_post"
+        case FlowOutputMode.TRANSCRIBE_ONLY:
+            return "transcribe_only"
+        case FlowOutputMode.TEMPLATE_FILL:
+            return "template_fill"
+        case FlowOutputMode.RENDER_VERBATIM:
+            return "render_verbatim"
+        case FlowOutputMode.COMPOSE_TEXT:
+            return None
 
 
 __all__ = [
