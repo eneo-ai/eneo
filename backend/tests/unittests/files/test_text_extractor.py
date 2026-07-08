@@ -254,6 +254,13 @@ class TestTextExtractorPDF:
             PDF_TEXT_LIKELY_REVERSED_WARNING,
         )
 
+    def test_pdf_text_quality_warnings_flags_vertical_reversed_title(self):
+        text = "[PAGE 1]\ne\nt\ne\nb\nr\na\ns\nn\ne\nm\na\nx\nE\n\n[PAGE 2]\n1"
+
+        assert TextExtractor.pdf_text_quality_warnings(text) == (
+            PDF_TEXT_LIKELY_REVERSED_WARNING,
+        )
+
     def test_pdf_text_quality_warnings_ignores_normal_text(self):
         normal_words = "och att det den som med till eller ska har kan inte "
         text = normal_words * 4

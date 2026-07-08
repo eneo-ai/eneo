@@ -106,6 +106,7 @@ class TextMimeTypes(MimeTypesBase):
 PDF_TEXT_LIKELY_REVERSED_WARNING: Final = "pdf_text_likely_reversed"
 _PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING: Final = 40
 _PDF_TEXT_MIN_REVERSED_COMMON_TOKENS: Final = 5
+_PDF_TEXT_MIN_VERTICAL_LETTER_RUN: Final = 8
 _PDF_TEXT_COMMON_WORDS: Final = frozenset(
     (
         "och",
@@ -196,6 +197,8 @@ class TextExtractor:
 
     @classmethod
     def _looks_likely_reversed_pdf_text(cls, text: str) -> bool:
+        if cls._has_vertical_letter_run(text):
+            return True
         tokens = cls._text_quality_tokens(text)
         if len(tokens) < _PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING:
             return False
@@ -221,6 +224,19 @@ class TextExtractor:
         if token:
             tokens.append("".join(token))
         return tokens
+
+    @staticmethod
+    def _has_vertical_letter_run(text: str) -> bool:
+        run = 0
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if len(line) == 1 and line.isalpha():
+                run += 1
+                if run >= _PDF_TEXT_MIN_VERTICAL_LETTER_RUN:
+                    return True
+            elif line:
+                run = 0
+        return False
 
     @classmethod
     def _extract_pdf_page(cls, page: Any) -> str:
