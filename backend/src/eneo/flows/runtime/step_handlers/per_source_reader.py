@@ -4,7 +4,6 @@ import json
 import logging
 import time
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import UUID
@@ -27,6 +26,7 @@ from eneo.flows.runtime.step_handlers.base import (
     PrepareAssistantStepFn,
 )
 from eneo.flows.runtime_input import build_runtime_input_config
+from eneo.flows.source_identity import without_runtime_source_identity_json_fields
 from eneo.main.exceptions import TypedIOValidationException
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 PER_SOURCE_READER_CONCURRENCY = 1
 PER_SOURCE_METADATA_PREVIEW_CHARS = 2000
 PER_SOURCE_SOURCE_LABEL_MAX_CHARS = 120
-_RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 
 @dataclass(frozen=True)
@@ -83,7 +82,9 @@ async def execute_per_source_reader(
         )
     per_call_step = replace(
         step,
-        output_contract=_model_facing_per_source_contract(step.output_contract),
+        output_contract=without_runtime_source_identity_json_fields(
+            step.output_contract
+        ),
     )
     if not file_ids:
         prepared_step = await prepare_assistant_step(
@@ -296,39 +297,6 @@ def _documents_item_schema(output_contract: dict[str, Any] | None) -> dict[str, 
     if typed_item_schema.get("type") != "object":
         return None
     return dict(typed_item_schema)
-
-
-def _model_facing_per_source_contract(
-    output_contract: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if output_contract is None or _documents_item_schema(output_contract) is None:
-        return output_contract
-    projected_contract = deepcopy(output_contract)
-    properties = projected_contract.get("properties")
-    if not isinstance(properties, dict):
-        return projected_contract
-    typed_properties = cast(dict[str, Any], properties)
-    documents_schema = typed_properties.get("documents")
-    if not isinstance(documents_schema, dict):
-        return projected_contract
-    typed_documents_schema = cast(dict[str, Any], documents_schema)
-    item_schema = typed_documents_schema.get("items")
-    if not isinstance(item_schema, dict):
-        return projected_contract
-    typed_item_schema = cast(dict[str, Any], item_schema)
-    item_properties = typed_item_schema.get("properties")
-    if isinstance(item_properties, dict):
-        typed_item_properties = cast(dict[str, Any], item_properties)
-        for field_name in _RUNTIME_SOURCE_IDENTITY_FIELDS:
-            typed_item_properties.pop(field_name, None)
-    required = typed_item_schema.get("required")
-    if isinstance(required, list):
-        typed_item_schema["required"] = [
-            field_name
-            for field_name in cast(list[object], required)
-            if field_name not in _RUNTIME_SOURCE_IDENTITY_FIELDS
-        ]
-    return projected_contract
 
 
 def _raise_if_per_source_output_is_not_object(

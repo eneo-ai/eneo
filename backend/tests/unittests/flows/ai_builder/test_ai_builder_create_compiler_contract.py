@@ -1817,6 +1817,123 @@ def test_report_disposition_both_folds_standalone_overview_into_body_writer() ->
     assert validate_spec(compiled).valid
 
 
+def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Rapport per källa",
+            "plan_rationale": "Läs dokument, skriv avsnitt per källa och rendera PDF.",
+            "steps": [
+                {
+                    "name": "Läs dokumenten",
+                    "instructions": "Extrahera fakta per dokument.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Dokumentets titel.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Kort sammanfattning.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Bygg källavsnitt",
+                    "instructions": "Skriv ett färdigt avsnitt per dokument.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_sections",
+                            "field_type": "array",
+                            "description": "Färdiga rapportavsnitt per källa.",
+                            "item_fields": [
+                                {
+                                    "name": "section_title",
+                                    "field_type": "string",
+                                    "description": "Rubrik för avsnittet.",
+                                },
+                                {
+                                    "name": "section_body",
+                                    "field_type": "string",
+                                    "description": "Färdig avsnittstext.",
+                                },
+                                {
+                                    "name": "source_label",
+                                    "field_type": "string",
+                                    "description": "Runtimeägd källetikett.",
+                                },
+                                {
+                                    "name": "source_file_id",
+                                    "field_type": "string",
+                                    "description": "Runtimeägt fil-id.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Sätt ihop slutrapport",
+                    "instructions": "Sätt ihop rapporten.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+            ui_language="sv",
+            report_disposition="both",
+        ),
+    )
+
+    section_step = compiled.steps[1]
+    assert section_step.input_config == {"item_map": {"enabled": True}}
+    assert section_step.output_contract is not None
+    section_properties = section_step.output_contract["properties"]["source_sections"][
+        "items"
+    ]["properties"]
+    assert list(section_properties) == [
+        "section_title",
+        "section_body",
+        "source_label",
+        "source_file_id",
+    ]
+    assert section_step.output_contract["properties"]["source_sections"]["items"][
+        "required"
+    ] == [
+        "section_title",
+        "section_body",
+        "source_label",
+        "source_file_id",
+    ]
+    instructions = section_step.assistant_spec.instructions
+    assert (
+        "Allowed fields for items of source_sections: section_title, section_body."
+        in instructions
+    )
+    assert "Allowed fields for items of source_sections: source_label" not in (
+        instructions
+    )
+    assert validate_spec(compiled).valid
+
+
 def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     outline = parse_create_flow_intent_arguments(
         {

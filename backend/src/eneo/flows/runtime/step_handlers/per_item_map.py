@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from eneo.flows.domain.flow import FlowRun
@@ -21,6 +21,10 @@ from eneo.flows.runtime.step_execution_runtime import (
     complete_step_execution,
 )
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
+from eneo.flows.source_identity import (
+    runtime_source_identity_fields_for_array_items,
+    without_runtime_source_identity_json_fields,
+)
 from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -30,6 +34,7 @@ PER_ITEM_METADATA_PREVIEW_CHARS = 2000
 @dataclass(frozen=True)
 class PerItemMapCall:
     item_number: int
+    input_array_key: str
     source_label: str | None
     source_file_id: str | None
     output: StepExecutionOutput
@@ -63,22 +68,40 @@ async def execute_per_item_map(
             "exactly one top-level array of objects.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
+    input_array_key = _single_array_key(step.input_contract)
+    if input_array_key is None:
+        raise TypedIOValidationException(
+            "Per-item map execution requires a JSON input contract shaped as "
+            "exactly one top-level array of objects.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    per_call_step = replace(
+        step,
+        output_contract=without_runtime_source_identity_json_fields(
+            step.output_contract
+        ),
+    )
 
-    documents = _previous_documents(step=step, state=state)
-    if not documents:
+    input_items = _previous_items(
+        step=step,
+        state=state,
+        input_array_key=input_array_key,
+    )
+    if not input_items:
         raise TypedIOValidationException(
             f"Step {step.step_order}: per-item map requires at least one previous "
-            "documents[] item.",
+            f"{input_array_key}[] item.",
             code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
         )
 
     item_calls: list[PerItemMapCall] = []
-    for item_number, document in enumerate(documents, start=1):
+    for item_number, input_item in enumerate(input_items, start=1):
         item_calls.append(
             await _execute_one_item(
                 item_number=item_number,
-                document=document,
-                step=step,
+                input_array_key=input_array_key,
+                input_item=input_item,
+                step=per_call_step,
                 run=run,
                 state=state,
                 version_metadata=version_metadata,
@@ -91,6 +114,7 @@ async def execute_per_item_map(
         output=await _assemble_per_item_output(
             step=step,
             run=run,
+            input_array_key=input_array_key,
             output_array_key=output_array_key,
             item_calls=item_calls,
         )
@@ -100,7 +124,8 @@ async def execute_per_item_map(
 async def _execute_one_item(
     *,
     item_number: int,
-    document: dict[str, Any],
+    input_array_key: str,
+    input_item: dict[str, Any],
     step: RuntimeStep,
     run: FlowRun,
     state: RunExecutionState,
@@ -109,7 +134,11 @@ async def _execute_one_item(
     prepare_assistant_step: PrepareAssistantStepFn,
 ) -> PerItemMapCall:
     started = time.perf_counter()
-    step_input = _step_input_for_document(item_number=item_number, document=document)
+    step_input = _step_input_for_item(
+        item_number=item_number,
+        input_array_key=input_array_key,
+        input_item=input_item,
+    )
     prepared_step = await prepare_assistant_step(
         step=step,
         run=run,
@@ -134,8 +163,9 @@ async def _execute_one_item(
     )
     return PerItemMapCall(
         item_number=item_number,
-        source_label=_optional_string(document.get("source_label")),
-        source_file_id=_optional_string(document.get("source_file_id")),
+        input_array_key=input_array_key,
+        source_label=_optional_string(input_item.get("source_label")),
+        source_file_id=_optional_string(input_item.get("source_file_id")),
         output=output,
         deps=prepared_step.deps,
         elapsed_ms=elapsed_ms,
@@ -146,6 +176,7 @@ async def _assemble_per_item_output(
     *,
     step: RuntimeStep,
     run: FlowRun,
+    input_array_key: str,
     output_array_key: str,
     item_calls: list[PerItemMapCall],
 ) -> StepExecutionOutput:
@@ -154,12 +185,20 @@ async def _assemble_per_item_output(
     output_items = [
         item
         for call in sorted(item_calls, key=lambda value: value.item_number)
-        for item in _call_output_items(call, output_array_key=output_array_key)
+        for item in _call_output_items(
+            call,
+            output_array_key=output_array_key,
+            identity_fields=runtime_source_identity_fields_for_array_items(
+                step.output_contract,
+                output_array_key,
+            ),
+        )
     ]
     assembled_structured = {output_array_key: output_items}
     full_text = json.dumps(assembled_structured, ensure_ascii=False)
     item_map_metadata = _item_map_metadata(
         item_calls=item_calls,
+        input_array_key=input_array_key,
         output_array_key=output_array_key,
         source_step_order=step.step_order - 1,
     )
@@ -192,7 +231,8 @@ async def _assemble_per_item_output(
         StepDiagnostic(
             code="previous_step_per_item_map",
             message=(
-                f"Step {step.step_order}: executed once per previous documents[] "
+                f"Step {step.step_order}: executed once per previous "
+                f"{input_array_key}[] "
                 f"item ({len(item_calls)} item calls)."
             ),
             severity="info",
@@ -236,12 +276,13 @@ async def _assemble_per_item_output(
     )
 
 
-def _step_input_for_document(
+def _step_input_for_item(
     *,
     item_number: int,
-    document: dict[str, Any],
+    input_array_key: str,
+    input_item: dict[str, Any],
 ) -> StepInputValue:
-    structured = {"documents": [document]}
+    structured = {input_array_key: [input_item]}
     text = json.dumps(structured, ensure_ascii=False)
     return StepInputValue(
         text=text,
@@ -252,17 +293,19 @@ def _step_input_for_document(
             "capture_mode": "previous_step_item",
             "execution_mode": "per_item",
             "item_number": item_number,
-            "source_label": _optional_string(document.get("source_label")),
-            "source_file_id": _optional_string(document.get("source_file_id")),
+            "input_array": input_array_key,
+            "source_label": _optional_string(input_item.get("source_label")),
+            "source_file_id": _optional_string(input_item.get("source_file_id")),
             "input_text_length": len(text),
         },
     )
 
 
-def _previous_documents(
+def _previous_items(
     *,
     step: RuntimeStep,
     state: RunExecutionState,
+    input_array_key: str,
 ) -> list[dict[str, Any]]:
     previous_result = state.completed_by_order.get(step.step_order - 1)
     if previous_result is None:
@@ -282,17 +325,19 @@ def _previous_documents(
             code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
     typed_structured = cast(Mapping[str, object], structured)
-    documents = typed_structured.get("documents")
-    if not isinstance(documents, list):
+    input_items = typed_structured.get(input_array_key)
+    if not isinstance(input_items, list):
         raise TypedIOValidationException(
-            f"Step {step.step_order}: per-item map requires previous documents[].",
+            f"Step {step.step_order}: per-item map requires previous "
+            f"{input_array_key}[].",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
     result: list[dict[str, Any]] = []
-    for index, raw_item in enumerate(cast(list[object], documents), start=1):
+    for index, raw_item in enumerate(cast(list[object], input_items), start=1):
         if not isinstance(raw_item, dict):
             raise TypedIOValidationException(
-                f"Step {step.step_order}: previous documents[{index}] must be an object.",
+                f"Step {step.step_order}: previous {input_array_key}[{index}] must "
+                "be an object.",
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
         result.append(dict(cast(dict[str, Any], raw_item)))
@@ -300,9 +345,13 @@ def _previous_documents(
 
 
 def _single_output_array_key(output_contract: dict[str, Any] | None) -> str | None:
-    if not isinstance(output_contract, Mapping):
+    return _single_array_key(output_contract)
+
+
+def _single_array_key(contract: dict[str, Any] | None) -> str | None:
+    if not isinstance(contract, Mapping):
         return None
-    properties = output_contract.get("properties")
+    properties = contract.get("properties")
     if not isinstance(properties, Mapping):
         return None
     typed_properties = cast(Mapping[str, object], properties)
@@ -343,6 +392,7 @@ def _call_output_items(
     call: PerItemMapCall,
     *,
     output_array_key: str,
+    identity_fields: frozenset[str],
 ) -> list[dict[str, Any]]:
     structured_output = cast(dict[str, Any], call.output.structured_output)
     raw_items = structured_output.get(output_array_key)
@@ -359,13 +409,19 @@ def _call_output_items(
                 "must be an object.",
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
-        items.append(dict(cast(dict[str, Any], raw_item)))
+        item = dict(cast(dict[str, Any], raw_item))
+        if "source_label" in identity_fields and call.source_label is not None:
+            item["source_label"] = call.source_label
+        if "source_file_id" in identity_fields and call.source_file_id is not None:
+            item["source_file_id"] = call.source_file_id
+        items.append(item)
     return items
 
 
 def _item_map_metadata(
     *,
     item_calls: list[PerItemMapCall],
+    input_array_key: str,
     output_array_key: str,
     source_step_order: int,
 ) -> dict[str, Any]:
@@ -374,7 +430,7 @@ def _item_map_metadata(
         "capture_mode": "previous_step_item_map",
         "execution_mode": "per_item",
         "source_step_order": source_step_order,
-        "input_array": "documents",
+        "input_array": input_array_key,
         "output_array": output_array_key,
         "item_count": len(item_calls),
         "per_item_calls": [_item_call_metadata(call) for call in item_calls],
@@ -404,8 +460,9 @@ def _item_call_metadata(call: PerItemMapCall) -> dict[str, Any]:
 
 
 def _item_map_input_text_summary(item_calls: list[PerItemMapCall]) -> str:
+    input_array_key = item_calls[0].input_array_key if item_calls else "items"
     return (
-        f"[per-item map input: {len(item_calls)} documents[] item calls; "
+        f"[per-item map input: {len(item_calls)} {input_array_key}[] item calls; "
         "see runtime_input.per_item_calls for model input previews]"
     )
 

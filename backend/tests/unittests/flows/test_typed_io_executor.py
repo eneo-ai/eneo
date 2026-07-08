@@ -2072,6 +2072,112 @@ async def test_per_source_config_fails_closed_when_step_is_not_document_reader(u
 
 
 @pytest.mark.asyncio
+async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identity(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step(
+        response_text=(
+            '{"source_sections":[{"section_title":"Human title",'
+            '"section_body":"Finished section text"}]}'
+        )
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"records":[]}',
+        structured={
+            "records": [
+                {
+                    "title": "Human title",
+                    "summary": "Source summary",
+                    "source_label": "source-a.pdf",
+                    "source_file_id": "file-a",
+                }
+            ]
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {
+                "records": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["records"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "source_sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "section_title": {"type": "string"},
+                            "section_body": {"type": "string"},
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                        },
+                        "required": [
+                            "section_title",
+                            "section_body",
+                            "source_label",
+                            "source_file_id",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["source_sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True}},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert output.structured_output == {
+        "source_sections": [
+            {
+                "section_title": "Human title",
+                "section_body": "Finished section text",
+                "source_label": "source-a.pdf",
+                "source_file_id": "file-a",
+            }
+        ]
+    }
+    question = assistant.get_response.await_args.kwargs["question"]
+    assert '"records":' in question
+    assert '"documents":' not in question
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["input_array"] == "records"
+    assert output.runtime_input_metadata["output_array"] == "source_sections"
+    assert output.runtime_input_metadata["per_item_calls"][0]["source_label"] == (
+        "source-a.pdf"
+    )
+
+
+@pytest.mark.asyncio
 async def test_per_item_map_executes_one_model_call_per_previous_document_at_scale(
     user,
 ):

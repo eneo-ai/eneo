@@ -32,9 +32,9 @@ from eneo.flows.flow_authoring_spec import (
     InputType,
     StepSpec,
 )
+from eneo.flows.source_identity import without_runtime_source_identity_draft_fields
 
 logger = logging.getLogger(__name__)
-_RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 
 def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
@@ -182,23 +182,9 @@ def _assistant_output_fields_for_planned_step(
 ) -> list[StructuredFieldDraft] | None:
     if is_terminal_schema_step:
         return []
-    if step.runtime_input_execution_mode != "per_source":
+    if (
+        step.runtime_input_execution_mode != "per_source"
+        and not step.previous_item_map_enabled
+    ):
         return None
-    return _without_runtime_source_identity_fields(list(step.output_fields))
-
-
-def _without_runtime_source_identity_fields(
-    fields: list[StructuredFieldDraft],
-) -> list[StructuredFieldDraft]:
-    projected_fields: list[StructuredFieldDraft] = []
-    for field in fields:
-        if field.field_type != "array" or field.name != "documents":
-            projected_fields.append(field)
-            continue
-        item_fields = [
-            item
-            for item in field.item_fields or []
-            if item.name not in _RUNTIME_SOURCE_IDENTITY_FIELDS
-        ]
-        projected_fields.append(field.model_copy(update={"item_fields": item_fields}))
-    return projected_fields
+    return without_runtime_source_identity_draft_fields(list(step.output_fields))
