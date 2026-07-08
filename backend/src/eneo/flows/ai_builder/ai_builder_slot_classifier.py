@@ -23,10 +23,12 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 10
-_SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 11
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
+CLASSIFICATION_REASON_MAX_LENGTH = 500
+CLASSIFICATION_NOTE_MAX_LENGTH = 500
+CLASSIFICATION_NOTES_MAX_ITEMS = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +128,7 @@ async def classify_slots(
     started_at = time.perf_counter()
     completion_kwargs = {
         **litellm_kwargs,
-        "response_format": _SLOT_CLASSIFICATION_RESPONSE_FORMAT,
+        "response_format": _slot_classification_response_format(slot_values),
     }
     try:
         response = await litellm_client.acompletion(
@@ -370,6 +372,162 @@ def _parse_classification_evidence(raw_value: object) -> tuple[str, ...]:
         if len(evidence) >= CLASSIFICATION_EVIDENCE_MAX_ITEMS:
             break
     return tuple(evidence)
+
+
+def _slot_classification_response_format(
+    allowed_slot_values: Mapping[str, Collection[str]],
+) -> dict[str, object]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": f"ai_builder_slot_classification_v{_SLOT_CLASSIFICATION_SCHEMA_VERSION}",
+            # Strict structured outputs reject maxLength/maxItems in current
+            # provider subsets; parser and persisted metadata validators still
+            # enforce the same bounds as a backstop.
+            "strict": False,
+            "schema": _slot_classification_json_schema(allowed_slot_values),
+        },
+    }
+
+
+def _slot_classification_json_schema(
+    allowed_slot_values: Mapping[str, Collection[str]],
+) -> dict[str, object]:
+    normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "slots",
+            "file_roles",
+            "form_intake",
+            "secondary_obligations",
+            "assumptions",
+            "contradictions",
+        ],
+        "properties": {
+            "slots": {
+                "type": "array",
+                "maxItems": len(normalized_values),
+                "items": _slot_classification_slot_schema(normalized_values),
+            },
+            "file_roles": {
+                "type": "array",
+                "items": _classified_file_role_schema(),
+            },
+            "form_intake": {
+                "anyOf": [
+                    _classified_form_intake_schema(),
+                    {"type": "null"},
+                ],
+            },
+            "secondary_obligations": {
+                "type": "array",
+                "maxItems": len(RESULT_OBLIGATION_VALUES),
+                "items": {"type": "string", "enum": list(RESULT_OBLIGATION_VALUES)},
+            },
+            "assumptions": _classification_note_array_schema(),
+            "contradictions": _classification_note_array_schema(),
+        },
+    }
+
+
+def _slot_classification_slot_schema(
+    allowed_slot_values: Mapping[str, Collection[str]],
+) -> dict[str, object]:
+    slot_variants = [
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["slot_name", "value", "confidence", "reason", "evidence"],
+            "properties": {
+                "slot_name": {"type": "string", "enum": [slot_name]},
+                "value": {
+                    "type": "string",
+                    "enum": sorted({*values, UNKNOWN_SLOT_VALUE}),
+                },
+                "confidence": _classification_confidence_schema(),
+                "reason": _classification_reason_schema(),
+                "evidence": _classification_evidence_array_schema(),
+            },
+        }
+        for slot_name, values in sorted(allowed_slot_values.items())
+    ]
+    if not slot_variants:
+        return {"type": "object", "additionalProperties": False}
+    return {"anyOf": slot_variants}
+
+
+def _classified_file_role_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["file_id", "role", "confidence", "reason", "evidence"],
+        "properties": {
+            "file_id": {"type": "string"},
+            "role": {"type": "string", "enum": list(get_args(FileRole))},
+            "confidence": _classification_confidence_schema(),
+            "reason": _classification_reason_schema(),
+            "evidence": _classification_evidence_array_schema(),
+        },
+    }
+
+
+def _classified_form_intake_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "needs_form_fields",
+            "sectioned_form_intake",
+            "confidence",
+            "reason",
+            "evidence",
+        ],
+        "properties": {
+            "needs_form_fields": {"type": "boolean"},
+            "sectioned_form_intake": {"type": "boolean"},
+            "confidence": _classification_confidence_schema(),
+            "reason": _classification_reason_schema(),
+            "evidence": _classification_evidence_array_schema(),
+        },
+    }
+
+
+def _classification_confidence_schema() -> dict[str, object]:
+    return {"type": "string", "enum": ["high", "medium", "low"]}
+
+
+def _classification_reason_schema() -> dict[str, object]:
+    return {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": CLASSIFICATION_REASON_MAX_LENGTH,
+    }
+
+
+def _classification_note_array_schema() -> dict[str, object]:
+    return {
+        "type": "array",
+        "maxItems": CLASSIFICATION_NOTES_MAX_ITEMS,
+        "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": CLASSIFICATION_NOTE_MAX_LENGTH,
+        },
+    }
+
+
+def _classification_evidence_array_schema() -> dict[str, object]:
+    return {
+        "type": "array",
+        "maxItems": CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+        "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+        },
+    }
 
 
 def _downgrade_unsupported_confidence(

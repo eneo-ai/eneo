@@ -42,6 +42,9 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+    CLASSIFICATION_NOTE_MAX_LENGTH,
+    CLASSIFICATION_NOTES_MAX_ITEMS,
+    CLASSIFICATION_REASON_MAX_LENGTH,
     UNKNOWN_SLOT_VALUE,
     ClassifiedFormIntake,
     ClassifiedSlot,
@@ -79,9 +82,6 @@ LLMResolvableSlotName: TypeAlias = Literal[
     "runtime_metadata_fields",
 ]
 
-_MAX_SLOT_CLASSIFICATION_REASON_LENGTH = 500
-_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH = 500
-_MAX_SLOT_CLASSIFICATION_NOTES = 10
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 
 
@@ -97,7 +97,7 @@ class SlotClassificationSlotMetadata(BaseModel):
     slot_name: LLMResolvableSlotName
     value: str = Field(min_length=1, max_length=128)
     confidence: SlotClassificationConfidence
-    reason: str = Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_REASON_LENGTH)
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
         min_length=1,
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
@@ -126,7 +126,7 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
     needs_form_fields: bool = False
     sectioned_form_intake: bool = False
     confidence: SlotClassificationConfidence
-    reason: str = Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_REASON_LENGTH)
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
         min_length=1,
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
@@ -150,7 +150,7 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
 
 SlotClassificationNote: TypeAlias = Annotated[
     str,
-    Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH),
+    Field(min_length=1, max_length=CLASSIFICATION_NOTE_MAX_LENGTH),
 ]
 
 
@@ -181,11 +181,11 @@ class SlotClassificationMetadata(BaseModel):
     form_intake: SlotClassificationFormIntakeMetadata | None = None
     assumptions: list[SlotClassificationNote] = Field(
         default_factory=_empty_slot_classification_notes,
-        max_length=_MAX_SLOT_CLASSIFICATION_NOTES,
+        max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
     )
     contradictions: list[SlotClassificationNote] = Field(
         default_factory=_empty_slot_classification_notes,
-        max_length=_MAX_SLOT_CLASSIFICATION_NOTES,
+        max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
     )
 
     @field_validator("slots")
@@ -373,7 +373,7 @@ def _bounded_metadata_text(
     value: str,
     *,
     fallback: str,
-    max_length: int = _MAX_SLOT_CLASSIFICATION_NOTE_LENGTH,
+    max_length: int = CLASSIFICATION_NOTE_MAX_LENGTH,
 ) -> str:
     stripped = value.strip()
     if not stripped:
@@ -527,12 +527,12 @@ def slot_classification_metadata_from_result(
                     _bounded_metadata_text(value, fallback="assumption")
                     for value in result.assumptions
                     if value.strip()
-                ][:_MAX_SLOT_CLASSIFICATION_NOTES],
+                ][:CLASSIFICATION_NOTES_MAX_ITEMS],
                 "contradictions": [
                     _bounded_metadata_text(value, fallback="contradiction")
                     for value in result.contradictions
                     if value.strip()
-                ][:_MAX_SLOT_CLASSIFICATION_NOTES],
+                ][:CLASSIFICATION_NOTES_MAX_ITEMS],
             }
         )
     except ValidationError:

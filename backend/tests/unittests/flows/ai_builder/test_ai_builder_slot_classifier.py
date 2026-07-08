@@ -309,7 +309,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 10,
+                    "schema_version": 11,
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -502,10 +502,19 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_requests_json_response_format() -> None:
+async def test_classify_slots_requests_bounded_json_schema_response_format() -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
-        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
     )
 
     await classify_slots(
@@ -518,9 +527,54 @@ async def test_classify_slots_requests_json_response_format() -> None:
         ui_language="sv",
     )
 
-    assert litellm_client.acompletion.await_args.kwargs["response_format"] == {
-        "type": "json_object"
+    response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
+    assert response_format["type"] == "json_schema"
+    json_schema = response_format["json_schema"]
+    assert json_schema["name"] == "ai_builder_slot_classification_v11"
+    assert json_schema["strict"] is False
+
+    schema = json_schema["schema"]
+    assert schema["required"] == [
+        "slots",
+        "file_roles",
+        "form_intake",
+        "secondary_obligations",
+        "assumptions",
+        "contradictions",
+    ]
+    assert schema["additionalProperties"] is False
+    slot_schema = schema["properties"]["slots"]
+    assert slot_schema["maxItems"] == 1
+    slot_variant = slot_schema["items"]["anyOf"][0]
+    assert slot_variant["properties"]["slot_name"] == {
+        "type": "string",
+        "enum": ["primary_runtime_input"],
     }
+    assert slot_variant["properties"]["value"]["enum"] == [
+        "audio",
+        "documents",
+        "unknown",
+    ]
+    assert (
+        slot_variant["properties"]["reason"]["maxLength"]
+        == classifier.CLASSIFICATION_REASON_MAX_LENGTH
+    )
+    assert (
+        slot_variant["properties"]["evidence"]["maxItems"]
+        == classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS
+    )
+    assert (
+        slot_variant["properties"]["evidence"]["items"]["maxLength"]
+        == classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
+    )
+    assert (
+        schema["properties"]["assumptions"]["maxItems"]
+        == classifier.CLASSIFICATION_NOTES_MAX_ITEMS
+    )
+    assert (
+        schema["properties"]["assumptions"]["items"]["maxLength"]
+        == classifier.CLASSIFICATION_NOTE_MAX_LENGTH
+    )
 
 
 def test_slot_classification_prompt_separates_source_material_from_artifacts() -> None:
