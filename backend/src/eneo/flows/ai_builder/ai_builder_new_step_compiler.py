@@ -89,6 +89,7 @@ def compile_new_step_draft(
     plan_step_ref: str,
     prior_steps: list[StepSpec],
     source_capture_fields: tuple[SourceCaptureField, ...] = (),
+    assistant_output_fields: list[StructuredFieldDraft] | None = None,
     ui_language: str | None = None,
 ) -> StepSpec:
     step_draft = normalize_new_step_input_shape(
@@ -110,6 +111,7 @@ def compile_new_step_draft(
         step_draft=step_draft,
         input_bindings=input_bindings,
         source_capture_fields=source_capture_fields,
+        assistant_output_fields=assistant_output_fields,
         ui_language=ui_language,
     )
     output_config = compile_output_config(step_draft)
@@ -427,6 +429,7 @@ def compile_assistant_instructions(
     step_draft: NewStepDraft,
     input_bindings: dict[str, Any] | None,
     source_capture_fields: tuple[SourceCaptureField, ...] = (),
+    assistant_output_fields: list[StructuredFieldDraft] | None = None,
     ui_language: str | None = None,
 ) -> str:
     instructions = step_draft.instructions
@@ -446,7 +449,11 @@ def compile_assistant_instructions(
     )
     return _append_output_field_guidance(
         instructions=instructions,
-        output_fields=step_draft.output_fields,
+        output_fields=(
+            assistant_output_fields
+            if assistant_output_fields is not None
+            else step_draft.output_fields
+        ),
     )
 
 

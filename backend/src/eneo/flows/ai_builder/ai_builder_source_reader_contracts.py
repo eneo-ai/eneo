@@ -436,9 +436,7 @@ def _ensure_source_label_field(
         StructuredFieldDraft(
             name="source_label",
             field_type="string",
-            description=(
-                "Source file name if available, otherwise a stable source label."
-            ),
+            description="Runtime-provided source label from uploaded file metadata.",
         ),
         *fields,
     ]
@@ -462,7 +460,7 @@ def _add_runtime_source_file_id_field(
             StructuredFieldDraft(
                 name="source_file_id",
                 field_type="string",
-                description="Runtime file id for this source document.",
+                description="Runtime-provided file id for this source document.",
             ),
             *item_fields[insert_index:],
         ]

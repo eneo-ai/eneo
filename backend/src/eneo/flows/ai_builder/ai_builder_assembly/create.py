@@ -1241,15 +1241,16 @@ def _append_per_source_reader_instruction(
     if ui_language == "en":
         addition = (
             "This document reader runs once per uploaded source. Extract facts "
-            "only from the current source document and return one document object; "
-            "the runtime fills source_label and source_file_id from file metadata."
+            "only from the current source document and return documents with one "
+            "document object; the runtime fills source_label and source_file_id "
+            "from file metadata."
         )
     else:
         addition = (
             "Den här dokumentläsaren körs en gång per uppladdad källa. Extrahera "
-            "bara fakta från det aktuella källdokumentet och returnera ett "
-            "dokumentobjekt; runtime fyller source_label och source_file_id från "
-            "filmetadata."
+            "bara fakta från det aktuella källdokumentet och returnera documents "
+            "med ett dokumentobjekt; runtime fyller source_label och source_file_id "
+            "från filmetadata."
         )
     if addition in instructions:
         return instructions

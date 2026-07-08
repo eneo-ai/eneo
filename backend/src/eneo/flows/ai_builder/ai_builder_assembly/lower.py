@@ -11,7 +11,10 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_new_step_output_mode,
     make_plan_step_ref,
 )
-from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
 from eneo.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
@@ -31,6 +34,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 
 logger = logging.getLogger(__name__)
+_RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 
 def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
@@ -72,6 +76,13 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
                 plan_step_ref=make_plan_step_ref(index),
                 prior_steps=compiled_steps,
                 source_capture_fields=source_capture_fields_by_index.get(index, ()),
+                assistant_output_fields=_assistant_output_fields_for_planned_step(
+                    planned_step,
+                    is_terminal_schema_step=(
+                        plan.terminal_output_schema is not None
+                        and index == len(plan.steps) - 1
+                    ),
+                ),
                 ui_language=plan.ui_language,
             )
         )
@@ -161,3 +172,32 @@ def _new_step_draft_from_planned_step(
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
     )
+
+
+def _assistant_output_fields_for_planned_step(
+    step: PlannedStep,
+    *,
+    is_terminal_schema_step: bool,
+) -> list[StructuredFieldDraft] | None:
+    if is_terminal_schema_step:
+        return []
+    if step.runtime_input_execution_mode != "per_source":
+        return None
+    return _without_runtime_source_identity_fields(list(step.output_fields))
+
+
+def _without_runtime_source_identity_fields(
+    fields: list[StructuredFieldDraft],
+) -> list[StructuredFieldDraft]:
+    projected_fields: list[StructuredFieldDraft] = []
+    for field in fields:
+        if field.field_type != "array" or field.name != "documents":
+            projected_fields.append(field)
+            continue
+        item_fields = [
+            item
+            for item in field.item_fields or []
+            if item.name not in _RUNTIME_SOURCE_IDENTITY_FIELDS
+        ]
+        projected_fields.append(field.model_copy(update={"item_fields": item_fields}))
+    return projected_fields

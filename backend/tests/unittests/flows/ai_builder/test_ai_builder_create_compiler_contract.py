@@ -1691,6 +1691,14 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     reader_instructions = reader_step.assistant_spec.instructions
     assert "körs en gång per uppladdad källa" in reader_instructions
     assert "runtime fyller source_label och source_file_id" in reader_instructions
+    assert (
+        "Allowed fields for items of documents: title, date_or_year, "
+        "author_or_sender, summary."
+    ) in reader_instructions
+    assert (
+        "Allowed fields for items of documents: source_label"
+        not in reader_instructions
+    )
     assert "file_name" not in reader_instructions
     assert reader_step.input_config is not None
     assert (
@@ -1763,6 +1771,7 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     reader_instructions = reader_step.assistant_spec.instructions
     assert "körs en gång per uppladdad källa" in reader_instructions
     assert "runtime fyller source_label och source_file_id" in reader_instructions
+    assert "Allowed fields for items of documents:" not in reader_instructions
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 

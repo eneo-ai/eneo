@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import UUID
 
@@ -27,16 +29,21 @@ from eneo.flows.runtime.step_handlers.base import (
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.main.exceptions import TypedIOValidationException
 
+logger = logging.getLogger(__name__)
+
 # ponytail: this executor owns one AsyncSession; raise only after per-source
 # calls get isolated session ownership.
 PER_SOURCE_READER_CONCURRENCY = 1
 PER_SOURCE_METADATA_PREVIEW_CHARS = 2000
+PER_SOURCE_SOURCE_LABEL_MAX_CHARS = 120
+_RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 
 @dataclass(frozen=True)
 class PerSourceReaderCall:
     source_number: int
     file_id: UUID
+    source_label: str
     output: StepExecutionOutput
     deps: StepExecutionRuntimeDeps
     elapsed_ms: int
@@ -74,7 +81,10 @@ async def execute_per_source_reader(
             "as exactly one top-level documents[] array.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
-    per_call_step = step
+    per_call_step = replace(
+        step,
+        output_contract=_model_facing_per_source_contract(step.output_contract),
+    )
     if not file_ids:
         prepared_step = await prepare_assistant_step(
             step=per_call_step,
@@ -108,6 +118,7 @@ async def execute_per_source_reader(
                 prepare_assistant_step=prepare_assistant_step,
             )
         )
+    per_source_calls = _with_deduped_source_labels(per_source_calls)
     return StepExecutionResult(
         output=await _assemble_per_source_output(
             step=step,
@@ -154,6 +165,7 @@ async def _execute_one_source(
     return PerSourceReaderCall(
         source_number=source_number,
         file_id=file_id,
+        source_label=_raw_source_label(source_number, output.runtime_input_metadata),
         output=output,
         deps=prepared_step.deps,
         elapsed_ms=elapsed_ms,
@@ -286,6 +298,39 @@ def _documents_item_schema(output_contract: dict[str, Any] | None) -> dict[str, 
     return dict(typed_item_schema)
 
 
+def _model_facing_per_source_contract(
+    output_contract: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if output_contract is None or _documents_item_schema(output_contract) is None:
+        return output_contract
+    projected_contract = deepcopy(output_contract)
+    properties = projected_contract.get("properties")
+    if not isinstance(properties, dict):
+        return projected_contract
+    typed_properties = cast(dict[str, Any], properties)
+    documents_schema = typed_properties.get("documents")
+    if not isinstance(documents_schema, dict):
+        return projected_contract
+    typed_documents_schema = cast(dict[str, Any], documents_schema)
+    item_schema = typed_documents_schema.get("items")
+    if not isinstance(item_schema, dict):
+        return projected_contract
+    typed_item_schema = cast(dict[str, Any], item_schema)
+    item_properties = typed_item_schema.get("properties")
+    if isinstance(item_properties, dict):
+        typed_item_properties = cast(dict[str, Any], item_properties)
+        for field_name in _RUNTIME_SOURCE_IDENTITY_FIELDS:
+            typed_item_properties.pop(field_name, None)
+    required = typed_item_schema.get("required")
+    if isinstance(required, list):
+        typed_item_schema["required"] = [
+            field_name
+            for field_name in cast(list[object], required)
+            if field_name not in _RUNTIME_SOURCE_IDENTITY_FIELDS
+        ]
+    return projected_contract
+
+
 def _raise_if_per_source_output_is_not_object(
     *,
     output: StepExecutionOutput,
@@ -318,21 +363,56 @@ def _source_document_items(call: PerSourceReaderCall) -> list[dict[str, Any]]:
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
         item = dict(cast(dict[str, Any], raw_item))
-        item["source_label"] = _source_label(call)
+        item["source_label"] = call.source_label
         item["source_file_id"] = str(call.file_id)
         items.append(item)
     return items
 
 
-def _source_label(call: PerSourceReaderCall) -> str:
-    file_metadata = _first_runtime_file_metadata(call.output.runtime_input_metadata)
+def _raw_source_label(
+    source_number: int,
+    runtime_input_metadata: dict[str, Any] | None,
+) -> str:
+    file_metadata = _first_runtime_file_metadata(runtime_input_metadata)
     if file_metadata is not None:
         raw_name = file_metadata.get("name")
         if isinstance(raw_name, str):
-            file_name = " ".join(raw_name.split())
+            printable_name = "".join(
+                char if char.isprintable() else " " for char in raw_name
+            )
+            file_name = " ".join(printable_name.split())
             if file_name:
-                return file_name
-    return f"[SOURCE {call.source_number}]"
+                return _cap_source_label(file_name, source_number=source_number)
+    return f"Källa {source_number}"
+
+
+def _cap_source_label(label: str, *, source_number: int) -> str:
+    if len(label) <= PER_SOURCE_SOURCE_LABEL_MAX_CHARS:
+        return label
+    logger.info(
+        "flow_per_source_reader_source_label_truncated",
+        extra={
+            "source_number": source_number,
+            "source_label_chars": len(label),
+            "display_char_cap": PER_SOURCE_SOURCE_LABEL_MAX_CHARS,
+        },
+    )
+    return f"{label[: PER_SOURCE_SOURCE_LABEL_MAX_CHARS - 3].rstrip()}..."
+
+
+def _with_deduped_source_labels(
+    per_source_calls: list[PerSourceReaderCall],
+) -> list[PerSourceReaderCall]:
+    counts: dict[str, int] = {}
+    deduped_calls: list[PerSourceReaderCall] = []
+    for call in per_source_calls:
+        count = counts.get(call.source_label, 0) + 1
+        counts[call.source_label] = count
+        source_label = (
+            call.source_label if count == 1 else f"{call.source_label} ({count})"
+        )
+        deduped_calls.append(replace(call, source_label=source_label))
+    return deduped_calls
 
 
 def _first_runtime_file_metadata(
@@ -430,7 +510,7 @@ def _per_source_call_metadata(call: PerSourceReaderCall) -> dict[str, Any]:
     return {
         "source_number": call.source_number,
         "file_id": str(call.file_id),
-        "source_label": _source_label(call),
+        "source_label": call.source_label,
         "elapsed_ms": call.elapsed_ms,
         "input_text_length": len(input_text_value),
         "input_text_preview": input_text_value[:PER_SOURCE_METADATA_PREVIEW_CHARS],
@@ -463,7 +543,7 @@ def _per_source_tool_metadata(
             {
                 "source_number": call.source_number,
                 "file_id": str(call.file_id),
-                "source_label": _source_label(call),
+                "source_label": call.source_label,
                 "tool_calls": call.output.tool_calls_metadata,
             }
             for call in per_source_calls

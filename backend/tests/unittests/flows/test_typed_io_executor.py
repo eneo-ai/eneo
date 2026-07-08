@@ -1928,7 +1928,7 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     second_file = SimpleNamespace(
         id=second_file_id,
         text="Beta document text",
-        name="beta.pdf",
+        name="alpha.pdf",
         checksum="checksum-b",
         size=200,
         mimetype="application/pdf",
@@ -2020,6 +2020,8 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     ]
     assert any("Alpha document text" in question for question in questions)
     assert any("Beta document text" in question for question in questions)
+    assert not any("source_label" in question for question in questions)
+    assert not any("source_file_id" in question for question in questions)
     assert not any(
         "Alpha document text" in question and "Beta document text" in question
         for question in questions
@@ -2033,7 +2035,7 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
             },
             {
                 "title": "Beta",
-                "source_label": "beta.pdf",
+                "source_label": "alpha.pdf (2)",
                 "source_file_id": str(second_file_id),
             },
         ]
@@ -2045,6 +2047,28 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         str(second_file_id),
     ]
     assert len(output.runtime_input_metadata["per_source_calls"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_per_source_config_fails_closed_when_step_is_not_document_reader(user):
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(
+        input_type="document",
+        output_type="text",
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_contract_violation"
 
 
 @pytest.mark.asyncio
