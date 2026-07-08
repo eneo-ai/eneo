@@ -208,15 +208,25 @@ def compile_runtime_input_overrides(step_draft: NewStepDraft) -> dict[str, Any] 
         not step_draft.runtime_required
         and step_draft.runtime_max_files is None
         and step_draft.runtime_input_execution_mode == "single_call"
+        and not step_draft.previous_item_map_enabled
     ):
         return None
 
+    input_config: dict[str, Any] = {}
     runtime_input: dict[str, Any] = {"required": step_draft.runtime_required}
     if step_draft.runtime_max_files is not None:
         runtime_input["max_files"] = step_draft.runtime_max_files
     if step_draft.runtime_input_execution_mode != "single_call":
         runtime_input["execution_mode"] = step_draft.runtime_input_execution_mode
-    return {"runtime_input": runtime_input}
+    if (
+        step_draft.runtime_required
+        or step_draft.runtime_max_files is not None
+        or step_draft.runtime_input_execution_mode != "single_call"
+    ):
+        input_config["runtime_input"] = runtime_input
+    if step_draft.previous_item_map_enabled:
+        input_config["item_map"] = {"enabled": True}
+    return input_config or None
 
 
 def compile_output_config(step_draft: NewStepDraft) -> dict[str, Any] | None:

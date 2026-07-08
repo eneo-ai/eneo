@@ -144,6 +144,7 @@ class NewStepDraft(BaseModel):
     runtime_required: bool = False
     runtime_max_files: int | None = None
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call"
+    previous_item_map_enabled: bool = False
     uses_form_fields: list[str] = Field(default_factory=list)
     uses_previous_fields: list[PreviousFieldRef] = Field(
         default_factory=lambda: cast(list[PreviousFieldRef], [])

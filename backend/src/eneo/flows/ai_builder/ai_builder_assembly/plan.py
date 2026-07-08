@@ -72,6 +72,7 @@ class PlannedStep:
     runtime_required: bool = False
     runtime_max_files: int | None = None
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call"
+    previous_item_map_enabled: bool = False
     form_field_refs: tuple[str, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()

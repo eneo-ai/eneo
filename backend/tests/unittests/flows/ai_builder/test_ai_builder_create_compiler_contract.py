@@ -1800,6 +1800,11 @@ def test_report_disposition_both_folds_standalone_overview_into_body_writer() ->
         "Sätt ihop slutrapport",
         "Rendera PDF",
     ]
+    section_step = compiled.steps[1]
+    assert section_step.input_config == {"item_map": {"enabled": True}}
+    assert "körs en gång per documents[]-post" in (
+        section_step.assistant_spec.instructions
+    )
     body_writer_step = compiled.steps[2]
     assert body_writer_step.input_source == InputSource.ALL_PREVIOUS_STEPS
     assert "Skriv en samlad översikt över alla källor." in (

@@ -508,6 +508,10 @@ def _assemble_create_intent(
         completed_steps,
         ui_language=ui_language,
     )
+    completed_steps = _apply_previous_document_item_map_execution(
+        completed_steps,
+        ui_language=ui_language,
+    )
     completed_steps = _annotate_document_section_source_attribution(
         completed_steps,
         ui_language=ui_language,
@@ -1346,6 +1350,75 @@ def _append_per_source_reader_instruction(
             "bara fakta från det aktuella källdokumentet och returnera documents "
             "med ett dokumentobjekt; runtime fyller source_label och source_file_id "
             "från filmetadata."
+        )
+    if addition in instructions:
+        return instructions
+    return f"{instructions}\n\n{addition}"
+
+
+def _apply_previous_document_item_map_execution(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    ui_language: str | None,
+) -> tuple[PlannedStep, ...]:
+    updated_steps: list[PlannedStep] = []
+    changed = False
+    for planned_step in planned_steps:
+        previous_step = updated_steps[-1] if updated_steps else None
+        output_array = _single_output_array_field_name(planned_step.output_fields)
+        if (
+            previous_step is None
+            or not planned_step_is_source_reader(previous_step)
+            or previous_step.runtime_input_execution_mode != "per_source"
+            or planned_step.input_source != InputSource.PREVIOUS_STEP
+            or planned_step.input_type != InputType.JSON
+            or planned_step.output_type != OutputType.JSON
+            or output_array is None
+        ):
+            updated_steps.append(planned_step)
+            continue
+        annotated_step = replace(
+            planned_step,
+            instructions=_append_previous_document_item_map_instruction(
+                planned_step.instructions,
+                output_array=output_array,
+                ui_language=ui_language,
+            ),
+            previous_item_map_enabled=True,
+        )
+        updated_steps.append(annotated_step)
+        changed = changed or annotated_step != planned_step
+    return tuple(updated_steps) if changed else planned_steps
+
+
+def _single_output_array_field_name(
+    output_fields: tuple[StructuredFieldDraft, ...],
+) -> str | None:
+    if len(output_fields) != 1:
+        return None
+    field = output_fields[0]
+    if field.field_type != "array":
+        return None
+    return field.name
+
+
+def _append_previous_document_item_map_instruction(
+    instructions: str,
+    *,
+    output_array: str,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "en":
+        addition = (
+            "This step runs once per documents[] item from the previous reader. "
+            f"Use only the current document item and return {output_array} with "
+            "one item."
+        )
+    else:
+        addition = (
+            "Det här steget körs en gång per documents[]-post från föregående "
+            f"läsare. Använd bara den aktuella dokumentposten och returnera "
+            f"{output_array} med en post."
         )
     if addition in instructions:
         return instructions
