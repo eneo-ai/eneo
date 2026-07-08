@@ -1674,7 +1674,7 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     )
 
     reader_step = compiled.steps[0]
-    body_writer_step = compiled.steps[1]
+    section_step = compiled.steps[1]
     assert reader_step.output_contract is not None
     documents_schema = reader_step.output_contract["properties"]["documents"]
     item_properties = documents_schema["items"]["properties"]
@@ -1705,10 +1705,11 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert (
         reader_step.input_config["runtime_input"]["execution_mode"] == "per_source"
     )
-    assert '"Källa: {source_label}"' not in body_writer_step.assistant_spec.instructions
-    assert "Skriv källspecifika avsnitt" in (
-        body_writer_step.assistant_spec.instructions
-    )
+    assert '"Källa: {source_label}"' not in section_step.assistant_spec.instructions
+    assert "section_title" in section_step.output_contract["properties"][
+        "source_sections"
+    ]["items"]["properties"]
+    assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
     assert validate_spec(compiled).valid
 
 
@@ -1826,6 +1827,144 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
     assert body_writer_step.input_source == InputSource.PREVIOUS_STEP
     assert body_writer_step.output_mode == OutputMode.COMPOSE_TEXT
     assert body_writer_step.input_bindings == {
+        "question": "# {{ step_c.output.structured.report_title }}",
+        "source_refs": [
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "source_sections",
+                "item_template": (
+                    "## {section_title}\n\n"
+                    "{section_body}\n\n"
+                    "Källa: {source_label}"
+                ),
+            },
+            {
+                "step_ref": "step_c",
+                "output": "structured",
+                "field_path": "overall_overview",
+                "label": "Samlad översikt",
+            },
+        ],
+    }
+    assert all(step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps)
+    assert validate_spec(compiled).valid
+
+
+def test_report_disposition_both_inserts_missing_source_section_map() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Dokumentöversikt i PDF",
+            "plan_rationale": "Läs dokument, skriv översikt och rendera PDF.",
+            "steps": [
+                {
+                    "name": "Läs varje dokument",
+                    "instructions": "Läs varje dokument och strukturera fakta.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "item_fields": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Dokumentets titel.",
+                                },
+                                {
+                                    "name": "document_type",
+                                    "field_type": "string",
+                                    "description": "Dokumenttyp.",
+                                },
+                                {
+                                    "name": "category",
+                                    "field_type": "string",
+                                    "description": "Kategori.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Kort sammanfattning.",
+                                },
+                                {
+                                    "name": "conclusions",
+                                    "field_type": "string",
+                                    "description": "Slutsatser.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Sammanställ översikt",
+                    "instructions": "Jämför dokumenten och skapa en samlad översikt.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Samlad översikt.",
+                        },
+                        {
+                            "name": "overall_conclusion",
+                            "field_type": "string",
+                            "description": "Samlad slutsats.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Skriv rapporttext",
+                    "instructions": "Skriv den kompletta rapporttexten för PDF-dokumentet.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+            ui_language="sv",
+            report_disposition="both",
+        ),
+    )
+
+    assert [step.name for step in compiled.steps] == [
+        "Läs varje dokument",
+        "Bygg källavsnitt",
+        "Sammanställ översikt",
+        "Skriv rapporttext",
+        "Rendera PDF",
+    ]
+    section_step = compiled.steps[1]
+    assert section_step.input_config == {"item_map": {"enabled": True}}
+    section_properties = section_step.output_contract["properties"]["source_sections"][
+        "items"
+    ]["properties"]
+    assert list(section_properties) == [
+        "section_title",
+        "section_body",
+        "source_label",
+        "source_file_id",
+    ]
+    assert "source_label" not in section_step.assistant_spec.instructions
+
+    overview_step = compiled.steps[2]
+    assert list(overview_step.output_contract["properties"]) == [
+        "report_title",
+        "overall_overview",
+    ]
+
+    compose_step = compiled.steps[3]
+    assert compose_step.output_mode == OutputMode.COMPOSE_TEXT
+    assert compose_step.input_source == InputSource.PREVIOUS_STEP
+    assert compose_step.input_bindings == {
         "question": "# {{ step_c.output.structured.report_title }}",
         "source_refs": [
             {

@@ -502,8 +502,20 @@ def _assemble_create_intent(
         completed_steps,
         ui_language=ui_language,
     )
+    completed_steps = _ensure_document_report_section_writer(
+        completed_steps,
+        report_disposition=report_disposition,
+        final_output_type=final_output_type,
+        ui_language=ui_language,
+    )
     completed_steps = _apply_previous_document_item_map_execution(
         completed_steps,
+        ui_language=ui_language,
+    )
+    completed_steps = _ensure_document_report_overview_writer(
+        completed_steps,
+        report_disposition=report_disposition,
+        final_output_type=final_output_type,
         ui_language=ui_language,
     )
     completed_steps = _replace_document_report_body_writer_with_compose(
@@ -1261,6 +1273,135 @@ def _append_per_source_reader_instruction(
     return f"{instructions}\n\n{addition}"
 
 
+def _ensure_document_report_section_writer(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    report_disposition: str | None,
+    final_output_type: OutputType,
+    ui_language: str | None,
+) -> tuple[PlannedStep, ...]:
+    if (
+        final_output_type not in _DOCUMENT_OUTPUT_TYPES
+        or report_disposition not in {"both", "per_source_sections"}
+        or len(planned_steps) < 3
+        or _source_section_single_array_index(planned_steps) is not None
+    ):
+        return planned_steps
+
+    reader_index = _per_source_document_reader_index(planned_steps)
+    if reader_index is None:
+        return planned_steps
+    reader_step = planned_steps[reader_index]
+    section_step = PlannedStep(
+        role="transform",
+        name=_document_report_section_writer_name(ui_language),
+        instructions=_document_report_section_writer_instructions(ui_language),
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        output_type=OutputType.JSON,
+        output_mode=OutputMode.PASS_THROUGH,
+        underlag_channel=derive_underlag_channel(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            previous_step=reader_step,
+            previous_field_refs=(),
+        ),
+        output_fields=(_document_report_section_array_field(ui_language),),
+    )
+    logger.info(
+        "ai_builder_document_report_section_writer_inserted",
+        extra={"reader_step_name": reader_step.name},
+    )
+    return (
+        *planned_steps[: reader_index + 1],
+        section_step,
+        *planned_steps[reader_index + 1 :],
+    )
+
+
+def _per_source_document_reader_index(
+    planned_steps: tuple[PlannedStep, ...],
+) -> int | None:
+    for index, planned_step in enumerate(planned_steps):
+        if (
+            planned_step_is_source_reader(planned_step)
+            and planned_step.runtime_input_execution_mode == "per_source"
+            and structured_fields_have_document_items(planned_step.output_fields)
+        ):
+            return index
+    return None
+
+
+def _source_section_single_array_index(
+    planned_steps: tuple[PlannedStep, ...],
+) -> int | None:
+    for index, planned_step in enumerate(planned_steps):
+        if _step_outputs_source_section_array(planned_step):
+            return index
+    return None
+
+
+def _step_outputs_source_section_array(planned_step: PlannedStep) -> bool:
+    if len(planned_step.output_fields) != 1:
+        return False
+    field = planned_step.output_fields[0]
+    if field.field_type != "array":
+        return False
+    item_field_names = {item.name for item in field.item_fields or ()}
+    if {"section_title", "section_body"}.issubset(item_field_names):
+        return True
+    return _source_section_array_name(field.name)
+
+
+def _source_section_array_name(name: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_")
+    tokens = set(normalized.split("_"))
+    return normalized in {"source_sections", "source_section"} or (
+        bool(tokens.intersection({"source", "kalla", "kalldokument"}))
+        and bool(tokens.intersection({"section", "sections", "avsnitt"}))
+    )
+
+
+def _document_report_section_writer_name(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return "Build source sections"
+    return "Bygg källavsnitt"
+
+
+def _document_report_section_writer_instructions(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return (
+            "Write one finished report section for the current document item. "
+            "Use the document title or topic as section_title, not the uploaded "
+            "filename. Put the full source-specific prose in section_body."
+        )
+    return (
+        "Skriv ett färdigt rapportavsnitt för den aktuella dokumentposten. "
+        "Använd dokumentets titel eller ämne som section_title, inte det "
+        "uppladdade filnamnet. Lägg hela den källspecifika rapporttexten i "
+        "section_body."
+    )
+
+
+def _document_report_section_array_field(
+    ui_language: str | None,
+) -> StructuredFieldDraft:
+    description = (
+        "One finished report section per source document."
+        if ui_language == "en"
+        else "Ett färdigt rapportavsnitt per källdokument."
+    )
+    return StructuredFieldDraft(
+        name="source_sections",
+        field_type="array",
+        description=description,
+        item_fields=[
+            _section_title_field(ui_language),
+            _section_body_field(ui_language),
+        ],
+    )
+
+
 def _apply_previous_document_item_map_execution(
     planned_steps: tuple[PlannedStep, ...],
     *,
@@ -1328,6 +1469,84 @@ def _append_previous_document_item_map_instruction(
     if addition in instructions:
         return instructions
     return f"{instructions}\n\n{addition}"
+
+
+def _ensure_document_report_overview_writer(
+    planned_steps: tuple[PlannedStep, ...],
+    *,
+    report_disposition: str | None,
+    final_output_type: OutputType,
+    ui_language: str | None,
+) -> tuple[PlannedStep, ...]:
+    if (
+        final_output_type not in _DOCUMENT_OUTPUT_TYPES
+        or report_disposition != "both"
+        or len(planned_steps) < 4
+        or planned_steps[-1].role != "renderer"
+        or planned_steps[-2].role != "body_writer"
+    ):
+        return planned_steps
+
+    body_writer_index = len(planned_steps) - 2
+    section_index = _source_section_item_map_index(
+        planned_steps[:body_writer_index]
+    )
+    if section_index is None:
+        return planned_steps
+    if (
+        _overview_writer_index(
+            planned_steps=planned_steps,
+            after_index=section_index,
+            before_index=body_writer_index,
+        )
+        is not None
+    ):
+        return planned_steps
+
+    section_step = planned_steps[section_index]
+    overview_step = PlannedStep(
+        role="transform",
+        name=_document_report_overview_writer_name(ui_language),
+        instructions=_document_report_overview_writer_instructions(ui_language),
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        output_type=OutputType.JSON,
+        output_mode=OutputMode.PASS_THROUGH,
+        underlag_channel=derive_underlag_channel(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            previous_step=section_step,
+            previous_field_refs=(),
+        ),
+        output_fields=_report_overview_fields(ui_language),
+    )
+    logger.info(
+        "ai_builder_document_report_overview_writer_inserted",
+        extra={"section_step_name": section_step.name},
+    )
+    return (
+        *planned_steps[: section_index + 1],
+        overview_step,
+        *planned_steps[section_index + 1 :],
+    )
+
+
+def _document_report_overview_writer_name(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return "Write overview"
+    return "Skriv översikt"
+
+
+def _document_report_overview_writer_instructions(ui_language: str | None) -> str:
+    if ui_language == "en":
+        return (
+            "Write a concise report title and synthesized overview across the "
+            "completed source sections. Use only the supplied section content."
+        )
+    return (
+        "Skriv en koncis rapporttitel och samlad översikt över de färdiga "
+        "källavsnitten. Använd endast det tillhandahållna avsnittsinnehållet."
+    )
 
 
 def _replace_document_report_body_writer_with_compose(
