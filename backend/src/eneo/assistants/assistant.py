@@ -363,6 +363,7 @@ class Assistant(Entity):
         prompt_override: str | None = None,
         prompt: str | None = None,
         version: int = 1,
+        reject_context_over_limit: bool = False,
     ) -> "CompletionModelResponse":
         if self.completion_model is None:
             raise NoModelSelectedException()
@@ -386,6 +387,7 @@ class Assistant(Entity):
             model_kwargs=model_kwargs,
             version=version,
             mcp_servers=self._mcp_servers_for_completion(),
+            reject_context_over_limit=reject_context_over_limit,
         )
 
     async def ask(

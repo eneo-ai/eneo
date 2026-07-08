@@ -82,4 +82,5 @@ class RuntimeAssistantProtocol(Protocol):
         prompt_override: str | None = None,
         prompt: str | None = None,
         version: int = 1,
+        reject_context_over_limit: bool = False,
     ) -> CompletionModelResponse: ...

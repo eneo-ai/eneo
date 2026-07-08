@@ -11,6 +11,9 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextWindowExceededError,
+)
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params,
 )
@@ -352,6 +355,51 @@ def is_json_mode_rejection(exc: Exception) -> bool:
     return any(term in msg for term in ("response_format", "json_object", "json mode"))
 
 
+def _context_window_source_hint(input_payload: dict[str, Any]) -> str:
+    runtime_input = _string_key_dict(input_payload.get("runtime_input"))
+    if not runtime_input:
+        return ""
+    files = runtime_input.get("files")
+    if not isinstance(files, list) or not files:
+        return ""
+    first_file = _string_key_dict(cast(list[object], files)[0])
+    if not first_file:
+        return ""
+    name = first_file.get("name")
+    if isinstance(name, str) and name.strip():
+        return f" for source '{name.strip()}'"
+    return ""
+
+
+def _typed_context_window_error(
+    exc: ContextWindowExceededError,
+    *,
+    step: RuntimeStep,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+    effective_prompt: str,
+) -> TypedIOValidationException:
+    source_hint = _context_window_source_hint(prepared.input_payload_for_result)
+    if deps.logger is not None:
+        deps.logger.warning(
+            "flow_executor.context_window_exceeded step_order=%d estimated_tokens=%d max_tokens=%d",
+            step.step_order,
+            exc.estimated_tokens,
+            exc.max_tokens,
+        )
+    return deps.attach_typed_failure_context(
+        TypedIOValidationException(
+            f"Step {step.step_order}: packaged model input{source_hint} uses "
+            f"about {exc.estimated_tokens} tokens, exceeding the selected "
+            f"model window of {exc.max_tokens} tokens. Use a larger-context "
+            "model, split the document, or reduce the step input.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value,
+        ),
+        input_payload_for_result=prepared.input_payload_for_result,
+        effective_prompt=effective_prompt,
+    )
+
+
 async def call_assistant_with_timeout(
     *,
     step: RuntimeStep,
@@ -404,6 +452,7 @@ async def call_assistant_with_timeout(
             stream=False,
             prompt_override=prompt_override,
             version=version,
+            reject_context_over_limit=True,
         )
     )
     state.in_flight_llm_task = llm_task
@@ -527,7 +576,16 @@ async def call_assistant_with_timeout(
                     effective_prompt=prepared.effective_prompt,
                 )
             if llm_task in done:
-                return llm_task.result()
+                try:
+                    return llm_task.result()
+                except ContextWindowExceededError as exc:
+                    raise _typed_context_window_error(
+                        exc,
+                        step=step,
+                        prepared=prepared,
+                        deps=deps,
+                        effective_prompt=prompt_override,
+                    ) from exc
             if cancel_watcher is not None and cancel_watcher in done:
                 if cancel_watcher.result():
                     await _cancel_llm_task_with_grace()

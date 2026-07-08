@@ -156,6 +156,19 @@ class ChunkGrouping:
     relevance_score: float = 0.0
 
 
+@dataclass(frozen=True)
+class ContextWindowExceededError(Exception):
+    estimated_tokens: int
+    max_tokens: int
+
+    def __str__(self) -> str:
+        return (
+            "Estimated context exceeds configured model limit: "
+            f"{self.estimated_tokens} estimated tokens vs "
+            f"{self.max_tokens} configured tokens."
+        )
+
+
 class _Prompt:
     def __init__(self, version: int = 1, model_name: str = ""):
         super().__init__()
@@ -582,6 +595,7 @@ class ContextBuilder:
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
+        reject_over_limit: bool = False,
     ) -> Context:
         if files is None:
             files = []
@@ -682,6 +696,18 @@ class ContextBuilder:
         # and may accept it. Knowledge below receives no remaining budget, while
         # the required prompt/input is still sent so the provider can decide.
         if tokens_used > max_tokens:
+            if reject_over_limit:
+                logger.warning(
+                    "Estimated context exceeds configured model limit: "
+                    "%d estimated tokens vs %d configured tokens; rejecting "
+                    "before provider call",
+                    tokens_used,
+                    max_tokens,
+                )
+                raise ContextWindowExceededError(
+                    estimated_tokens=tokens_used,
+                    max_tokens=max_tokens,
+                )
             logger.warning(
                 "Estimated context exceeds configured model limit: "
                 "%d estimated tokens vs %d configured tokens; sending request "

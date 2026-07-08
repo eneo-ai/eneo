@@ -608,6 +608,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Reduce the request scope or increase upstream responsiveness before rerun.",
         user_action="Try again later or ask a flow editor to reduce the request.",
     ),
+    FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The packaged step input exceeds the selected model context window.",
+        consumer_action="Use a larger-context model, split the source document, or reduce the step input before rerun.",
+        user_action="Use a smaller source, split the document, or ask a flow editor to choose a larger-context model.",
+    ),
     FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

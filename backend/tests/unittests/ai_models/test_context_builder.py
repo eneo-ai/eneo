@@ -11,6 +11,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
+    ContextWindowExceededError,
     count_tokens,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
@@ -223,6 +224,22 @@ def test_too_long_question_is_forwarded_to_provider(context_builder: ContextBuil
 
     assert context.input == input_str
     assert context.token_count > 5
+
+
+def test_too_long_question_can_be_rejected_by_strict_callers(
+    context_builder: ContextBuilder,
+):
+    input_str = "This is a loooooong query, longer than 5 tokens"
+
+    with pytest.raises(ContextWindowExceededError) as exc_info:
+        context_builder.build_context(
+            input_str=input_str,
+            max_tokens=5,
+            reject_over_limit=True,
+        )
+
+    assert exc_info.value.estimated_tokens > 5
+    assert exc_info.value.max_tokens == 5
 
 
 def test_too_long_required_context_skips_knowledge(

@@ -11,6 +11,9 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import Completion, TokenUsage
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextWindowExceededError,
+)
 from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
@@ -21,6 +24,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.runtime.models import (
     RunExecutionState,
@@ -596,6 +600,78 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert state.json_mode_supported["provider:model:1"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_translates_context_window_failure():
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        side_effect=ContextWindowExceededError(
+            estimated_tokens=42000,
+            max_tokens=32000,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="large source",
+            source_text="large source",
+            input_source="flow_input",
+            runtime_input_metadata={"files": [{"name": "large-source.pdf"}]},
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "large source",
+            "source_text": "large source",
+            "input_source": "flow_input",
+            "runtime_input": {"files": [{"name": "large-source.pdf"}]},
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
+        apply_output_cap=AsyncMock(return_value=("unused", [])),
+        attach_typed_failure_context=attach_typed_failure_context,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
+    )
+    assert "large-source.pdf" in str(exc_info.value)
+    assert "42000" in str(exc_info.value)
+    assert "32000" in str(exc_info.value)
+    assert getattr(exc_info.value, "effective_prompt") == "Prompt"
+    assert getattr(exc_info.value, "input_payload_json")["runtime_input"] == {
+        "files": [{"name": "large-source.pdf"}]
+    }
+    assert assistant.get_response.await_args.kwargs["reject_context_over_limit"] is True
 
 
 @pytest.mark.asyncio

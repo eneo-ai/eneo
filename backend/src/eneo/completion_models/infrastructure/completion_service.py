@@ -242,6 +242,7 @@ class CompletionService:
         use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
+        reject_context_over_limit: bool = False,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -313,6 +314,7 @@ class CompletionService:
                     if mcp_proxy and model.supports_tool_calling
                     else None
                 ),
+                reject_over_limit=reject_context_over_limit,
             )
 
             if extended_logging:
