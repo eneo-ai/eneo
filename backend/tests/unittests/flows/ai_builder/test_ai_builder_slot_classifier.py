@@ -386,6 +386,25 @@ def test_slot_classification_prompt_separates_source_material_from_artifacts() -
     assert "uploaded or recorded speech for transcription is audio input" in prompt
 
 
+def test_slot_classification_prompt_explains_report_disposition_values() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        text="Skriv ett rapportavsnitt för varje uppladdat dokument.",
+        allowed_slot_values={
+            "report_disposition": frozenset(
+                {"both", "per_source_sections", "synthesized_overview"}
+            ),
+        },
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "For report_disposition" in prompt
+    assert "per_source_sections" in prompt
+    assert "synthesized_overview" in prompt
+    assert "both" in prompt
+    assert "each uploaded source" in prompt
+
+
 def test_slot_classification_system_prompt_stays_domain_neutral() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         text="Skapa ett generellt flöde.",

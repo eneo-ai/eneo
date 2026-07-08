@@ -357,6 +357,11 @@ def _build_slot_classification_prompt(
         "unsure, or want help choosing a slot, emit that slot with value "
         "`unknown`, confidence `high`, and reason `user_explicit_uncertain`; "
         "do not choose the most likely option. "
+        "For report_disposition, classify per_source_sections when the user wants "
+        "a separate report section or document record for each uploaded source; "
+        "classify synthesized_overview when they want the sources combined into "
+        "one shared summary or analysis; classify both when they ask for source "
+        "sections plus a shared overview, comparison, or conclusion. "
         "If still ambiguous, use value `unknown` with confidence `low` and explain "
         "what question should be asked in contradictions."
     )
