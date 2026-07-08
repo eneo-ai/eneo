@@ -92,6 +92,7 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
 }
 _DATE_TOKENS = frozenset({"date"})
 _AUTHOR_OR_SENDER_TOKENS = frozenset({"author", "sender"})
+_AUTHOR_SOURCE_TOKENS = frozenset({"author", "source"})
 _SUMMARY_TOKENS = frozenset({"summary"})
 _SUMMARY_MODIFIER_TOKENS = frozenset(
     {"brief", "concise", "kort", "short", "source", "topic"}
@@ -377,7 +378,9 @@ def _canonical_source_reader_field_name(field_name: str) -> str:
     tokens = _source_reader_field_tokens(field_name)
     if tokens == _DATE_TOKENS:
         return "date_or_year"
-    if tokens and tokens <= _AUTHOR_OR_SENDER_TOKENS:
+    if tokens == _AUTHOR_SOURCE_TOKENS or (
+        tokens and tokens <= _AUTHOR_OR_SENDER_TOKENS
+    ):
         return "author_or_sender"
     if tokens in _TITLE_TOKEN_SETS:
         return "title"
@@ -430,8 +433,12 @@ def _is_self_nested_container_field(field_name: str, *, parent_name: str) -> boo
 def _ensure_source_label_field(
     fields: list[StructuredFieldDraft],
 ) -> list[StructuredFieldDraft]:
-    if any(field.name == "source_label" for field in fields):
-        return fields
+    existing_source_labels = [field for field in fields if field.name == "source_label"]
+    if existing_source_labels:
+        return [
+            existing_source_labels[0],
+            *(field for field in fields if field.name != "source_label"),
+        ]
     return [
         StructuredFieldDraft(
             name="source_label",
@@ -548,6 +555,8 @@ def _source_capture_field_key(value: str) -> str:
         return "title"
     if token_set in _DOCUMENT_TYPE_TOKEN_SETS:
         return "document_type"
+    if token_set == _AUTHOR_SOURCE_TOKENS:
+        return "author_or_sender"
     if token_set == _CATEGORY_TOKENS:
         return "category"
     if "conclusion" in token_set and token_set <= (

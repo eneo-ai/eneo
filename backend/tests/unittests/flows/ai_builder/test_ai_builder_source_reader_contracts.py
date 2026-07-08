@@ -79,6 +79,30 @@ def test_source_reader_completion_canonicalizes_source_item_fields() -> None:
     ]
 
 
+def test_source_reader_completion_canonicalizes_author_or_source_without_losing_identity() -> (
+    None
+):
+    completed = complete_structured_source_reader_fields(
+        (
+            _field(
+                "documents",
+                "array",
+                item_fields=[
+                    _field("author_or_source"),
+                    _field("source"),
+                ],
+            ),
+        ),
+        required_fields=(),
+    )
+
+    documents_field = completed[0]
+    assert [field.name for field in documents_field.item_fields or []] == [
+        "source_label",
+        "author_or_sender",
+    ]
+
+
 def test_source_reader_completion_canonicalizes_obligation_variants() -> None:
     completed = complete_structured_source_reader_fields(
         (
