@@ -67,6 +67,7 @@ from eneo.flows.template_reference_analyzer import (
     analyze_template,
     consumes_runtime_input,
 )
+from eneo.main.config import get_settings
 
 _RETENTION_NOT_TRACKED_NOTE = (
     "No retention tombstones are present in this export; rows purged before "
@@ -186,6 +187,7 @@ def _build_manifest(
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     return EvidenceExportManifest(
         schema_version=EVIDENCE_EXPORT_SCHEMA_VERSION,
+        app_version=get_settings().app_version,
         provenance_schema_version_min=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
         provenance_schema_version_current=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
         provenance_persisted_version_status=_provenance_persisted_version_status(

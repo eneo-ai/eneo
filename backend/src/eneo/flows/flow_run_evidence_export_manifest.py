@@ -11,8 +11,8 @@ from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFileSource,
 )
 
-EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v7"] = (
-    "flow-evidence-export.v7"
+EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v8"] = (
+    "flow-evidence-export.v8"
 )
 
 EvidenceExportContentHashInput: TypeAlias = Literal["raw", "redacted"]
@@ -90,7 +90,8 @@ class EvidenceReviewCheckpointSummary(BaseModel):
 class EvidenceExportManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-evidence-export.v7"]
+    schema_version: Literal["flow-evidence-export.v8"]
+    app_version: str
     provenance_schema_version_min: str
     provenance_schema_version_current: str
     provenance_persisted_version_status: EvidenceProvenancePersistedVersionStatus

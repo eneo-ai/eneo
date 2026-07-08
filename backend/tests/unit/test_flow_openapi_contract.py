@@ -2657,6 +2657,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     assert manifest.get("additionalProperties") is False
     assert set(manifest_properties) >= {
         "schema_version",
+        "app_version",
         "content_hash",
         "content_hash_input",
         "exported_at",
@@ -2672,7 +2673,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v7"}
+    ) == {"flow-evidence-export.v8"}
     assert _extract_enum_values(
         openapi_spec, manifest_properties["content_hash_input"]
     ) == {

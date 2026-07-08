@@ -184,11 +184,12 @@ def _evidence_export_payload(run: FlowRun) -> dict:
         mode="json"
     )
     return {
-        "schema_version": "flow-evidence-export.v7",
+        "schema_version": "flow-evidence-export.v8",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v7",
+            "schema_version": "flow-evidence-export.v8",
+            "app_version": "DEV",
             "provenance_schema_version_min": "flow-attempt-provenance.v1",
             "provenance_schema_version_current": "flow-attempt-provenance.v1",
             "provenance_persisted_version_status": "not_tracked",

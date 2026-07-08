@@ -375,6 +375,7 @@ def test_suite_returns_failure_when_quality_checks_fail(
     def fail_quality_check(**_: Any) -> dict[str, Any]:
         return {
             "created_at": "20260707T000000",
+            "app_version": harness.LOCAL_APP_VERSION,
             "case": {"id": "document_pdf_source_retention_balance"},
             "session_id": "session-1",
             "plan_id": "plan-1",
@@ -424,6 +425,7 @@ def test_suite_returns_failure_when_quality_checks_fail(
     )
     summary = json.loads(summary_path.read_text())
     assert summary["case_error_count"] == 0
+    assert summary["app_version"] == harness.LOCAL_APP_VERSION
     assert summary["quality_failure_run_count"] == 1
     assert summary["failure_count"] == 1
     assert summary["results"][0]["failed_check_count"] == 1

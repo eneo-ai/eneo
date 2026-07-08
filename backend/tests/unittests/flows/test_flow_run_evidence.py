@@ -63,6 +63,7 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.main.config import get_settings
 
 
 def _redacted_export_context() -> EvidenceExportContext:
@@ -964,6 +965,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
 
     assert set(export["manifest"]) == {
         "schema_version",
+        "app_version",
         "provenance_schema_version_min",
         "provenance_schema_version_current",
         "provenance_persisted_version_status",
@@ -987,6 +989,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     }
     assert export["schema_version"] == EVIDENCE_EXPORT_SCHEMA_VERSION
     assert export["manifest"]["schema_version"] == export["schema_version"]
+    assert export["manifest"]["app_version"] == get_settings().app_version
     assert export["manifest"]["run_id"] == str(run.id)
     assert export["manifest"]["tenant_id"] == str(run.tenant_id)
     assert export["manifest"]["flow_id"] == str(run.flow_id)
@@ -2023,6 +2026,7 @@ def test_evidence_export_redacts_review_checkpoint_payloads_without_resume_key()
 def test_evidence_export_manifest_rejects_unknown_fields() -> None:
     payload = {
         "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
+        "app_version": get_settings().app_version,
         "provenance_schema_version_min": "flow-attempt-provenance.v1",
         "provenance_schema_version_current": "flow-attempt-provenance.v1",
         "provenance_persisted_version_status": "not_tracked",

@@ -26,6 +26,23 @@ DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json"
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 
 
+def _local_app_version() -> str:
+    backend_src = Path(__file__).resolve().parents[1] / "src"
+    sys.path.insert(0, str(backend_src))
+    try:
+        from eneo.main.config import get_settings
+
+        return get_settings().app_version
+    finally:
+        try:
+            sys.path.remove(str(backend_src))
+        except ValueError:
+            pass
+
+
+LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
+
+
 @dataclass(frozen=True, slots=True)
 class ApiConfig:
     base_url: str
@@ -94,6 +111,7 @@ def main() -> int:
         )
         failure: JsonObject = {
             "created_at": started_at,
+            "app_version": LOCAL_APP_VERSION,
             "base_url": config.base_url,
             "space_id": args.space_id,
             "error": str(error),
@@ -375,6 +393,8 @@ def _run_suite(
             except (HTTPError, URLError, TimeoutError, ValueError) as error:
                 case_error_count += 1
                 failure = {
+                    "created_at": time.strftime("%Y%m%dT%H%M%S"),
+                    "app_version": LOCAL_APP_VERSION,
                     "case_id": case.case_id,
                     "complexity": case.complexity,
                     "domain": case.domain,
@@ -392,6 +412,7 @@ def _run_suite(
 
     suite_summary: JsonObject = {
         "created_at": started_at,
+        "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
         "space_id": args.space_id,
         "case_count": len(cases),
@@ -518,6 +539,7 @@ def _run_case(
 
     return {
         "created_at": started_at,
+        "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
         "space_id": args.space_id,
         "case": {
