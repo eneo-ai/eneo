@@ -1,7 +1,8 @@
 """Unit tests for S3-backed original-byte storage + signed file references (#1).
 
 Covers the object-storage wrapper, the signed-token tenant/variant binding, the
-LLM-facing reference block, and FileService's graceful-degradation upload path.
+LLM-facing reference block, FileService's graceful-degradation upload path, the
+URL-only send-path filtering, and the completion-layer mint audit.
 """
 
 from contextlib import asynccontextmanager
@@ -11,16 +12,21 @@ from uuid import uuid4
 
 import pytest
 
+import eneo.files.file_reference as file_reference_mod
+from eneo.assistants.assistant_service import AssistantService
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.signed_urls import (
     build_signed_download_url,
     generate_signed_token,
     verify_signed_token,
 )
+from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
     build_file_references_string,
 )
 from eneo.files.file_models import ContentDisposition, FileBaseWithContent, FileType
+from eneo.files.file_reference import url_only_file_ids
 from eneo.files.file_service import FileService
 from eneo.files.object_storage import FileObjectStorage, ObjectStorageError
 
@@ -286,3 +292,240 @@ class TestFileServiceStorageOffload:
         upload.read.assert_not_awaited()
         protocol.to_domain_with_derivatives.assert_awaited_once_with(upload)
         assert saved.storage_key is None
+
+
+def _reference_settings(base_url: str | None = "http://host.docker.internal:8123"):
+    return SimpleNamespace(file_reference_base_url=base_url, public_origin=None)
+
+
+def _stub_file(
+    file_type: FileType = FileType.TEXT,
+    storage_key: str | None = "tenant/uuid/doc.csv",
+    parent_file_id=None,
+    name: str = "doc.csv",
+):
+    return SimpleNamespace(
+        id=uuid4(),
+        name=name,
+        file_type=file_type,
+        storage_key=storage_key,
+        parent_file_id=parent_file_id,
+    )
+
+
+class TestUrlOnlyFileIds:
+    def test_empty_when_inlining_enabled(self, monkeypatch):
+        monkeypatch.setattr(
+            file_reference_mod, "get_settings", lambda: _reference_settings()
+        )
+        assert url_only_file_ids([_stub_file()], inline_file_text=True) == set()
+
+    def test_empty_without_base_url(self, monkeypatch):
+        monkeypatch.setattr(
+            file_reference_mod,
+            "get_settings",
+            lambda: _reference_settings(base_url=None),
+        )
+        assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
+
+    def test_selects_only_stored_text_files(self, monkeypatch):
+        monkeypatch.setattr(
+            file_reference_mod, "get_settings", lambda: _reference_settings()
+        )
+        stored_text = _stub_file()
+        unstored_text = _stub_file(storage_key=None)
+        stored_image = _stub_file(file_type=FileType.IMAGE, storage_key="k")
+
+        ids = url_only_file_ids(
+            [stored_text, unstored_text, stored_image], inline_file_text=False
+        )
+        assert ids == {stored_text.id}
+
+
+class TestSendPathUrlOnlyFiltering:
+    """URL-only parents keep their text out of context (context_builder) — these
+    tests pin that their derived vision images stay out of the request too."""
+
+    @pytest.mark.asyncio
+    async def test_message_derived_images_dropped_for_url_only_parent(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            file_reference_mod, "get_settings", lambda: _reference_settings()
+        )
+        stored_parent = _stub_file()
+        plain_parent = _stub_file(storage_key=None, name="small.pdf")
+        stored_derived = _stub_file(
+            file_type=FileType.IMAGE,
+            storage_key=None,
+            parent_file_id=stored_parent.id,
+        )
+        plain_derived = _stub_file(
+            file_type=FileType.IMAGE,
+            storage_key=None,
+            parent_file_id=plain_parent.id,
+        )
+
+        service = MagicMock()
+        service._completion_prompt_files_for_model = AsyncMock(return_value=[])
+        service._attach_history_derivatives = AsyncMock()
+        service.file_service.with_derived_images = AsyncMock(
+            return_value=[stored_parent, plain_parent, stored_derived, plain_derived]
+        )
+
+        result = await AssistantService._build_completion_file_inputs(
+            service,
+            files=[stored_parent, plain_parent],
+            session=SimpleNamespace(questions=[]),
+            assistant=SimpleNamespace(attachments=[], inline_file_text=False),
+            completion_model=SimpleNamespace(vision=True),
+        )
+
+        # The stored parent stays (it becomes the URL reference block), but its
+        # rendered images are dropped; the un-stored document keeps its images.
+        assert stored_parent in result.completion_message_files
+        assert stored_derived not in result.completion_message_files
+        assert plain_derived in result.completion_message_files
+
+    @pytest.mark.asyncio
+    async def test_history_derivatives_skip_url_only_parents(self, monkeypatch):
+        monkeypatch.setattr(
+            file_reference_mod, "get_settings", lambda: _reference_settings()
+        )
+        stored_parent = _stub_file()
+        plain_parent = _stub_file(storage_key=None, name="small.pdf")
+        question = SimpleNamespace(files=[stored_parent, plain_parent])
+        session = SimpleNamespace(questions=[question])
+
+        plain_derived = _stub_file(
+            file_type=FileType.IMAGE,
+            storage_key=None,
+            parent_file_id=plain_parent.id,
+        )
+        service = MagicMock()
+        service.file_service.get_derived_images = AsyncMock(
+            return_value=[plain_derived]
+        )
+
+        await AssistantService._attach_history_derivatives(
+            service, session=session, inline_file_text=False
+        )
+
+        lookup = service.file_service.get_derived_images.await_args.kwargs
+        assert lookup["parent_ids"] == [plain_parent.id]
+        assert plain_derived in question.files
+
+    @pytest.mark.asyncio
+    async def test_fit_guard_ignores_url_only_uploads(self, monkeypatch):
+        monkeypatch.setattr(
+            file_reference_mod, "get_settings", lambda: _reference_settings()
+        )
+        stored = _stub_file(name="huge.csv")
+        plain = _stub_file(storage_key=None, name="small.pdf")
+
+        service = MagicMock()
+        service._completion_prompt_files_for_model = AsyncMock(return_value=[])
+        service.file_service.with_derived_images = AsyncMock(
+            side_effect=lambda files: files
+        )
+        service._assert_files_fit_context = MagicMock()
+
+        await AssistantService._assert_message_attachments_fit(
+            service,
+            assistant=SimpleNamespace(attachments=[], inline_file_text=False),
+            model=SimpleNamespace(vision=True),
+            prompt_text="prompt",
+            files=[stored, plain],
+        )
+
+        counted = service._assert_files_fit_context.call_args.kwargs["files"]
+        assert stored not in counted
+        assert plain in counted
+
+
+class TestCompletionMintAudit:
+    def _user(self):
+        return SimpleNamespace(
+            id=uuid4(),
+            username="anna",
+            email="anna@kommun.se",
+            active_api_key=None,
+        )
+
+    def _service(self, audit_service, user="default"):
+        return CompletionService(
+            context_builder=MagicMock(),
+            tenant=SimpleNamespace(id=uuid4(), name="Kommun"),
+            user=self._user() if user == "default" else user,
+            config=SimpleNamespace(file_reference_url_expiry_seconds=3600),
+            encryption_service=MagicMock(),
+            audit_service=audit_service,
+        )
+
+    @pytest.mark.asyncio
+    async def test_audits_only_current_turn_minted_files(self):
+        audit_service = AsyncMock()
+        service = self._service(audit_service)
+
+        minted = _stub_file()
+        unminted = _stub_file(storage_key=None)
+        history_id = uuid4()
+        urls = {minted.id: "https://x/dl", history_id: "https://x/dl2"}
+
+        await service._audit_file_reference_mints(
+            files=[minted, unminted],
+            file_reference_urls=urls,
+            session=SimpleNamespace(id=uuid4()),
+        )
+
+        audit_service.log_async.assert_awaited_once()
+        kwargs = audit_service.log_async.await_args.kwargs
+        assert kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
+        assert kwargs["entity_id"] == minted.id
+        assert kwargs["metadata"]["extra"]["source"] == "completion"
+
+    @pytest.mark.asyncio
+    async def test_skipped_without_user(self):
+        audit_service = AsyncMock()
+        service = self._service(audit_service, user=None)
+        minted = _stub_file()
+
+        await service._audit_file_reference_mints(
+            files=[minted],
+            file_reference_urls={minted.id: "https://x/dl"},
+            session=None,
+        )
+
+        audit_service.log_async.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_noop_without_audit_service(self):
+        service = self._service(audit_service=None)
+        minted = _stub_file()
+
+        await service._audit_file_reference_mints(
+            files=[minted],
+            file_reference_urls={minted.id: "https://x/dl"},
+            session=None,
+        )  # must not raise
+
+
+class TestBuildFileReferenceUrlsTextOnly:
+    @pytest.mark.asyncio
+    async def test_mints_only_for_stored_text_files(self):
+        service = CompletionService(
+            context_builder=MagicMock(),
+            tenant=SimpleNamespace(id=uuid4()),
+            user=None,
+            config=SimpleNamespace(
+                file_reference_base_url="http://host.docker.internal:8123",
+                public_origin=None,
+                file_reference_url_expiry_seconds=3600,
+            ),
+            encryption_service=MagicMock(),
+        )
+        stored_text = _stub_file()
+        stored_image = _stub_file(file_type=FileType.IMAGE, storage_key="k")
+
+        urls = service._build_file_reference_urls([stored_text, stored_image])
+        assert set(urls) == {stored_text.id}
