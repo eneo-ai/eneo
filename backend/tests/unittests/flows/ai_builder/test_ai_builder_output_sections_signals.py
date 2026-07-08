@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    SECTIONED_FORM_INTAKE_SIGNAL,
+)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,
 )
@@ -133,3 +136,15 @@ def test_four_sections_is_high_confidence() -> None:
 
     assert result.sections == ("Bakgrund", "Bedömning", "Risker", "Rekommendation")
     assert result.high_confidence
+
+
+def test_model_sectioned_form_intake_signal_suppresses_output_sections() -> None:
+    result = extract_requested_output_sections(
+        """
+        Skapa ett dokument med rubrikerna Bakgrund, Bedömning, Risker och Beslut.
+        """,
+        model_form_intake_signals={SECTIONED_FORM_INTAKE_SIGNAL},
+    )
+
+    assert result.sections == ()
+    assert not result.high_confidence

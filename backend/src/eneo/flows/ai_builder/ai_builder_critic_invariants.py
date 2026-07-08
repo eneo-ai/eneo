@@ -10,7 +10,7 @@ narrower view can filter the tuple inline and pass `invariants=` to
 `render_critic_issues`.
 
 Layering: this module imports AI Builder types (`FlowDraftSpecCore`,
-`OutputIntentResolution`, `PlannerPatternSignals`) and form-intake signals.
+`OutputIntentResolution`, `PlannerPatternSignals`) and authored flow specs.
 The Flow Capability Manifest stays engine-truth-only and does not learn
 about conversation signals; those live here with the rest of the AI Builder
 layer.
@@ -28,9 +28,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
     step_references_form_field,
-)
-from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
-    mentions_sectioned_form_intake,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     OutputIntentResolution,
@@ -357,7 +354,9 @@ _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
 def _sectioned_form_intake_requires_form_fields_evidence(
     context: CriticContext,
 ) -> bool:
-    return mentions_sectioned_form_intake(context.text) and not context.spec.form_fields
+    return (
+        context.planner_patterns.sectioned_form_intake and not context.spec.form_fields
+    )
 
 
 _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(

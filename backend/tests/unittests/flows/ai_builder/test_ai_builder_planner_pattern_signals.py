@@ -5,6 +5,9 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
+from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    SECTIONED_FORM_INTAKE_SIGNAL,
+)
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
@@ -62,6 +65,17 @@ def test_detect_planner_pattern_signals_does_not_flag_complex_or_ambiguous_text(
     text: str,
 ) -> None:
     assert not detect_planner_pattern_signals(text).is_simple_text_transform
+
+
+def test_detect_planner_pattern_signals_prefers_model_form_intake_signal() -> None:
+    signals = detect_planner_pattern_signals(
+        "Bygg flödet enligt beskrivningen.",
+        model_form_intake_signals={SECTIONED_FORM_INTAKE_SIGNAL},
+    )
+
+    assert signals.needs_form_fields
+    assert signals.sectioned_form_intake
+    assert signals.recipe_signals() == {SECTIONED_FORM_INTAKE_SIGNAL}
 
 
 def test_requirements_signal_text_ignores_confirmation_boilerplate() -> None:

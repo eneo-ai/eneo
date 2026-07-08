@@ -27,11 +27,12 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
+    form_intake_signal_values_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
-from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -50,6 +51,7 @@ def build_conversation_aware_quality_feedback(
     flow: Flow | None = None,
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
+    planning_state: PlanningState | None = None,
 ) -> str | None:
     context = build_conversation_critic_context(
         conversation,
@@ -57,6 +59,7 @@ def build_conversation_aware_quality_feedback(
         flow=flow,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
+        planning_state=planning_state,
     )
     return build_quality_feedback_from_critic_context(
         context,
@@ -71,6 +74,7 @@ def build_conversation_critic_context(
     flow: Flow | None = None,
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
+    planning_state: PlanningState | None = None,
 ) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
@@ -86,7 +90,12 @@ def build_conversation_critic_context(
         requirements_state.latest_summary
     )
     signal_text = "\n".join(part for part in (text, requirements_text) if part)
-    planner_patterns = detect_planner_pattern_signals(signal_text)
+    planner_patterns = detect_planner_pattern_signals(
+        signal_text,
+        model_form_intake_signals=form_intake_signal_values_from_planning_state(
+            planning_state
+        ),
+    )
     output_intent = resolve_output_intent(text, answer_signals)
     input_intent = resolve_input_intent(text, answer_signals, flow=flow)
 

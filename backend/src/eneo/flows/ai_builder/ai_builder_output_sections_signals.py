@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    SECTIONED_FORM_INTAKE_SIGNAL,
     mentions_sectioned_form_intake,
 )
 
@@ -67,9 +69,17 @@ class RequestedOutputSections:
         return self.confidence == "high"
 
 
-def extract_requested_output_sections(text: str) -> RequestedOutputSections:
+def extract_requested_output_sections(
+    text: str,
+    *,
+    model_form_intake_signals: Collection[str] = (),
+) -> RequestedOutputSections:
     normalized = text.casefold()
-    if not normalized or mentions_sectioned_form_intake(text):
+    if (
+        not normalized
+        or SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals
+        or mentions_sectioned_form_intake(text)
+    ):
         return RequestedOutputSections.empty()
 
     explicit_titles = _explicit_heading_titles(text)

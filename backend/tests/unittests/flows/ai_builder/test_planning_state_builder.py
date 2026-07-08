@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedFileRole,
+    ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationConfidence,
     SlotClassificationResult,
@@ -136,9 +137,10 @@ def _classified(
 def _slot_classification_metadata(
     *slots: ClassifiedSlot,
     prompt_hash: str = "a" * 64,
+    form_intake: ClassifiedFormIntake | None = None,
 ) -> dict[str, object]:
     metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(slots=slots),
+        SlotClassificationResult(slots=slots, form_intake=form_intake),
         prompt_hash=prompt_hash,
     )
     assert metadata is not None
@@ -1274,11 +1276,43 @@ class TestSlotClassificationMetadataReplay:
         assert state.resolved_slots["runtime_metadata_fields"].value == (
             "detailed_case_metadata"
         )
+        assert state.signals == []
         commit = derive_architecture_commit_draft(state)
         assert commit is not None
         assert commit.chosen_patterns == [
             "document_to_structured_report",
             "form_field_runtime_inputs",
+        ]
+
+    def test_replays_form_intake_signals_from_conversation_metadata(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa ett formulär där användaren ska lämna fritext "
+                        "under varje rubrik."
+                    ),
+                    metadata=_slot_classification_metadata(
+                        form_intake=ClassifiedFormIntake(
+                            needs_form_fields=True,
+                            sectioned_form_intake=True,
+                            confidence="high",
+                            reason="runtime text per section",
+                            evidence=("fritext under varje rubrik",),
+                        )
+                    ),
+                )
+            ]
+        )
+
+        assert [
+            (signal.question_id, signal.value)
+            for signal in state.signals
+            if signal.question_id == "form_intake_pattern"
+        ] == [
+            ("form_intake_pattern", "needs_form_fields"),
+            ("form_intake_pattern", "sectioned_form_intake"),
         ]
 
     def test_structured_answer_wins_over_classifier_metadata(self) -> None:
@@ -1837,6 +1871,55 @@ class TestModelSlotMerge:
             for signal in state.signals
             if signal.question_id == "result_obligation"
         ] == ["risks", "actions"]
+
+    def test_model_form_intake_persists_planning_signals(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                form_intake=ClassifiedFormIntake(
+                    needs_form_fields=True,
+                    sectioned_form_intake=True,
+                    confidence="high",
+                    reason="runtime text per section",
+                    evidence=("fritext under varje rubrik",),
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="",
+        )
+
+        assert [
+            (signal.question_id, signal.value, signal.source)
+            for signal in state.signals
+        ] == [
+            ("form_intake_pattern", "needs_form_fields", "model"),
+            ("form_intake_pattern", "sectioned_form_intake", "model"),
+        ]
+        assert state.signals[0].provenance == [
+            "model:form_intake_pattern:" + "b" * 64,
+            "quote:fritext under varje rubrik",
+        ]
+
+    def test_model_form_intake_without_quoted_evidence_is_ignored(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                form_intake=ClassifiedFormIntake(
+                    needs_form_fields=True,
+                    sectioned_form_intake=False,
+                    confidence="high",
+                    reason="unsupported",
+                )
+            ),
+            prompt_hash="c" * 64,
+            freeform_text="",
+        )
+
+        assert state.signals == []
 
     def test_high_model_output_can_displace_high_confidence_input_heuristic(
         self,

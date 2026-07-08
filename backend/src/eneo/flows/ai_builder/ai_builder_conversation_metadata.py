@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     UNKNOWN_SLOT_VALUE,
+    ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationConfidence,
     SlotClassificationResult,
@@ -119,6 +120,34 @@ class SlotClassificationSlotMetadata(BaseModel):
         )
 
 
+class SlotClassificationFormIntakeMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    needs_form_fields: bool = False
+    sectioned_form_intake: bool = False
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_REASON_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        min_length=1,
+        max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+    )
+
+    @model_validator(mode="after")
+    def require_positive_signal(self) -> "SlotClassificationFormIntakeMetadata":
+        if not self.needs_form_fields and not self.sectioned_form_intake:
+            raise ValueError("form_intake metadata must contain a positive signal")
+        return self
+
+    def to_classified_form_intake(self) -> ClassifiedFormIntake:
+        return ClassifiedFormIntake(
+            needs_form_fields=self.needs_form_fields or self.sectioned_form_intake,
+            sectioned_form_intake=self.sectioned_form_intake,
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=tuple(self.evidence),
+        )
+
+
 SlotClassificationNote: TypeAlias = Annotated[
     str,
     Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH),
@@ -149,6 +178,7 @@ class SlotClassificationMetadata(BaseModel):
         default_factory=_empty_result_obligations,
         max_length=_MAX_RESULT_OBLIGATIONS,
     )
+    form_intake: SlotClassificationFormIntakeMetadata | None = None
     assumptions: list[SlotClassificationNote] = Field(
         default_factory=_empty_slot_classification_notes,
         max_length=_MAX_SLOT_CLASSIFICATION_NOTES,
@@ -172,6 +202,9 @@ class SlotClassificationMetadata(BaseModel):
     def to_result(self) -> SlotClassificationResult:
         return SlotClassificationResult(
             slots=tuple(slot.to_classified_slot() for slot in self.slots),
+            form_intake=self.form_intake.to_classified_form_intake()
+            if self.form_intake is not None
+            else None,
             secondary_obligations=tuple(self.secondary_obligations),
             assumptions=tuple(self.assumptions),
             contradictions=tuple(self.contradictions),
@@ -475,12 +508,13 @@ def slot_classification_metadata_from_result(
         for slot in result.slots
         if (payload := _slot_classification_slot_payload(slot)) is not None
     ]
+    form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
     secondary_obligations = [
         obligation
         for obligation in result.secondary_obligations
         if obligation in RESULT_OBLIGATION_VALUES
     ][:_MAX_RESULT_OBLIGATIONS]
-    if not slot_payloads and not secondary_obligations:
+    if not slot_payloads and not secondary_obligations and form_intake_payload is None:
         return None
     try:
         return SlotClassificationMetadata.model_validate(
@@ -488,6 +522,7 @@ def slot_classification_metadata_from_result(
                 "prompt_hash": prompt_hash,
                 "slots": slot_payloads,
                 "secondary_obligations": secondary_obligations,
+                "form_intake": form_intake_payload,
                 "assumptions": [
                     _bounded_metadata_text(value, fallback="assumption")
                     for value in result.assumptions
@@ -529,6 +564,39 @@ def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object]
         "reason": _bounded_metadata_text(
             slot.reason,
             fallback="slot classification",
+        ),
+        "evidence": evidence,
+    }
+
+
+def _slot_classification_form_intake_payload(
+    form_intake: ClassifiedFormIntake | None,
+) -> dict[str, object] | None:
+    if form_intake is None:
+        return None
+    if form_intake.confidence == "low":
+        return None
+    if not form_intake.needs_form_fields and not form_intake.sectioned_form_intake:
+        return None
+    evidence = [
+        _bounded_metadata_text(
+            value,
+            fallback="form intake evidence",
+            max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+        )
+        for value in form_intake.evidence
+        if value.strip()
+    ][:CLASSIFICATION_EVIDENCE_MAX_ITEMS]
+    if not evidence:
+        return None
+    return {
+        "needs_form_fields": form_intake.needs_form_fields
+        or form_intake.sectioned_form_intake,
+        "sectioned_form_intake": form_intake.sectioned_form_intake,
+        "confidence": form_intake.confidence,
+        "reason": _bounded_metadata_text(
+            form_intake.reason,
+            fallback="form intake classification",
         ),
         "evidence": evidence,
     }

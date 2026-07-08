@@ -29,6 +29,13 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.planning_state import (
+    BUILDER_SCHEMA_VERSION,
+    FCM_VERSION,
+    PLANNER_CONTRACT_VERSION,
+    PlanningSignal,
+    PlanningState,
+)
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -512,6 +519,45 @@ def test_sectioned_form_intake_does_not_require_section_writers() -> None:
 
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
     assert "requested_output_sections_require_section_writers" not in issue_ids
+
+
+def test_model_sectioned_form_intake_signal_requires_form_fields() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Formulär till rapport",
+        flow_description="",
+        steps=[
+            _step(
+                "step_a",
+                "Sammanställ rapport",
+                "Sammanställ användarens svar.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+    planning_state = PlanningState(
+        fcm_version=FCM_VERSION,
+        planner_contract_version=PLANNER_CONTRACT_VERSION,
+        builder_schema_version=BUILDER_SCHEMA_VERSION,
+        signals=[
+            PlanningSignal(
+                question_id="form_intake_pattern",
+                value="sectioned_form_intake",
+                confidence="high",
+                source="model",
+                provenance=["quote:fritext under varje rubrik"],
+            )
+        ],
+    )
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": "Bygg flödet enligt beskrivningen."}],
+        spec,
+        planning_state=planning_state,
+    )
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+    assert "sectioned_form_intake_requires_form_fields" in issue_ids
 
 
 def _pdf_mismatch_context() -> "CriticContext":

@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationResult,
 )
@@ -251,6 +252,13 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             )
             for slot_name, value in values_by_slot.items()
         ),
+        form_intake=ClassifiedFormIntake(
+            needs_form_fields=True,
+            sectioned_form_intake=True,
+            confidence="high",
+            reason="runtime text per section",
+            evidence=("fritext under varje rubrik",),
+        ),
         secondary_obligations=("risks", "actions"),
         assumptions=("User wants runtime form fields.",),
         contradictions=("No contradiction.",),
@@ -268,6 +276,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert {slot.slot_name for slot in parsed.slots} == LLM_RESOLVABLE_SLOT_NAMES
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
     assert parsed.to_result().slots == result.slots
+    assert parsed.to_result().form_intake == result.form_intake
     assert parsed.to_result().secondary_obligations == ("risks", "actions")
 
 

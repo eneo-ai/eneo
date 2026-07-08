@@ -274,6 +274,7 @@ class CompiledProposalFinalizer:
                 spec=compiled.content.spec,
                 aggregation_intent=compiled.aggregation_intent,
                 resource_catalog=request.resource_catalog,
+                planning_state=request.planning_state,
             )
             hard_feedback = format_validation_feedback(
                 spec=compiled.content.spec,
@@ -313,6 +314,7 @@ class CompiledProposalFinalizer:
             spec=compiled.content.spec,
             aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
+            planning_state=request.planning_state,
         )
         quality_failure_codes = quality_failure_codes | contextual_quality.failure_codes
         combined_quality_feedback = (
@@ -369,6 +371,7 @@ class CompiledProposalFinalizer:
             spec=compiled.content.spec,
             flow=request.flow,
             resource_catalog=request.resource_catalog,
+            planning_state=request.planning_state,
         )
         combined_quality_feedback = "\n\n".join(
             feedback

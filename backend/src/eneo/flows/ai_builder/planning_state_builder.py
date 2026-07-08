@@ -34,6 +34,11 @@ from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    FORM_INTAKE_NEEDS_FIELDS_SIGNAL,
+    FORM_INTAKE_SIGNAL_ID,
+    SECTIONED_FORM_INTAKE_SIGNAL,
+)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
@@ -65,6 +70,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedFileRole,
+    ClassifiedFormIntake,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
@@ -485,6 +491,11 @@ def merge_llm_resolved_slots(
         classification_result=classification_result,
         prompt_hash=prompt_hash,
     )
+    _merge_model_form_intake(
+        state,
+        classification_result=classification_result,
+        prompt_hash=prompt_hash,
+    )
     _merge_model_file_roles(
         state,
         classification_result=classification_result,
@@ -527,6 +538,58 @@ def merge_llm_resolved_slots(
             ],
             confidence=classified_slot.confidence,
         )
+
+
+def _merge_model_form_intake(
+    state: PlanningState,
+    *,
+    classification_result: SlotClassificationResult,
+    prompt_hash: str,
+) -> None:
+    form_intake = classification_result.form_intake
+    if not _model_form_intake_is_persistable(form_intake):
+        return
+    assert form_intake is not None
+    existing = {
+        signal.value
+        for signal in state.signals
+        if signal.question_id == FORM_INTAKE_SIGNAL_ID
+    }
+    for value in _form_intake_signal_values(form_intake):
+        if value in existing:
+            continue
+        state.signals.append(
+            PlanningSignal(
+                question_id=FORM_INTAKE_SIGNAL_ID,
+                value=value,
+                confidence=form_intake.confidence,
+                source="model",
+                provenance=[
+                    f"model:{FORM_INTAKE_SIGNAL_ID}:{prompt_hash}",
+                    *[f"quote:{item}" for item in form_intake.evidence],
+                ],
+            )
+        )
+        existing.add(value)
+
+
+def _model_form_intake_is_persistable(
+    form_intake: ClassifiedFormIntake | None,
+) -> bool:
+    if form_intake is None:
+        return False
+    return form_intake.confidence != "low" and bool(form_intake.evidence)
+
+
+def _form_intake_signal_values(
+    form_intake: ClassifiedFormIntake,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    if form_intake.needs_form_fields or form_intake.sectioned_form_intake:
+        values.append(FORM_INTAKE_NEEDS_FIELDS_SIGNAL)
+    if form_intake.sectioned_form_intake:
+        values.append(SECTIONED_FORM_INTAKE_SIGNAL)
+    return tuple(values)
 
 
 def _merge_model_file_roles(

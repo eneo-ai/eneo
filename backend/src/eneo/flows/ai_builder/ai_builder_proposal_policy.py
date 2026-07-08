@@ -37,7 +37,7 @@ from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
 )
-from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
@@ -144,6 +144,7 @@ def format_contextual_quality_feedback(
     flow: "Flow | None" = None,
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
+    planning_state: PlanningState | None = None,
 ) -> str | None:
     return build_conversation_aware_quality_feedback(
         conversation,
@@ -151,6 +152,7 @@ def format_contextual_quality_feedback(
         flow=flow,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
+        planning_state=planning_state,
     )
 
 
@@ -160,6 +162,7 @@ def build_create_contextual_quality_feedback(
     spec: FlowDraftSpecCore,
     aggregation_intent: AggregationIntent,
     resource_catalog: "AIBuilderResourceCatalog | None",
+    planning_state: PlanningState | None = None,
 ) -> CreateContextualQualityFeedback:
     context = build_conversation_critic_context(
         conversation,
@@ -167,6 +170,7 @@ def build_create_contextual_quality_feedback(
         flow=None,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
+        planning_state=planning_state,
     )
     preflight = run_draft_preflight(context)
     enforce_architecture_critic_invariants(context, issues=preflight.issues)

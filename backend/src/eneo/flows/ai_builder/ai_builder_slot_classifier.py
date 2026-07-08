@@ -23,7 +23,7 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 9
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 10
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
@@ -48,9 +48,19 @@ class ClassifiedFileRole:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassifiedFormIntake:
+    needs_form_fields: bool
+    sectioned_form_intake: bool
+    confidence: SlotClassificationConfidence
+    reason: str
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
+    form_intake: ClassifiedFormIntake | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
     assumptions: tuple[str, ...] = ()
     contradictions: tuple[str, ...] = ()
@@ -252,9 +262,11 @@ def parse_slot_classification_response(
         raw_dict.get("secondary_obligations", [])
     )
     file_roles = _parse_file_roles(raw_dict.get("file_roles", []))
+    form_intake = _parse_form_intake(raw_dict.get("form_intake"))
     return SlotClassificationResult(
         slots=tuple(slots),
         file_roles=file_roles,
+        form_intake=form_intake,
         secondary_obligations=secondary_obligations,
         assumptions=assumptions,
         contradictions=contradictions,
@@ -306,6 +318,36 @@ def _parse_file_roles(raw_value: object) -> tuple[ClassifiedFileRole, ...]:
         )
         seen_file_ids.add(file_id)
     return tuple(roles)
+
+
+def _parse_form_intake(raw_value: object) -> ClassifiedFormIntake | None:
+    if not isinstance(raw_value, dict):
+        return None
+    item_dict = cast(dict[str, Any], raw_value)
+    needs_form_fields = item_dict.get("needs_form_fields")
+    sectioned_form_intake = item_dict.get("sectioned_form_intake")
+    confidence = item_dict.get("confidence")
+    reason = item_dict.get("reason")
+    evidence = _parse_classification_evidence(item_dict.get("evidence", []))
+    if not isinstance(needs_form_fields, bool) or not isinstance(
+        sectioned_form_intake,
+        bool,
+    ):
+        return None
+    if not needs_form_fields and not sectioned_form_intake:
+        return None
+    if confidence not in {"high", "medium", "low"}:
+        return None
+    confidence_value = cast(SlotClassificationConfidence, confidence)
+    return ClassifiedFormIntake(
+        needs_form_fields=needs_form_fields or sectioned_form_intake,
+        sectioned_form_intake=sectioned_form_intake,
+        confidence=_downgrade_unsupported_confidence(confidence_value, evidence),
+        reason=reason.strip()
+        if isinstance(reason, str) and reason.strip()
+        else "form intake classification",
+        evidence=evidence,
+    )
 
 
 def _parse_classification_evidence(raw_value: object) -> tuple[str, ...]:
@@ -469,6 +511,11 @@ def _build_slot_classification_prompt(
         "from the source material and no separate per-run fields are requested. "
         "If the user says values should be derived from source material, do not "
         "classify that as runtime form fields. "
+        "For form_intake, classify needs_form_fields=true only when the user "
+        "wants runtime values that are separate from the primary source material; "
+        "classify sectioned_form_intake=true when the user wants a repeated set "
+        "of runtime free-text fields per section, heading, rubric, or similar. "
+        "Do not classify final report headings or output sections as form intake. "
         "If the user explicitly says they do not know, have not decided, are "
         "unsure, or want help choosing a slot, emit that slot with value "
         "`unknown`, confidence `high`, and reason `user_explicit_uncertain`; "
@@ -500,6 +547,7 @@ def _build_slot_classification_prompt(
         "{"
         '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]}], '
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]}], '
+        '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]} | null, '
         '"secondary_obligations": [str], '
         '"assumptions": [str], '
         '"contradictions": [str]'

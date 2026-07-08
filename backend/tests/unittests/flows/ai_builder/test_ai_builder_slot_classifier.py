@@ -231,6 +231,55 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
     assert slot.evidence == ("Jag vet inte exakt vilket format",)
 
 
+def test_parse_slot_classification_response_accepts_form_intake_evidence() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "form_intake": {
+                    "needs_form_fields": True,
+                    "sectioned_form_intake": True,
+                    "confidence": "high",
+                    "reason": "runtime free text per heading",
+                    "evidence": ["fritext under varje rubrik"],
+                },
+            }
+        ),
+        allowed_slot_values={},
+    )
+
+    assert result is not None
+    assert result.form_intake is not None
+    assert result.form_intake.needs_form_fields is True
+    assert result.form_intake.sectioned_form_intake is True
+    assert result.form_intake.confidence == "high"
+    assert result.form_intake.evidence == ("fritext under varje rubrik",)
+
+
+def test_parse_slot_classification_response_downgrades_unsupported_form_intake() -> (
+    None
+):
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "form_intake": {
+                    "needs_form_fields": True,
+                    "sectioned_form_intake": False,
+                    "confidence": "high",
+                    "reason": "unsupported form fields",
+                },
+            }
+        ),
+        allowed_slot_values={},
+    )
+
+    assert result is not None
+    assert result.form_intake is not None
+    assert result.form_intake.confidence == "low"
+    assert result.form_intake.evidence == ()
+
+
 def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
     text = "Sammanfatta ärendet"
 
@@ -260,7 +309,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 9,
+                    "schema_version": 10,
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -378,6 +427,11 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
     assert f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes" in prompt
     assert f"at most {classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH}" in prompt
     assert "exact_quote_str" in prompt
+    assert "form_intake" in prompt
+    assert (
+        "Do not classify final report headings or output sections as form intake"
+        in prompt
+    )
 
 
 def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:

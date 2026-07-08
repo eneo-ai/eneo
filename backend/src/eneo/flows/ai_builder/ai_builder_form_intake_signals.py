@@ -61,7 +61,9 @@ _OUTPUT_ONLY_SECTION_MARKERS: tuple[str, ...] = (
     "the final document should contain the headings",
 )
 
-_SECTIONED_FORM_INTAKE_SIGNAL = "sectioned_form_intake"
+FORM_INTAKE_SIGNAL_ID = "form_intake_pattern"
+FORM_INTAKE_NEEDS_FIELDS_SIGNAL = "needs_form_fields"
+SECTIONED_FORM_INTAKE_SIGNAL = "sectioned_form_intake"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +74,7 @@ class FormIntakePattern:
     def recipe_signals(self) -> set[str]:
         signals: set[str] = set()
         if self.sectioned_form_intake:
-            signals.add(_SECTIONED_FORM_INTAKE_SIGNAL)
+            signals.add(SECTIONED_FORM_INTAKE_SIGNAL)
         return signals
 
 

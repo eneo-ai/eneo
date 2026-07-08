@@ -50,6 +50,7 @@ from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
 )
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
+    form_intake_signal_values_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
@@ -281,7 +282,10 @@ def build_proposal_prepared(
         resource_catalog=resource_catalog,
         mcp_selection_values=mcp_resource_selection_values(conversation),
         requested_output_sections=extract_requested_output_sections(
-            section_signal_text
+            section_signal_text,
+            model_form_intake_signals=form_intake_signal_values_from_planning_state(
+                planning_state
+            ),
         ),
         plan_revision_context=build_plan_revision_prompt_block(
             context=plan_edit_context,

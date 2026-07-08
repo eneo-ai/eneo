@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
+    FORM_INTAKE_NEEDS_FIELDS_SIGNAL,
+    FORM_INTAKE_SIGNAL_ID,
+    SECTIONED_FORM_INTAKE_SIGNAL,
     mentions_form_field_needs,
+    mentions_sectioned_form_intake,
 )
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
@@ -17,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_input_fields_declared_absent,
 )
+from eneo.flows.ai_builder.planning_state import PlanningState
 
 _DOCUMENT_INPUT_MARKERS: tuple[str, ...] = (
     "uppladdade dokument",
@@ -161,6 +167,7 @@ class PlannerPatternSignals:
     """Conversation signals for both structure-seeking and restraint rules."""
 
     needs_form_fields: bool = False
+    sectioned_form_intake: bool = False
     derive_from_input_only: bool = False
     prefers_structured_intermediate: bool = False
     prefers_quality_step: bool = False
@@ -171,7 +178,21 @@ class PlannerPatternSignals:
         signals: set[str] = set()
         if self.rich_document_workflow:
             signals.add(_RICH_DOCUMENT_WORKFLOW_SIGNAL)
+        if self.sectioned_form_intake:
+            signals.add(SECTIONED_FORM_INTAKE_SIGNAL)
         return signals
+
+
+def form_intake_signal_values_from_planning_state(
+    planning_state: PlanningState | None,
+) -> frozenset[str]:
+    if planning_state is None:
+        return frozenset()
+    return frozenset(
+        signal.value
+        for signal in planning_state.signals
+        if signal.question_id == FORM_INTAKE_SIGNAL_ID
+    )
 
 
 def build_requirements_signal_text(
@@ -203,9 +224,15 @@ def build_requirements_signal_text(
     return "\n".join(parts)
 
 
-def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
+def detect_planner_pattern_signals(
+    text: str,
+    *,
+    model_form_intake_signals: Collection[str] = (),
+) -> PlannerPatternSignals:
     normalized = text.casefold()
     if not normalized:
+        if model_form_intake_signals:
+            return _planner_patterns_from_form_intake_signals(model_form_intake_signals)
         return PlannerPatternSignals()
 
     input_intent = resolve_input_intent(normalized, {})
@@ -224,8 +251,19 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
         normalized,
         _DERIVE_FROM_INPUT_ONLY_MARKERS,
     )
+    model_sectioned_form_intake = (
+        SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals
+    )
+    model_needs_form_fields = (
+        model_sectioned_form_intake
+        or FORM_INTAKE_NEEDS_FIELDS_SIGNAL in model_form_intake_signals
+    )
+    sectioned_form_intake = (
+        model_sectioned_form_intake or mentions_sectioned_form_intake(normalized)
+    )
     needs_form_fields = (
-        mentions_form_field_needs(normalized)
+        model_needs_form_fields
+        or mentions_form_field_needs(normalized)
         or _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
     ) and not derive_from_input_only
     is_simple_text_transform = (
@@ -235,7 +273,7 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
         and not document_like_output
         and not prefers_structured_intermediate
         and not prefers_quality_step
-        and not mentions_form_field_needs(normalized)
+        and not needs_form_fields
         and not _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
         and not _contains_any(normalized, _FORM_FIELD_GUARD_MARKERS)
     )
@@ -251,11 +289,26 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
     )
     return PlannerPatternSignals(
         needs_form_fields=needs_form_fields,
+        sectioned_form_intake=sectioned_form_intake and not derive_from_input_only,
         derive_from_input_only=derive_from_input_only,
         prefers_structured_intermediate=prefers_structured_intermediate,
         prefers_quality_step=prefers_quality_step,
         rich_document_workflow=rich_document_workflow,
         is_simple_text_transform=is_simple_text_transform,
+    )
+
+
+def _planner_patterns_from_form_intake_signals(
+    model_form_intake_signals: Collection[str],
+) -> PlannerPatternSignals:
+    sectioned_form_intake = SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals
+    needs_form_fields = (
+        sectioned_form_intake
+        or FORM_INTAKE_NEEDS_FIELDS_SIGNAL in model_form_intake_signals
+    )
+    return PlannerPatternSignals(
+        needs_form_fields=needs_form_fields,
+        sectioned_form_intake=sectioned_form_intake,
     )
 
 
