@@ -268,7 +268,9 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
 
 
 @pytest.mark.asyncio
-async def test_runtime_planning_state_overlays_model_slots() -> None:
+async def test_runtime_planning_state_overlays_heuristic_slots_with_model_evidence() -> (
+    None
+):
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
@@ -312,15 +314,72 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
         )
     ).planning_state
 
-    assert state.resolved_slots["primary_runtime_input"].source == "heuristic"
+    assert state.resolved_slots["primary_runtime_input"].source == "model"
     assert state.resolved_slots["primary_runtime_input"].value == "text"
     assert state.resolved_slots["terminal_output"].source == "model"
     assert state.resolved_slots["terminal_output"].value == "structured_text"
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
-    assert "\n- primary_runtime_input:" not in prompt
+    assert "\n- primary_runtime_input:" in prompt
     assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_guess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    heuristic_state = PlanningState.empty()
+    heuristic_state.resolved_slots = {
+        "primary_runtime_input": _slot(
+            "primary_runtime_input",
+            "audio",
+            source="heuristic",
+            confidence="high",
+        )
+    }
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "documents",
+                        "confidence": "high",
+                        "reason": "the user uploads written material",
+                        "evidence": ["ladda upp flera PDF-dokument"],
+                    },
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        lambda *_args, **_kwargs: heuristic_state,
+    )
+
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Jag vill ladda upp flera PDF-dokument och analysera dem.",
+                )
+            ],
+            litellm_client=litellm_client,
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    ).planning_state
+
+    slot = state.resolved_slots["primary_runtime_input"]
+    assert slot.source == "model"
+    assert slot.value == "documents"
+    assert "quote:ladda upp flera PDF-dokument" in slot.evidence
 
 
 @pytest.mark.asyncio

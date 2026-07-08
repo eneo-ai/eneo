@@ -1782,6 +1782,7 @@ class TestModelSlotMerge:
                 name="terminal_output",
                 value="structured_text",
                 source="heuristic",
+                confidence="medium",
             )
         }
 
@@ -1837,7 +1838,7 @@ class TestModelSlotMerge:
             if signal.question_id == "result_obligation"
         ] == ["risks", "actions"]
 
-    def test_model_output_cannot_displace_high_confidence_input_heuristic(
+    def test_high_model_output_can_displace_high_confidence_input_heuristic(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1868,7 +1869,10 @@ class TestModelSlotMerge:
             freeform_text="",
         )
 
-        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert (
+            state.resolved_slots["primary_runtime_input"].value == "text_and_documents"
+        )
+        assert state.resolved_slots["primary_runtime_input"].source == "model"
         assert state.resolved_slots["primary_runtime_input"].confidence == "high"
 
     def test_low_model_slot_is_not_persisted(self) -> None:

@@ -835,16 +835,8 @@ def _model_slot_can_replace(
     if existing_slot.source == "policy_default":
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
-        if (
-            existing_slot.name == "primary_runtime_input"
-            and existing_slot.confidence == "high"
-        ):
-            return False
-        if (
-            existing_slot.name == "runtime_metadata_fields"
-            and existing_slot.confidence == "high"
-        ):
-            return False
+        if existing_slot.confidence == "high":
+            return model_confidence == "high"
         return model_confidence in {"high", "medium"}
     return False
 
