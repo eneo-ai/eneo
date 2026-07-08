@@ -1949,15 +1949,15 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         side_effect=[
             SimpleNamespace(
                 completion=(
-                    '{"source_label":"uploaded_source_1",'
-                    '"source_file_id":"unspecified","title":"Alpha"}'
+                    '{"documents":[{"source_label":"uploaded_source_1",'
+                    '"source_file_id":"unspecified","title":"Alpha"}]}'
                 ),
                 total_token_count=11,
             ),
             SimpleNamespace(
                 completion=(
-                    '{"source_label":"uploaded_source_2",'
-                    '"source_file_id":"unspecified","title":"Beta"}'
+                    '{"documents":[{"source_label":"uploaded_source_2",'
+                    '"source_file_id":"unspecified","title":"Beta"}]}'
                 ),
                 total_token_count=13,
             ),

@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
-from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
@@ -32,7 +31,6 @@ from eneo.main.exceptions import TypedIOValidationException
 # calls get isolated session ownership.
 PER_SOURCE_READER_CONCURRENCY = 1
 PER_SOURCE_METADATA_PREVIEW_CHARS = 2000
-RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 
 @dataclass(frozen=True)
@@ -70,10 +68,13 @@ async def execute_per_source_reader(
         run=run,
         attempt_no=attempt_no,
     )
-    per_call_step = replace(
-        step,
-        output_contract=_per_source_item_output_contract(step.output_contract),
-    )
+    if _documents_item_schema(step.output_contract) is None:
+        raise TypedIOValidationException(
+            "Per-source document readers require a JSON output contract shaped "
+            "as exactly one top-level documents[] array.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    per_call_step = step
     if not file_ids:
         prepared_step = await prepare_assistant_step(
             step=per_call_step,
@@ -172,8 +173,9 @@ async def _assemble_per_source_output(
         )
     first_output = per_source_calls[0].output
     documents = [
-        _source_document_item(call)
+        document
         for call in sorted(per_source_calls, key=lambda item: item.source_number)
+        for document in _source_document_items(call)
     ]
     assembled_structured = {"documents": documents}
     full_text = json.dumps(assembled_structured, ensure_ascii=False)
@@ -260,42 +262,6 @@ async def _assemble_per_source_output(
     )
 
 
-def _per_source_item_output_contract(
-    output_contract: dict[str, Any] | None,
-) -> dict[str, Any]:
-    item_schema = _documents_item_schema(output_contract)
-    if item_schema is None:
-        raise TypedIOValidationException(
-            "Per-source document readers require a JSON output contract shaped "
-            "as exactly one top-level documents[] array.",
-            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-        )
-    item_contract = deepcopy(item_schema)
-    properties = item_contract.get("properties")
-    if isinstance(properties, Mapping):
-        projected_properties = {
-            key: value
-            for key, value in cast(Mapping[str, object], properties).items()
-            if key not in RUNTIME_SOURCE_IDENTITY_FIELDS
-        }
-        item_contract["properties"] = projected_properties
-    required = item_contract.get("required")
-    if isinstance(required, list):
-        required_items = [
-            item for item in cast(list[object], required) if isinstance(item, str)
-        ]
-        projected_required: list[str] = [
-            item
-            for item in required_items
-            if item not in RUNTIME_SOURCE_IDENTITY_FIELDS
-        ]
-        if projected_required:
-            item_contract["required"] = projected_required
-        else:
-            item_contract.pop("required", None)
-    return item_contract
-
-
 def _documents_item_schema(output_contract: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(output_contract, Mapping):
         return None
@@ -335,12 +301,27 @@ def _raise_if_per_source_output_is_not_object(
     )
 
 
-def _source_document_item(call: PerSourceReaderCall) -> dict[str, Any]:
+def _source_document_items(call: PerSourceReaderCall) -> list[dict[str, Any]]:
     structured_output = cast(dict[str, Any], call.output.structured_output)
-    item = dict(structured_output)
-    item["source_label"] = _source_label(call)
-    item["source_file_id"] = str(call.file_id)
-    return item
+    documents = structured_output.get("documents")
+    if not isinstance(documents, list):
+        raise TypedIOValidationException(
+            f"Step output for source {call.source_number} must contain documents[].",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    items: list[dict[str, Any]] = []
+    for index, raw_item in enumerate(cast(list[object], documents), start=1):
+        if not isinstance(raw_item, dict):
+            raise TypedIOValidationException(
+                f"Step output for source {call.source_number} documents[{index}] "
+                "must be an object.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        item = dict(cast(dict[str, Any], raw_item))
+        item["source_label"] = _source_label(call)
+        item["source_file_id"] = str(call.file_id)
+        items.append(item)
+    return items
 
 
 def _source_label(call: PerSourceReaderCall) -> str:
