@@ -312,6 +312,35 @@ class TestFileServiceStorageOffload:
         assert saved.storage_key is None
 
     @pytest.mark.asyncio
+    async def test_discards_stored_object_when_db_write_fails(self, tmp_path):
+        # The files row is the only pointer to the stored object: a rolled-back
+        # insert must not leave the uploaded bytes orphaned in the bucket.
+        storage = MagicMock()
+        storage.is_configured.return_value = True
+        storage.upload = AsyncMock()
+        storage.delete = AsyncMock()
+        service, _ = self._service(storage, tmp_path)
+        service.repo.add = AsyncMock(side_effect=RuntimeError("insert failed"))
+
+        with pytest.raises(RuntimeError):
+            await service.save_file(self._upload())
+
+        uploaded_key = storage.upload.await_args.args[0]
+        storage.delete.assert_awaited_once_with(uploaded_key)
+
+    @pytest.mark.asyncio
+    async def test_discard_failure_does_not_mask_db_error(self, tmp_path):
+        storage = MagicMock()
+        storage.is_configured.return_value = True
+        storage.upload = AsyncMock()
+        storage.delete = AsyncMock(side_effect=ObjectStorageError("down"))
+        service, _ = self._service(storage, tmp_path)
+        service.repo.add = AsyncMock(side_effect=RuntimeError("insert failed"))
+
+        with pytest.raises(RuntimeError, match="insert failed"):
+            await service.save_file(self._upload())
+
+    @pytest.mark.asyncio
     async def test_never_buffers_upload_before_validation(self, tmp_path):
         # The offload bytes come from the protocol's temp file via the hook,
         # which only runs after the size guard: an oversized upload must be
