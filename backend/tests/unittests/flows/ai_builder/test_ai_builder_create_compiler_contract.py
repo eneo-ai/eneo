@@ -7,6 +7,9 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_assembly import (
+    try_compile_create_intent_with_assembly,
+)
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
@@ -314,6 +317,48 @@ def test_missing_document_report_compose_topology_is_typed_architecture_failure(
         "assembly_document_report_compose_topology_missing"
     )
     assert "deterministic compose_text body writer" in exc_info.value.detail
+
+
+def test_assembly_fails_closed_when_document_report_compose_topology_is_missing() -> (
+    None
+):
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Broken report",
+            "plan_rationale": "No source-section topology can be derived.",
+            "steps": [
+                {
+                    "name": "Write report body",
+                    "instructions": "Write the report body.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        try_compile_create_intent_with_assembly(
+            intent,
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            form_fields=(),
+            pattern_ids=(),
+            chain_steps=(),
+            aggregation_intent=cast(AggregationIntent, "aggregate"),
+            terminal_output_schema=None,
+            source_reader_required_fields=(),
+            result_contract_output_fields=(),
+            report_disposition="both",
+            runtime_required=True,
+            runtime_max_files=None,
+            ui_language="sv",
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_document_report_compose_topology_missing"
+    )
 
 
 def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag() -> (

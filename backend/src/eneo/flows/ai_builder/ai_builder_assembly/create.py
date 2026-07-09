@@ -4,8 +4,11 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, NoReturn
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
     render_verbatim_step,
@@ -543,7 +546,14 @@ def _assemble_create_intent(
         report_disposition=report_disposition,
         final_output_type=final_output_type,
     ) and not _has_terminal_compose_renderer_topology(completed_steps):
-        return _reject("document_report_compose_topology_missing")
+        _raise_document_report_compose_topology_missing(
+            runtime_input_type=runtime_input_type,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
+            pattern_ids=pattern_ids,
+            chain_steps=chain_steps,
+            semantic_step_count=len(semantic_steps),
+        )
     completed_steps = _annotate_report_disposition(
         completed_steps,
         report_disposition=report_disposition,
@@ -1697,6 +1707,33 @@ def _has_terminal_compose_renderer_topology(
         and planned_steps[-2].role == "body_writer"
         and planned_steps[-2].output_mode == OutputMode.COMPOSE_TEXT
         and planned_steps[-1].role == "renderer"
+    )
+
+
+def _raise_document_report_compose_topology_missing(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+    semantic_step_count: int,
+) -> NoReturn:
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail=_REJECTION_FEEDBACK["document_report_compose_topology_missing"],
+        log_context={
+            "failure_code": "assembly_document_report_compose_topology_missing",
+            "reason": "document_report_compose_topology_missing",
+            "runtime_input_type": runtime_input_type.value,
+            "final_output_type": final_output_type.value,
+            "final_output_mode": (
+                final_output_mode.value if final_output_mode is not None else None
+            ),
+            "pattern_ids": ",".join(pattern_ids),
+            "chain_steps": ",".join(chain_steps),
+            "semantic_step_count": semantic_step_count,
+        },
     )
 
 
