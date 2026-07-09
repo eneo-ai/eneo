@@ -350,6 +350,17 @@ EXPORT_MAX_CONCURRENT_PER_TENANT=2
 # Files older than this are automatically cleaned up by daily cron job (03:00 UTC)
 EXPORT_MAX_AGE_HOURS=24
 
+# ----------------------------------------------------------------------------
+# Internal MCP Loopback URL
+# ----------------------------------------------------------------------------
+# [OPTIONAL] URL the backend uses to reach its own loopback MCP servers
+# (mounted under /internal-mcp) during a completion, e.g. built-in knowledge
+# search in tool mode. Must be reachable from inside the backend container.
+# The packaged image defaults this to http://localhost:8000 (its own bind),
+# so you normally do not need to set it. Override only if the HTTP server
+# runs on a different port or behind an internal service URL.
+# INTERNAL_MCP_BASE_URL=http://localhost:8000
+
 # ============================================================================
 # FEATURE FLAGS
 # ============================================================================

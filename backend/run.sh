@@ -22,4 +22,9 @@ fi
 
 echo "Starting Eneo backend with $workers workers"
 
+# Loopback MCP servers (/internal-mcp) are served by this same process, which
+# binds :8000 below. The config default targets the uvicorn dev port (8123),
+# so pin the packaged default here unless the deployment overrides it.
+export INTERNAL_MCP_BASE_URL="${INTERNAL_MCP_BASE_URL:-http://localhost:8000}"
+
 exec gunicorn src.eneo.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
