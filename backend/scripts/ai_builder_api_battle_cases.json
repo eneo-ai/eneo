@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "description": "Municipality-oriented Flow AI Builder API battle-test prompts. These cases are not golden outputs; they are pressure prompts for plan shape, source-context logic, schemas, runtime input fields, and token-efficient dataflow.",
+  "description": "Municipality-oriented Flow AI Builder API battle-test prompts across municipal administrations, schools, care, support functions, crisis work, and municipal companies. These cases are not golden outputs; they are pressure prompts for plan shape, source-context logic, schemas, runtime input fields, questions, and token-efficient dataflow.",
   "cases": [
     {
       "id": "simple_document_metadata_json",
-      "complexity": "simple",
+      "complexity": "easy",
       "domain": "municipality_records",
       "prompt": "Jag vill skapa ett flöde för kommunen där jag laddar upp ett dokument och får tillbaka JSON med dokumenttyp, titel, datum, avsändare, mottagare, ärendenummer om det finns, en kort sammanfattning och vilka uppgifter som saknas eller är osäkra.",
       "expected": {
@@ -27,7 +27,7 @@
     },
     {
       "id": "simple_audio_minutes_actions",
-      "complexity": "simple",
+      "complexity": "easy",
       "domain": "municipality_meetings",
       "prompt": "Jag vill bygga ett flöde där jag laddar upp en ljudfil från ett kort internt möte. Flödet ska transkribera ljudet och sedan ta fram beslut, åtgärder, ansvarig, deadline och öppna frågor som strukturerad JSON. Saknas ansvarig eller deadline ska det stå ospecificerat.",
       "expected": {
@@ -45,6 +45,65 @@
           ["deadline", "due_date"],
           ["oppna_fragor", "open_questions"]
         ]
+      }
+    },
+    {
+      "id": "easy_email_reply_with_case_metadata",
+      "complexity": "easy",
+      "domain": "municipality_service_center",
+      "prompt": "Jag vill skapa ett flöde för servicecenter. Vid körning klistrar jag in ett mejl från en invånare och fyller i handläggande förvaltning och önskad svarston. Flödet ska klassificera ärendet, bedöma brådska, lista saknade uppgifter och skriva ett kort förslag på svar till invånaren.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "min_form_field_count": 2,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          ["forvaltning", "department", "handlaggande_forvaltning"],
+          ["ton", "tone", "svarston", "onskad_svarston"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["arendekategori", "case_category", "case_classification", "category"],
+          ["bradska", "urgency", "urgency_level", "urgency_reason", "priority", "urgency_assessment"],
+          ["saknade_uppgifter", "missing_information", "missing_facts", "open_questions"]
+        ]
+      }
+    },
+    {
+      "id": "easy_spreadsheet_case_statistics_json",
+      "complexity": "easy",
+      "domain": "municipality_operations",
+      "prompt": "Jag vill bygga ett flöde där jag laddar upp en CSV- eller Excel-fil med inkomna ärenden. Flödet ska räkna antal ärenden per kategori, antal per status, äldsta öppna ärende, genomsnittlig handläggningstid om kolumnen finns och lämna en kort JSON-sammanfattning.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["kategori", "category", "cases_by_category"],
+          ["status", "cases_by_status"],
+          ["aldsta_oppna_arende", "oldest_open_case"],
+          ["genomsnittlig_handlaggningstid", "average_handling_time"],
+          ["sammanfattning", "summary"]
+        ]
+      }
+    },
+    {
+      "id": "easy_single_document_plain_language_summary",
+      "complexity": "easy",
+      "domain": "municipality_records",
+      "prompt": "Jag vill bygga ett flöde där jag laddar upp ett beslut eller tjänsteutlåtande och får en lättläst sammanfattning i text: vad ärendet gäller, vilket beslut som föreslås eller fattas, viktiga datum och vad invånaren behöver göra.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "text",
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true
       }
     },
     {
@@ -140,8 +199,295 @@
       }
     },
     {
+      "id": "medium_audio_to_protocol_pdf_with_metadata",
+      "complexity": "medium",
+      "domain": "municipality_meetings",
+      "prompt": "Jag vill skapa ett flöde för arbetsmöten. Vid körning laddar jag upp en ljudfil och fyller i mötesdatum, nämnd eller arbetsgrupp och ordförande. Flödet ska transkribera, ta fram beslut, åtgärder, ansvariga och öppna frågor och skapa en protokollsliknande PDF.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "min_form_field_count": 3,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          ["motesdatum", "meeting_date", "datum"],
+          ["namnd", "arbetsgrupp", "committee"],
+          ["ordforande", "chair"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["beslut", "decision", "decisions"],
+          ["atgarder", "actions", "next_steps"],
+          ["ansvarig", "owner", "responsible"],
+          ["oppna_fragor", "open_questions"]
+        ]
+      }
+    },
+    {
+      "id": "medium_public_records_redaction_package",
+      "complexity": "medium",
+      "domain": "municipality_records",
+      "prompt": "Jag vill bygga ett flöde för utlämnande av allmän handling. Jag laddar upp ett dokument och flödet ska identifiera personuppgifter, sekretesskänsliga uppgifter, föreslå maskeringar med motivering och skapa både en strukturerad granskningslista och en kort text till registratorn.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 6,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["personuppgifter", "personal_data", "pii"],
+          ["sekretess", "confidentiality", "secrecy"],
+          ["maskering", "redaction", "redactions"],
+          ["motivering", "reason", "justification"],
+          ["registrator", "registrar_note", "note"]
+        ]
+      }
+    },
+    {
+      "id": "medium_school_absence_followup_json",
+      "complexity": "medium",
+      "domain": "municipality_education",
+      "prompt": "Jag vill skapa ett flöde för elevfrånvaro. Vid körning laddar jag upp frånvarodata eller klistrar in en tabell. Flödet ska hitta elever med oroande mönster, beskriva typ av mönster, risknivå, vilka uppgifter som saknas och rekommenderad uppföljning som strukturerad JSON.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 5,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["elev", "student", "student_id"],
+          ["monster", "pattern", "absence_pattern"],
+          ["riskniva", "risk", "risk_level"],
+          ["saknade_uppgifter", "missing_information"],
+          ["uppfoljning", "follow_up", "recommended_action"]
+        ]
+      }
+    },
+    {
+      "id": "medium_decision_letter_template_attachment",
+      "complexity": "medium",
+      "domain": "municipality_templates",
+      "prompt": "Jag vill bygga ett flöde som fyller i kommunens beslutsbrevsmall. Vid körning laddar jag upp ärendeunderlag och fyller i handläggare, beslutsdatum och diarienummer. Flödet ska hämta rätt motivering, beslut, eventuella villkor och överklagandehänvisning från underlaget och returnera en ifylld DOCX.",
+      "file_id_envs": ["ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID"],
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 1,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          ["handlaggare", "case_worker"],
+          ["beslutsdatum", "decision_date"],
+          ["diarienummer", "case_number", "reference_number"]
+        ],
+        "forbidden_question_event_ids": ["docx_output_mode"],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["beslut", "decision"],
+          ["motivering", "reason", "justification"],
+          ["villkor", "conditions"],
+          ["overklagande", "appeal", "appeal_instruction"]
+        ]
+      }
+    },
+    {
+      "id": "easy_preschool_incident_note_json",
+      "complexity": "easy",
+      "domain": "municipality_preschool",
+      "prompt": "Jag vill skapa ett flöde för förskolan. Vid körning klistrar pedagog in en kort incidentanteckning och fyller i förskola, avdelning och datum. Flödet ska ta fram vad som hände, berörda roller, om vårdnadshavare behöver kontaktas, föreslagen uppföljning och osäkra uppgifter som JSON.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "min_form_field_count": 3,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          ["forskola", "preschool"],
+          ["avdelning", "unit", "department"],
+          ["datum", "date"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["handelse", "incident", "event", "what_happened"],
+          ["roller", "roles", "involved_roles", "roles_involved"],
+          ["vardnadshavare", "guardian", "parent_contact", "parent_contact_needed", "guardian_contact_needed"],
+          ["uppfoljning", "follow_up", "recommended_action"],
+          ["osakerhet", "uncertainty", "uncertain", "uncertain_information"]
+        ]
+      }
+    },
+    {
+      "id": "easy_library_event_copy_text",
+      "complexity": "easy",
+      "domain": "municipality_culture",
+      "prompt": "Jag vill bygga ett flöde för biblioteket där jag klistrar in rå information om ett evenemang och får en kort webbanpassad text, en rubrik, målgrupp, datum/tid om det finns och en mycket kort version för sociala medier.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_types": ["json", "text"],
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["rubrik", "title", "heading"],
+          ["malgrupp", "target_group", "audience"],
+          ["datum", "date", "time"],
+          ["webbtext", "web_text", "copy"],
+          ["sociala_medier", "social_media", "short_version"]
+        ]
+      }
+    },
+    {
+      "id": "easy_hr_job_application_summary",
+      "complexity": "easy",
+      "domain": "municipality_hr",
+      "prompt": "Jag vill skapa ett flöde för HR där jag laddar upp ett CV och personligt brev. Flödet ska sammanfatta kandidatens erfarenhet, utbildning, matchning mot kravprofilen, styrkor, frågetecken och förslag på intervjufrågor i JSON.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["erfarenhet", "experience"],
+          ["utbildning", "education"],
+          ["matchning", "match", "requirements_match"],
+          ["styrkor", "strengths"],
+          ["fragetecken", "questions", "concerns"],
+          ["intervjufragor", "interview_questions"]
+        ]
+      }
+    },
+    {
+      "id": "medium_elderly_care_deviation_report",
+      "complexity": "medium",
+      "domain": "municipality_elderly_care",
+      "prompt": "Jag vill bygga ett flöde för äldreomsorgen. Vid körning laddar jag upp en avvikelserapport eller klistrar in anteckningar. Flödet ska klassificera avvikelsen, bedöma allvarlighetsgrad, identifiera bakomliggande orsaker om de nämns, föreslå åtgärder, ansvarig funktion och skapa en kort rapport för enhetschef.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["avvikelse", "deviation", "incident_type"],
+          ["allvarlighetsgrad", "severity"],
+          ["orsak", "root_cause", "cause"],
+          ["atgard", "action", "actions"],
+          ["ansvarig", "responsible", "owner"]
+        ]
+      }
+    },
+    {
+      "id": "medium_water_leak_citizen_notice",
+      "complexity": "medium",
+      "domain": "municipal_water_company",
+      "prompt": "Jag vill skapa ett flöde för kommunens VA-bolag. Vid driftstörning klistrar jag in intern felrapport och fyller i område, beräknad klartid och kontaktväg. Flödet ska ta fram vad som hänt, berörda abonnenter, praktiska råd, risker och skriva ett tydligt meddelande till invånare.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_form_field_count": 3,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_form_field_groups": [
+          ["omrade", "area"],
+          ["klartid", "estimated_resolution_time", "beraknad_klartid"],
+          ["kontakt", "contact", "kontaktvag"]
+        ],
+        "expected_leaf_output_field_groups": [
+          ["handelse", "incident", "event", "summary", "cause_or_uncertainty"],
+          ["abonnenter", "subscribers", "affected_subscribers", "affected_residents"],
+          ["rad", "advice", "instructions", "recommendations"],
+          ["risk", "risks"]
+        ]
+      }
+    },
+    {
+      "id": "medium_housing_company_tenant_complaint",
+      "complexity": "medium",
+      "domain": "municipal_housing_company",
+      "prompt": "Jag vill bygga ett flöde för ett kommunalt bostadsbolag. Vid körning klistrar handläggare in ett hyresgästärende eller laddar upp korrespondens. Flödet ska sammanfatta problemet, identifiera ärendetyp, föreslå prioritet, nästa åtgärd, ansvarig intern funktion och skriva ett kort svar till hyresgästen.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["problem", "issue", "summary"],
+          ["arendetyp", "case_type", "category"],
+          ["prioritet", "priority", "urgency"],
+          ["nasta_atgard", "next_action", "recommended_action"],
+          ["ansvarig", "owner", "responsible"],
+          ["svar", "reply", "tenant_reply"]
+        ]
+      }
+    },
+    {
+      "id": "medium_finance_invoice_anomaly_review",
+      "complexity": "medium",
+      "domain": "municipality_finance",
+      "prompt": "Jag vill skapa ett flöde för ekonomiavdelningen. Jag laddar upp fakturaunderlag eller klistrar in fakturarader och flödet ska identifiera avvikande belopp, saknade referenser, möjlig dubbeldebitering, kostnadsställe, leverantör och rekommenderad kontroll som JSON.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 5,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["belopp", "amount"],
+          ["referens", "reference"],
+          ["dubbeldebitering", "duplicate_charge"],
+          ["kostnadsstalle", "cost_center"],
+          ["leverantor", "supplier", "vendor"],
+          ["kontroll", "recommended_check"]
+        ]
+      }
+    },
+    {
+      "id": "medium_parks_work_order_prioritization",
+      "complexity": "medium",
+      "domain": "municipality_parks",
+      "prompt": "Jag vill skapa ett flöde för park- och gata. Vid körning klistrar jag in inkomna felanmälningar om lekplatser, belysning, snöröjning eller nedskräpning. Flödet ska gruppera ärenden, bedöma risk, föreslå prioritet, vilken entreprenör eller intern grupp som bör hantera och skapa en arbetsorderlista.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 5,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["feltyp", "issue_type", "category"],
+          ["plats", "location"],
+          ["risk", "risk_level"],
+          ["prioritet", "priority"],
+          ["utforare", "contractor", "owner"],
+          ["arbetsorder", "work_order"]
+        ]
+      }
+    },
+    {
       "id": "complex_meeting_audio_policy_pdf",
-      "complexity": "complex",
+      "complexity": "hard",
       "domain": "municipality_governance",
       "prompt": "Jag vill skapa ett flöde för nämndmöten. Jag laddar upp mötesljud och ibland ett dokument med kommunens riktlinjer. Flödet ska transkribera mötet, identifiera beslut, yrkanden, reservationer, ansvariga, deadlines och öppna frågor. Sedan ska det kontrollera om beslut eller åtgärder verkar strida mot riktlinjerna eller behöver juridisk uppföljning. Innan slutrapporten skapas vill jag kunna granska de strukturerade beslutspunkterna. Slutrapporten ska vara PDF med protokollsliknande struktur.",
       "expected": {
@@ -229,7 +575,7 @@
     },
     {
       "id": "complex_procurement_multi_document_matrix",
-      "complexity": "complex",
+      "complexity": "hard",
       "domain": "municipality_procurement",
       "prompt": "Jag vill bygga ett flöde som granskar upphandlingsunderlag. Jag laddar upp flera dokument: kravspecifikation, anbudsutkast och eventuellt kommunens inköpspolicy. Flödet ska extrahera krav, leverantörslöften, risker, avvikelser, sekretesskänsliga delar och frågor som behöver skickas tillbaka till leverantören. Det ska jämföra dokumenten mot varandra och skapa både en strukturerad JSON-matris och en sammanfattande rapport för upphandlaren.",
       "expected": {
@@ -252,7 +598,7 @@
     },
     {
       "id": "complex_social_case_timeline_redaction",
-      "complexity": "complex",
+      "complexity": "hard",
       "domain": "municipality_social_services",
       "prompt": "Jag vill skapa ett flöde för intern beredning av ett socialt ärende. Jag laddar upp flera dokument och vill att flödet tar fram en tidslinje, parter, viktiga händelser, beslut, rättslig grund om den nämns, saknade uppgifter, risker och rekommenderade nästa steg. Personuppgifter ska flaggas tydligt och slutrapporten ska ha en separat version där känsliga personuppgifter maskeras. Jag vill kunna granska innan slutrapporten skapas.",
       "expected": {
@@ -272,6 +618,332 @@
           ["personuppgifter", "personal_data", "pii"],
           ["risker", "risk", "risks"]
         ]
+      }
+    },
+    {
+      "id": "hard_many_source_documents_exhaustive_pdf",
+      "complexity": "hard",
+      "domain": "municipality_records",
+      "prompt": "Jag vill bygga ett flöde för stora ärendepaket där jag ibland laddar upp 20 till 50 handlingar i samma ärende. Flödet ska läsa varje handling uttömmande, skriva ett eget avsnitt per källa med källa synlig, skapa en samlad översikt och returnera en PDF. Det får inte välja ut några dokument eller göra RAG-sökning; alla uppladdade handlingar ska behandlas.",
+      "scripted_question_answers": {
+        "report_disposition": "both"
+      },
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 7,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_output_modes": [
+          "pass_through",
+          "pass_through",
+          "pass_through",
+          "compose_text",
+          "render_verbatim"
+        ],
+        "forbid_input_sources": ["all_previous_steps"],
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["source_label", "source_file_id"],
+          ["section_title", "title"],
+          ["section_body", "summary", "analysis"]
+        ]
+      }
+    },
+    {
+      "id": "hard_mixed_audio_documents_decision_basis",
+      "complexity": "hard",
+      "domain": "municipality_governance",
+      "prompt": "Jag vill skapa ett flöde för beslutsberedning där jag vid körning kan ladda upp mötesljud och flera bilagor som tjänsteutlåtande, remissvar och policy. Flödet ska transkribera ljudet, koppla uttalanden till bilagorna, ta fram beslutsalternativ, risker, ansvariga, tidsfrister och skapa en besluts-PM i PDF. Jag vill granska de strukturerade punkterna innan PM:et skrivs.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["transkription", "transcript"],
+          ["beslutsalternativ", "decision_options", "options"],
+          ["risker", "risk", "risks"],
+          ["ansvariga", "owner", "responsible"],
+          ["tidsfrist", "deadline", "due_date"]
+        ]
+      }
+    },
+    {
+      "id": "hard_environment_incident_synthesis",
+      "complexity": "hard",
+      "domain": "municipality_environment",
+      "prompt": "Jag vill bygga ett flöde för miljöincidenter. Vid körning laddar jag upp inspektionsanteckningar, tidigare beslut, provsvar och inkomna klagomål. Flödet ska sammanställa händelseförlopp, mätvärden, möjliga lagrum, avvikelser, osäkra uppgifter, föreslagna förelägganden och en rapport till miljöhandläggaren.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 8,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["handelseforlopp", "timeline", "events"],
+          ["matvarden", "measurements", "sample_results"],
+          ["lagrum", "legal_basis"],
+          ["avvikelser", "deviation", "deviations"],
+          ["osakra_uppgifter", "uncertainties"],
+          ["forelaggande", "injunction", "recommended_action"]
+        ]
+      }
+    },
+    {
+      "id": "hard_procurement_scoring_with_human_review",
+      "complexity": "hard",
+      "domain": "municipality_procurement",
+      "prompt": "Jag vill skapa ett flöde för utvärdering av anbud. Jag laddar upp upphandlingskrav, flera leverantörsanbud och utvärderingsmodell. Flödet ska extrahera skallkrav, börkrav och poänggrund, jämföra varje anbud, flagga osäkra tolkningar, skapa en JSON-matris och därefter en rapport. Jag vill kunna granska matrisen innan rapporten skapas.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["skallkrav", "mandatory_requirement", "must_requirement"],
+          ["borkrav", "should_requirement", "scored_requirement"],
+          ["poang", "score", "points"],
+          ["leverantor", "supplier", "vendor"],
+          ["osakerhet", "uncertainty"],
+          ["rekommendation", "recommendation"]
+        ]
+      }
+    },
+    {
+      "id": "hard_gdpr_subject_access_package",
+      "complexity": "hard",
+      "domain": "municipality_gdpr",
+      "prompt": "Jag vill bygga ett flöde för begäran om registerutdrag. Jag laddar upp flera dokument, e-postutdrag och ärendeanteckningar. Flödet ska hitta personuppgifter om den registrerade, skilja dem från tredje person, ange källa, flagga uppgifter som kan behöva sekretessprövas och skapa både en strukturerad utlämningslista och en text till dataskyddssamordnaren.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_types": ["json", "text"],
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["personuppgift", "personal_data", "pii"],
+          ["registrerad", "data_subject"],
+          ["tredje_person", "third_party"],
+          ["kalla", "source", "source_label"],
+          ["sekretessprovning", "confidentiality_review"],
+          ["utlamning", "disclosure", "release_list"]
+        ]
+      }
+    },
+    {
+      "id": "hard_crisis_situation_report_multi_unit",
+      "complexity": "hard",
+      "domain": "municipality_crisis_preparedness",
+      "prompt": "Jag vill skapa ett flöde för kommunens krisledning. Under en väderhändelse laddar jag upp lägesrapporter från skola, äldreomsorg, VA-bolag, räddningstjänst och kommunikation. Flödet ska sammanställa påverkan per verksamhet, kritiska beroenden, beslutade åtgärder, öppna risker, kommunikationsbehov och skapa en lägesbildsrapport i PDF.",
+      "scripted_question_answers": {
+        "report_disposition": "both"
+      },
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["verksamhet", "unit", "service_area"],
+          ["paverkan", "impact"],
+          ["beroende", "dependency"],
+          ["atgard", "action", "actions"],
+          ["risk", "risks"],
+          ["kommunikation", "communication"]
+        ]
+      }
+    },
+    {
+      "id": "hard_school_student_support_timeline",
+      "complexity": "hard",
+      "domain": "municipality_school",
+      "prompt": "Jag vill bygga ett flöde för elevhälsan. Jag laddar upp mentoranteckningar, frånvarodata, åtgärdsprogram och mötesanteckningar. Flödet ska skapa en tidslinje, identifiera insatser, ansvariga, risk- och skyddsfaktorer, saknade uppgifter och föreslå punkter inför elevhälsomöte. Personuppgifter ska flaggas tydligt.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["tidslinje", "timeline"],
+          ["insats", "support_action", "intervention"],
+          ["ansvarig", "owner", "responsible"],
+          ["riskfaktor", "risk_factor"],
+          ["skyddsfaktor", "protective_factor"],
+          ["saknade_uppgifter", "missing_information"],
+          ["personuppgifter", "personal_data", "pii"]
+        ]
+      }
+    },
+    {
+      "id": "hard_archive_retention_classification",
+      "complexity": "hard",
+      "domain": "municipality_archive",
+      "prompt": "Jag vill skapa ett flöde för arkiv och informationshantering. Jag laddar upp eller klistrar in en lista med handlingstyper från en förvaltning. Flödet ska föreslå klassificering, gallringsfrist om den kan utläsas, bevarandevärde, sekretessrisk, personuppgiftsrisk, oklarheter och frågor som arkivarien behöver följa upp.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 6,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["handlingstyp", "record_type"],
+          ["klassificering", "classification"],
+          ["gallring", "retention", "disposal"],
+          ["bevarande", "preservation"],
+          ["sekretess", "confidentiality"],
+          ["personuppgift", "personal_data"],
+          ["oklarhet", "uncertainty", "follow_up_question"]
+        ]
+      }
+    },
+    {
+      "id": "hard_budget_variance_management_report",
+      "complexity": "hard",
+      "domain": "municipality_finance",
+      "prompt": "Jag vill bygga ett flöde för månadsuppföljning. Jag laddar upp budgetutfall, prognos och verksamhetskommentarer från flera förvaltningar. Flödet ska hitta stora avvikelser, möjliga orsaker, risk för helårsprognos, föreslagna åtgärder och skapa en rapport till kommunledningen.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 8,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["forvaltning", "department", "administration"],
+          ["avvikelse", "variance"],
+          ["orsak", "cause"],
+          ["prognos", "forecast"],
+          ["risk", "risks"],
+          ["atgard", "action", "recommended_action"]
+        ]
+      }
+    },
+    {
+      "id": "hard_municipal_company_board_packet",
+      "complexity": "hard",
+      "domain": "municipal_company_governance",
+      "prompt": "Jag vill skapa ett flöde för ett kommunalt bolags styrelsemöten. Jag laddar upp mötesljud, föredragningslista och bilagor. Flödet ska transkribera, koppla diskussioner till rätt punkt, ta fram beslut, bordlagda frågor, uppdrag till VD, risker och skapa ett protokollsutkast i DOCX eller PDF.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_types": ["docx", "pdf"],
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["dagordningspunkt", "agenda_item"],
+          ["beslut", "decision", "decisions"],
+          ["bordlagd", "deferred"],
+          ["uppdrag", "assignment", "action"],
+          ["vd", "ceo"],
+          ["risk", "risks"]
+        ]
+      }
+    },
+    {
+      "id": "hard_property_maintenance_contract_followup",
+      "complexity": "hard",
+      "domain": "municipal_property_company",
+      "prompt": "Jag vill skapa ett flöde för kommunfastigheter. Jag laddar upp serviceavtal, arbetsorder, besiktningsprotokoll och felanmälningar. Flödet ska jämföra utfört arbete mot avtal, hitta återkommande fel, garanti- eller vitesrisker, rekommendera åtgärder och skapa en rapport till fastighetsförvaltaren.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 9,
+        "terminal_output_type": "text",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 1,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["avtal", "contract"],
+          ["arbetsorder", "work_order"],
+          ["aterkommande_fel", "recurring_issue"],
+          ["garanti", "warranty"],
+          ["vite", "penalty"],
+          ["rekommenderad_atgard", "recommended_action"]
+        ]
+      }
+    },
+    {
+      "id": "attachment_example_report_infers_disposition",
+      "complexity": "medium",
+      "domain": "municipality_reports",
+      "prompt": "Jag vill bygga ett flöde där jag laddar upp flera dokument och får en PDF-rapport som följer formen i den bifogade exempelrapporten. Flödet ska läsa varje källa, skriva källavsnitt och skapa en samlad rapport med samma övergripande struktur som exemplet.",
+      "file_id_envs": ["ENEO_AI_BUILDER_EXAMPLE_REPORT_FILE_ID"],
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 7,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbidden_question_event_ids": ["report_disposition"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["section_title", "rubrik", "title"],
+          ["section_body", "avsnitt", "body", "report_section"]
+        ]
+      }
+    },
+    {
+      "id": "attachment_docx_template_placeholders_to_fields",
+      "complexity": "medium",
+      "domain": "municipality_templates",
+      "prompt": "Jag vill bygga ett flöde som fyller i den bifogade DOCX-mallen. Vid körning ska jag ladda upp underlag och fylla i mallens variabler, till exempel kundnamn och case_id. Flödet ska läsa underlaget, skriva mallinnehållet och returnera en ifylld DOCX.",
+      "file_id_envs": ["ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID"],
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 1,
+        "min_form_field_count": 1,
+        "expected_form_field_groups": [
+          ["kundnamn", "customer_name"],
+          ["case_id", "caseid", "arendenummer"]
+        ],
+        "forbidden_question_event_ids": ["docx_output_mode"],
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true
+      }
+    },
+    {
+      "id": "ambiguous_report_without_attachment_asks_one_question",
+      "complexity": "easy",
+      "domain": "municipality_reports",
+      "prompt": "Jag vill bygga ett flöde där jag laddar upp flera dokument och får en tydlig PDF-rapport tillbaka.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1
       }
     }
   ]

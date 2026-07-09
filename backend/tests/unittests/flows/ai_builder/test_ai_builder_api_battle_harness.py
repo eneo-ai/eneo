@@ -27,7 +27,12 @@ def _battle_harness() -> ModuleType:
     return module
 
 
-def _document_plan(*, terminal_mode: str, terminal_input_source: str) -> dict[str, Any]:
+def _document_plan(
+    *,
+    terminal_mode: str,
+    terminal_input_source: str,
+    terminal_output_type: str = "pdf",
+) -> dict[str, Any]:
     return {
         "proposal": {
             "spec": {
@@ -50,7 +55,7 @@ def _document_plan(*, terminal_mode: str, terminal_input_source: str) -> dict[st
                         "name": "Render report",
                         "input_source": terminal_input_source,
                         "input_type": "text",
-                        "output_type": "pdf",
+                        "output_type": terminal_output_type,
                         "output_mode": terminal_mode,
                     },
                 ],
@@ -158,6 +163,32 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     assert bad_report["metrics"]["renderer_is_previous_step_bound"] is False
 
 
+def test_harness_allows_template_fill_document_terminal_without_renderer_binding() -> (
+    None
+):
+    harness = _battle_harness()
+    plan = _document_plan(
+        terminal_mode="template_fill",
+        terminal_input_source="flow_input",
+        terminal_output_type="docx",
+    )
+
+    summary = harness._summarize_plan(plan)
+    report = harness._quality_report(
+        plan=plan,
+        summary=summary,
+        expected={
+            "terminal_output_type": "docx",
+            "terminal_document_output_mode": "template_fill",
+        },
+        event_summary={},
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["terminal_document_output_mode"]["passed"] is True
+    assert "renderer_previous_step_bound" not in checks
+
+
 def test_harness_can_fail_extra_post_json_text_helper() -> None:
     harness = _battle_harness()
     plan = _document_plan_with_extra_text_helper()
@@ -177,6 +208,48 @@ def test_harness_can_fail_extra_post_json_text_helper() -> None:
     assert checks["max_post_json_text_cleanup_steps"]["passed"] is False
     assert checks["max_post_json_text_cleanup_steps"]["actual"] == 2
     assert report["metrics"]["post_json_text_cleanup_step_count"] == 2
+
+
+def test_harness_checks_question_count_before_plan_exists() -> None:
+    harness = _battle_harness()
+
+    report = harness._quality_report(
+        plan=None,
+        summary={"has_plan": False},
+        expected={
+            "allow_question_instead_of_plan": True,
+            "expected_question_event_count": 1,
+            "max_question_event_count": 1,
+            "expected_question_event_ids": ["report_disposition"],
+        },
+        event_summary={
+            "question_event_count": 1,
+            "question_event_ids": ["report_disposition"],
+        },
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["plan_or_structured_question"]["passed"] is True
+    assert checks["expected_question_event_count"]["passed"] is True
+    assert checks["max_question_event_count"]["passed"] is True
+    assert checks["expected_question_event_ids"]["passed"] is True
+
+    bad_report = harness._quality_report(
+        plan=None,
+        summary={"has_plan": False},
+        expected={
+            "allow_question_instead_of_plan": True,
+            "expected_question_event_count": 1,
+            "forbidden_question_event_ids": ["docx_output_mode"],
+        },
+        event_summary={
+            "question_event_count": 2,
+            "question_event_ids": ["docx_output_mode", "report_disposition"],
+        },
+    )
+    bad_checks = {check["name"]: check for check in bad_report["checks"]}
+    assert bad_checks["expected_question_event_count"]["passed"] is False
+    assert bad_checks["forbidden_question_event_ids"]["passed"] is False
 
 
 def test_artifact_warning_allows_document_body_copy() -> None:
@@ -303,6 +376,42 @@ def test_context_balance_pdf_case_sets_cleanup_cap() -> None:
     )
 
     assert pdf_case.expected["max_post_json_text_cleanup_steps"] == 1
+
+
+def test_attachment_case_file_ids_can_resolve_from_environment(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="attachment_docx_template_placeholders_to_fields",
+        prompt="Build a DOCX flow.",
+        file_id_envs=("ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",),
+    )
+    args = type("Args", (), {"file_ids": None})()
+
+    assert harness._missing_file_id_envs(case, args) == (
+        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",
+    )
+    skipped = harness._skipped_case_bundle(
+        case=case,
+        repetition=None,
+        missing_envs=("ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",),
+    )
+    assert skipped["skipped"] is True
+    assert skipped["case"]["id"] == "attachment_docx_template_placeholders_to_fields"
+    assert "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID" in skipped["skip_reason"]
+
+    monkeypatch.setenv(
+        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID",
+        "file-template-1",
+    )
+
+    assert harness._missing_file_id_envs(case, args) == ()
+    assert harness._case_file_ids(case, args) == ("file-template-1",)
+
+    cli_args = type("Args", (), {"file_ids": ["file-cli-1"]})()
+    assert harness._missing_file_id_envs(case, cli_args) == ()
+    assert harness._case_file_ids(case, cli_args) == ("file-cli-1",)
 
 
 def test_suite_reliability_counts_invalid_plan_errors() -> None:

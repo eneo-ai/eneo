@@ -58,6 +58,7 @@ class BattleCase:
     domain: str = "custom"
     expected: JsonObject | None = None
     file_ids: tuple[str, ...] = ()
+    file_id_envs: tuple[str, ...] = ()
     scripted_question_answers: JsonObject | None = None
 
 
@@ -95,13 +96,28 @@ def main() -> int:
                 args=args,
                 output_dir=output_dir,
             )
+        case = cases[0]
+        if missing_envs := _missing_file_id_envs(case, args):
+            skipped = _skipped_case_bundle(
+                case=case,
+                repetition=None,
+                missing_envs=missing_envs,
+            )
+            skipped_path = _write_bundle(
+                output_dir,
+                skipped,
+                suffix=f"{case.case_id}-skipped",
+            )
+            print(f"case skipped: {skipped['skip_reason']}")
+            print(f"skipped bundle: {skipped_path}")
+            return 0
         bundle = _run_case(
-            case=cases[0],
+            case=case,
             config=config,
             args=args,
             existing_session_id=args.session_id,
         )
-        bundle_path = _write_bundle(output_dir, bundle, suffix=cases[0].case_id)
+        bundle_path = _write_bundle(output_dir, bundle, suffix=case.case_id)
         _print_summary(bundle["plan_summary"], bundle_path)
         return 0
     except (HTTPError, URLError, TimeoutError, ValueError) as error:
@@ -301,6 +317,15 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             isinstance(file_id, str) for file_id in file_ids
         ):
             raise ValueError(f"{path} case {case_id}.file_ids must be a string list.")
+        file_id_envs = raw_case.get("file_id_envs")
+        if file_id_envs is None:
+            file_id_envs = []
+        if not isinstance(file_id_envs, list) or not all(
+            isinstance(env_name, str) for env_name in file_id_envs
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.file_id_envs must be a string list."
+            )
         expected = raw_case.get("expected")
         if expected is not None and not isinstance(expected, Mapping):
             raise ValueError(f"{path} case {case_id}.expected must be an object.")
@@ -317,6 +342,7 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
                 domain=str(raw_case.get("domain") or "custom"),
                 expected=dict(expected) if isinstance(expected, Mapping) else None,
                 file_ids=tuple(file_ids),
+                file_id_envs=tuple(file_id_envs),
                 scripted_question_answers=(
                     dict(scripted_answers)
                     if isinstance(scripted_answers, Mapping)
@@ -352,6 +378,7 @@ def _run_suite(
     results: list[JsonObject] = []
     case_error_count = 0
     quality_failure_run_count = 0
+    skipped_run_count = 0
     total_runs = len(cases) * args.repetitions
 
     run_index = 0
@@ -366,6 +393,21 @@ def _run_suite(
                 f"{case.case_id} ({case.complexity}) "
                 f"repetition {repetition}/{args.repetitions} ==="
             )
+            if missing_envs := _missing_file_id_envs(case, args):
+                skipped_run_count += 1
+                skipped = _skipped_case_bundle(
+                    case=case,
+                    repetition=repetition,
+                    missing_envs=missing_envs,
+                )
+                skipped_path = _write_bundle(
+                    suite_dir,
+                    skipped,
+                    suffix=f"{case.case_id}{repetition_suffix}-skipped",
+                )
+                print(f"case skipped: {skipped['skip_reason']}")
+                results.append(_suite_result(skipped, skipped_path))
+                continue
             try:
                 bundle = _run_case(
                     case=case,
@@ -421,6 +463,7 @@ def _run_suite(
         "failure_count": case_error_count + quality_failure_run_count,
         "case_error_count": case_error_count,
         "quality_failure_run_count": quality_failure_run_count,
+        "skipped_run_count": skipped_run_count,
         "results": results,
         "reliability": _suite_reliability_summary(results),
     }
@@ -458,13 +501,14 @@ def _run_case(
         session_id = _required_string(initial_session, "session_id")
         print(f"created session {session_id}")
 
+    file_ids = _case_file_ids(case, args)
     interactions: list[JsonObject] = []
     first = _send_and_fetch(
         config=config,
         session_id=session_id,
         message=case.prompt,
         model_id=args.model_id,
-        file_ids=tuple(args.file_ids or ()) or case.file_ids,
+        file_ids=file_ids,
         ui_language=args.ui_language,
         question_answer=None,
     )
@@ -548,7 +592,8 @@ def _run_case(
             "domain": case.domain,
             "prompt": case.prompt,
             "expected": case.expected or {},
-            "file_ids": list(tuple(args.file_ids or ()) or case.file_ids),
+            "file_ids": list(file_ids),
+            "file_id_envs": list(case.file_id_envs),
             "scripted_question_answers": case.scripted_question_answers or {},
         },
         "session_id": session_id,
@@ -764,6 +809,63 @@ def _requirements_confirmation_payload(
     return payload
 
 
+def _case_file_ids(case: BattleCase, args: argparse.Namespace) -> tuple[str, ...]:
+    cli_file_ids = tuple(getattr(args, "file_ids", None) or ())
+    if cli_file_ids:
+        return cli_file_ids
+    missing_envs = _missing_file_id_envs(case, args)
+    if missing_envs:
+        raise ValueError(
+            f"case {case.case_id} requires file id env var(s): "
+            + ", ".join(missing_envs)
+        )
+    return (*case.file_ids, *_file_ids_from_envs(case.file_id_envs))
+
+
+def _missing_file_id_envs(
+    case: BattleCase,
+    args: argparse.Namespace,
+) -> tuple[str, ...]:
+    if tuple(getattr(args, "file_ids", None) or ()):
+        return ()
+    return tuple(
+        env_name
+        for env_name in case.file_id_envs
+        if not os.getenv(env_name, "").strip()
+    )
+
+
+def _file_ids_from_envs(env_names: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        os.environ[env_name].strip()
+        for env_name in env_names
+        if os.getenv(env_name, "").strip()
+    )
+
+
+def _skipped_case_bundle(
+    *,
+    case: BattleCase,
+    repetition: int | None,
+    missing_envs: tuple[str, ...],
+) -> JsonObject:
+    return {
+        "created_at": time.strftime("%Y%m%dT%H%M%S"),
+        "app_version": LOCAL_APP_VERSION,
+        "case": {
+            "id": case.case_id,
+            "complexity": case.complexity,
+            "domain": case.domain,
+            "file_id_envs": list(case.file_id_envs),
+        },
+        "repetition": repetition,
+        "skipped": True,
+        "skip_reason": (
+            "Missing file-id environment variable(s): " + ", ".join(missing_envs)
+        ),
+    }
+
+
 def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
     created_at = str(bundle.get("created_at") or time.strftime("%Y%m%dT%H%M%S"))
     safe_suffix = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in suffix)
@@ -795,6 +897,10 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "plan_id": bundle.get("plan_id"),
         "repetition": bundle.get("repetition"),
         "bundle_path": str(bundle_path),
+        "skipped": bundle.get("skipped") is True,
+        "skip_reason": bundle.get("skip_reason")
+        if isinstance(bundle.get("skip_reason"), str)
+        else None,
         "step_count": bundle.get("plan_summary", {}).get("step_count")
         if isinstance(bundle.get("plan_summary"), Mapping)
         else None,
@@ -828,6 +934,8 @@ def _failed_check_names(result: Mapping[str, Any]) -> list[str]:
 def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
     grouped: dict[str, list[JsonObject]] = {}
     for result in results:
+        if result.get("skipped") is True:
+            continue
         case_id = result.get("case_id")
         if isinstance(case_id, str):
             grouped.setdefault(case_id, []).append(result)
@@ -1357,6 +1465,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
 
     return {
         "event_counts": event_counts,
+        "question_event_count": len(question_event_ids),
         "question_event_ids": list(dict.fromkeys(question_event_ids)),
         "question_like_text_event_count": len(question_like_text_events),
         "question_like_text_events": question_like_text_events[:5],
@@ -1490,6 +1599,9 @@ def _quality_report(
 
     allows_structured_question = expected.get("allow_question_instead_of_plan") is True
     question_event_ids = _string_list(event_summary.get("question_event_ids"))
+    question_event_count = _int_value(event_summary.get("question_event_count"))
+    if question_event_count is None:
+        question_event_count = len(question_event_ids)
     if allows_structured_question:
         add_check(
             "plan_or_structured_question",
@@ -1511,6 +1623,49 @@ def _quality_report(
         text_only_questions,
         0,
     )
+    if expected_question_ids := _string_list(
+        expected.get("expected_question_event_ids")
+    ):
+        add_check(
+            "expected_question_event_ids",
+            question_event_ids == expected_question_ids,
+            question_event_ids,
+            expected_question_ids,
+        )
+    if forbidden_question_ids := set(
+        _string_list(expected.get("forbidden_question_event_ids"))
+    ):
+        matched_forbidden = [
+            question_id
+            for question_id in question_event_ids
+            if question_id in forbidden_question_ids
+        ]
+        add_check(
+            "forbidden_question_event_ids",
+            matched_forbidden == [],
+            matched_forbidden,
+            sorted(forbidden_question_ids),
+        )
+    if (
+        expected_question_count := _int_value(
+            expected.get("expected_question_event_count")
+        )
+    ) is not None:
+        add_check(
+            "expected_question_event_count",
+            question_event_count == expected_question_count,
+            question_event_count,
+            expected_question_count,
+        )
+    if (
+        max_question_count := _int_value(expected.get("max_question_event_count"))
+    ) is not None:
+        add_check(
+            "max_question_event_count",
+            question_event_count <= max_question_count,
+            question_event_count,
+            max_question_count,
+        )
     if plan is None:
         return {"checks": checks, "warnings": warnings}
 
@@ -1585,15 +1740,16 @@ def _quality_report(
             summary.get("terminal_output_mode"),
             expected_output_mode,
         )
-        renderer_is_previous_step_bound = _source_context_metrics(summary)[
-            "renderer_is_previous_step_bound"
-        ]
-        add_check(
-            "renderer_previous_step_bound",
-            renderer_is_previous_step_bound is True,
-            renderer_is_previous_step_bound,
-            True,
-        )
+        if expected_output_mode == "render_verbatim":
+            renderer_is_previous_step_bound = _source_context_metrics(summary)[
+                "renderer_is_previous_step_bound"
+            ]
+            add_check(
+                "renderer_previous_step_bound",
+                renderer_is_previous_step_bound is True,
+                renderer_is_previous_step_bound,
+                True,
+            )
     if (minimum_json := _int_value(expected.get("min_json_steps"))) is not None:
         actual_json = _int_value(summary.get("json_step_count"))
         add_check(
@@ -1672,6 +1828,16 @@ def _quality_report(
         expected,
         "expected_form_field_groups",
     )
+    if (
+        min_form_fields := _int_value(expected.get("min_form_field_count"))
+    ) is not None:
+        form_field_names = _string_list(summary.get("form_field_names"))
+        add_check(
+            "min_form_field_count",
+            len(form_field_names) >= min_form_fields,
+            len(form_field_names),
+            min_form_fields,
+        )
     if expected_form_fields:
         form_field_names = _string_list(summary.get("form_field_names"))
         missing_form_groups = [
