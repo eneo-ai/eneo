@@ -102,7 +102,7 @@
       return {
         // Eneo's own built-in tools get localized labels; otherwise prefer the
         // server-provided title annotation, falling back to the raw tool name.
-        toolName: toolDisplayName(tc.tool_name, tc.title),
+        toolName: toolDisplayName(tc.tool_name, tc.server_name, tc.title),
         serverName: serverDisplayName(tc.server_name),
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
@@ -255,7 +255,7 @@
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex items-center gap-2">
                 <span class="text-default truncate text-sm font-medium"
-                  >{toolDisplayName(toolCall.tool_name)}</span
+                  >{toolDisplayName(toolCall.tool_name, toolCall.server_name)}</span
                 >
                 {#if isDenied}
                   <span
