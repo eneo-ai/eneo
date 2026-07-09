@@ -25,10 +25,17 @@ from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
     build_file_references_string,
 )
-from eneo.files.file_models import ContentDisposition, FileBaseWithContent, FileType
+from eneo.files.file_models import (
+    ContentDisposition,
+    FileBaseWithContent,
+    FileType,
+    SignedURLRequest,
+)
 from eneo.files.file_reference import url_only_file_ids
+from eneo.files.file_router import generate_signed_url
 from eneo.files.file_service import FileService
 from eneo.files.object_storage import FileObjectStorage, ObjectStorageError
+from eneo.main.exceptions import FileTooLargeException, NotFoundException
 
 
 def _s3_settings(configured: bool = True):
@@ -232,12 +239,14 @@ class TestInlineFileTextToggle:
 
 
 class TestFileServiceStorageOffload:
-    def _service(self, storage):
+    def _service(self, storage, tmp_path=None):
+        """FileService with a fake protocol that mimics the real temp-file
+        window: when the caller passes an on_disk_hook, it is invoked with a
+        real on-disk copy of the upload, exactly once, after 'validation'."""
         user = MagicMock(id=uuid4(), tenant_id=uuid4())
         repo = AsyncMock()
         repo.session = MagicMock()
         repo.add = AsyncMock(side_effect=lambda create: create)
-        protocol = AsyncMock()
         file = FileBaseWithContent(
             name="doc.pdf",
             checksum="abc",
@@ -245,38 +254,47 @@ class TestFileServiceStorageOffload:
             file_type=FileType.TEXT,
             text="extracted",
         )
-        protocol.to_domain_with_derivatives.return_value = (file, [])
+
+        async def fake_to_domain(upload, on_disk_hook=None):
+            if on_disk_hook is not None:
+                assert tmp_path is not None
+                filepath = tmp_path / "upload.bin"
+                filepath.write_bytes(b"pdf-bytes")
+                on_disk_hook(filepath)
+            return (file, [])
+
+        protocol = AsyncMock()
+        protocol.to_domain_with_derivatives = AsyncMock(side_effect=fake_to_domain)
         return FileService(
             user=user, repo=repo, protocol=protocol, object_storage=storage
         ), protocol
 
+    def _upload(self):
+        upload = MagicMock()
+        upload.read = AsyncMock(return_value=b"pdf-bytes")
+        upload.seek = AsyncMock()
+        return upload
+
     @pytest.mark.asyncio
-    async def test_persists_storage_key_on_success(self):
+    async def test_persists_storage_key_on_success(self, tmp_path):
         storage = MagicMock()
         storage.is_configured.return_value = True
         storage.upload = AsyncMock()
-        service, _ = self._service(storage)
+        service, _ = self._service(storage, tmp_path)
 
-        upload = MagicMock()
-        upload.read = AsyncMock(return_value=b"pdf-bytes")
-        upload.seek = AsyncMock()
-
-        saved = await service.save_file(upload)
+        saved = await service.save_file(self._upload())
         storage.upload.assert_awaited_once()
+        assert storage.upload.await_args.args[1] == b"pdf-bytes"
         assert saved.storage_key is not None
 
     @pytest.mark.asyncio
-    async def test_degrades_to_null_key_on_upload_error(self):
+    async def test_degrades_to_null_key_on_upload_error(self, tmp_path):
         storage = MagicMock()
         storage.is_configured.return_value = True
         storage.upload = AsyncMock(side_effect=ObjectStorageError("down"))
-        service, _ = self._service(storage)
+        service, _ = self._service(storage, tmp_path)
 
-        upload = MagicMock()
-        upload.read = AsyncMock(return_value=b"pdf-bytes")
-        upload.seek = AsyncMock()
-
-        saved = await service.save_file(upload)
+        saved = await service.save_file(self._upload())
         assert saved.storage_key is None
 
     @pytest.mark.asyncio
@@ -285,13 +303,32 @@ class TestFileServiceStorageOffload:
         storage.is_configured.return_value = False
         service, protocol = self._service(storage)
 
-        upload = MagicMock()
-        upload.read = AsyncMock()
-
+        upload = self._upload()
         saved = await service.save_file(upload)
         upload.read.assert_not_awaited()
-        protocol.to_domain_with_derivatives.assert_awaited_once_with(upload)
+        protocol.to_domain_with_derivatives.assert_awaited_once_with(
+            upload, on_disk_hook=None
+        )
         assert saved.storage_key is None
+
+    @pytest.mark.asyncio
+    async def test_never_buffers_upload_before_validation(self, tmp_path):
+        # The offload bytes come from the protocol's temp file via the hook,
+        # which only runs after the size guard: an oversized upload must be
+        # rejected without the service ever allocating the raw bytes.
+        storage = MagicMock()
+        storage.is_configured.return_value = True
+        storage.upload = AsyncMock()
+        service, protocol = self._service(storage, tmp_path)
+        protocol.to_domain_with_derivatives = AsyncMock(
+            side_effect=FileTooLargeException(file_size=999, max_size=10)
+        )
+
+        upload = self._upload()
+        with pytest.raises(FileTooLargeException):
+            await service.save_file(upload)
+        upload.read.assert_not_awaited()
+        storage.upload.assert_not_awaited()
 
 
 def _reference_settings(base_url: str | None = "http://host.docker.internal:8123"):
@@ -508,6 +545,65 @@ class TestCompletionMintAudit:
             file_reference_urls={minted.id: "https://x/dl"},
             session=None,
         )  # must not raise
+
+
+class TestSignedUrlEndpointAudit:
+    """The manual mint endpoint must write a FILE_SIGNED_URL_MINTED audit row
+    using an owner-checked, metadata-only lookup (no text/blob columns)."""
+
+    def _container(self, files):
+        container = MagicMock()
+        file_service = MagicMock()
+        file_service.get_file_infos = AsyncMock(return_value=files)
+        container.file_service.return_value = file_service
+        container.user.return_value = SimpleNamespace(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            username="anna",
+            email="anna@kommun.se",
+        )
+        audit_service = MagicMock()
+        audit_service.log_async = AsyncMock()
+        container.audit_service.return_value = audit_service
+        return container, file_service, audit_service
+
+    def _request(self):
+        return SimpleNamespace(base_url="http://testserver/")
+
+    @pytest.mark.asyncio
+    async def test_minting_writes_audit_row(self):
+        file_info = SimpleNamespace(id=uuid4(), name="doc.pdf")
+        container, file_service, audit_service = self._container([file_info])
+
+        response = await generate_signed_url(
+            id=file_info.id,
+            request=self._request(),
+            signed_url_req=SignedURLRequest(),
+            container=container,
+        )
+
+        file_service.get_file_infos.assert_awaited_once_with(file_ids=[file_info.id])
+        audit_service.log_async.assert_awaited_once()
+        kwargs = audit_service.log_async.await_args.kwargs
+        assert kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
+        assert kwargs["entity_id"] == file_info.id
+        assert kwargs["metadata"]["target"]["name"] == "doc.pdf"
+        assert response.url.startswith(
+            f"http://testserver/api/v1/files/{file_info.id}/download/"
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_file_is_404_and_unaudited(self):
+        container, _, audit_service = self._container([])
+
+        with pytest.raises(NotFoundException):
+            await generate_signed_url(
+                id=uuid4(),
+                request=self._request(),
+                signed_url_req=SignedURLRequest(),
+                container=container,
+            )
+        audit_service.log_async.assert_not_awaited()
 
 
 class TestBuildFileReferenceUrlsTextOnly:
