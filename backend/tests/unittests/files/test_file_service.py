@@ -48,7 +48,9 @@ async def test_save_file_delegates_to_protocol_without_max_size(service, protoco
 
     await service.save_file(upload)
 
-    protocol.to_domain_with_derivatives.assert_called_once_with(upload)
+    protocol.to_domain_with_derivatives.assert_called_once_with(
+        upload, on_disk_hook=None
+    )
 
 
 @pytest.mark.asyncio
