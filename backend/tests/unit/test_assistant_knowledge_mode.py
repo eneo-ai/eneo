@@ -175,6 +175,14 @@ class TestKnowledgeCatalog:
 
         assert "call knowledge__search_knowledge FIRST" in catalog
 
+    def test_catalog_routes_meta_questions_to_the_builtin_listing_tool(self):
+        # "What knowledge do you have?" must go to the built-in listing tool,
+        # not a similarly purposed listing tool from another server.
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "answer with knowledge__list_knowledge_sources" in catalog
+        assert "never with a listing tool from another server" in catalog
+
     def test_catalog_tool_names_match_proxy_prefixing(self):
         # The catalog hardcodes the prefixed tool names; they must match what
         # the proxy actually derives from the knowledge server's name.
@@ -190,3 +198,4 @@ class TestKnowledgeCatalog:
 
         assert f"{prefix}__search_knowledge" in catalog
         assert f"{prefix}__read_source" in catalog
+        assert f"{prefix}__list_knowledge_sources" in catalog

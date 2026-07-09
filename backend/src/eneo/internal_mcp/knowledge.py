@@ -367,7 +367,12 @@ async def read_source(
 
 @mcp.tool(title="List knowledge sources")
 async def list_knowledge_sources(ctx: Context) -> str:
-    """List the knowledge sources attached to this assistant."""
+    """List the knowledge sources attached to this assistant.
+
+    Use this tool whenever the user asks what knowledge, sources or
+    documents are available, in preference to similarly named listing
+    tools from other servers.
+    """
     async with internal_tool_context(ctx) as (container, _user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
 
