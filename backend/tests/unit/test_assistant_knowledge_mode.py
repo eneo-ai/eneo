@@ -183,6 +183,14 @@ class TestKnowledgeCatalog:
         assert "answer with knowledge__list_knowledge_sources" in catalog
         assert "never with a listing tool from another server" in catalog
 
+    def test_catalog_exempts_attached_files_from_search_first(self):
+        # "What does this file contain?" is answered from the attachment
+        # (inlined text or a file-reading tool), not by searching knowledge.
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "questions about files attached to this conversation" in catalog
+        assert "not from knowledge searches" in catalog
+
     def test_catalog_tool_names_match_proxy_prefixing(self):
         # The catalog hardcodes the prefixed tool names; they must match what
         # the proxy actually derives from the knowledge server's name.
