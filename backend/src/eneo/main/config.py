@@ -448,6 +448,12 @@ class Settings(BaseSettings):
     # backend process/container. Dev default is the local server.
     internal_mcp_base_url: str = "http://localhost:8123"
 
+    # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
+    # retrieval: chunks scoring below it are dropped instead of injected.
+    # Off by default because useful values depend on the embedding model in
+    # use; set per deployment where that model is known.
+    inject_knowledge_min_score: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
+
     # Dev
     testing: bool = False
     dev: bool = False

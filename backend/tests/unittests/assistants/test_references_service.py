@@ -93,3 +93,51 @@ def test_concatenate_session_is_null():
     service = ReferencesService(AsyncMock(), AsyncMock())
     concatenated_session = service._concatenate_conversation("next question", None)
     assert concatenated_session == "next question"
+
+
+def _service_with_datastore():
+    datastore = MagicMock()
+    datastore.semantic_search = AsyncMock(return_value=[])
+    return ReferencesService(AsyncMock(), datastore), datastore
+
+
+def _patch_min_score(monkeypatch, min_score):
+    monkeypatch.setattr(
+        "eneo.assistants.references.get_settings",
+        lambda: MagicMock(inject_knowledge_min_score=min_score),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", (1, 2))
+async def test_inject_retrieval_applies_configured_relevance_floor(
+    monkeypatch, version
+):
+    _patch_min_score(monkeypatch, 0.3)
+    service, datastore = _service_with_datastore()
+
+    await service._query_datastore_if_groups_or_websites(
+        "question",
+        collections=[MagicMock(embedding_model=MagicMock())],
+        websites=[],
+        num_chunks=10,
+        version=version,
+    )
+
+    assert datastore.semantic_search.await_args.kwargs["min_score"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_relevance_floor_is_off_when_unset(monkeypatch):
+    _patch_min_score(monkeypatch, None)
+    service, datastore = _service_with_datastore()
+
+    await service._query_datastore_if_groups_or_websites(
+        "question",
+        collections=[MagicMock(embedding_model=MagicMock())],
+        websites=[],
+        num_chunks=10,
+        version=2,
+    )
+
+    assert datastore.semantic_search.await_args.kwargs["min_score"] is None

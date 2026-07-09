@@ -5,6 +5,7 @@ from uuid import UUID
 
 from eneo.files.file_models import FileType
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
+from eneo.main.config import get_settings
 from eneo.services.service import DatastoreResult
 
 if TYPE_CHECKING:
@@ -71,6 +72,9 @@ class ReferencesService:
                 collections=collections,
                 websites=websites,
                 integration_knowledge_list=integration_knowledge_list,
+                # Deployment-wide relevance floor for injected chunks (off by
+                # default; cosine-similarity scales differ per embedding model).
+                min_score=get_settings().inject_knowledge_min_score,
                 **search_params,
             )
 
