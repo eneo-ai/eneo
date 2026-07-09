@@ -394,7 +394,7 @@ async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
         lambda *, text_files, image_files, model_name: len(text_files) * 100,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[])
+    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
     # ceiling = 90; one uploaded text file = 100 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service()._assert_message_attachments_fit(
@@ -413,7 +413,7 @@ async def test_message_fit_passes_when_within_ceiling(monkeypatch):
         lambda *, text_files, image_files, model_name: len(text_files) * 40,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[])
+    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
     # ceiling = 90; one uploaded text file = 40 <= 90 -> ok
     await _service()._assert_message_attachments_fit(
         assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]
@@ -433,7 +433,7 @@ async def test_message_fit_includes_persistent_baseline(monkeypatch):
         lambda *, text_files, image_files, model_name: len(text_files) * 50,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[_text_attachment()])
+    assistant = SimpleNamespace(attachments=[_text_attachment()], inline_file_text=True)
     # message alone = 50 <= 90; persistent 50 + message 50 = 100 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service()._assert_message_attachments_fit(
@@ -455,7 +455,7 @@ async def test_message_fit_skips_when_no_uploads(monkeypatch):
     )
     file_service = AsyncMock()
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=True)
-    assistant = SimpleNamespace(attachments=[_text_attachment()])
+    assistant = SimpleNamespace(attachments=[_text_attachment()], inline_file_text=True)
     # Would raise (and touch derived images) if it ran -> proves the early return.
     await _service(file_service)._assert_message_attachments_fit(
         assistant=assistant, model=model, prompt_text="x", files=[]
@@ -482,7 +482,7 @@ async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=True)
     # No persistent attachments, so the only derived-image lookup is the upload's.
-    assistant = SimpleNamespace(attachments=[])
+    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
     # ceiling = 90; text 10 + derived image 90 = 100 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service(file_service)._assert_message_attachments_fit(
@@ -507,7 +507,7 @@ async def test_message_fit_no_derived_images_without_vision(monkeypatch):
         return_value=[_text_attachment(), _image_attachment()]
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[])
+    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
     # Non-vision: uploaded file used as-is (10 <= 90), no derived-image lookup.
     await _service(file_service)._assert_message_attachments_fit(
         assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]

@@ -1,6 +1,7 @@
 import hashlib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -43,17 +44,23 @@ class FileService:
             yield
 
     async def save_file(self, upload_file: UploadFile):
-        # Only when external storage is configured: read the raw bytes up front
-        # (the protocol consumes the upload destructively during extraction) and
-        # rewind so to_domain_with_derivatives() still sees a fresh upload.
-        # Skipped entirely when storage is off, so the upload stream is untouched.
+        # Only when external storage is configured: capture the original bytes
+        # from the protocol's validated temp file. The hook runs after the size
+        # guard, so an oversized upload is rejected before the full allocation,
+        # and the temp file is the only readable copy once the protocol has
+        # consumed the upload stream.
         raw_bytes: bytes | None = None
+        on_disk_hook: Callable[[Path], None] | None = None
         if self.object_storage is not None and self.object_storage.is_configured():
-            raw_bytes = await upload_file.read()
-            await upload_file.seek(0)
+
+            def _capture_original(filepath: Path) -> None:
+                nonlocal raw_bytes
+                raw_bytes = filepath.read_bytes()
+
+            on_disk_hook = _capture_original
 
         file, derived_images = await self.protocol.to_domain_with_derivatives(
-            upload_file
+            upload_file, on_disk_hook=on_disk_hook
         )
         if raw_bytes is not None:
             file.storage_key = await self._store_original_bytes(
