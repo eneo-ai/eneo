@@ -148,6 +148,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
+        on_disk_hook: Callable[[Path], None] | None = None,
     ):
         if max_size is None:
             max_size = get_settings().upload_image_to_session_max_size
@@ -160,6 +161,7 @@ class FileProtocol:
             max_size=max_size,
             extractor=self.image_extractor.extract,
             limit_setting_name=limit_setting_name,
+            on_disk_hook=on_disk_hook,
         )
 
         # Vision images are base64-encoded into every model request (and
@@ -178,6 +180,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
+        on_disk_hook: Callable[[Path], None] | None = None,
     ) -> tuple[FileBaseWithContent, list[FileBaseWithContent]]:
         """Like to_domain, but document uploads (PDF/DOCX/PPTX) also yield
         their visual content as derived image files.
@@ -219,14 +222,18 @@ class FileProtocol:
                     upload_file,
                     max_size=max_size,
                     limit_setting_name=limit_setting_name,
+                    on_disk_hook=on_disk_hook,
                 ),
                 [],
             )
 
         extracted: list[ProcessedImage] = []
         extract = extractor
+        caller_hook = on_disk_hook
 
         def collect_images(filepath: Path) -> None:
+            if caller_hook is not None:
+                caller_hook(filepath)
             extracted.extend(extract(filepath))
 
         file = await self.text_to_domain(
@@ -260,6 +267,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
+        on_disk_hook: Callable[[Path], None] | None = None,
     ):
         if max_size is None:
             max_size = get_settings().transcription_max_file_size
@@ -272,6 +280,7 @@ class FileProtocol:
             max_size=max_size,
             extractor=bytes_extractor,
             limit_setting_name=limit_setting_name,
+            on_disk_hook=on_disk_hook,
         )
 
     async def to_domain(
@@ -279,6 +288,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
+        on_disk_hook: Callable[[Path], None] | None = None,
     ):
         content_type = upload_file.content_type or ""
         if ImageMimeTypes.has_value(content_type):
@@ -286,16 +296,19 @@ class FileProtocol:
                 upload_file,
                 max_size=max_size,
                 limit_setting_name=limit_setting_name,
+                on_disk_hook=on_disk_hook,
             )
         elif AudioMimeTypes.has_value(content_type):
             return await self.audio_to_domain(
                 upload_file,
                 max_size=max_size,
                 limit_setting_name=limit_setting_name,
+                on_disk_hook=on_disk_hook,
             )
 
         return await self.text_to_domain(
             upload_file,
             max_size=max_size,
             limit_setting_name=limit_setting_name,
+            on_disk_hook=on_disk_hook,
         )

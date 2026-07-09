@@ -183,10 +183,14 @@ async def generate_signed_url(
     signed_url_req: SignedURLRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    # Verify the file exists and the user has access to it
+    # Verify the file exists and the user has access to it. Metadata-only
+    # lookup: minting and the audit trail need id/name, not text/blob columns.
     service = container.file_service()
     current_user = container.user()
-    file = await service.get_file_by_id(file_id=id)
+    files = await service.get_file_infos(file_ids=[id])
+    if not files:
+        raise NotFoundException()
+    file = files[0]
 
     # Calculate expiration time
     expires_at = int(time.time()) + signed_url_req.expires_in
