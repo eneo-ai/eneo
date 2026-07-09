@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
@@ -54,6 +55,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.flows.flow_variable_definitions import can_expose_form_field_bare_alias
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,7 @@ class CreateCompileContext:
     runtime_metadata_state: RuntimeMetadataState | None = None
     runtime_metadata_disables_declared_input_fields: bool = False
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
+    template_placeholder_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
@@ -300,8 +303,15 @@ def create_compile_context_from_planning_state(
         runtime_metadata_state=runtime_metadata_state,
         runtime_input_hint_text=runtime_input_hint_text,
     )
+    template_placeholder_field_hints = (
+        _template_placeholder_field_hints_from_planning_state(planning_state)
+    )
     if planning_state is None:
-        if ui_language is None and not runtime_input_field_hints:
+        if (
+            ui_language is None
+            and not runtime_input_field_hints
+            and not template_placeholder_field_hints
+        ):
             return None
         return CreateCompileContext(
             ui_language=ui_language,
@@ -310,6 +320,7 @@ def create_compile_context_from_planning_state(
                 metadata_disables_declared_input_fields
             ),
             runtime_input_field_hints=runtime_input_field_hints,
+            template_placeholder_field_hints=template_placeholder_field_hints,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
     runtime_input_type = _runtime_input_type_from_architecture(
@@ -330,6 +341,7 @@ def create_compile_context_from_planning_state(
             metadata_disables_declared_input_fields
         ),
         runtime_input_field_hints=runtime_input_field_hints,
+        template_placeholder_field_hints=template_placeholder_field_hints,
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
             architecture,
@@ -512,6 +524,62 @@ def _runtime_input_field_hints_from_source(
     return extract_runtime_input_field_hints(source_text)
 
 
+def _template_placeholder_field_hints_from_planning_state(
+    planning_state: PlanningState | None,
+) -> tuple[RuntimeInputFieldHint, ...]:
+    if planning_state is None:
+        return ()
+    evidence = planning_state.output_schema_evidence
+    if evidence is None or evidence.source != "template_placeholders":
+        return ()
+    raw_properties = evidence.json_schema.get("properties")
+    if not isinstance(raw_properties, Mapping):
+        return ()
+
+    raw_required = evidence.json_schema.get("required")
+    required_names = (
+        {item for item in raw_required if isinstance(item, str)}
+        if isinstance(raw_required, list)
+        else set()
+    )
+    hints: list[RuntimeInputFieldHint] = []
+    seen: set[str] = set()
+    for raw_placeholder in raw_properties:
+        if not isinstance(raw_placeholder, str):
+            continue
+        field_name = _template_placeholder_form_field_name(raw_placeholder)
+        if field_name is None or field_name in seen:
+            continue
+        hints.append(
+            RuntimeInputFieldHint(
+                variable_name=field_name,
+                label=field_name,
+                required=(
+                    raw_placeholder in required_names or field_name in required_names
+                ),
+            )
+        )
+        seen.add(field_name)
+    return tuple(hints)
+
+
+def _template_placeholder_form_field_name(placeholder: str) -> str | None:
+    candidate = " ".join(placeholder.strip().split())
+    if not candidate:
+        return None
+
+    candidate_casefold = candidate.casefold()
+    for prefix in ("flow_input.", "flow.input."):
+        if not candidate_casefold.startswith(prefix):
+            continue
+        candidate = candidate[len(prefix) :].strip()
+        break
+
+    if not can_expose_form_field_bare_alias(candidate):
+        return None
+    return candidate
+
+
 def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType | None:
     slot = state.resolved_slots.get("primary_runtime_input")
     if slot is None:
@@ -677,11 +745,16 @@ def _compile_form_fields(
     runtime_input_field_hints = (
         context.runtime_input_field_hints if context is not None else ()
     )
+    template_placeholder_field_hints = (
+        context.template_placeholder_field_hints if context is not None else ()
+    )
     metadata_disables_declared_input_fields = (
         context.runtime_metadata_disables_declared_input_fields
         if context is not None
         else False
     )
+    active_intent_fields = intent_fields
+    dropped_form_field_ref_names: set[str] = set()
     if runtime_metadata_state is not None and not runtime_metadata_allows_input_fields(
         runtime_metadata_state
     ):
@@ -702,14 +775,21 @@ def _compile_form_fields(
         }
         runtime_input_field_hints = ()
         if metadata_disables_declared_input_fields:
-            return [], [], dropped_ref_names
+            active_intent_fields = []
+            dropped_form_field_ref_names.update(dropped_ref_names)
 
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
-    dropped_form_field_ref_names: set[str] = set()
-    runtime_hint_names = {hint.variable_name for hint in runtime_input_field_hints}
-    for field in intent_fields:
-        if runtime_hint_names and field.variable_name not in runtime_hint_names:
+    metadata_hint_names = {hint.variable_name for hint in runtime_input_field_hints}
+    template_hint_names = {
+        hint.variable_name for hint in template_placeholder_field_hints
+    }
+    for field in active_intent_fields:
+        if (
+            metadata_hint_names
+            and field.variable_name not in metadata_hint_names
+            and field.variable_name not in template_hint_names
+        ):
             dropped_form_field_ref_names.add(field.variable_name)
             continue
         if is_primary_runtime_input_shadow_field(
@@ -723,7 +803,7 @@ def _compile_form_fields(
         fields.append(_compile_input_field(field))
 
     seen = {field.name for field in fields}
-    for hint in runtime_input_field_hints:
+    for hint in (*runtime_input_field_hints, *template_placeholder_field_hints):
         if is_primary_runtime_input_shadow_field(
             variable_name=hint.variable_name,
             field_type=hint.field_type,
@@ -756,7 +836,10 @@ def _server_owned_runtime_field_names(
         return set()
     return {
         hint.variable_name
-        for hint in context.runtime_input_field_hints
+        for hint in (
+            *context.runtime_input_field_hints,
+            *context.template_placeholder_field_hints,
+        )
         if hint.variable_name in known_field_names
     }
 

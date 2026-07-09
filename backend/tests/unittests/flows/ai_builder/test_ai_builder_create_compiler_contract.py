@@ -95,6 +95,9 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     assert context is not None
     assert context.final_output_type == OutputType.DOCX
     assert context.terminal_output_schema is None
+    assert [hint.variable_name for hint in context.template_placeholder_field_hints] == [
+        "kundnamn"
+    ]
 
 
 def test_compile_context_requires_only_summary_source_reader_obligation() -> None:
@@ -1426,6 +1429,81 @@ def test_compiler_uses_assembly_path_for_docx_template_fill() -> None:
     assert template_step.output_type == OutputType.DOCX
     assert template_step.output_mode == OutputMode.TEMPLATE_FILL
     assert template_step.input_bindings is None
+    assert validate_spec(compiled).valid
+
+
+def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {
+                "kundnamn": {"type": "string"},
+                "flow_input.case_id": {"type": "string"},
+                "datum": {"type": "string"},
+                "step_a.output.summary": {"type": "string"},
+                "text": {"type": "string"},
+            },
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=[
+            "file:file_id:content:template_placeholder:kundnamn",
+            "file:file_id:content:template_placeholder:flow_input.case_id",
+            "file:file_id:content:template_placeholder:datum",
+            "file:file_id:content:template_placeholder:step_a.output.summary",
+            "file:file_id:content:template_placeholder:text",
+        ],
+    )
+    derived_context = create_compile_context_from_planning_state(state)
+    assert derived_context is not None
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Template report",
+            "flow_description": "Fill a DOCX template from source documents.",
+            "plan_rationale": "Prepare content and fill the template.",
+            "steps": [
+                {
+                    "name": "Prepare template content",
+                    "instructions": "Prepare the content for the DOCX template.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.TEMPLATE_FILL,
+            pattern_ids=("document_to_docx_template",),
+            pattern_chain_steps=(
+                FLOW_INPUT_DOCUMENT_UPLOAD,
+                EXTRACT_TEMPLATE_VARIABLES_STEP,
+                TEMPLATE_FILL_DOCX_STEP,
+            ),
+            template_placeholder_field_hints=(
+                derived_context.template_placeholder_field_hints
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["kundnamn", "case_id"]
+    content_step = compiled.steps[1]
+    question = _question(content_step.input_bindings)
+    assert "kundnamn: {{ flow_input.kundnamn }}" in question
+    assert "case_id: {{ flow_input.case_id }}" in question
+    assert "datum:" not in question
+    assert "step_a.output.summary" not in question
+    assert "text:" not in question
     assert validate_spec(compiled).valid
 
 
