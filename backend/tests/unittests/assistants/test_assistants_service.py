@@ -47,7 +47,6 @@ def setup_fixture():
     mock_db_result.fetchall.return_value = []
     repo.session.execute = AsyncMock(return_value=mock_db_result)
     user = TEST_USER
-    auth_service = MagicMock()
     assistant = AssistantCreatePublic(
         name="test_name",
         prompt=PromptCreate(text="test_prompt"),
@@ -80,7 +79,6 @@ def setup_fixture():
         repo=repo,
         space_repo=space_repo,
         user=user,
-        auth_service=auth_service,
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
@@ -115,7 +113,6 @@ async def assistant_service():
     return AssistantService(
         repo=AsyncMock(),
         user=MagicMock(id=uuid4()),
-        auth_service=MagicMock(),
         service_repo=AsyncMock(),
         step_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
