@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from eneo.allowed_origins.get_origin_callback import get_origin
-from eneo.knowledge_mcp import knowledge_mcp_app
+from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.main.observability import init_observability, instrument_fastapi
@@ -250,9 +250,11 @@ def get_application():
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
     app.mount("/scim/v2", scim_app)
-    # Loopback knowledge-MCP for tool-mode knowledge search (its session
-    # manager is driven by the parent lifespan in dependencies/lifespan.py).
-    app.mount("/internal-mcp/knowledge", knowledge_mcp_app)
+    # Loopback internal-MCP servers (knowledge search, attachment reading;
+    # their session managers are driven by the parent lifespan in
+    # dependencies/lifespan.py).
+    for mount_path, internal_mcp_app in internal_mcp_mounts():
+        app.mount(mount_path, internal_mcp_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)

@@ -12,11 +12,11 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.auth_service import AuthService
-from eneo.knowledge_mcp.server import (
+from eneo.internal_mcp.foundation import assistant_id_from_token
+from eneo.internal_mcp.knowledge import (
     DESCRIPTION_SOURCES_CAP,
     KNOWLEDGE_SERVER_NAME,
     MAX_RESULTS_CEILING,
-    _assistant_id_from_token,
     _blob_in_scope,
     _clamp_max_results,
     _diversify,
@@ -126,7 +126,7 @@ class TestTokenScoping:
             self._user(), assistant_id=assistant_id
         )
 
-        assert _assistant_id_from_token(token) == assistant_id
+        assert assistant_id_from_token(token) == assistant_id
 
     def test_unscoped_access_token_is_rejected(self):
         token = AuthService(api_key_repo=MagicMock()).create_access_token_for_user(
@@ -134,7 +134,7 @@ class TestTokenScoping:
         )
 
         with pytest.raises(ValueError):
-            _assistant_id_from_token(token)
+            assistant_id_from_token(token)
 
 
 class TestSearchResultContent:

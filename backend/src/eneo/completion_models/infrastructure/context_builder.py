@@ -176,7 +176,10 @@ def build_file_references_string(
     return (
         "Each attached file below also has a download URL. Pass the URL to a "
         "tool that accepts a URL input when the tool needs the original file; "
-        "the file's raw bytes are NOT in this prompt.\n\n"
+        "the file's raw bytes are NOT in this prompt. Prefer a tool suited to "
+        "the file and the task; when no more specific tool fits and a "
+        "read_file tool is available, use it to read the file's text "
+        "content.\n\n"
         f"{references}"
     )
 

@@ -178,7 +178,7 @@ class TestKnowledgeCatalog:
     def test_catalog_tool_names_match_proxy_prefixing(self):
         # The catalog hardcodes the prefixed tool names; they must match what
         # the proxy actually derives from the knowledge server's name.
-        from eneo.knowledge_mcp.server import KNOWLEDGE_SERVER_NAME
+        from eneo.internal_mcp.knowledge import KNOWLEDGE_SERVER_NAME
         from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
             MCPProxySession,
         )

@@ -425,6 +425,7 @@ class Assistant(Entity):
         prompt_override: str | None = None,
         completion_prompt_files: list["File"] | None = None,
         knowledge_mcp_server: Optional["MCPServer"] = None,
+        internal_mcp_servers: Sequence["MCPServer"] = (),
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -485,11 +486,16 @@ class Assistant(Entity):
             if mcp_servers_override is not None
             else self.mcp_servers
         )
+        # Internal (loopback) servers go first among the MCP servers: their
+        # tools lead the tool array and, with the proxy's first-registered-wins
+        # collision rule, survive a prefixed-name collision with an external
+        # server. Knowledge leads because it also steers the knowledge catalog.
+        prepended_servers: list["MCPServer"] = []
         if knowledge_mcp_server is not None:
-            # First among the MCP servers: its tools lead the tool array and,
-            # with the proxy's first-registered-wins collision rule, survive a
-            # prefixed-name collision with an external server.
-            effective_mcp_servers = [knowledge_mcp_server] + list(effective_mcp_servers)
+            prepended_servers.append(knowledge_mcp_server)
+        prepended_servers.extend(internal_mcp_servers)
+        if prepended_servers:
+            effective_mcp_servers = prepended_servers + list(effective_mcp_servers)
         knowledge_catalog = self.build_knowledge_catalog() if use_knowledge_tool else ""
 
         response = await completion_service.get_response(

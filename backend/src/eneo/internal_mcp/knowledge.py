@@ -1,43 +1,30 @@
 # pyright: basic
 # FastMCP's Context surface is largely untyped; this module is a thin adapter
 # over it, so strict unknown-type checking adds noise without safety here.
-"""FastMCP loopback server + ephemeral-server builder for knowledge search.
+"""Internal MCP server exposing knowledge search as on-demand tools.
 
-The same process both *hosts* this MCP server (mounted at
-``/internal-mcp/knowledge``) and *connects* to it as an MCP client during a
-completion, so built-in knowledge search rides the exact same proxy plumbing as
-any external MCP server. Authentication rides in the bearer token: a
-short-lived access token that authenticates the user and carries an
-``assistant_id`` claim identifying whose knowledge may be searched. Tools
-therefore take no scope argument and cannot be pointed at another assistant.
-
-The server is stateless (``stateless_http=True``): no MCP protocol session id
-is ever assigned, so the proxy's per-chat-session resume bookkeeping naturally
-skips it, and any backend worker can serve a loopback call regardless of which
-worker initiated it.
-
-The ephemeral :class:`MCPServer` entity built per completion is never
-persisted; failures are local to the request, so circuit-breaker state keyed on
-its throwaway id never accumulates (by design).
+The bearer token's ``assistant_id`` claim fixes whose knowledge may be
+searched; see :mod:`eneo.internal_mcp.foundation` for the hosting and
+authentication model shared by all internal servers.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from contextlib import asynccontextmanager
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import jwt
-from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import EmbeddedResource, TextContent, TextResourceContents
 from pydantic import AnyUrl
 
-from eneo.database.database import sessionmanager
-from eneo.main.config import get_settings
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.internal_mcp.foundation import (
+    build_ephemeral_server,
+    default_page_cap,
+    internal_tool_context,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
 logger = logging.getLogger(__name__)
 
@@ -76,55 +63,6 @@ mcp = FastMCP(
         "the sources do not contain the answer."
     ),
 )
-
-
-# --------------------------------------------------------------------------- #
-# Request context helpers
-# --------------------------------------------------------------------------- #
-def _bearer_from_ctx(ctx: Context) -> str:
-    request = ctx.request_context.request
-    header = request.headers.get("authorization") if request is not None else None
-    if not header or not header.lower().startswith("bearer "):
-        raise ValueError("Missing or malformed Authorization header.")
-    return header.split(" ", 1)[1].strip()
-
-
-def _assistant_id_from_token(token: str) -> UUID:
-    settings = get_settings()
-    claims = jwt.decode(
-        token,
-        key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
-    )
-    raw = claims.get("assistant_id")
-    if not raw:
-        raise ValueError("Access token is not scoped to an assistant.")
-    return UUID(str(raw))
-
-
-@asynccontextmanager
-async def _knowledge_context(ctx: Context):
-    """Bootstrap a user-bound container for the token's user + assistant.
-
-    Yields ``(container, assistant_id)``. The container is bound to the
-    authenticated user, so loading the assistant runs the normal ``SpaceActor``
-    permission checks. Search is read-only; the transaction simply closes on
-    exit.
-    """
-    # Imported lazily: the Container pulls in the whole service graph, so a
-    # top-level import would create a cycle.
-    from eneo.main.container.container import Container
-    from eneo.main.container.container_overrides import override_user
-
-    token = _bearer_from_ctx(ctx)
-    assistant_id = _assistant_id_from_token(token)
-    async with sessionmanager.session() as session:
-        async with session.begin():
-            container = Container(session=providers.Object(session))
-            user = await container.user_service().authenticate(token=token)
-            override_user(container=container, user=user)
-            yield container, assistant_id
 
 
 def _pick_embedding_model(assistant):
@@ -328,7 +266,7 @@ async def search_knowledge(
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r", query[:120])
-    async with _knowledge_context(ctx) as (container, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         embedding_model = _pick_embedding_model(assistant)
         if embedding_model is None:
@@ -396,7 +334,7 @@ async def read_source(
         return [TextContent(type="text", text="Invalid document_id.")]
     offset = max(0, offset)
 
-    async with _knowledge_context(ctx) as (container, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         try:
             blob = await container.info_blob_repo().get(blob_id)
@@ -417,7 +355,6 @@ async def read_source(
             )
             return [not_found]
 
-    page_cap = min(20_000, get_settings().mcp_tool_output_max_chars // 2)
     logger.info(
         "[RAG] read_source assistant=%s document=%s offset=%d size=%d",
         assistant_id,
@@ -425,13 +362,13 @@ async def read_source(
         offset,
         len(blob.text),
     )
-    return _document_page_content(blob, offset=offset, page_cap=page_cap)
+    return _document_page_content(blob, offset=offset, page_cap=default_page_cap())
 
 
 @mcp.tool(title="List knowledge sources")
 async def list_knowledge_sources(ctx: Context) -> str:
     """List the knowledge sources attached to this assistant."""
-    async with _knowledge_context(ctx) as (container, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
 
         lines: list[str] = []
@@ -452,25 +389,8 @@ async def list_knowledge_sources(ctx: Context) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# ASGI app + lifespan + ephemeral-server builder
+# Ephemeral-server builder
 # --------------------------------------------------------------------------- #
-# Build the Streamable-HTTP ASGI app eagerly so ``mcp.session_manager`` exists
-# for the lifespan below. Mounted at "/internal-mcp/knowledge"; its own route
-# is "/mcp", so the full loopback URL is "<base>/internal-mcp/knowledge/mcp".
-knowledge_mcp_app = mcp.streamable_http_app()
-
-
-@asynccontextmanager
-async def knowledge_mcp_lifespan():
-    """Run the Streamable-HTTP session manager for the lifetime of the app.
-
-    Mounted sub-apps do not get their lifespan invoked by Starlette, so the
-    parent app's lifespan must drive the session manager's task group.
-    """
-    async with mcp.session_manager.run():
-        yield
-
-
 def _sources_suffix(source_labels: Sequence[str]) -> str:
     """Per-assistant coverage note appended to the search tool description.
 
@@ -491,52 +411,17 @@ def _sources_suffix(source_labels: Sequence[str]) -> str:
     )
 
 
-async def _knowledge_tool_entities(
-    server_id: UUID, source_labels: Sequence[str] = ()
-) -> list[MCPServerTool]:
-    """Derive entity-side tool definitions from the live FastMCP tool list.
-
-    The MCP proxy builds its registry from ``server.tools`` (not a live
-    discovery), so these must mirror what the endpoint actually exposes.
-    Deriving them from ``mcp.list_tools()`` keeps the two in sync automatically.
-    The search tool's description additionally names the assistant's sources
-    (enrichment only appends; the shared docstring always leads).
-    """
-    tools = await mcp.list_tools()
-    return [
-        MCPServerTool(
-            mcp_server_id=server_id,
-            name=tool.name,
-            title=getattr(tool, "title", None),
-            description=(
-                (tool.description or "") + _sources_suffix(source_labels)
-                if tool.name == "search_knowledge"
-                else tool.description
-            ),
-            input_schema=tool.inputSchema,
-            is_enabled_by_default=True,
-        )
-        for tool in tools
-    ]
-
-
 async def build_knowledge_mcp_server(
     *, token: str, tenant_id: UUID, source_labels: Sequence[str] = ()
 ) -> MCPServer:
     """Build the ephemeral MCP server eneo attaches to a completion in tool mode."""
-    settings = get_settings()
-    server_id = uuid4()
-    tools = await _knowledge_tool_entities(server_id, source_labels)
-    return MCPServer(
-        id=server_id,
-        tenant_id=tenant_id,
+    return await build_ephemeral_server(
+        mcp,
         name=KNOWLEDGE_SERVER_NAME,
         description="Loopback server for searching this assistant's knowledge.",
-        http_url=(
-            f"{settings.internal_mcp_base_url.rstrip('/')}/internal-mcp/knowledge/mcp"
-        ),
-        http_auth_type="bearer",
-        http_auth_config_schema={"token": token},
-        is_enabled=True,
-        tools=tools,
+        token=token,
+        tenant_id=tenant_id,
+        tool_description_suffixes={"search_knowledge": _sources_suffix(source_labels)}
+        if source_labels
+        else None,
     )
