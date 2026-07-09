@@ -14,7 +14,7 @@
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
-  import { dedupeByDocument } from "../../mcpReferenceDocs";
+  import { dedupeByDocument, textDocumentReferences } from "../../mcpReferenceDocs";
   import type { InfoBlob } from "@eneo/eneo-js";
 
   const { settings } = getAppContext();
@@ -30,9 +30,7 @@
   // Image references (resource_link blocks with an image mimeType) render as a
   // thumbnail strip in MessageAnswer, not as text-snippet chips here. Exclude
   // them so they neither show as "unknown source" rows nor inflate the count.
-  const mcpRefs = $derived(
-    (message.mcp_tool_references ?? []).filter((ref) => !(ref.mime_type ?? "").startsWith("image/"))
-  );
+  const mcpRefs = $derived(textDocumentReferences(message.mcp_tool_references ?? []));
   // One chip per document: several passages from the same document (chunk
   // fragments of one uri) collapse to a single reference entry.
   const mcpRefDocs = $derived(dedupeByDocument(mcpRefs));

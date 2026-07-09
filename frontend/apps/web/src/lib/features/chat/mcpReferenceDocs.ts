@@ -19,8 +19,19 @@ type McpRefLike = {
   id: string;
   uri: string;
   content?: string | null;
+  mime_type?: string | null;
   meta?: Record<string, unknown> | null;
 };
+
+/**
+ * References that render as text-snippet chips. Image references render as a
+ * thumbnail strip instead, so they must not consume citation numbers; every
+ * place that numbers references (chip list, inline pills) must count over
+ * this same filtered list.
+ */
+export function textDocumentReferences<T extends McpRefLike>(refs: T[]): T[] {
+  return refs.filter((ref) => !(ref.mime_type ?? "").startsWith("image/"));
+}
 
 export function canonicalDocKey(ref: McpRefLike): string {
   const uri = ref.uri ?? "";
