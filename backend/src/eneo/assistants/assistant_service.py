@@ -1873,7 +1873,9 @@ class AssistantService:
                 self.user, assistant_id=assistant_to_ask.id
             )
             knowledge_mcp_server = await build_knowledge_mcp_server(
-                token=scoped_token, tenant_id=self.user.tenant_id
+                token=scoped_token,
+                tenant_id=self.user.tenant_id,
+                source_labels=assistant_to_ask.knowledge_source_labels(),
             )
         logger.info(
             "[RAG] assistant=%s knowledge_mode=%s "

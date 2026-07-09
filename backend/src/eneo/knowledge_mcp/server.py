@@ -24,6 +24,7 @@ its throwaway id never accumulates (by design).
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import Literal
 from uuid import UUID, uuid4
@@ -59,6 +60,11 @@ SPECIFIC_CAP = 6
 OVERVIEW_FETCH = 60
 OVERVIEW_CAP = 15
 OVERVIEW_CHUNKS_PER_DOC = 2
+
+# Most source labels named in the search tool's description; the rest collapse
+# to "and N more" so source-heavy assistants do not bloat every completion's
+# tool schema.
+DESCRIPTION_SOURCES_CAP = 10
 
 mcp = FastMCP(
     name="Eneo Knowledge",
@@ -460,12 +466,36 @@ async def knowledge_mcp_lifespan():
         yield
 
 
-async def _knowledge_tool_entities(server_id: UUID) -> list[MCPServerTool]:
+def _sources_suffix(source_labels: Sequence[str]) -> str:
+    """Per-assistant coverage note appended to the search tool description.
+
+    Naming the sources inside the description is what lets the model pick this
+    tool over similarly named tools from other MCP servers.
+    """
+    if not source_labels:
+        return ""
+    shown = list(source_labels[:DESCRIPTION_SOURCES_CAP])
+    listing = "; ".join(shown)
+    remaining = len(source_labels) - len(shown)
+    if remaining > 0:
+        listing += f"; and {remaining} more"
+    return (
+        f"\n\nCovers these knowledge sources: {listing}. Questions about any "
+        "of these MUST be answered with this tool, not with similarly named "
+        "tools from other servers."
+    )
+
+
+async def _knowledge_tool_entities(
+    server_id: UUID, source_labels: Sequence[str] = ()
+) -> list[MCPServerTool]:
     """Derive entity-side tool definitions from the live FastMCP tool list.
 
     The MCP proxy builds its registry from ``server.tools`` (not a live
     discovery), so these must mirror what the endpoint actually exposes.
     Deriving them from ``mcp.list_tools()`` keeps the two in sync automatically.
+    The search tool's description additionally names the assistant's sources
+    (enrichment only appends; the shared docstring always leads).
     """
     tools = await mcp.list_tools()
     return [
@@ -473,7 +503,11 @@ async def _knowledge_tool_entities(server_id: UUID) -> list[MCPServerTool]:
             mcp_server_id=server_id,
             name=tool.name,
             title=getattr(tool, "title", None),
-            description=tool.description,
+            description=(
+                (tool.description or "") + _sources_suffix(source_labels)
+                if tool.name == "search_knowledge"
+                else tool.description
+            ),
             input_schema=tool.inputSchema,
             is_enabled_by_default=True,
         )
@@ -481,11 +515,13 @@ async def _knowledge_tool_entities(server_id: UUID) -> list[MCPServerTool]:
     ]
 
 
-async def build_knowledge_mcp_server(*, token: str, tenant_id: UUID) -> MCPServer:
+async def build_knowledge_mcp_server(
+    *, token: str, tenant_id: UUID, source_labels: Sequence[str] = ()
+) -> MCPServer:
     """Build the ephemeral MCP server eneo attaches to a completion in tool mode."""
     settings = get_settings()
     server_id = uuid4()
-    tools = await _knowledge_tool_entities(server_id)
+    tools = await _knowledge_tool_entities(server_id, source_labels)
     return MCPServer(
         id=server_id,
         tenant_id=tenant_id,

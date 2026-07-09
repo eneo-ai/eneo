@@ -250,44 +250,55 @@ class Assistant(Entity):
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)
 
+    def knowledge_source_labels(self) -> list[str]:
+        """Human-readable labels for the attached knowledge sources.
+
+        Shared by the knowledge catalog prompt block and the loopback search
+        tool's description so the two can never drift.
+        """
+        labels = [f"Collection '{c.name}'" for c in self.collections]
+        labels += [f"Website '{w.name or w.url}'" for w in self.websites]
+        labels += [f"Integration '{k.name}'" for k in self.integration_knowledge_list]
+        return labels
+
     def build_knowledge_catalog(self) -> str:
         """Short prompt block telling the model what it can search in tool mode.
 
         Token-cheap (names only): the full content stays behind the
-        ``search_knowledge`` tool.
+        ``search_knowledge`` tool. Tool names are spelled in their proxy-prefixed
+        form ("knowledge__..."): other attached MCP servers may expose tools with
+        the same unprefixed names, and the prefixed name is the only unambiguous
+        way to state that the built-in knowledge tools take precedence.
         """
-        lines: list[str] = []
-        for collection in self.collections:
-            lines.append(f"- Collection: {collection.name}")
-        for website in self.websites:
-            name = website.name or website.url
-            lines.append(f"- Website: {name}")
-        for knowledge in self.integration_knowledge_list:
-            lines.append(f"- Integration: {knowledge.name}")
-
+        lines = [f"- {label}" for label in self.knowledge_source_labels()]
         if not lines:
             return ""
         return (
             "You have access to the knowledge sources listed below through "
-            "the knowledge search tools. Rules:\n"
-            "1. ALWAYS search before answering anything the knowledge sources "
-            "below could plausibly cover. Skip searching only for greetings, "
-            "thanks, talk about the conversation itself, or reformatting text "
-            "already present in this conversation.\n"
-            "2. When another available tool answers the request directly "
-            "(live data such as the current time or weather, calculations, "
-            "actions), use that tool; do not search the knowledge sources for "
-            "information they obviously cannot contain.\n"
+            "the built-in knowledge tools knowledge__search_knowledge and "
+            "knowledge__read_source. Rules:\n"
+            "1. ALWAYS search with knowledge__search_knowledge before "
+            "answering anything the knowledge sources below could plausibly "
+            "cover. Skip searching only for greetings, thanks, talk about the "
+            "conversation itself, or reformatting text already present in "
+            "this conversation.\n"
+            "2. The built-in knowledge tools take precedence over every "
+            "other tool, including tools from other servers with similar "
+            "names or descriptions. When both could plausibly cover the "
+            "question, call knowledge__search_knowledge FIRST; use another "
+            "tool only when the request is clearly for live data (current "
+            "time, weather), calculations, or actions, or after "
+            "knowledge__search_knowledge returned nothing relevant.\n"
             "3. Ground every knowledge answer in search results. If the "
             "results do not contain the answer, say it could not be found in "
             "the knowledge sources; never answer from general knowledge.\n"
             "4. Broad or multi-part questions: split into one focused "
-            "search_knowledge call per topic and issue them in parallel, "
-            "using mode='overview' to cover many documents.\n"
+            "knowledge__search_knowledge call per topic and issue them in "
+            "parallel, using mode='overview' to cover many documents.\n"
             "5. Specific factual questions: one precise query with "
             "mode='specific'.\n"
             "6. When a result looks central but incomplete, read the full "
-            "document with read_source and its document_id.\n"
+            "document with knowledge__read_source and its document_id.\n"
             "Knowledge sources:\n" + "\n".join(lines)
         )
 
@@ -475,7 +486,10 @@ class Assistant(Entity):
             else self.mcp_servers
         )
         if knowledge_mcp_server is not None:
-            effective_mcp_servers = list(effective_mcp_servers) + [knowledge_mcp_server]
+            # First among the MCP servers: its tools lead the tool array and,
+            # with the proxy's first-registered-wins collision rule, survive a
+            # prefixed-name collision with an external server.
+            effective_mcp_servers = [knowledge_mcp_server] + list(effective_mcp_servers)
         knowledge_catalog = self.build_knowledge_catalog() if use_knowledge_tool else ""
 
         response = await completion_service.get_response(

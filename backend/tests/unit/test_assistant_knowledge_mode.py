@@ -86,7 +86,9 @@ class TestKnowledgeModeGating:
 
         references_service.get_references.assert_not_awaited()
         kwargs = completion_service.get_response.await_args.kwargs
-        assert kwargs["mcp_servers"] == [external_server, knowledge_server]
+        # Knowledge server first: its tools lead the tool array and win any
+        # prefixed-name collision (first-registered-wins in the proxy).
+        assert kwargs["mcp_servers"] == [knowledge_server, external_server]
         assert kwargs["info_blob_chunks"] == []
         assert kwargs["knowledge_catalog"] != ""
 
@@ -138,16 +140,16 @@ class TestKnowledgeCatalog:
 
         catalog = assistant.build_knowledge_catalog()
 
-        assert "Collection: Waste FAQ" in catalog
-        assert "Website: Municipal site" in catalog
-        assert "Integration: Sharepoint HR" in catalog
+        assert "Collection 'Waste FAQ'" in catalog
+        assert "Website 'Municipal site'" in catalog
+        assert "Integration 'Sharepoint HR'" in catalog
 
     def test_website_without_name_falls_back_to_url(self):
         website = MagicMock(url="https://kommun.se")
         website.name = None
         assistant = _assistant(collections=[], websites=[website])
 
-        assert "Website: https://kommun.se" in assistant.build_knowledge_catalog()
+        assert "Website 'https://kommun.se'" in assistant.build_knowledge_catalog()
 
     def test_empty_without_knowledge(self):
         assistant = _assistant(collections=[])
@@ -156,12 +158,35 @@ class TestKnowledgeCatalog:
     def test_catalog_enforces_search_first_and_strict_grounding(self):
         catalog = _assistant().build_knowledge_catalog()
 
-        assert "ALWAYS search before answering" in catalog
+        assert "ALWAYS search with knowledge__search_knowledge" in catalog
         assert "could not be found in the knowledge sources" in catalog
         assert "never answer from general knowledge" in catalog
 
-    def test_catalog_defers_to_other_tools_for_non_knowledge_requests(self):
+    def test_catalog_defers_to_other_tools_only_for_live_data_and_actions(self):
         catalog = _assistant().build_knowledge_catalog()
 
-        assert "another available tool answers the request directly" in catalog
-        assert "obviously cannot contain" in catalog
+        assert "take precedence over every other tool" in catalog
+        assert "clearly for live data" in catalog
+
+    def test_catalog_states_knowledge_tools_win_ties(self):
+        # When another server exposes a similarly named search tool, the
+        # catalog must resolve the tie toward the built-in knowledge tools.
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "call knowledge__search_knowledge FIRST" in catalog
+
+    def test_catalog_tool_names_match_proxy_prefixing(self):
+        # The catalog hardcodes the prefixed tool names; they must match what
+        # the proxy actually derives from the knowledge server's name.
+        from eneo.knowledge_mcp.server import KNOWLEDGE_SERVER_NAME
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+            MCPProxySession,
+        )
+
+        prefix = MCPProxySession(mcp_servers=[])._sanitize_name(
+            KNOWLEDGE_SERVER_NAME.lower()
+        )
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert f"{prefix}__search_knowledge" in catalog
+        assert f"{prefix}__read_source" in catalog

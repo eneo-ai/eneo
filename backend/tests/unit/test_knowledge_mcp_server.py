@@ -13,6 +13,7 @@ import pytest
 
 from eneo.authentication.auth_service import AuthService
 from eneo.knowledge_mcp.server import (
+    DESCRIPTION_SOURCES_CAP,
     KNOWLEDGE_SERVER_NAME,
     MAX_RESULTS_CEILING,
     _assistant_id_from_token,
@@ -45,16 +46,61 @@ def _chunk(**overrides):
 class TestBuildKnowledgeMcpServer:
     @pytest.mark.asyncio
     async def test_tool_entities_mirror_live_tool_list(self):
-        server = await build_knowledge_mcp_server(token="tok", tenant_id=uuid4())
+        server = await build_knowledge_mcp_server(
+            token="tok", tenant_id=uuid4(), source_labels=["Collection 'Waste FAQ'"]
+        )
 
         live_tools = await mcp.list_tools()
         assert [t.name for t in server.tools] == [t.name for t in live_tools]
         assert [t.input_schema for t in server.tools] == [
             t.inputSchema for t in live_tools
         ]
+        # Source enrichment may only append: the live docstring always leads.
+        for entity, live in zip(server.tools, live_tools):
+            assert entity.description.startswith(live.description)
         assert {"search_knowledge", "list_knowledge_sources", "read_source"} <= {
             t.name for t in server.tools
         }
+
+    @pytest.mark.asyncio
+    async def test_search_description_names_the_sources(self):
+        server = await build_knowledge_mcp_server(
+            token="tok", tenant_id=uuid4(), source_labels=["Collection 'testsamling'"]
+        )
+
+        by_name = {t.name: t for t in server.tools}
+        live_by_name = {t.name: t for t in await mcp.list_tools()}
+
+        assert "Collection 'testsamling'" in by_name["search_knowledge"].description
+        assert by_name["read_source"].description == (
+            live_by_name["read_source"].description
+        )
+        assert by_name["list_knowledge_sources"].description == (
+            live_by_name["list_knowledge_sources"].description
+        )
+
+    @pytest.mark.asyncio
+    async def test_source_listing_is_capped(self):
+        labels = [f"Collection 'Samling {i}'" for i in range(15)]
+        server = await build_knowledge_mcp_server(
+            token="tok", tenant_id=uuid4(), source_labels=labels
+        )
+
+        description = next(
+            t.description for t in server.tools if t.name == "search_knowledge"
+        )
+        assert all(label in description for label in labels[:DESCRIPTION_SOURCES_CAP])
+        assert labels[DESCRIPTION_SOURCES_CAP] not in description
+        assert "and 5 more" in description
+
+    @pytest.mark.asyncio
+    async def test_no_labels_leaves_descriptions_untouched(self):
+        server = await build_knowledge_mcp_server(token="tok", tenant_id=uuid4())
+
+        live_tools = await mcp.list_tools()
+        assert [t.description for t in server.tools] == [
+            t.description for t in live_tools
+        ]
 
     @pytest.mark.asyncio
     async def test_server_is_bearer_authenticated_loopback(self):
