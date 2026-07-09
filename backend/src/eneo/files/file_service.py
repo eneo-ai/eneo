@@ -67,23 +67,31 @@ class FileService:
                 raw_bytes=raw_bytes, filename=file.name, mimetype=file.mimetype
             )
 
-        async with self._write_transaction():
-            saved_file = await self.repo.add(
-                FileCreate(
-                    **file.model_dump(),
-                    user_id=self.user.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            for derived in derived_images:
-                await self.repo.add(
+        try:
+            async with self._write_transaction():
+                saved_file = await self.repo.add(
                     FileCreate(
-                        **derived.model_dump(),
+                        **file.model_dump(),
                         user_id=self.user.id,
                         tenant_id=self.user.tenant_id,
-                        parent_file_id=saved_file.id,
                     )
                 )
+                for derived in derived_images:
+                    await self.repo.add(
+                        FileCreate(
+                            **derived.model_dump(),
+                            user_id=self.user.id,
+                            tenant_id=self.user.tenant_id,
+                            parent_file_id=saved_file.id,
+                        )
+                    )
+        except Exception:
+            # The files row is the only pointer to the stored object; without
+            # it the object sits outside every delete/retention path, so
+            # discard it before propagating the failure.
+            if file.storage_key is not None:
+                await self._discard_stored_original(file.storage_key)
+            raise
 
         # Don't calculate token count here - we don't know which model will be used
         # Token counting will happen when the file is used in an assistant context
@@ -112,6 +120,19 @@ class FileService:
                 exc,
             )
             return None
+
+    async def _discard_stored_original(self, key: str) -> None:
+        """Best-effort delete of a stored original whose DB row never landed."""
+        if self.object_storage is None:
+            return
+        try:
+            await self.object_storage.delete(key)
+        except ObjectStorageError as exc:
+            logger.warning(
+                "[file-storage] could not discard orphaned object '%s': %s",
+                key,
+                exc,
+            )
 
     async def save_image_from_bytes(
         self,
