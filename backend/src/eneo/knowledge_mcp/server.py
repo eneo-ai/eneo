@@ -309,7 +309,10 @@ async def search_knowledge(
 ) -> list[TextContent | EmbeddedResource]:
     """Search this assistant's knowledge sources for relevant passages.
 
-    Write a focused, self-contained query in the language of the sources.
+    Write the query as a focused, self-contained natural-language phrase in
+    the language of the sources (e.g. "opening hours recycling center", not
+    "opening_hours_recycling_center" or a bag of keywords). Semantic search
+    matches meaning, so phrase it the way the sources would.
     Modes:
     - "specific" (default): small, high-precision result set for factual
       questions ("when does department X open today?").
@@ -319,7 +322,9 @@ async def search_knowledge(
 
     If nothing relevant returns, retry once with different wording before
     concluding the sources do not cover it. Each result includes a
-    document_id; pass it to read_source to read that full document.
+    document_id; pass it to read_source to read that full document. For
+    meta-questions about what knowledge is available, use
+    list_knowledge_sources instead of searching.
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r", query[:120])
@@ -480,9 +485,9 @@ def _sources_suffix(source_labels: Sequence[str]) -> str:
     if remaining > 0:
         listing += f"; and {remaining} more"
     return (
-        f"\n\nCovers these knowledge sources: {listing}. Questions about any "
-        "of these MUST be answered with this tool, not with similarly named "
-        "tools from other servers."
+        f"\n\nCovers these knowledge sources: {listing}. Content questions "
+        "about any of these MUST be answered with this tool, not with "
+        "similarly named tools from other servers."
     )
 
 
