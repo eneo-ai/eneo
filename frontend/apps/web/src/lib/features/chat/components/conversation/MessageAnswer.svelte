@@ -7,13 +7,13 @@
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
-  import { serverDisplayName, toolDisplayName } from "../../internalToolLabels";
+  import { internalReadFileId, serverDisplayName, toolDisplayName } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight, Check, X, Wrench } from "lucide-svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
@@ -74,6 +74,25 @@
     !!tc.tool_call_id && pendingToolIds.includes(tc.tool_call_id);
   const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
   const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
+
+  // Attachment names across the whole conversation, so a read_file call on the
+  // internal files server can be labelled with the file it is reading (its url
+  // argument only carries the file id).
+  const attachmentNamesById = $derived.by(() => {
+    const names = new SvelteMap<string, string>();
+    for (const msg of chat.currentConversation?.messages ?? []) {
+      for (const file of msg.files ?? []) names.set(file.id, file.name);
+    }
+    return names;
+  });
+  const readFileDetail = (tc: {
+    server_name: string;
+    tool_name: string;
+    arguments?: Record<string, unknown>;
+  }) => {
+    const fileId = internalReadFileId(tc.server_name, tc.tool_name, tc.arguments);
+    return fileId ? (attachmentNamesById.get(fileId) ?? null) : null;
+  };
   const tracedSteps = $derived(
     tracedToolCalls.map((tc, i) => {
       const denied =
@@ -104,6 +123,7 @@
         // server-provided title annotation, falling back to the raw tool name.
         toolName: toolDisplayName(tc.tool_name, tc.server_name, tc.title),
         serverName: serverDisplayName(tc.server_name),
+        detail: readFileDetail(tc),
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status
@@ -221,6 +241,7 @@
         {@const isSubmitting = toolCall.tool_call_id
           ? submittingToolIds.has(toolCall.tool_call_id)
           : false}
+        {@const pendingDetail = readFileDetail(toolCall)}
         {@const statusStyle = isDenied
           ? "border-negative-default/20 bg-negative-dimmer/50"
           : isApproved
@@ -257,6 +278,9 @@
                 <span class="text-default truncate text-sm font-medium"
                   >{toolDisplayName(toolCall.tool_name, toolCall.server_name)}</span
                 >
+                {#if pendingDetail}
+                  <span class="text-muted min-w-0 truncate text-xs">{pendingDetail}</span>
+                {/if}
                 {#if isDenied}
                   <span
                     class="bg-negative-dimmer text-negative-default inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"

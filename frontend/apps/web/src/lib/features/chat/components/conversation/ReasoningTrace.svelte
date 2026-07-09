@@ -18,6 +18,8 @@
   type Step = {
     toolName: string;
     serverName: string;
+    /** Extra context for the call, e.g. the filename a read_file call reads. */
+    detail?: string | null;
     args?: Record<string, unknown>;
     toolCallId?: string;
     status: "preparing" | "running" | "complete" | "failed" | "denied";
@@ -133,6 +135,7 @@
                 <ReasoningToolStep
                   toolName={step.toolName}
                   serverName={step.serverName}
+                  detail={step.detail}
                   args={step.args}
                   toolCallId={step.toolCallId}
                   status={step.status}

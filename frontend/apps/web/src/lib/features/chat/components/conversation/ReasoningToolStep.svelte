@@ -15,6 +15,7 @@
   let {
     toolName,
     serverName,
+    detail = null,
     args,
     toolCallId,
     onLoadResult,
@@ -22,6 +23,8 @@
   }: {
     toolName: string;
     serverName: string;
+    /** Extra context for the call, e.g. the filename a read_file call reads. */
+    detail?: string | null;
     args?: Record<string, unknown>;
     toolCallId?: string;
     onLoadResult?: () => Promise<string | null>;
@@ -129,6 +132,9 @@
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <div class="flex items-center gap-2">
         <span class="text-secondary truncate text-sm font-medium">{toolName}</span>
+        {#if detail}
+          <span class="text-muted min-w-0 truncate text-xs">{detail}</span>
+        {/if}
         <span
           class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase {ui.badge}"
         >

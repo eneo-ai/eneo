@@ -304,6 +304,23 @@
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
   });
 
+  // Eneo's built-in loopback MCP servers that will be active for this partner:
+  // always on, not togglable, but surfaced next to the external servers so the
+  // user sees every tool the model can reach. Mirrors the backend attach gates
+  // (knowledge_mode "tool" + knowledge attached; inline_file_text off means
+  // attachments reach the model as signed URLs read by the files server).
+  const internalMcpServers = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    const internal: Array<{ name: string }> = [];
+    if (hasKnowledge && partnerKnowledgeMode === "tool") {
+      internal.push({ name: "knowledge" });
+    }
+    if (partner?.inline_file_text === false) {
+      internal.push({ name: "files" });
+    }
+    return internal;
+  });
+
   const showWebSearch = $derived(
     chat.partner.type === "default-assistant" && featureFlags.showWebSearch
   );
@@ -434,9 +451,10 @@
         />
       {/if}
 
-      {#if hasMcpTools}
+      {#if hasMcpTools || internalMcpServers.length > 0}
         <ChatMcpServers
           servers={mcpServers}
+          internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
           bind:autoAcceptTools
         />

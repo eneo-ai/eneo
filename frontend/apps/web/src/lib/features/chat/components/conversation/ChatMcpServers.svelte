@@ -7,7 +7,8 @@
     MCP servers are active for this conversation and whether tool calls run
     automatically or require per-call approval. State is owned by the parent
     (ConversationInput) so it can be sent with each ask request — this component
-    only renders and mutates it.
+    only renders and mutates it. Eneo's own internal (loopback) servers are
+    listed too, but they are always active and cannot be toggled.
 -->
 <script lang="ts">
   import { buttonVariants } from "$lib/components/ui/button/index.js";
@@ -16,7 +17,8 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Plug, ShieldCheck } from "lucide-svelte";
+  import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
+  import { BookOpen, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
   import type { SvelteSet } from "svelte/reactivity";
 
   type McpServer = {
@@ -26,17 +28,34 @@
     icon_url?: string | null;
   };
 
+  type InternalMcpServer = {
+    /** Internal server name as the backend attaches it (e.g. "knowledge"). */
+    name: string;
+  };
+
   type Props = {
     servers: McpServer[];
+    /** Eneo's built-in loopback servers active for this partner (not togglable). */
+    internalServers?: InternalMcpServer[];
     /** Server ids the user has switched off for this conversation (mutated in place). */
     disabledServerIds: SvelteSet<string>;
     /** When true, tool calls run without per-call approval. */
     autoAcceptTools: boolean;
   };
 
-  let { servers, disabledServerIds, autoAcceptTools = $bindable() }: Props = $props();
+  let {
+    servers,
+    internalServers = [],
+    disabledServerIds,
+    autoAcceptTools = $bindable()
+  }: Props = $props();
 
-  const total = $derived(servers.length);
+  const INTERNAL_SERVER_ICONS: Record<string, typeof Plug> = {
+    knowledge: BookOpen,
+    files: Paperclip
+  };
+
+  const total = $derived(servers.length + internalServers.length);
   const disabledCount = $derived(
     servers.filter((server) => disabledServerIds.has(server.id)).length
   );
@@ -73,19 +92,19 @@
       <Popover.Title class="text-sm">{m.mcp_servers()}</Popover.Title>
       <div class="text-muted-foreground mt-0.5 flex items-center justify-between gap-2 text-xs">
         <span>{m.mcp_servers_active_count({ active: activeCount, total })}</span>
-        {#if total > 1}
+        {#if servers.length > 1}
           <span class="flex items-center gap-0.5">
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={activeCount === total}
+              disabled={disabledCount === 0}
               onclick={() => setAll(true)}>{m.mcp_all_on()}</button
             >
             <span aria-hidden="true" class="text-border">·</span>
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={activeCount === 0}
+              disabled={disabledCount === servers.length}
               onclick={() => setAll(false)}>{m.mcp_all_off()}</button
             >
           </span>
@@ -98,6 +117,32 @@
       role="group"
       aria-label={m.mcp_servers()}
     >
+      {#each internalServers as server (server.name)}
+        {@const Icon = INTERNAL_SERVER_ICONS[server.name] ?? Plug}
+        {@const label = serverDisplayName(server.name)}
+        <div class="flex items-center gap-2.5 rounded-md px-2 py-2">
+          <span
+            class="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center rounded-md"
+            aria-hidden="true"
+          >
+            <Icon class="size-4" />
+          </span>
+          <span class="min-w-0 flex-1">
+            <span class="text-foreground block truncate text-sm font-medium">{label}</span>
+            <span
+              id="mcp-internal-desc-{server.name}"
+              class="text-muted-foreground block truncate text-xs"
+              >{m.mcp_internal_server_hint()}</span
+            >
+          </span>
+          <Switch
+            checked
+            disabled
+            aria-label={label}
+            aria-describedby="mcp-internal-desc-{server.name}"
+          />
+        </div>
+      {/each}
       {#each servers as server (server.id)}
         {@const on = !disabledServerIds.has(server.id)}
         {@const descId = server.description ? `mcp-desc-${server.id}` : undefined}
