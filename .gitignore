@@ -38,6 +38,7 @@ CLAUDE.md
 .claude/
 .specify/
 .devcontainer/claude-config/
+.devcontainer/devcontainer-lock.json
 .code/
 .mcp.json
 install-claude.sh
@@ -101,6 +102,13 @@ plan/
 # Local runtime and prompt scratch
 backend/celerybeat-schedule
 /prompt.md
+
+# Local review artifacts stay out of the branch.
+fablereview/
+review-artifacts/
+
+# Local hook/cache output.
+**/.impeccable/
 
 # Raw refactor execution artifacts stay local; curated plans, journals,
 # retrospectives, and reconciliations under docs/refactor are durable.
