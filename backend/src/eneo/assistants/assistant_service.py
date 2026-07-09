@@ -678,6 +678,8 @@ class AssistantService:
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
+                inline_file_text,
+                knowledge_mode,
             )
         ) or any(
             is_provided(value)

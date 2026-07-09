@@ -11,6 +11,7 @@ from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
+    KnowledgeMode,
 )
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
@@ -333,6 +334,8 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
         {"attachment_ids": []},
         {"description": None},
         {"insight_enabled": False},
+        {"inline_file_text": False},
+        {"knowledge_mode": KnowledgeMode.INJECT},
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
