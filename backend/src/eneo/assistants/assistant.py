@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     )
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -430,7 +429,7 @@ class Assistant(Entity):
         files: list["File"] | None = None,
         stream: bool = False,
         version: int = 1,
-        web_search_results: Sequence["WebSearchResult"] | None = None,
+        web_search_mcp_server: Optional["MCPServer"] = None,
         require_tool_approval: bool = False,
         completion_model_override: Optional[CompletionModel] = None,
         mcp_servers_override: Optional[list["MCPServer"]] = None,
@@ -502,12 +501,21 @@ class Assistant(Entity):
         # tools lead the tool array and, with the proxy's first-registered-wins
         # collision rule, survive a prefixed-name collision with an external
         # server. Knowledge leads because it also steers the knowledge catalog.
+        # The resolved web-search provider follows the internal servers but
+        # precedes the assistant's own / governance servers.
         prepended_servers: list["MCPServer"] = []
         if knowledge_mcp_server is not None:
             prepended_servers.append(knowledge_mcp_server)
         prepended_servers.extend(internal_mcp_servers)
+        if web_search_mcp_server is not None:
+            prepended_servers.append(web_search_mcp_server)
         if prepended_servers:
-            effective_mcp_servers = prepended_servers + list(effective_mcp_servers)
+            prepended_ids = {server.id for server in prepended_servers}
+            effective_mcp_servers = prepended_servers + [
+                server
+                for server in effective_mcp_servers
+                if server.id not in prepended_ids
+            ]
         knowledge_catalog = self.build_knowledge_catalog() if use_knowledge_tool else ""
 
         response = await completion_service.get_response(
@@ -525,7 +533,6 @@ class Assistant(Entity):
             model_kwargs=self.completion_model_kwargs,
             version=version,
             use_image_generation=self.is_default,
-            web_search_results=list(web_search_results or []),
             mcp_servers=effective_mcp_servers,
             require_tool_approval=require_tool_approval,
             inline_file_text=self.inline_file_text,

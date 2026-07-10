@@ -1,11 +1,16 @@
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.exceptions import NameCollisionException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    UnauthorizedException,
+)
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -28,6 +33,40 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
+
+# RFC 9110 token syntax — the only characters legal in an HTTP field name.
+# Rejecting anything else also rules out CR/LF header injection.
+_HTTP_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+
+# Headers an admin-configured api_key_header credential must never occupy:
+# transport/framing headers, proxy/forwarding headers, MCP session headers,
+# and headers Eneo itself controls (Authorization, X-Eneo-* identity).
+_FORBIDDEN_HEADER_NAMES = frozenset(
+    {
+        "host",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+        "upgrade",
+        "te",
+        "trailer",
+        "keep-alive",
+        "expect",
+        "via",
+        "cookie",
+        "set-cookie",
+        "forwarded",
+        "origin",
+        "referer",
+        "authorization",
+        "proxy-authorization",
+        "proxy-authenticate",
+        "mcp-session-id",
+        "mcp-protocol-version",
+    }
+)
+_FORBIDDEN_HEADER_PREFIXES = ("x-forwarded-", "x-real-", "x-eneo-", "sec-")
 
 
 @dataclass
@@ -68,6 +107,14 @@ class ToolChange:
 
 
 @dataclass
+class WebSearchActivationResult:
+    """Result of activating a web-search provider."""
+
+    server: MCPServer
+    deactivated_server_ids: list[UUID] = field(default_factory=lambda: [])
+
+
+@dataclass
 class ToolSyncResult:
     """Result of tool sync with changeset for review."""
 
@@ -100,6 +147,50 @@ class MCPServerService:
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
+
+    @staticmethod
+    def _validate_auth_config(
+        http_auth_type: str, config: dict[str, Any] | None
+    ) -> None:
+        """Validate a plaintext auth config before it is tested or stored.
+
+        Enforces that credentials ride in headers (never URLs), that an
+        api_key_header name is legal HTTP token syntax and not a reserved
+        transport/session header, and that no secret can smuggle CR/LF into
+        the request stream.
+        """
+        if http_auth_type == "none":
+            return
+
+        token = (config or {}).get("token")
+        if token is not None:
+            if not isinstance(token, str) or not token.strip():
+                raise BadRequestException("Credential must be a non-empty string")
+            if any(ord(c) < 0x20 or c == "\x7f" for c in token):
+                raise BadRequestException(
+                    "Credential must not contain control characters"
+                )
+
+        if http_auth_type != "api_key_header":
+            return
+
+        header_name = (config or {}).get("header_name")
+        if not isinstance(header_name, str) or not header_name:
+            raise BadRequestException(
+                "api_key_header authentication requires a header name"
+            )
+        if not _HTTP_TOKEN_RE.match(header_name):
+            raise BadRequestException(
+                "Header name must use HTTP token syntax "
+                "(letters, digits, and !#$%&'*+-.^_`|~)"
+            )
+        lowered = header_name.lower()
+        if lowered in _FORBIDDEN_HEADER_NAMES or lowered.startswith(
+            _FORBIDDEN_HEADER_PREFIXES
+        ):
+            raise BadRequestException(
+                f"Header '{header_name}' is reserved and cannot carry credentials"
+            )
 
     async def _get_server_for_tenant(self, mcp_server_id: UUID) -> MCPServer:
         """Fetch an MCP server and verify it belongs to the current user's tenant."""
@@ -141,11 +232,18 @@ class MCPServerService:
                     decrypted[key] = self.encryption_service.decrypt(decrypted[key])
         return decrypted
 
-    async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
-        """Get all MCP servers from global catalog with optional tag filtering."""
+    async def get_mcp_servers(
+        self,
+        tags: list[str] | None = None,
+        purpose: str | None = None,
+    ) -> list[MCPServer]:
+        """Get all MCP servers from global catalog with optional filtering."""
+        filters: dict[str, Any] = {"tenant_id": self.user.tenant_id}
+        if purpose is not None:
+            filters["purpose"] = purpose
         if tags:
-            return await self.repo.query(tags=tags, tenant_id=self.user.tenant_id)
-        return await self.repo.query(tenant_id=self.user.tenant_id)
+            return await self.repo.query(tags=tags, **filters)
+        return await self.repo.query(**filters)
 
     async def get_mcp_server(self, mcp_server_id: UUID) -> MCPServer:
         """Get a single MCP server by ID."""
@@ -162,6 +260,7 @@ class MCPServerService:
         name: str,
         http_url: str,
         http_auth_type: str = "none",
+        purpose: str = "general",
         description: str | None = None,
         http_auth_config_schema: dict[str, Any] | None = None,
         forward_identity: bool = False,
@@ -180,12 +279,18 @@ class MCPServerService:
         if documentation_url is not None:
             documentation_url = str(documentation_url)
 
-        # Create domain object (not saved yet)
+        self._validate_auth_config(http_auth_type, http_auth_config_schema)
+
+        # Create domain object (not saved yet). Web-search providers are saved
+        # inactive: at most one may be enabled per tenant, and switching is an
+        # explicit activation step.
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
             http_url=http_url,
             http_auth_type=http_auth_type,
+            purpose=purpose,
+            is_enabled=purpose != "web_search",
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -267,6 +372,28 @@ class MCPServerService:
             http_auth_type is not None and http_auth_type != mcp_server.http_auth_type
         )
         credentials_changed = http_auth_config_schema is not None
+
+        effective_auth_type = (
+            http_auth_type if http_auth_type is not None else mcp_server.http_auth_type
+        )
+        if http_auth_config_schema is not None:
+            # A token-only credential replacement keeps the stored header name.
+            if (
+                effective_auth_type == "api_key_header"
+                and "header_name" not in http_auth_config_schema
+                and mcp_server.http_auth_config_schema
+                and mcp_server.http_auth_config_schema.get("header_name")
+            ):
+                http_auth_config_schema = {
+                    "header_name": mcp_server.http_auth_config_schema["header_name"],
+                    **http_auth_config_schema,
+                }
+            self._validate_auth_config(effective_auth_type, http_auth_config_schema)
+        elif auth_type_changed:
+            self._validate_auth_config(
+                effective_auth_type,
+                self._decrypt_auth_config(mcp_server.http_auth_config_schema),
+            )
 
         # Apply changes to domain object
         if name is not None:
@@ -652,6 +779,26 @@ class MCPServerService:
         return await self.tool_repo.update(tool)
 
     @validate_permissions(Permission.ADMIN)
+    async def update_tool_display_name(
+        self, tool_id: UUID, display_name: str | None
+    ) -> MCPServerTool:
+        """Set or clear the admin display name for a tool (admin only).
+
+        Display-only: the protocol-level tool name is untouched, so calls keep
+        routing to the same remote tool. None or blank clears the override.
+        """
+        tool = await self.tool_repo.one(id=tool_id)
+        await self._get_server_for_tenant(tool.mcp_server_id)
+
+        if display_name is not None:
+            display_name = display_name.strip() or None
+        if display_name is not None and len(display_name) > 100:
+            raise BadRequestException("Display name must be 100 characters or less")
+
+        tool.display_name = display_name
+        return await self.tool_repo.update(tool)
+
+    @validate_permissions(Permission.ADMIN)
     async def update_tenant_tool_enabled(
         self, tool_id: UUID, is_enabled: bool
     ) -> MCPServerTool:
@@ -696,6 +843,93 @@ class MCPServerService:
         # Return tool with tenant setting applied
         tool.is_enabled_by_default = is_enabled
         return tool
+
+    def _usable_tools(self, tools: list[MCPServerTool]) -> list[MCPServerTool]:
+        """Tools that can actually serve a request: enabled, present on the
+        remote, and with an admin-approved definition (a never-approved new
+        tool has no active description/schema yet)."""
+        return [
+            tool
+            for tool in tools
+            if tool.is_enabled_by_default
+            and not tool.removed_from_remote
+            and (tool.description is not None or tool.input_schema is not None)
+        ]
+
+    @validate_permissions(Permission.ADMIN)
+    async def activate_web_search_server(
+        self, mcp_server_id: UUID
+    ) -> WebSearchActivationResult:
+        """Make this server the tenant's active web-search provider (admin only).
+
+        Atomic switch: the previously active provider is deactivated in the
+        same transaction, under the partial unique index that allows at most
+        one enabled web-search server per tenant. Rejects servers that are
+        unreachable or have no usable tools.
+        """
+        import sqlalchemy as sa
+
+        from eneo.database.tables.mcp_server_table import (
+            MCPServers as MCPServersTable,
+        )
+
+        server = await self._get_server_for_tenant(mcp_server_id)
+        if server.purpose != "web_search":
+            raise BadRequestException(
+                "Only web-search MCP servers can be activated as the "
+                "web-search provider"
+            )
+
+        tools = await self.get_tools_with_tenant_settings(mcp_server_id)
+        if not self._usable_tools(tools):
+            raise BadRequestException(
+                "Web-search provider has no enabled tools. Sync and approve "
+                "its tools before activating."
+            )
+
+        credentials = self._decrypt_auth_config(server.http_auth_config_schema)
+        _, connection = await self._test_connection_and_discover_tools(
+            server, credentials
+        )
+        if not connection.success:
+            raise BadRequestException(
+                connection.error_message
+                or "Web-search provider is unreachable and cannot be activated"
+            )
+
+        # Deactivate the current provider first so the partial unique index
+        # never sees two enabled web-search servers. Both statements commit
+        # with the request's unit of work — the switch is all-or-nothing.
+        deactivate_stmt = (
+            sa.update(MCPServersTable)
+            .where(
+                MCPServersTable.tenant_id == self.user.tenant_id,
+                MCPServersTable.purpose == "web_search",
+                MCPServersTable.is_enabled == True,  # noqa: E712
+                MCPServersTable.id != mcp_server_id,
+            )
+            .values(is_enabled=False)
+            .returning(MCPServersTable.id)
+        )
+        result = await self.repo.session.execute(deactivate_stmt)
+        deactivated_ids = [row[0] for row in result.fetchall()]
+
+        server.is_enabled = True
+        server = await self.repo.update(server)
+        return WebSearchActivationResult(
+            server=server, deactivated_server_ids=deactivated_ids
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def deactivate_web_search_server(self, mcp_server_id: UUID) -> MCPServer:
+        """Deactivate a web-search provider, leaving the tenant without one."""
+        server = await self._get_server_for_tenant(mcp_server_id)
+        if server.purpose != "web_search":
+            raise BadRequestException(
+                "Only web-search MCP servers can be deactivated here"
+            )
+        server.is_enabled = False
+        return await self.repo.update(server)
 
     async def get_tools_with_tenant_settings(
         self, mcp_server_id: UUID

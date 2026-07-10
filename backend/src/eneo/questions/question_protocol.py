@@ -6,7 +6,6 @@ from eneo.questions.question import (
     Question,
     ToolAssistant,
     UseTools,
-    WebSearchResultPublic,
 )
 
 
@@ -43,14 +42,6 @@ def to_question_public(question: Question) -> Message:
             for blob in question.info_blobs
         ],
         tools=tools,
-        web_search_references=[
-            WebSearchResultPublic(
-                id=web_search_result.id,
-                title=web_search_result.title,
-                url=web_search_result.url,
-            )
-            for web_search_result in question.web_search_results
-        ],
         mcp_tool_references=list(question.mcp_tool_references),
         tool_calls=public_tool_calls,
     )

@@ -23,17 +23,20 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerCreate,
     MCPServerCreateResponse,
     MCPServerPublic,
+    MCPServerPurpose,
     MCPServerSettingsCreate,
     MCPServerSettingsPublic,
     MCPServerSettingsUpdate,
     MCPServerToolList,
     MCPServerToolPublic,
+    MCPServerToolRename,
     MCPServerToolSyncResponse,
     MCPServerToolUpdate,
     MCPServerUpdate,
     ToolChangePublic,
     ToolReviewRequest,
     ToolReviewResponse,
+    WebSearchActivationResponse,
 )
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -56,13 +59,14 @@ _TAGS_QUERY = Query(None)
 )
 async def get_mcp_servers(
     tags: list[str] | None = _TAGS_QUERY,
+    purpose: MCPServerPurpose | None = None,
     container: Container = _WITH_USER,
 ):
-    """Get all MCP servers from global catalog with optional tag filtering."""
+    """Get all MCP servers from global catalog with optional tag/purpose filtering."""
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
-    mcp_servers = await service.get_mcp_servers(tags=tags)
+    mcp_servers = await service.get_mcp_servers(tags=tags, purpose=purpose)
     return assembler.to_paginated_response(mcp_servers)
 
 
@@ -77,6 +81,7 @@ async def get_mcp_servers(
     responses=responses.get_responses([404]),
 )
 async def get_tenant_mcp_settings(
+    purpose: MCPServerPurpose | None = None,
     container: Container = _WITH_USER,
 ):
     """Get all available MCP servers with tenant enablement status."""
@@ -84,6 +89,8 @@ async def get_tenant_mcp_settings(
     assembler = container.mcp_server_settings_assembler()
 
     settings = await service.get_available_mcp_servers()
+    if purpose is not None:
+        settings = [server for server in settings if server.purpose == purpose]
     return assembler.to_paginated_response(settings)
 
 
@@ -285,6 +292,7 @@ async def create_mcp_server(
         name=data.name,
         http_url=str(data.http_url),
         http_auth_type=data.http_auth_type,
+        purpose=data.purpose,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
         forward_identity=data.forward_identity,
@@ -449,6 +457,94 @@ async def delete_mcp_server(
         description=f"Deleted MCP server '{mcp_server.name}'",
         metadata=AuditMetadata.standard(actor=user, target=mcp_server),
     )
+
+
+# ============================================================================
+# Web-Search Provider Activation Endpoints
+# ============================================================================
+
+
+@router.post(
+    "/{id}/activate-web-search/",
+    description="Activate this server as the tenant's web-search provider (admin only).",
+    response_model=WebSearchActivationResponse,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def activate_web_search(
+    id: UUID,
+    container: Container = _WITH_USER,
+):
+    """Activate this server as the tenant's web-search provider (admin only).
+
+    Atomic switch: deactivates the previously active provider in the same
+    transaction. Rejects servers that are not purpose=web_search, are
+    unreachable, or have no enabled tools.
+    """
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+
+    result = await service.activate_web_search_server(id)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_ENABLED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=f"Activated web-search provider '{result.server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=result.server,
+            extra={
+                "purpose": "web_search",
+                "deactivated_server_ids": [
+                    str(server_id) for server_id in result.deactivated_server_ids
+                ],
+            },
+        ),
+    )
+
+    return WebSearchActivationResponse(
+        server=assembler.from_domain_to_model(result.server),
+        deactivated_server_ids=result.deactivated_server_ids,
+    )
+
+
+@router.post(
+    "/{id}/deactivate-web-search/",
+    description="Deactivate this web-search provider (admin only).",
+    response_model=MCPServerPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def deactivate_web_search(
+    id: UUID,
+    container: Container = _WITH_USER,
+):
+    """Deactivate this web-search provider, leaving the tenant without one."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+
+    server = await service.deactivate_web_search_server(id)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_DISABLED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=server.id,
+        description=f"Deactivated web-search provider '{server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=server,
+            extra={"purpose": "web_search"},
+        ),
+    )
+
+    return assembler.from_domain_to_model(server)
 
 
 # ============================================================================
@@ -650,6 +746,58 @@ async def approve_all_tool_changes(
     return ToolReviewResponse(
         approved_tools=[assembler.from_domain_to_model(t) for t in approved],
     )
+
+
+@router.put(
+    "/{id}/tools/{tool_id}/display-name/",
+    description="Set or clear the admin display name for a tool (admin only).",
+    response_model=MCPServerToolPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def update_tool_display_name(
+    id: UUID,
+    tool_id: UUID,
+    data: MCPServerToolRename,
+    container: Container = _WITH_USER,
+):
+    """Set or clear the admin display name for a tool (admin only).
+
+    Display-only: the protocol-level tool name is untouched. Null clears the
+    override, falling back to the remote-synced title.
+    """
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    mcp_server = await service.get_mcp_server(id)
+    tool = await service.update_tool_display_name(tool_id, data.display_name)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER_TOOL,
+        entity_id=tool.id,
+        description=(
+            f"Renamed tool '{tool.name}' on MCP server '{mcp_server.name}' to "
+            f"'{tool.display_name}'"
+            if tool.display_name
+            else f"Cleared display name for tool '{tool.name}' on MCP server "
+            f"'{mcp_server.name}'"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tool,
+            extra={
+                "mcp_server_id": str(mcp_server.id),
+                "mcp_server_name": mcp_server.name,
+                "display_name": tool.display_name,
+            },
+        ),
+    )
+
+    return assembler.from_domain_to_model(tool)
 
 
 @router.put(

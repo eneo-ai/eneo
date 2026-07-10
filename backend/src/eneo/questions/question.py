@@ -12,7 +12,6 @@ from pydantic import (
 )
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.web_search import WebSearchResult
 from eneo.files.file_models import File, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
@@ -45,12 +44,6 @@ class QuestionsFiles(BaseModel):
     file: File
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class WebSearchResultPublic(BaseModel):
-    id: UUID
-    title: str
-    url: str
 
 
 class McpToolReferencePublic(InDB):
@@ -137,7 +130,6 @@ class Question(QuestionAdd, InDB):
         validation_alias=AliasPath("assistant", "name"), default=None
     )
     questions_files: list[QuestionsFiles] = []
-    web_search_results: list[WebSearchResult] = []
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
@@ -163,7 +155,6 @@ class Message(QuestionBase, InDB):
     files: list[FilePublic]
     tools: UseTools
     generated_files: list[FilePublic]
-    web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
     reasoning: Optional[str] = None

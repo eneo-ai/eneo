@@ -27,7 +27,6 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.web_search import WebSearchResult
 from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -98,6 +97,7 @@ class MCPServerPublicDict(TypedDict):
     description: str | None
     http_url: str | None
     http_auth_type: str | None
+    purpose: str
     tags: list[str] | None
     icon_url: str | None
     security_classification: dict[str, object] | None
@@ -313,7 +313,6 @@ class AssistantResponse(BaseModel):
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools
-    web_search_results: list[WebSearchResult]
     mcp_tool_references: list[McpToolReference] = Field(
         default_factory=_empty_mcp_tool_reference_list
     )

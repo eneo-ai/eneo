@@ -209,7 +209,9 @@ class MCPProxySession:
                     server=server,
                     server_prefix=server_prefix,
                     name=tool.name,
-                    title=tool.title,
+                    # Admin display name wins over the remote-synced title in
+                    # every user-facing surface (tool traces, approval cards).
+                    title=tool.display_name or tool.title,
                     description=tool.description,
                     input_schema=tool.input_schema,
                 )
@@ -270,7 +272,7 @@ class MCPProxySession:
                 server=server,
                 server_prefix=server_prefix,
                 name=db_tool.name,
-                title=db_tool.title,
+                title=db_tool.display_name or db_tool.title,
                 description=db_tool.description,
                 input_schema=db_tool.input_schema,
             )

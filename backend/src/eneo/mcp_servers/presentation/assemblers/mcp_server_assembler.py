@@ -1,9 +1,10 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.presentation.models import (
     MCPServerList,
     MCPServerPublic,
+    MCPServerPurpose,
     MCPServerSettingsList,
     MCPServerSettingsPublic,
     MCPServerToolPublic,
@@ -75,6 +76,7 @@ class MCPServerAssembler:
             "description": mcp_server.description,
             "http_url": mcp_server.http_url,
             "http_auth_type": mcp_server.http_auth_type,
+            "purpose": mcp_server.purpose,
             "tags": mcp_server.tags,
             "icon_url": mcp_server.icon_url,
             "security_classification": sc_dict,
@@ -83,6 +85,7 @@ class MCPServerAssembler:
                     "id": str(tool.id),
                     "name": tool.name,
                     "title": tool.title,
+                    "display_name": tool.display_name,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
                     "is_enabled": tool.is_enabled_by_default,
@@ -99,6 +102,8 @@ class MCPServerAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
+            purpose=cast(MCPServerPurpose, mcp_server.purpose),
+            is_enabled=mcp_server.is_enabled,
             has_credentials=bool(mcp_server.http_auth_config_schema),
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
@@ -138,6 +143,7 @@ class MCPServerSettingsAssembler:
                 mcp_server_id=tool.mcp_server_id,
                 name=tool.name,
                 title=tool.title,
+                display_name=tool.display_name,
                 description=tool.description,
                 input_schema=tool.input_schema,
                 is_enabled_by_default=tool.is_enabled_by_default,
@@ -156,6 +162,8 @@ class MCPServerSettingsAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
+            purpose=cast(MCPServerPurpose, mcp_server.purpose),
+            is_enabled=mcp_server.is_enabled,
             has_credentials=bool(mcp_server.http_auth_config_schema),
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service

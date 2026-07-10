@@ -20,7 +20,6 @@ from eneo.main.logging import get_logger
 from eneo.questions.question import (
     McpToolReferencePublic,
     UseTools,
-    WebSearchResultPublic,
 )
 from eneo.sessions.session import (
     AskChatResponse,
@@ -51,12 +50,6 @@ logger = get_logger(__name__)
 
 class _SupportsModelDump(Protocol):
     def model_dump(self) -> dict[str, Any]: ...
-
-
-class _SupportsWebSearchResult(Protocol):
-    id: Any
-    title: str
-    url: str
 
 
 class _SupportsToolCallMetadata(Protocol):
@@ -117,7 +110,6 @@ def to_ask_response(
         ],
         model=public_model,
         tools=tools,
-        web_search_references=[],
         mcp_tool_references=[
             McpToolReferencePublic(
                 id=ref.id,
@@ -145,7 +137,6 @@ def to_ask_conversation_response(
     question_id: Optional["UUID"] = None,
     created_at: Optional[datetime] = None,
     updated_at: Optional[datetime] = None,
-    web_search_results: Sequence[_SupportsWebSearchResult] | None = None,
     mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskChatResponse:
     if completion_model is None:
@@ -180,14 +171,6 @@ def to_ask_conversation_response(
             for blob in info_blobs
         ],
         tools=tools,
-        web_search_references=[
-            WebSearchResultPublic(
-                id=web_search_result.id,
-                title=web_search_result.title,
-                url=web_search_result.url,
-            )
-            for web_search_result in (web_search_results or [])
-        ],
         mcp_tool_references=[
             McpToolReferencePublic(
                 id=ref.id,
@@ -420,7 +403,6 @@ async def to_conversation_response(
                     question_id=response.question_id,
                     created_at=response.created_at,
                     updated_at=response.updated_at,
-                    web_search_results=response.web_search_results,
                 ).model_dump()
             )
             yield ServerSentEvent(
@@ -446,6 +428,5 @@ async def to_conversation_response(
         question_id=response.question_id,
         created_at=response.created_at,
         updated_at=response.updated_at,
-        web_search_results=response.web_search_results,
         mcp_tool_references=response.mcp_tool_references,
     )

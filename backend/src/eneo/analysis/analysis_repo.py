@@ -232,11 +232,6 @@ class AnalysisRepository:
             .options(selectinload(Sessions.assistant).selectinload(Assistants.user))
             .options(
                 selectinload(Sessions.questions).selectinload(
-                    Questions.web_search_results
-                ),
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(
                     Questions.mcp_tool_references
                 )
             )
@@ -297,11 +292,6 @@ class AnalysisRepository:
                 .selectinload(QuestionsFiles.file)
             )
             .options(selectinload(Sessions.group_chat))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.web_search_results
-                ),
-            )
             .options(
                 selectinload(Sessions.questions).selectinload(
                     Questions.mcp_tool_references

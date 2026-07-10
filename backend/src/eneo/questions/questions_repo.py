@@ -20,16 +20,12 @@ from eneo.database.tables.questions_table import (
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.web_search_results_table import (
-    WebSearchResult as WebSearchResultsTable,
-)
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.questions.question import Question, QuestionAdd
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.logging.logging import LoggingDetails
     from eneo.questions.question import ToolCallInfo
 
@@ -58,7 +54,6 @@ class QuestionRepository:
             selectinload(Questions.info_blob_references)
             .selectinload(InfoBlobReferences.info_blob)
             .selectinload(InfoBlobs.website),
-            selectinload(Questions.web_search_results),
             selectinload(Questions.mcp_tool_references),
         ]
 
@@ -115,25 +110,6 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
-    async def _add_web_search_results(
-        self, web_search_results: list["WebSearchResult"], question_id: UUID
-    ):
-        stmt = sa.insert(WebSearchResultsTable).values(
-            [
-                dict(
-                    id=web_search_result.id,
-                    title=web_search_result.title,
-                    url=web_search_result.url,
-                    content=web_search_result.content,
-                    score=web_search_result.score,
-                    question_id=question_id,
-                )
-                for web_search_result in web_search_results
-            ]
-        )
-
-        await self.session.execute(stmt)
-
     async def _add_mcp_tool_references(
         self, mcp_tool_references: list["McpToolReference"], question_id: UUID
     ):
@@ -173,7 +149,6 @@ class QuestionRepository:
         reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
-        web_search_results: list["WebSearchResult"] | None = None,
         logging_details: "LoggingDetails | None" = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
     ) -> None:
@@ -231,11 +206,6 @@ class QuestionRepository:
                 files=list(generated_files),
                 file_type="assistant",
             )
-        if web_search_results:
-            await self._add_web_search_results(
-                web_search_results=list(web_search_results),
-                question_id=question_id,
-            )
         if mcp_tool_references:
             await self._add_mcp_tool_references(
                 mcp_tool_references=mcp_tool_references,
@@ -248,7 +218,6 @@ class QuestionRepository:
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         files: list[File] | None = None,
         generated_files: list[File] | None = None,
-        web_search_results: list["WebSearchResult"] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
     ):
         stmt = (
@@ -275,11 +244,6 @@ class QuestionRepository:
                 question_id=question_record.id,
                 files=generated_files,
                 file_type="assistant",
-            )
-
-        if web_search_results:
-            await self._add_web_search_results(
-                web_search_results=web_search_results, question_id=question_record.id
             )
 
         if mcp_tool_references:

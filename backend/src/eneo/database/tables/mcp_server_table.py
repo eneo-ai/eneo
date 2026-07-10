@@ -1,7 +1,15 @@
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +28,14 @@ class MCPServers(BasePublic):
     __tablename__ = "mcp_servers"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_mcp_servers_tenant_name"),
+        # A tenant may save several web-search providers but only one may be
+        # active at a time; activation is an explicit transactional switch.
+        Index(
+            "uq_mcp_servers_tenant_active_web_search",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("purpose = 'web_search' AND is_enabled = true"),
+        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(
@@ -27,6 +43,13 @@ class MCPServers(BasePublic):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+
+    # What this server is for: "general" (ordinary assistant tooling) or
+    # "web_search" (the tenant's web-search boundary, driven by the chat
+    # Search toggle rather than per-assistant attachment).
+    purpose: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="general"
+    )
 
     # HTTP configuration (uses Streamable HTTP transport - MCP 2025-03-26+ standard)
     http_url: Mapped[str] = mapped_column(String, nullable=False)
@@ -83,6 +106,9 @@ class MCPServerTools(BasePublic):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[Optional[str]] = mapped_column(Text)
+    # Admin-set display name. Overrides the remote-synced title in every UI
+    # surface; never touched by tool sync.
+    display_name: Mapped[Optional[str]] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text)
     input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     is_enabled_by_default: Mapped[bool] = mapped_column(

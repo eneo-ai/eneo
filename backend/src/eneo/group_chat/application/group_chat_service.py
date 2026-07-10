@@ -529,7 +529,6 @@ class GroupChatService:
                 completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 tools=UseTools(assistants=[]),
                 description=None,
-                web_search_results=[],
                 question_id=question_id,
             )
         else:

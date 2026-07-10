@@ -401,6 +401,9 @@ class SpaceRepository:
         await self.session.execute(stmt)
 
         if tool_settings:
+            # Last-wins dedupe: the composite PK (space_id, tool_id) makes a
+            # duplicated tool in the payload a 500 otherwise.
+            tool_settings = list({t[0]: t for t in tool_settings}.values())
             tool_ids = [t[0] for t in tool_settings]
 
             # Validate all tools belong to selected servers
@@ -1267,10 +1270,19 @@ class SpaceRepository:
             SecurityClassification as SecurityClassificationDBModel,
         )
 
+        # Web-search servers are included even when deactivated: an attached
+        # one is a capability marker (resolved to the active provider at ask
+        # time), and dropping it here would flip the space's capability toggle
+        # off after a provider switch. General servers must be enabled.
         mcp_servers_query = (
             sa.select(MCPServersTable)
             .where(MCPServersTable.tenant_id == self.user.tenant_id)
-            .where(MCPServersTable.is_enabled == True)  # noqa: E712
+            .where(
+                sa.or_(
+                    MCPServersTable.is_enabled == True,  # noqa: E712
+                    MCPServersTable.purpose == "web_search",
+                )
+            )
             .options(
                 _selectinload(MCPServersTable.security_classification).selectinload(
                     SecurityClassificationDBModel.tenant
@@ -1295,6 +1307,7 @@ class SpaceRepository:
                 http_url=server.http_url,
                 http_auth_type=server.http_auth_type,
                 http_auth_config_schema=server.http_auth_config_schema,
+                purpose=server.purpose,
                 is_enabled=server.is_enabled,
                 env_vars=server.env_vars,
                 tags=server.tags,

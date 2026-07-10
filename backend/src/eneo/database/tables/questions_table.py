@@ -18,7 +18,6 @@ from eneo.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:
     from eneo.database.tables.mcp_tool_references_table import McpToolReference
-    from eneo.database.tables.web_search_results_table import WebSearchResult
 
 
 class Questions(BasePublic):
@@ -67,9 +66,6 @@ class Questions(BasePublic):
     )
     questions_files: Mapped[list["QuestionsFiles"]] = relationship(
         order_by="QuestionsFiles.file_id"
-    )
-    web_search_results: Mapped[list["WebSearchResult"]] = relationship(
-        order_by="WebSearchResult.score.desc()"
     )
     mcp_tool_references: Mapped[list["McpToolReference"]] = relationship(
         order_by="[McpToolReference.tool_call_id, McpToolReference.order]"

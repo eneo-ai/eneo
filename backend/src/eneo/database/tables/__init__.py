@@ -46,7 +46,6 @@ _TABLE_MODULES = (
     "eneo.database.tables.tenant_table",
     "eneo.database.tables.user_groups_table",
     "eneo.database.tables.users_table",
-    "eneo.database.tables.web_search_results_table",
     "eneo.database.tables.websites_spaces_table",
     "eneo.database.tables.websites_table",
     "eneo.database.tables.widget_table",

@@ -99,10 +99,9 @@ async def test_create_question_placeholder_inserts_row_with_seeded_question_toke
     assert question_add.num_tokens_question == 42
     assert question_add.num_tokens_answer == 0
     assert question_add.tenant_id == service.user.tenant_id
-    # No info_blob_chunks / generated_files / web_search on a placeholder
+    # No info_blob_chunks / generated_files on a placeholder
     assert kwargs.get("info_blob_chunks") == []
     assert kwargs.get("generated_files") == []
-    assert kwargs.get("web_search_results") == []
 
 
 @pytest.mark.asyncio
@@ -166,7 +165,6 @@ async def test_complete_question_with_answer_calls_repo_update():
         info_blob_chunks=[],
         generated_files=None,
         logging_details=None,
-        web_search_results=None,
         tool_calls=None,
     )
 

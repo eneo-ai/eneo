@@ -77,7 +77,6 @@ class ConversationService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
-        use_web_search: bool = False,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
     ) -> "AssistantResponse":
@@ -138,7 +137,6 @@ class ConversationService:
                     session_id=session_id,
                     tool_assistant_id=tool_assistant_id,
                     version=version,
-                    use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                 )
@@ -166,7 +164,6 @@ class ConversationService:
                     session_id=None,  # explicitly None for new conversation
                     tool_assistant_id=tool_assistant_id,
                     version=version,
-                    use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                 )

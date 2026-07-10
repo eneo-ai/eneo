@@ -206,6 +206,7 @@ class SpaceService:
                 http_url=server.http_url,
                 http_auth_type=server.http_auth_type,
                 http_auth_config_schema=server.http_auth_config_schema,
+                purpose=server.purpose,
                 is_enabled=server.is_enabled,
                 env_vars=server.env_vars,
                 tags=server.tags,
@@ -323,10 +324,18 @@ class SpaceService:
                 SecurityClassification,
             )
 
+            # Web-search servers are capability markers resolved to the active
+            # provider at ask time, so a deactivated one may legitimately stay
+            # in the space; only general servers must be currently enabled.
             query = (
                 sa.select(MCPServersTable)
                 .where(MCPServersTable.tenant_id == self.user.tenant_id)
-                .where(MCPServersTable.is_enabled == True)  # noqa: E712
+                .where(
+                    sa.or_(
+                        MCPServersTable.is_enabled == True,  # noqa: E712
+                        MCPServersTable.purpose == "web_search",
+                    )
+                )
                 .where(MCPServersTable.id.in_(mcp_server_ids))
                 .options(
                     _selectinload(MCPServersTable.security_classification).selectinload(
@@ -355,6 +364,7 @@ class SpaceService:
                     http_url=server.http_url,
                     http_auth_type=server.http_auth_type,
                     http_auth_config_schema=server.http_auth_config_schema,
+                    purpose=server.purpose,
                     is_enabled=server.is_enabled,
                     env_vars=server.env_vars,
                     tags=server.tags,

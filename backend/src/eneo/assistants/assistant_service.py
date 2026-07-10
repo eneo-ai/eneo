@@ -24,7 +24,6 @@ from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
     count_tokens,
 )
-from eneo.completion_models.infrastructure.web_search import WebSearch
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import url_only_file_ids
@@ -57,6 +56,10 @@ from eneo.main.models import (
     NotProvided,
     ResourcePermission,
     is_provided,
+)
+from eneo.mcp_servers.application.web_search_resolver import (
+    get_active_web_search_server,
+    usable_web_search_tools,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.prompts.prompt import Prompt
@@ -94,9 +97,6 @@ if TYPE_CHECKING:
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
-    )
-    from eneo.completion_models.infrastructure.web_search import (
-        WebSearchResult,
     )
     from eneo.files.file_models import File
     from eneo.governance_policy.application.effective_config_service import (
@@ -213,10 +213,6 @@ class AssistantService:
         )
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
-
-    @property
-    async def web_search(self):
-        return WebSearch()
 
     def validate_space_assistant(
         self,
@@ -792,10 +788,18 @@ class AssistantService:
                 MCPServers as MCPServersTable,
             )
 
+            # Web-search servers are capability markers resolved to the active
+            # provider at ask time, so a deactivated one may legitimately stay
+            # attached; only general servers must be currently enabled.
             mcp_servers_query = (
                 sa.select(MCPServersTable.id)
                 .where(MCPServersTable.tenant_id == self.user.tenant_id)
-                .where(MCPServersTable.is_enabled == True)  # noqa: E712
+                .where(
+                    sa.or_(
+                        MCPServersTable.is_enabled == True,  # noqa: E712
+                        MCPServersTable.purpose == "web_search",
+                    )
+                )
                 .where(MCPServersTable.id.in_(mcp_server_ids))
             )
             mcp_servers_result = await self.repo.session.execute(mcp_servers_query)
@@ -1194,7 +1198,6 @@ class AssistantService:
         assistant_id: UUID,
         question_id: UUID,
         version: int = 1,
-        web_search_results: Sequence["WebSearchResult"] | None = None,
         assistant_selector_tokens: int = 0,
     ) -> str | AsyncGenerator[Completion, None]:
         # Capture tenant_id outside the generator so the abort-path background save
@@ -1445,7 +1448,6 @@ class AssistantService:
                         generated_files=generated_files,
                         logging_details=response.extended_logging
                         or LoggingDetails(model_kwargs={}),
-                        web_search_results=list(web_search_results or []),
                         tool_calls=tool_calls if tool_calls else None,
                         mcp_tool_references=mcp_tool_references or None,
                         reasoning=reasoning_string or None,
@@ -1570,7 +1572,6 @@ class AssistantService:
                 info_blob_chunks=reference_chunks,
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
-                web_search_results=list(web_search_results or []),
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
             )
@@ -1699,7 +1700,6 @@ class AssistantService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
-        use_web_search: bool = False,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
@@ -1829,6 +1829,32 @@ class AssistantService:
                 "No completion model configured for this conversation.",
             )
 
+        # Web search: an attached purpose=web_search server is a capability
+        # marker, not a provider pin. The tenant's currently ACTIVE provider is
+        # resolved here and attached in its place, so switching providers never
+        # requires reconfiguring spaces or assistants. Attached (possibly
+        # stale or deactivated) web-search servers are stripped from the
+        # ordinary set; if no provider is active or the model cannot call
+        # tools, the capability is silently unavailable this turn.
+        web_search_base = (
+            mcp_servers_override
+            if mcp_servers_override is not None
+            else list(assistant_to_ask.mcp_servers)
+        )
+        web_search_mcp_server: "MCPServer | None" = None
+        if any(server.purpose == "web_search" for server in web_search_base):
+            mcp_servers_override = [
+                server for server in web_search_base if server.purpose != "web_search"
+            ]
+            if effective_completion_model.supports_tool_calling:
+                active_provider = await get_active_web_search_server(
+                    self.repo.session, self.user.tenant_id
+                )
+                if active_provider is not None and usable_web_search_tools(
+                    active_provider
+                ):
+                    web_search_mcp_server = active_provider
+
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
         # row is created — same "fail before persisting" carve-out as governance.
@@ -1889,12 +1915,6 @@ class AssistantService:
             assistant_id=assistant_to_ask.id,
             completion_model=cast("AICompletionModel", effective_completion_model),
         )
-
-        if use_web_search and version == 2:
-            web_search = await self.web_search
-            web_search_results = await web_search.search(search_query=question)
-        else:
-            web_search_results = []
 
         # Internal (loopback) MCP servers are scoped by one short-lived token
         # per completion, minted only when some server actually attaches.
@@ -1971,7 +1991,7 @@ class AssistantService:
             files=completion_file_inputs.completion_message_files,
             stream=stream,
             version=version,
-            web_search_results=web_search_results,
+            web_search_mcp_server=web_search_mcp_server,
             require_tool_approval=require_tool_approval,
             completion_model_override=completion_model_override,
             mcp_servers_override=mcp_servers_override,
@@ -1996,7 +2016,6 @@ class AssistantService:
             assistant_id=assistant_to_ask.id,
             question_id=question_id,
             version=version,
-            web_search_results=web_search_results,
             assistant_selector_tokens=assistant_selector_tokens,
         )
 
@@ -2022,7 +2041,6 @@ class AssistantService:
                 ]
             ),
             description=assistant_to_ask.description,
-            web_search_results=web_search_results,
             question_id=question_id,
             mcp_tool_references=mcp_tool_references,
         )

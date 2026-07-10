@@ -285,12 +285,18 @@ class MCPClient:
         """
         headers: dict[str, str] = {}
 
-        token: Optional[str] = None
         if self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
-
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        elif self.mcp_server.http_auth_type == "api_key_header":
+            # Admin-chosen header (e.g. X-Api-Key). The name is validated at
+            # configuration time against HTTP token syntax and a deny-list of
+            # transport/session headers, so it can be emitted as-is here.
+            header_name = self.auth_credentials.get("header_name")
+            token = self.auth_credentials.get("token")
+            if header_name and token:
+                headers[header_name] = token
 
         # Forward acting user/tenant identity only when this server opted in.
         # Added after the bearer token; the builder never emits Authorization,

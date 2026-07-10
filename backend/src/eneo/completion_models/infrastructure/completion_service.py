@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         CompletionModelAdapter,
     )
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -295,7 +294,6 @@ class CompletionService:
         prompt_files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
-        web_search_results: list["WebSearchResult"] | None = None,
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
@@ -314,8 +312,6 @@ class CompletionService:
             transcription_inputs = []
         if info_blob_chunks is None:
             info_blob_chunks = []
-        if web_search_results is None:
-            web_search_results = []
         if mcp_servers is None:
             mcp_servers = []
         # Org-level disable must be honored at runtime. Disabling a server only
@@ -389,7 +385,6 @@ class CompletionService:
                 transcription_inputs=transcription_inputs,
                 version=version,
                 use_image_generation=use_image_generation,
-                web_search_results=web_search_results,
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
                 knowledge_catalog=knowledge_catalog,

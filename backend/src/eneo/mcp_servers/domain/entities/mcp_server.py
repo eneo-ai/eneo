@@ -18,6 +18,7 @@ class MCPServerTool(Entity):
         mcp_server_id: UUID,
         name: str,
         title: Optional[str] = None,
+        display_name: Optional[str] = None,
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
         is_enabled_by_default: bool = True,
@@ -33,6 +34,7 @@ class MCPServerTool(Entity):
         self.mcp_server_id = mcp_server_id
         self.name = name
         self.title = title
+        self.display_name = display_name
         self.description = description
         self.input_schema = input_schema
         self.is_enabled_by_default = is_enabled_by_default
@@ -53,6 +55,7 @@ class MCPServer(Entity):
         description: Optional[str] = None,
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
+        purpose: str = "general",
         is_enabled: bool = True,
         forward_identity: bool = False,
         env_vars: Optional[dict[str, Any]] = None,
@@ -72,6 +75,7 @@ class MCPServer(Entity):
         self.http_url = http_url
         self.http_auth_type = http_auth_type
         self.http_auth_config_schema = http_auth_config_schema
+        self.purpose = purpose
         self.is_enabled = is_enabled
         self.forward_identity = forward_identity
         self.env_vars = env_vars

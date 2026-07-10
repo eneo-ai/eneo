@@ -3,7 +3,7 @@
 # Inline instruction appended after the MCP resource blocks. Lives next to the
 # data so the model gets the citation rule whenever a tool returns resources,
 # without requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires
-# when knowledge/web_search results are present, leaving MCP-only flows untaught).
+# when knowledge results are present, leaving MCP-only flows untaught).
 # Each resource is a self-describing, triple-quoted block whose attribution rides
 # in the server-provided text; Eneo prepends only a source_id line for citation.
 MCP_TOOL_REFERENCES_INSTRUCTION = (

@@ -201,7 +201,6 @@ class _Prompt:
         self.prompt: str | None = None
         self.knowledge: str | None = None
         self.knowledge_catalog: str | None = None
-        self.web_search_result: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
         self.version: int = version
@@ -214,9 +213,8 @@ class _Prompt:
         if self.prompt:
             components.append(self.prompt)
 
-        # Add references prompt if either knowledge or web search results exist
-        # but only for version 2
-        if (self.knowledge or self.web_search_result) and self.version == 2:
+        # Add references prompt if knowledge exists, but only for version 2
+        if self.knowledge and self.version == 2:
             components.append(SHOW_REFERENCES_PROMPT)
 
         # Add hallucination guard for version 1 knowledge
@@ -228,9 +226,6 @@ class _Prompt:
 
         if self.knowledge_catalog:
             components.append(self.knowledge_catalog)
-
-        if self.web_search_result:
-            components.append(self.web_search_result)
 
         if self.attachments:
             components.append(self.attachments)
@@ -413,15 +408,6 @@ class _Prompt:
 
         self.prompt = prompt
 
-    def add_web_search_result(
-        self, web_search_results: Sequence[_InformationChunkLike] | None = None
-    ) -> None:
-        if web_search_results is None:
-            web_search_results = []
-        self.web_search_result = self._create_information_string(
-            information_chunks=web_search_results
-        )
-
     def add_knowledge_catalog(self, catalog: str) -> None:
         self.knowledge_catalog = catalog or None
 
@@ -594,7 +580,6 @@ class ContextBuilder:
         session: Optional[SessionInDB] = None,
         version: int = 1,
         use_image_generation: bool = False,
-        web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
@@ -610,8 +595,6 @@ class ContextBuilder:
             transcription_inputs = []
         if info_blob_chunks is None:
             info_blob_chunks = []
-        if web_search_results is None:
-            web_search_results = []
         if mcp_tools is None:
             mcp_tools = []
         tokens_used = 0
@@ -676,8 +659,6 @@ class ContextBuilder:
         _prompt.add_attachments(
             files=self._get_files_by_type(prompt_files, FileType.TEXT)
         )
-        # Add web search results first so references prompt appears before knowledge
-        _prompt.add_web_search_result(web_search_results=web_search_results)
         # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
         # content itself stays behind the knowledge-MCP search tool.
         _prompt.add_knowledge_catalog(knowledge_catalog)

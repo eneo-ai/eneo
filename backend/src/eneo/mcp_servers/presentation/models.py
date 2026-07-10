@@ -10,6 +10,13 @@ from eneo.security_classifications.presentation.security_classification_models i
 
 T = TypeVar("T", bound=BaseModel)
 
+MCPServerPurpose = Literal["general", "web_search"]
+
+# "api_key_header" sends the credential in an admin-chosen header
+# (e.g. X-Api-Key). Header name is validated server-side against HTTP token
+# syntax and a deny-list of transport-level headers.
+MCPServerAuthType = Literal["none", "bearer", "api_key_header"]
+
 
 class BaseListModel(BaseModel, Generic[T]):
     items: list[T]
@@ -26,7 +33,9 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer"
+    http_auth_type: str  # "none", "bearer", "api_key_header"
+    purpose: MCPServerPurpose = "general"
+    is_enabled: bool = True
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
     forward_identity: bool = False
@@ -45,7 +54,8 @@ class MCPServerCreate(BaseModel):
 
     name: str
     http_url: AnyHttpUrl
-    http_auth_type: Literal["none", "bearer"] = "none"
+    http_auth_type: MCPServerAuthType = "none"
+    purpose: MCPServerPurpose = "general"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     forward_identity: bool = False
@@ -60,7 +70,7 @@ class MCPServerUpdate(BaseModel):
 
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
-    http_auth_type: Optional[Literal["none", "bearer"]] = None
+    http_auth_type: Optional[MCPServerAuthType] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     forward_identity: Optional[bool] = None
@@ -130,6 +140,7 @@ class MCPServerToolPublic(BaseModel):
     mcp_server_id: UUID
     name: str
     title: Optional[str] = None
+    display_name: Optional[str] = None
     description: Optional[str]
     input_schema: Optional[dict[str, Any]]
     is_enabled_by_default: bool
@@ -147,6 +158,15 @@ class MCPServerToolUpdate(BaseModel):
     """DTO for updating tenant-level tool settings."""
 
     is_enabled: bool
+
+
+class MCPServerToolRename(BaseModel):
+    """DTO for setting an admin display name on a tool.
+
+    None clears the override, falling back to the remote-synced title.
+    """
+
+    display_name: Optional[str] = None
 
 
 class MCPConnectionStatus(BaseModel):
@@ -201,3 +221,10 @@ class ToolReviewResponse(BaseModel):
     approved_tools: list[MCPServerToolPublic] = []
     rejected_tools: list[MCPServerToolPublic] = []
     deleted_count: int = 0
+
+
+class WebSearchActivationResponse(BaseModel):
+    """Response after activating a web-search provider."""
+
+    server: MCPServerPublic
+    deactivated_server_ids: list[UUID] = []

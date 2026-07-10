@@ -129,7 +129,6 @@ class ConversationRequest(_ConversationTarget):
     files: list[ModelId] = Field(default=[])
     stream: bool = False
     tools: Optional[UseTools] = None
-    use_web_search: bool = False
     require_tool_approval: bool = False
     # MCP servers the user turned off in the composer for this message. Narrows
     # the otherwise-active set (assistant's own servers, or policy-granted ones

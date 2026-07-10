@@ -33,7 +33,6 @@ from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
         McpSessionLifecycleService,
     )
@@ -337,7 +336,6 @@ class SessionService:
                 info_blob_chunks=[],
                 files=list(files or []),
                 generated_files=[],
-                web_search_results=[],
             )
 
         assert question_record is not None, (
@@ -357,7 +355,6 @@ class SessionService:
         info_blob_chunks: list[InfoBlobChunkInDBWithScore],
         generated_files: Sequence[File] | None = None,
         logging_details: LoggingDetails | None = None,
-        web_search_results: Sequence["WebSearchResult"] | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
@@ -377,9 +374,6 @@ class SessionService:
                 reasoning=reasoning,
                 info_blob_chunks=info_blob_chunks,
                 generated_files=list(generated_files) if generated_files else None,
-                web_search_results=list(web_search_results)
-                if web_search_results
-                else None,
                 logging_details=logging_details,
                 mcp_tool_references=mcp_tool_references,
             )

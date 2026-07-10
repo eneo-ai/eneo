@@ -160,7 +160,6 @@ async def test_complete_question_with_answer_updates_existing_row(
             info_blob_chunks=[],
             generated_files=None,
             logging_details=None,
-            web_search_results=None,
             tool_calls=None,
         )
 
