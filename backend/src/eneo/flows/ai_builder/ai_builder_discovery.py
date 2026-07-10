@@ -120,7 +120,10 @@ from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     has_low_confidence_signals,
     score_conversation_signals,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationResult
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    SlotClassificationResult,
+)
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.domain.flow import Flow
 
@@ -152,7 +155,11 @@ def analyze_discovery(
             low_signal = next(
                 (s for s in reversed(scored) if s.confidence == "low"), None
             )
-            if low_signal is not None:
+            if low_signal is not None and not _classifier_resolved_question(
+                question_id=low_signal.question_id,
+                profile=profile,
+                slot_classification_result=slot_classification_result,
+            ):
                 suggestion = question_suggestion_for_id(
                     low_signal.question_id, language=profile.language
                 )
@@ -188,6 +195,37 @@ def analyze_discovery(
         mvs_met=mvs_met,
         selected_question_ids=tuple(selected_question_ids),
         assumptions=tuple(assumptions),
+    )
+
+
+def _classifier_resolved_question(
+    *,
+    question_id: str,
+    profile: DiscoveryProfile,
+    slot_classification_result: SlotClassificationResult | None,
+) -> bool:
+    if slot_classification_result is None:
+        return False
+    canonical_id = canonical_question_id(question_id)
+    classifier_slot = next(
+        (
+            slot
+            for slot in slot_classification_result.slots
+            if slot.slot_name == canonical_id
+        ),
+        None,
+    )
+    if (
+        classifier_slot is None
+        or classifier_slot.confidence == "low"
+        or classifier_slot.value == UNKNOWN_SLOT_VALUE
+    ):
+        return False
+    resolved_slot = profile.resolved_slot(canonical_id)
+    return (
+        resolved_slot is not None
+        and classifier_slot.value == resolved_slot.value
+        and resolved_slot.confidence != "low"
     )
 
 

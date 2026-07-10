@@ -42,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
@@ -50,7 +51,13 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
-from eneo.flows.ai_builder.planning_state import FileRoleEvidence, PlanningState
+from eneo.flows.ai_builder.planning_state import (
+    FileRoleEvidence,
+    PlanningState,
+    ResolvedSlot,
+    SlotConfidence,
+    SlotSource,
+)
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -73,6 +80,221 @@ def _make_turn(
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         base_planning_state_version=base_planning_state_version,
     )
+
+
+def _resolved_slot(
+    name: str,
+    value: str,
+    *,
+    source: SlotSource = "model",
+    confidence: SlotConfidence = "high",
+) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source=source,
+        confidence=confidence,
+        evidence=["quote:test"],
+    )
+
+
+class TestLowConfidenceDiscoveryGate:
+    def test_low_confidence_question_still_fires_without_classifier_result(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Analyze file output report",
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots["terminal_output"] = _resolved_slot(
+            "terminal_output",
+            "structured_text",
+            confidence="medium",
+        )
+
+        with (
+            patch(
+                "eneo.flows.ai_builder.ai_builder_discovery._build_raw_discovery_issues",
+                return_value=[],
+            ),
+            patch(
+                "eneo.flows.ai_builder.ai_builder_discovery.score_conversation_signals",
+                return_value=[
+                    ScoredSignal(
+                        question_id="terminal_output",
+                        value="structured_text",
+                        confidence="low",
+                        source="freeform_text",
+                    )
+                ],
+            ),
+        ):
+            analysis = analyze_discovery(conversation, planning_state=planning_state)
+
+        assert "low_confidence_terminal_output" in {
+            issue.issue_id for issue in analysis.issues
+        }
+
+    def test_classifier_resolved_slot_suppresses_low_confidence_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Analyze file output report",
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots["terminal_output"] = _resolved_slot(
+            "terminal_output",
+            "structured_text",
+            confidence="medium",
+        )
+
+        with (
+            patch(
+                "eneo.flows.ai_builder.ai_builder_discovery._build_raw_discovery_issues",
+                return_value=[],
+            ),
+            patch(
+                "eneo.flows.ai_builder.ai_builder_discovery.score_conversation_signals",
+                return_value=[
+                    ScoredSignal(
+                        question_id="terminal_output",
+                        value="structured_text",
+                        confidence="low",
+                        source="freeform_text",
+                    )
+                ],
+            ),
+        ):
+            analysis = analyze_discovery(
+                conversation,
+                planning_state=planning_state,
+                slot_classification_result=SlotClassificationResult(
+                    slots=(
+                        ClassifiedSlot(
+                            slot_name="terminal_output",
+                            value="structured_text",
+                            confidence="medium",
+                            reason="user asked for text output",
+                            evidence=("output report",),
+                        ),
+                    )
+                ),
+            )
+
+        assert "low_confidence_terminal_output" not in {
+            issue.issue_id for issue in analysis.issues
+        }
+
+    @pytest.mark.parametrize(
+        (
+            "accepted_value",
+            "accepted_source",
+            "classifier_value",
+            "expects_question",
+        ),
+        [
+            pytest.param(
+                "structured_text",
+                "model",
+                "structured_text",
+                False,
+                id="same_accepted_value",
+            ),
+            pytest.param(
+                "structured_text",
+                "requirements_summary",
+                "pdf_document",
+                True,
+                id="rejected_different_value",
+            ),
+            pytest.param(
+                "pdf_document",
+                "structured_answer",
+                "pdf_document",
+                False,
+                id="later_explicit_correction",
+            ),
+            pytest.param(
+                None,
+                None,
+                "structured_text",
+                True,
+                id="missing_accepted_evidence",
+            ),
+        ],
+    )
+    def test_classifier_suppression_tracks_the_accepted_value(
+        self,
+        accepted_value: str | None,
+        accepted_source: SlotSource | None,
+        classifier_value: str,
+        expects_question: bool,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Analyze file output report",
+            )
+        ]
+        planning_state = PlanningState.empty()
+        if accepted_value is not None:
+            assert accepted_source is not None
+            planning_state.resolved_slots["terminal_output"] = _resolved_slot(
+                "terminal_output",
+                accepted_value,
+                source=accepted_source,
+            )
+        classifier_result = SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value=classifier_value,
+                    confidence="medium",
+                    reason="user asked for this output",
+                    evidence=("output report",),
+                ),
+            )
+        )
+
+        with (
+            patch(
+                "eneo.flows.ai_builder.ai_builder_discovery._build_raw_discovery_issues",
+                return_value=[],
+            ),
+            patch(
+                "eneo.flows.ai_builder.ai_builder_discovery.score_conversation_signals",
+                return_value=[
+                    ScoredSignal(
+                        question_id="terminal_output",
+                        value="structured_text",
+                        confidence="low",
+                        source="freeform_text",
+                    )
+                ],
+            ),
+        ):
+            analyses = tuple(
+                analyze_discovery(
+                    conversation,
+                    planning_state=planning_state,
+                    slot_classification_result=classifier_result,
+                )
+                for _ in range(2)
+            )
+
+        question_presence = tuple(
+            "low_confidence_terminal_output"
+            in {issue.issue_id for issue in analysis.issues}
+            for analysis in analyses
+        )
+        assert question_presence == (expects_question, expects_question)
+        assert analyses[0] == analyses[1]
 
 
 # ---------------------------------------------------------------------------
