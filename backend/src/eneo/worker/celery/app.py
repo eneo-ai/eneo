@@ -21,6 +21,15 @@ def create_celery_app(
     app = Celery(app_name)
     conf: Any = getattr(app, "conf")
     visibility_timeout = settings.celery_visibility_timeout_seconds
+    redis_transport_options = {
+        "visibility_timeout": visibility_timeout,
+        "socket_timeout": settings.redis_conn_timeout,
+        "socket_connect_timeout": settings.redis_conn_timeout,
+        "retry_on_timeout": settings.redis_retry_on_timeout,
+        "socket_keepalive": settings.redis_socket_keepalive,
+        "health_check_interval": settings.redis_health_check_interval,
+        "max_connections": settings.redis_max_connections,
+    }
     conf.update(
         broker_url=build_redis_url(settings.redis_db_celery_broker),
         result_backend=build_redis_url(settings.redis_db_celery_result),
@@ -30,13 +39,10 @@ def create_celery_app(
         task_reject_on_worker_lost=True,
         worker_prefetch_multiplier=1,
         broker_connection_retry_on_startup=True,
+        broker_connection_timeout=settings.redis_conn_timeout,
         # Broker visibility controls redelivery; mirror it across Celery's Redis knobs.
-        broker_transport_options={
-            "visibility_timeout": visibility_timeout,
-        },
-        result_backend_transport_options={
-            "visibility_timeout": visibility_timeout,
-        },
+        broker_transport_options=redis_transport_options,
+        result_backend_transport_options=dict(redis_transport_options),
         visibility_timeout=visibility_timeout,
     )
     return app

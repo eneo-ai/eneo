@@ -71,7 +71,7 @@ async def dispatch_flow_run_recoverably_after_commit(
     """Claim, send, and durably record one due dispatch attempt.
 
     The claim commits before broker I/O. Broker acceptance is not exactly-once:
-    if its local success write is lost, the pre-scheduled claim becomes due again
+    the bounded recovery deadline remains armed until a worker claims the run,
     and the worker's status-and-revision CAS rejects duplicate tasks.
     """
 

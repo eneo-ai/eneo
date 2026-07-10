@@ -60,7 +60,7 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
     assert queued_run["dispatch_attempt_count"] == 1
     assert queued_run["dispatch_last_attempt_at"] is not None
     assert queued_run["dispatched_at"] is not None
-    assert queued_run["dispatch_next_attempt_at"] is None
+    assert queued_run["dispatch_next_attempt_at"] is not None
 
     await flow_broker_worker_seam.start_worker(crash_after_attempt_start_run_id=run_id)
     (
@@ -84,7 +84,7 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
     )
     assert evidence["run"]["output_payload_json"] is None
 
-    await flow_broker_worker_seam.wait_for_worker_loss(timeout_seconds=30)
+    await flow_broker_worker_seam.wait_for_worker_child_exit(timeout_seconds=30)
     redelivery_result = await flow_broker_worker_seam.wait_for_task_result(
         task_id=task_id,
         timeout_seconds=30,

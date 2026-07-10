@@ -159,7 +159,7 @@ async def test_dispatch_coordinator_commits_claim_before_broker_and_records_acce
     )
     accepted = claimed.model_copy(
         update={
-            "dispatch_next_attempt_at": None,
+            "dispatch_next_attempt_at": run.created_at + timedelta(seconds=120),
             "dispatched_at": run.created_at + timedelta(seconds=1),
         }
     )
@@ -200,6 +200,9 @@ async def test_dispatch_coordinator_commits_claim_before_broker_and_records_acce
 
     assert isinstance(result, FlowRunDispatchAccepted)
     assert result.run is accepted
+    assert result.run.dispatch_next_attempt_at == run.created_at + timedelta(
+        seconds=120
+    )
     assert events == [
         "transaction_enter",
         "transaction_exit",

@@ -2974,7 +2974,7 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
         assert accepted.dispatch_attempt_count == 2
         assert accepted.dispatch_last_attempt_at == second_attempt_at
         assert accepted.dispatch_last_error == safe_error
-        assert accepted.dispatch_next_attempt_at is None
+        assert accepted.dispatch_next_attempt_at == accepted_at + timedelta(seconds=120)
         assert accepted.dispatched_at == accepted_at
         assert accepted.dispatch_pending_since == first_pending_since
         assert accepted.updated_at == first_stable_updated_at

@@ -362,6 +362,11 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
         flow_celery_maintenance_queue="flows.maintenance",
         celery_visibility_timeout_seconds=7200,
         flow_task_timeout_seconds=540,
+        redis_conn_timeout=5,
+        redis_retry_on_timeout=True,
+        redis_socket_keepalive=True,
+        redis_health_check_interval=30,
+        redis_max_connections=64,
     )
     monkeypatch.setattr(celery_app_module, "get_settings", lambda: settings)
     monkeypatch.setattr(shared_celery_app_module, "get_settings", lambda: settings)
@@ -394,8 +399,18 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.task_acks_late is True
     assert app.conf.broker_connection_retry_on_startup is True
-    assert app.conf.broker_transport_options["visibility_timeout"] == 7200
-    assert app.conf.result_backend_transport_options["visibility_timeout"] == 7200
+    assert app.conf.broker_connection_timeout == 5
+    expected_transport_options = {
+        "visibility_timeout": 7200,
+        "socket_timeout": 5,
+        "socket_connect_timeout": 5,
+        "retry_on_timeout": True,
+        "socket_keepalive": True,
+        "health_check_interval": 30,
+        "max_connections": 64,
+    }
+    assert app.conf.broker_transport_options == expected_transport_options
+    assert app.conf.result_backend_transport_options == expected_transport_options
     assert app.conf.visibility_timeout == 7200
     assert app.conf.task_soft_time_limit == 540
     assert app.conf.task_time_limit == 600

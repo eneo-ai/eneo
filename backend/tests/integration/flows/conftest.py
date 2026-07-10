@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -18,6 +19,7 @@ import sqlalchemy as sa
 from celery import Celery
 from dependency_injector import providers
 from httpx import AsyncClient
+from redis.asyncio import Redis as AsyncRedis
 from testcontainers.redis import RedisContainer
 
 from eneo.database.tables.roles_table import Roles
@@ -40,15 +42,17 @@ from tests.integration.conftest import (
 
 _FLOW_TASK_TIMEOUT_SECONDS = 5
 _FLOW_VISIBILITY_TIMEOUT_SECONDS = 90
-_MODEL_API_KEY_ENV_VARS = (
-    "ANTHROPIC_API_KEY",
-    "AZURE_API_KEY",
-    "FLUX_API_KEY",
-    "MISTRAL_API_KEY",
-    "OPENAI_API_KEY",
-    "OVHCLOUD_API_KEY",
-    "TAVILY_API_KEY",
-    "VLLM_API_KEY",
+_WORKER_PARENT_ENV_ALLOWLIST = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PYTHONIOENCODING",
+    "PYTHONPATH",
+    "PYTHONUNBUFFERED",
+    "TMPDIR",
+    "TZ",
+    "VIRTUAL_ENV",
 )
 
 
@@ -78,9 +82,10 @@ class FlowProcessAuthHeaders(Mapping[str, str]):
         return "FlowProcessAuthHeaders(<redacted>)"
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, repr=False)
 class FlowBrokerWorkerSeam:
     celery_app: Celery
+    broker_client: AsyncRedis
     queue_name: str
     worker_hostname: str
     worker_environment: dict[str, str]
@@ -88,6 +93,17 @@ class FlowBrokerWorkerSeam:
     task_timeout_seconds: int
     worker_process: subprocess.Popen[str] | None = None
     worker_log: TextIO | None = None
+
+    async def discard_single_queued_delivery(self) -> None:
+        pending_count = await self.broker_client.llen(self.queue_name)
+        if pending_count != 1:
+            raise AssertionError(
+                "Expected exactly one delivery on the disposable Flow queue, "
+                f"found {pending_count}."
+            )
+        deleted_count = await self.broker_client.delete(self.queue_name)
+        if deleted_count != 1:
+            raise AssertionError("The disposable Flow queue delivery was not deleted.")
 
     async def start_worker(
         self, *, crash_after_attempt_start_run_id: str | None = None
@@ -219,7 +235,7 @@ class FlowBrokerWorkerSeam:
             f"worker log tail:\n{self.worker_log_tail()}"
         )
 
-    async def wait_for_worker_loss(self, *, timeout_seconds: float = 30) -> None:
+    async def wait_for_worker_child_exit(self, *, timeout_seconds: float = 30) -> None:
         deadline = monotonic() + timeout_seconds
         exit_markers = (
             f"exitcode {_PROCESS_TEST_CRASH_EXIT_CODE}",
@@ -231,9 +247,7 @@ class FlowBrokerWorkerSeam:
             log_text = self.worker_log_path.read_text(
                 encoding="utf-8", errors="replace"
             )
-            if "WorkerLostError" in log_text and any(
-                marker in log_text for marker in exit_markers
-            ):
+            if any(marker in log_text for marker in exit_markers):
                 return
             await asyncio.sleep(0.1)
         raise AssertionError(
@@ -261,27 +275,28 @@ class FlowBrokerWorkerSeam:
         return "\n".join(lines[-line_count:])
 
     async def close(self) -> None:
-        process = self.worker_process
-        if process is not None and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.to_thread(process.wait, 10)
-            except subprocess.TimeoutExpired:
+        try:
+            process = self.worker_process
+            if process is not None and process.poll() is None:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-                await asyncio.to_thread(process.wait, 10)
-        elif process is not None:
-            await asyncio.to_thread(process.wait)
-
-        if self.worker_log is not None:
-            self.worker_log.close()
-        self.worker_process = None
-        self.worker_log = None
+                try:
+                    await asyncio.to_thread(process.wait, 10)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await asyncio.to_thread(process.wait, 10)
+            elif process is not None:
+                await asyncio.to_thread(process.wait)
+        finally:
+            if self.worker_log is not None:
+                self.worker_log.close()
+            self.worker_process = None
+            self.worker_log = None
 
     async def _wait_until_worker_ready(self, *, timeout_seconds: float) -> None:
         deadline = monotonic() + timeout_seconds
@@ -426,13 +441,9 @@ async def flow_broker_worker_seam(
     redis = RedisContainer(image="redis:7-alpine")
     if _TEST_NETWORK:
         redis = redis.with_kwargs(network=_TEST_NETWORK)
-    redis_started = False
-    celery_app: Celery | None = None
-    seam: FlowBrokerWorkerSeam | None = None
-    backend_overridden = False
-    try:
+    async with AsyncExitStack() as cleanup:
         await asyncio.to_thread(redis.start)
-        redis_started = True
+        cleanup.push_async_callback(asyncio.to_thread, redis.stop)
         redis_host, redis_port = _disposable_redis_endpoint(redis)
         identity = uuid4().hex
         queue_name = f"flows.wi04b.{identity}"
@@ -457,6 +468,7 @@ async def flow_broker_worker_seam(
             celery_app = create_flow_celery_app()
         finally:
             set_settings(original_settings)
+        cleanup.callback(celery_app.close)
 
         assert celery_app.conf.task_acks_late is True
         assert celery_app.conf.task_reject_on_worker_lost is True
@@ -471,9 +483,18 @@ async def flow_broker_worker_seam(
             queue_name=queue_name,
         )
         Container.flow_execution_backend.override(providers.Object(execution_backend))
-        backend_overridden = True
+        cleanup.callback(Container.flow_execution_backend.reset_last_overriding)
+        broker_client = AsyncRedis(
+            host=redis_host,
+            port=redis_port,
+            db=runtime_settings.redis_db_celery_broker,
+            socket_timeout=runtime_settings.redis_conn_timeout,
+            socket_connect_timeout=runtime_settings.redis_conn_timeout,
+        )
+        cleanup.push_async_callback(broker_client.aclose)
         seam = FlowBrokerWorkerSeam(
             celery_app=celery_app,
+            broker_client=broker_client,
             queue_name=queue_name,
             worker_hostname=f"flow-wi04b-{identity}@%h",
             worker_environment=_flow_worker_environment(
@@ -483,33 +504,30 @@ async def flow_broker_worker_seam(
             worker_log_path=tmp_path / "flow-worker.log",
             task_timeout_seconds=_FLOW_TASK_TIMEOUT_SECONDS,
         )
+        cleanup.push_async_callback(seam.close)
         yield seam
-    finally:
-        if seam is not None:
-            await seam.close()
-        if backend_overridden:
-            Container.flow_execution_backend.reset_last_overriding()
-        if celery_app is not None:
-            celery_app.close()
-        if redis_started:
-            await asyncio.to_thread(redis.stop)
 
 
 def _disposable_redis_endpoint(redis: RedisContainer) -> tuple[str, int]:
     if not _IN_DEVCONTAINER:
         return redis.get_container_host_ip(), int(redis.get_exposed_port(6379))
 
-    container_name = redis._container.name
+    wrapped_container = redis.get_wrapped_container()
+    container_name = wrapped_container.name
     if _host_resolves(container_name):
         return container_name, 6379
-    network_ip = _container_network_ip(redis._container, _TEST_NETWORK)
+    network_ip = _container_network_ip(wrapped_container, _TEST_NETWORK)
     if network_ip:
         return network_ip, 6379
     raise RuntimeError("Disposable Flow Redis container is unreachable.")
 
 
 def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str, str]:
-    environment = dict(os.environ)
+    environment = {
+        key: value
+        for key in _WORKER_PARENT_ENV_ALLOWLIST
+        if (value := os.environ.get(key)) is not None
+    }
     environment.update(
         {
             "POSTGRES_USER": settings.postgres_user,
@@ -535,6 +553,14 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "FLOW_RUNTIME_STEP_TIMEOUT_HARD_CEILING_SECONDS": str(
                 settings.flow_runtime_step_timeout_hard_ceiling_seconds
             ),
+            "UPLOAD_FILE_TO_SESSION_MAX_SIZE": str(
+                settings.upload_file_to_session_max_size
+            ),
+            "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE": str(
+                settings.upload_image_to_session_max_size
+            ),
+            "UPLOAD_MAX_FILE_SIZE": str(settings.upload_max_file_size),
+            "TRANSCRIPTION_MAX_FILE_SIZE": str(settings.transcription_max_file_size),
             "API_PREFIX": settings.api_prefix,
             "API_KEY_LENGTH": str(settings.api_key_length),
             "API_KEY_HEADER_NAME": settings.api_key_header_name,
@@ -546,13 +572,10 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "JWT_TOKEN_PREFIX": settings.jwt_token_prefix,
             "URL_SIGNING_KEY": settings.url_signing_key,
             "ENCRYPTION_KEY": settings.encryption_key or "",
-            "ENEO_SUPER_API_KEY": settings.eneo_super_api_key or "",
             "OPENAPI_ONLY_MODE": "false",
             "TENANT_CREDENTIALS_ENABLED": "false",
             "TESTING": "true",
             "DEV": "true",
         }
     )
-    for key in _MODEL_API_KEY_ENV_VARS:
-        environment[key] = ""
     return environment

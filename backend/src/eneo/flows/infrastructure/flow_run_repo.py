@@ -488,7 +488,12 @@ class FlowRunRepository:
             .where(FlowRuns.dispatch_exhausted_at.is_(None))
             .values(
                 dispatched_at=now,
-                dispatch_next_attempt_at=None,
+                dispatch_next_attempt_at=now
+                + timedelta(
+                    seconds=flow_dispatch_retry_delay_seconds(
+                        attempt_no=expected_attempt_count
+                    )
+                ),
                 updated_at=FlowRuns.updated_at,
             )
             .returning(FlowRuns)
