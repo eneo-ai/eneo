@@ -133,6 +133,47 @@ async def test_export_service_rejects_oversized_package_bytes() -> None:
     }
 
 
+@pytest.mark.anyio
+async def test_export_service_rejects_nonportable_config_before_writing_bytes() -> None:
+    assistant_id = uuid4()
+    writes: list[object] = []
+
+    def package_writer(envelope: object) -> bytes:
+        writes.append(envelope)
+        return b"package"
+
+    export_service = FlowPackageExportService(
+        flow_service=_FakeFlowPackageExportFlowService(
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        ),
+        package_writer=package_writer,
+    )
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        await export_service.export_to_bytes(
+            flow_id=uuid4(),
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        input_config={"token": "plaintext-do-not-export"},
+                    )
+                ]
+            ),
+            manifest_metadata=_manifest_metadata(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
+    assert exc_info.value.context == {
+        "step_order": 1,
+        "config_field": "input_config",
+    }
+    assert "plaintext-do-not-export" not in str(exc_info.value)
+    assert writes == []
+
+
 def test_export_builds_portable_envelope_and_round_trips_zip() -> None:
     assistant_id = uuid4()
     model_id = uuid4()
@@ -179,6 +220,235 @@ def test_export_builds_portable_envelope_and_round_trips_zip() -> None:
     assert requirement.used_by_steps == ["step_1"]
     assert requirement.model_kind is FlowPackageModelKind.COMPLETION_MODEL
     assert read_flow_package(write_flow_package(envelope)) == envelope
+
+
+def test_export_preserves_only_strict_mode_relevant_portable_config() -> None:
+    document_assistant_id = uuid4()
+    item_assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=document_assistant_id,
+                    input_type="document",
+                    input_config={
+                        "runtime_input": {
+                            "enabled": True,
+                            "required": True,
+                            "max_files": 3,
+                            "input_format": "document",
+                            "execution_mode": "per_source",
+                            "accepted_mimetypes_override": ["application/pdf"],
+                            "label": "Documents",
+                            "description": "Upload source documents.",
+                        }
+                    },
+                    output_config={"citation_mode": "inline_inref_sidecar"},
+                ),
+                _step(
+                    2,
+                    assistant_id=item_assistant_id,
+                    input_source="previous_step",
+                    input_type="json",
+                    output_type="json",
+                    input_config={"item_map": {"enabled": True}},
+                ),
+            ]
+        ),
+        assistant_snapshots={
+            document_assistant_id: _snapshot(model_ref=None),
+            item_assistant_id: _snapshot(model_ref=None),
+        },
+        resource_bindings=tuple(),
+    )
+
+    document_step, item_step = envelope.draft.spec.steps
+    assert document_step.input_config == {
+        "runtime_input": {
+            "enabled": True,
+            "required": True,
+            "max_files": 3,
+            "input_format": "document",
+            "execution_mode": "per_source",
+            "accepted_mimetypes_override": ["application/pdf"],
+            "label": "Documents",
+            "description": "Upload source documents.",
+        }
+    }
+    assert document_step.output_config == {"citation_mode": "inline_inref_sidecar"}
+    assert item_step.input_config == {"item_map": {"enabled": True}}
+    assert item_step.output_config is None
+
+    reparsed = read_flow_package(write_flow_package(envelope))
+    assert reparsed == envelope
+    assert reparsed.content_checksum == envelope.content_checksum
+
+
+def test_export_omits_recognized_portable_config_when_mode_irrelevant() -> None:
+    assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_type="text",
+                    output_mode="compose_text",
+                    input_config={
+                        "runtime_input": {"enabled": True},
+                        "item_map": {"enabled": True},
+                    },
+                    output_config={"citation_mode": "inline_inref_sidecar"},
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    step = envelope.draft.spec.steps[0]
+    assert step.input_config is None
+    assert step.output_config is None
+
+
+@pytest.mark.parametrize(
+    ("step_kwargs", "config_field", "sensitive_value"),
+    [
+        (
+            {
+                "input_source": "http_get",
+                "input_config": {
+                    "auth": {"mode": "bearer_token", "token": "plain-bearer"}
+                },
+            },
+            "input_config",
+            "plain-bearer",
+        ),
+        (
+            {
+                "input_config": {
+                    "auth": {
+                        "mode": "api_key",
+                        "header_name": "X-API-Key",
+                        "key": "encrypted-api-key",
+                    }
+                },
+            },
+            "input_config",
+            "encrypted-api-key",
+        ),
+        (
+            {
+                "output_config": {
+                    "auth": {
+                        "mode": "basic_auth",
+                        "username": "local-user",
+                        "password": "plain-password",
+                    }
+                },
+            },
+            "output_config",
+            "plain-password",
+        ),
+        (
+            {
+                "output_config": {
+                    "auth": {
+                        "mode": "bearer_token",
+                        "token": {"$secret": "stored"},
+                    }
+                },
+            },
+            "output_config",
+            "stored",
+        ),
+        (
+            {"input_config": {"token": "unknown-plaintext"}},
+            "input_config",
+            "unknown-plaintext",
+        ),
+        (
+            {
+                "output_config": {
+                    "template_filename_preview": "unsupported-preview.docx"
+                }
+            },
+            "output_config",
+            "unsupported-preview.docx",
+        ),
+        (
+            {
+                "input_type": "document",
+                "input_config": {
+                    "runtime_input": {
+                        "enabled": True,
+                        "unexpected_secret": "nested-plaintext",
+                    }
+                },
+            },
+            "input_config",
+            "nested-plaintext",
+        ),
+    ],
+    ids=[
+        "active-http-bearer",
+        "stale-http-encrypted-api-key",
+        "stale-http-basic-password",
+        "stored-secret-sentinel",
+        "unknown-top-level-field",
+        "unknown-output-field",
+        "unknown-nested-field",
+    ],
+)
+def test_export_rejects_secret_or_unknown_step_config_without_echoing_values(
+    step_kwargs: dict[str, object],
+    config_field: str,
+    sensitive_value: str,
+) -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id, **step_kwargs)]),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
+    assert exc_info.value.context == {
+        "step_order": 1,
+        "config_field": config_field,
+    }
+    assert sensitive_value not in str(exc_info.value)
+    assert sensitive_value not in repr(exc_info.value.context)
+
+
+def test_export_validates_variables_in_emitted_portable_config() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        input_type="document",
+                        input_config={
+                            "runtime_input": {
+                                "enabled": True,
+                                "description": "Use {{ missing_value }}",
+                            }
+                        },
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
 
 
 def test_export_preserves_form_fields_from_flow_metadata() -> None:
@@ -261,8 +531,6 @@ def _mcp_snapshot(case: str) -> AssistantAuthoringSnapshot:
         {"input_bindings": {"question": "{{ missing_value }}"}},
         {"input_contract": {"description": "{{ missing_value }}"}},
         {"output_contract": {"description": "{{ missing_value }}"}},
-        {"input_config": {"description": "{{ missing_value }}"}},
-        {"output_config": {"description": "{{ missing_value }}"}},
     ],
 )
 def test_export_rejects_invalid_template_references_in_step_payloads(
@@ -461,27 +729,6 @@ def test_export_rejects_stale_template_file_refs_in_output_config() -> None:
         exc_info.value.code
         is FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
     )
-
-
-def test_export_does_not_reject_unrelated_template_named_config_keys() -> None:
-    assistant_id = uuid4()
-    envelope = _build_envelope(
-        flow=_flow(
-            steps=[
-                _step(
-                    1,
-                    assistant_id=assistant_id,
-                    output_config={"template_filename_preview": "example.docx"},
-                )
-            ]
-        ),
-        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
-        resource_bindings=tuple(),
-    )
-
-    assert envelope.draft.spec.steps[0].output_config == {
-        "template_filename_preview": "example.docx"
-    }
 
 
 def test_export_allocates_package_slots_for_unbound_snapshot_resources() -> None:
@@ -811,7 +1058,7 @@ def test_export_rejects_deeply_nested_json_payloads() -> None:
                     _step(
                         1,
                         assistant_id=assistant_id,
-                        output_config={"root": nested_payload},
+                        output_contract={"root": nested_payload},
                     )
                 ]
             ),

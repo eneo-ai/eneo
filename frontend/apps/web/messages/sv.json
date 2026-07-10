@@ -3845,6 +3845,7 @@
   "flow_package_error_flow_package_export_json_payload_too_deep": "Flödet innehåller paketmetadata som är för djupt nästlad för säker export.",
   "flow_package_error_flow_package_export_mcp_unsupported": "Flöden som använder MCP-verktyg kan inte exporteras som paket ännu.",
   "flow_package_error_flow_package_export_missing_assistant_snapshot": "Flödet saknar en assistantsnapshot som krävs för export.",
+  "flow_package_error_flow_package_export_step_config_not_portable": "Ett flödessteg innehåller konfiguration som inte kan exporteras säkert. Ta bort lokala HTTP-inloggningsuppgifter eller konfiguration som inte stöds innan export.",
   "flow_package_error_flow_package_export_template_asset_payload_unsupported": "Flöden som använder mallfilspayloads kan inte exporteras som paket ännu.",
   "flow_package_error_flow_package_export_too_large": "Det exporterade paketet är för stort för den här instansen.",
   "flow_package_error_flow_package_export_unmapped_resource_ref": "Flödet refererar till en lokal resurs som inte kan beskrivas i paketet.",

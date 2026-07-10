@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Protocol, cast
 from uuid import UUID
 
-from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_draft import (
+    FlowPackageFlowDraft,
+    FlowPackageStepInputConfig,
+    FlowPackageStepOutputConfig,
+)
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageExportError,
@@ -30,8 +35,14 @@ from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
+from eneo.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from eneo.flows.enums import FlowOutputMode
+from eneo.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+)
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -43,6 +54,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_capability_manifest import is_citation_capable_step
 from eneo.flows.flow_metadata import (
     FlowFormSchemaParseMode,
     parse_flow_form_schema,
@@ -59,6 +71,7 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.flows.flow_validators_template import has_template_fill_resource_reference
 from eneo.flows.flow_variable_definitions import PRIMARY_FLOW_INPUT_KEYS
+from eneo.flows.http_transport import contains_secret_sentinel, is_authored_config
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -280,6 +293,9 @@ def _step_spec(
             context={"step_order": step.step_order},
         )
 
+    input_config = _portable_input_config(step)
+    output_config = _portable_output_config(step)
+
     try:
         mcp_policy = MCPPolicy(step.mcp_policy.value)
         input_source = InputSource(step.input_source.value)
@@ -311,9 +327,109 @@ def _step_spec(
         input_bindings=step.input_bindings,
         input_contract=step.input_contract,
         output_contract=step.output_contract,
-        input_config=step.input_config,
-        output_config=step.output_config,
+        input_config=input_config,
+        output_config=output_config,
         review_policy=step.review_policy,
+    )
+
+
+def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
+    raw_config = step.input_config
+    if not raw_config:
+        return None
+    _reject_known_nonportable_config(
+        raw_config,
+        step_order=step.step_order,
+        config_field="input_config",
+    )
+    try:
+        # Stored config is JSON; strict JSON parsing accepts exact enum strings
+        # without enabling Python-side scalar coercion.
+        parsed = FlowPackageStepInputConfig.model_validate_json(json.dumps(raw_config))
+    except (TypeError, ValueError) as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order,
+            config_field="input_config",
+        ) from exc
+
+    portable: FlowPersistedJsonObject = {}
+    if (
+        parsed.runtime_input is not None
+        and step.input_source is FlowInputSource.FLOW_INPUT
+        and step.input_type
+        in {FlowInputType.AUDIO, FlowInputType.DOCUMENT, FlowInputType.FILE}
+    ):
+        portable["runtime_input"] = parsed.runtime_input.model_dump(
+            mode="json",
+            exclude_unset=True,
+            exclude_none=True,
+        )
+    if (
+        parsed.item_map is not None
+        and step.input_source is FlowInputSource.PREVIOUS_STEP
+        and step.input_type is FlowInputType.JSON
+        and step.output_mode is FlowOutputMode.PASS_THROUGH
+        and step.output_type is FlowOutputType.JSON
+    ):
+        portable["item_map"] = parsed.item_map.model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+    return portable or None
+
+
+def _portable_output_config(step: FlowStep) -> FlowPersistedJsonObject | None:
+    raw_config = step.output_config
+    if not raw_config:
+        return None
+    _reject_known_nonportable_config(
+        raw_config,
+        step_order=step.step_order,
+        config_field="output_config",
+    )
+    try:
+        # Keep output parsing on the same strict persisted-JSON boundary as input.
+        parsed = FlowPackageStepOutputConfig.model_validate_json(json.dumps(raw_config))
+    except (TypeError, ValueError) as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order,
+            config_field="output_config",
+        ) from exc
+
+    if parsed.citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return None
+    if not is_citation_capable_step(
+        output_type=step.output_type,
+        output_mode=step.output_mode,
+        output_config={"citation_mode": parsed.citation_mode},
+    ):
+        return None
+    return {"citation_mode": parsed.citation_mode}
+
+
+def _reject_known_nonportable_config(
+    raw_config: FlowPersistedJsonObject,
+    *,
+    step_order: int,
+    config_field: str,
+) -> None:
+    if not is_authored_config(raw_config) and not contains_secret_sentinel(raw_config):
+        return
+    raise _step_config_not_portable(
+        step_order=step_order,
+        config_field=config_field,
+    )
+
+
+def _step_config_not_portable(
+    *,
+    step_order: int,
+    config_field: str,
+) -> FlowPackageExportError:
+    return FlowPackageExportError(
+        code=FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
+        message="Flow package export found step configuration that is not safely portable.",
+        context={"step_order": step_order, "config_field": config_field},
     )
 
 

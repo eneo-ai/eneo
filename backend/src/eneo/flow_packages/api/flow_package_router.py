@@ -637,6 +637,7 @@ def _raise_export_error(exc: FlowPackageExportError) -> NoReturn:
         case (
             FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT
             | FlowPackageExportErrorCode.UNSUPPORTED_STEP_IO
+            | FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
             | FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF
             | FlowPackageExportErrorCode.DUPLICATE_RESOURCE_BINDING
             | FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED

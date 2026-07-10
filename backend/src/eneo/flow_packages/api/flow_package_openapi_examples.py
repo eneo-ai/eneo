@@ -259,6 +259,10 @@ _FLOW_PACKAGE_EXPORT_BAD_REQUEST_MESSAGES = {
     FlowPackageExportErrorCode.UNSUPPORTED_STEP_IO: (
         "Flow package export does not support this step input, output, or mode yet."
     ),
+    FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE: (
+        "Flow package export found step configuration that cannot be exported safely; "
+        "remove local credentials or unsupported configuration before exporting."
+    ),
     FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF: (
         "Flow package export requires every local resource reference to be mapped to a package slot."
     ),

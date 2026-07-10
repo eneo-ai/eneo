@@ -3845,6 +3845,7 @@
   "flow_package_error_flow_package_export_json_payload_too_deep": "The flow contains package metadata that is too deeply nested to export safely.",
   "flow_package_error_flow_package_export_mcp_unsupported": "Flows that use MCP tools cannot be exported as packages yet.",
   "flow_package_error_flow_package_export_missing_assistant_snapshot": "The flow is missing an assistant snapshot required for export.",
+  "flow_package_error_flow_package_export_step_config_not_portable": "One flow step contains configuration that cannot be exported safely. Remove local HTTP credentials or unsupported step configuration before exporting.",
   "flow_package_error_flow_package_export_template_asset_payload_unsupported": "Flows that use template file payloads cannot be exported as packages yet.",
   "flow_package_error_flow_package_export_too_large": "The exported package is too large for this instance.",
   "flow_package_error_flow_package_export_unmapped_resource_ref": "The flow references a local resource that cannot be represented in the package.",

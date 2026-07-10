@@ -63,6 +63,7 @@ export const FLOW_PACKAGE_IMPORT_ERROR_CODES = [
 export const FLOW_PACKAGE_EXPORT_ERROR_CODES = [
   "flow_package_export_missing_assistant_snapshot",
   "flow_package_export_unsupported_step_io",
+  "flow_package_export_step_config_not_portable",
   "flow_package_export_unmapped_resource_ref",
   "flow_package_export_duplicate_resource_binding",
   "flow_package_export_mcp_unsupported",

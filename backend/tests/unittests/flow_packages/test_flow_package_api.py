@@ -756,9 +756,9 @@ async def test_export_flow_package_translates_export_errors_without_audit(
 ) -> None:
     flow_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
     export_error = FlowPackageExportError(
-        code=FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT,
-        message="Assistant authoring snapshot is missing.",
-        context={"step_order": 2},
+        code=FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
+        message="Flow package export found step configuration that is not safely portable.",
+        context={"step_order": 2, "config_field": "input_config"},
     )
 
     _patch_export_access(monkeypatch, flow_id=flow_id)
@@ -790,7 +790,10 @@ async def test_export_flow_package_translates_export_errors_without_audit(
         )
 
     assert exc_info.value.code == export_error.code.value
-    assert exc_info.value.context == {"step_order": 2}
+    assert exc_info.value.context == {
+        "step_order": 2,
+        "config_field": "input_config",
+    }
     assert audit_service.events == []
 
 
