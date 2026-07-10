@@ -889,7 +889,7 @@ def test_extract_answer_signals_prefers_latest_structured_answer_for_same_questi
         ]
     )
 
-    assert signals["terminal_output"] == {"pdf_document", "pdf-dokument"}
+    assert signals["terminal_output"] == {"pdf_document"}
 
 
 def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
@@ -920,7 +920,7 @@ def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
         ]
     )
 
-    assert signals["primary_runtime_input"] == {"audio", "ljud"}
+    assert signals["primary_runtime_input"] == {"audio"}
 
 
 def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structured_answer_labels() -> (
@@ -943,7 +943,53 @@ def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structu
     )
 
     assert "primary_runtime_input" not in signals
-    assert signals["terminal_output"] == {"docx_document", "docx document"}
+    assert signals["terminal_output"] == {"docx_document"}
+
+
+@pytest.mark.parametrize(
+    "display_label",
+    ["Både avsnitt och översikt", "Both sections and overview"],
+    ids=["swedish", "english"],
+)
+def test_structured_answer_signals_use_canonical_value_not_display_label(
+    display_label: str,
+) -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": display_label,
+            "metadata": {
+                "question_answer": {
+                    "question_id": "report_disposition",
+                    "selected_option_ids": ["both"],
+                    "selected_values": ["both"],
+                }
+            },
+        }
+    ]
+
+    assert extract_answer_signals(conversation)["report_disposition"] == {"both"}
+    assert question_is_already_resolved("report_disposition", conversation)
+
+
+def test_structured_answer_signals_preserve_explicit_custom_value() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Visible custom-answer presentation",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "document_kind",
+                    "custom_value": "Use the board-report template",
+                }
+            },
+        }
+    ]
+
+    assert extract_answer_signals(conversation)["document_kind"] == {
+        "use the board-report template"
+    }
+    assert question_is_already_resolved("document_kind", conversation)
 
 
 def test_latest_pending_structured_question_reads_backend_question_payload() -> None:

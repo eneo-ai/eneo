@@ -3402,7 +3402,7 @@ def _make_flow_step(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_repeated_output_question_after_structured_answer_recovers_without_internal_error(
+async def test_ai_builder_api_does_not_repeat_report_disposition_after_structured_answer(
     client,
     bearer_token,
     completion_model_factory,
@@ -3413,23 +3413,22 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
-        space_name="AI Builder API recovery",
+        space_name="AI Builder report-disposition monotonicity",
     )
 
     initial_question = _make_tool_call(
         tool_call_id="call_q1",
         name="ask_structured_question",
         arguments={
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
+            "question_id": "report_disposition",
+            "question": "Hur ska rapporten hantera flera källdokument?",
             "options": [
                 {
-                    "id": "structured_text",
-                    "label": "Strukturerat textresultat",
+                    "id": "per_source_sections",
+                    "label": "Avsnitt per källa",
                 },
-                {"id": "pdf_document", "label": "PDF-dokument"},
-                {"id": "docx_document", "label": "DOCX-dokument"},
-                {"id": "structured_json", "label": "Strukturerad JSON"},
+                {"id": "synthesized_overview", "label": "Samlad översikt"},
+                {"id": "both", "label": "Både avsnitt och översikt"},
             ],
             "selection_mode": "single",
             "allow_custom": True,
@@ -3439,11 +3438,11 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
         tool_call_id="call_q2",
         name="ask_structured_question",
         arguments={
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
+            "question_id": "report_disposition",
+            "question": "Hur ska rapporten hantera flera källdokument?",
             "options": [
-                {"id": "structured_text", "label": "Text"},
-                {"id": "pdf_document", "label": "PDF"},
+                {"id": "per_source_sections", "label": "Avsnitt per källa"},
+                {"id": "both", "label": "Båda"},
             ],
             "selection_mode": "single",
             "allow_custom": True,
@@ -3453,13 +3452,17 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
         tool_call_id="call_requirements",
         name="confirm_requirements",
         arguments={
-            "summary": "Ett ljudbaserat transkriberingsflöde som levererar PDF.",
+            "summary": "En PDF-rapport från flera dokument.",
             "key_decisions": [
-                {"topic": "Input", "decision": "Ljudfil"},
+                {"topic": "Input", "decision": "Flera dokument"},
                 {"topic": "Output", "decision": "PDF"},
+                {
+                    "topic": "Rapportstruktur",
+                    "decision": "Källavsnitt och samlad översikt",
+                },
             ],
-            "input_description": "Användaren laddar upp en ljudfil.",
-            "output_description": "Flödet producerar en PDF-sammanfattning.",
+            "input_description": "Användaren laddar upp flera dokument.",
+            "output_description": "Flödet producerar en PDF-rapport.",
         },
     )
 
@@ -3493,25 +3496,36 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
                     client=client,
                     bearer_token=bearer_token,
                     session_id=session_id,
-                    message="Skapa en ljudfil transkriberare samt sammanfattare",
+                    message="Skapa en PDF-rapport från flera uppladdade dokument.",
                 )
                 second_events = await _send_builder_message(
                     client=client,
                     bearer_token=bearer_token,
                     session_id=session_id,
-                    message="PDF-dokument",
+                    message="Både avsnitt och översikt",
                     question_answer={
-                        "question_id": "final_output_mode",
-                        "selected_option_ids": ["pdf_document"],
-                        "selected_values": ["pdf_document"],
+                        "question_id": "report_disposition",
+                        "selected_option_ids": ["both"],
+                        "selected_values": ["both"],
                         "ui_language": "sv",
                     },
                 )
 
-    assert any(event["event"] == "question" for event in first_events)
+    assert any(
+        event["event"] == "question"
+        and cast(dict[str, object], event["data"]).get("question_id")
+        == "report_disposition"
+        for event in first_events
+    )
     assert not any(event["event"] == "error" for event in second_events)
     assert any(
         event["event"] in {"requirements_summary", "question"}
+        for event in second_events
+    )
+    assert not any(
+        event["event"] == "question"
+        and cast(dict[str, object], event["data"]).get("question_id")
+        == "report_disposition"
         for event in second_events
     )
 

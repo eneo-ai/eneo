@@ -488,8 +488,6 @@ def extract_answer_signals(
             continue
 
         values = question_answer_values(answer)
-        if isinstance(content, str) and content.strip():
-            values.add(content.casefold())
         signals[question_id] = values
     return signals
 

@@ -27,6 +27,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    question_is_already_resolved,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
@@ -892,6 +895,34 @@ class TestPolicyDefaults:
         )
 
         assert "report_disposition" not in state.resolved_slots
+
+    def test_localized_structured_answer_resolves_report_disposition(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Skapa en PDF-rapport från flera uppladdade dokument.",
+            ),
+            ConversationMessage(
+                role="user",
+                content="Både avsnitt och översikt",
+                metadata={
+                    "question_answer": {
+                        "question_id": "report_disposition",
+                        "selected_option_ids": ["both"],
+                        "selected_values": ["both"],
+                    }
+                },
+            ),
+        ]
+
+        state = build_planning_state_from_conversation(conversation)
+
+        slot = state.resolved_slots["report_disposition"]
+        assert slot.value == "both"
+        assert slot.source == "structured_answer"
+        assert slot.confidence == "high"
+        assert slot.evidence == ["question_answer:report_disposition"]
+        assert question_is_already_resolved("report_disposition", conversation)
 
     def test_document_input_defaults_to_no_extra_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
