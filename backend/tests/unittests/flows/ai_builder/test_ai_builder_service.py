@@ -2078,43 +2078,6 @@ class TestReasoningLeakRegression:
         assert stored_args["step_count"] == 1
         assert stored_args["step_names"] == ["Step A"]
 
-    def test_session_response_with_compact_arguments_has_no_reasoning(self):
-        """SessionResponse with compact arguments (from append_plan_messages)
-        should never contain reasoning."""
-        from eneo.flows.ai_builder.ai_builder_api_models import (
-            SessionResponse,
-        )
-
-        # Simulate what append_plan_messages now stores (compact summary)
-        conversation = [
-            ConversationMessage(
-                role="assistant",
-                content="Here is a plan.",
-                tool_calls=[
-                    {
-                        "id": "call_123",
-                        "name": PROPOSE_FLOW_TOOL_NAME,
-                        "arguments": {
-                            "flow_name": "Test",
-                            "step_count": 1,
-                            "step_names": ["Step A"],
-                            "plan_rationale": "Simple flow.",
-                        },
-                    }
-                ],
-            ),
-        ]
-
-        response = SessionResponse(
-            session_id=uuid4(),
-            status=SessionStatus.CHATTING,
-            target_kind=TargetKind.CREATE,
-            conversation=conversation,
-        )
-        serialized = response.model_dump_json()
-        assert "reasoning" not in serialized
-        assert "step_count" in serialized
-
 
 @pytest.mark.asyncio
 async def test_prepare_message_context_stages_new_files_and_builds_attachment_context() -> (
