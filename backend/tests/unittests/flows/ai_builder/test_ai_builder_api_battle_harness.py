@@ -112,7 +112,7 @@ def _document_plan_with_extra_text_helper() -> dict[str, Any]:
     }
 
 
-def _classifier_diagnostics() -> dict[str, Any]:
+def _classifier_diagnostics() -> dict[str, object]:
     return {
         "session_id": "00000000-0000-0000-0000-000000000001",
         "classifier_runs": [
@@ -307,7 +307,7 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
         "forbidden_assumption_topics": ["invented default"],
     }
 
-    def checks_for(diagnostics: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    def checks_for(diagnostics: dict[str, object]) -> dict[str, dict[str, object]]:
         report = harness._quality_report(
             plan={},
             summary={},

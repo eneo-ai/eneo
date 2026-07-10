@@ -26,6 +26,13 @@ class AIBuilderAttachmentContextPolicy:
     max_discovery_excerpt_chars_total: int = 4000
 
 
+AI_BUILDER_MAX_ATTACHMENTS = 100
+AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE = (
+    f"AI Builder sessions support at most {AI_BUILDER_MAX_ATTACHMENTS} attachments. "
+    "Detach an existing attachment before adding another."
+)
+
+
 AIBuilderAttachmentCoverage = Literal[
     "fully_seen",
     "excerpt_truncated",
@@ -219,17 +226,43 @@ def _fair_discovery_excerpts(
     if not readable_files:
         return excerpt_by_file
 
-    per_file_budget = min(
-        policy.max_discovery_excerpt_chars,
-        policy.max_discovery_excerpt_chars_total // len(readable_files),
+    per_file_limit = max(0, policy.max_discovery_excerpt_chars)
+    capacities = {
+        file_id: min(len(text), per_file_limit) for file_id, text in readable_files
+    }
+    allocations = {file_id: 0 for file_id, _ in readable_files}
+    remaining = min(
+        max(0, policy.max_discovery_excerpt_chars_total),
+        sum(capacities.values()),
     )
+
+    while remaining > 0:
+        active_file_ids = [
+            file_id
+            for file_id, _ in readable_files
+            if allocations[file_id] < capacities[file_id]
+        ]
+        if not active_file_ids:
+            break
+        fair_share = max(1, remaining // len(active_file_ids))
+        for file_id in active_file_ids:
+            allocation = min(
+                fair_share,
+                capacities[file_id] - allocations[file_id],
+                remaining,
+            )
+            allocations[file_id] += allocation
+            remaining -= allocation
+            if remaining == 0:
+                break
+
     for file_id, text in readable_files:
-        if per_file_budget <= 0:
+        allocation = allocations[file_id]
+        if allocation <= 0:
             continue
-        excerpt, truncated = _bounded_text(text, per_file_budget)
         excerpt_by_file[file_id] = (
-            excerpt,
-            "excerpt_truncated" if truncated else "fully_seen",
+            text[:allocation],
+            "fully_seen" if allocation == len(text) else "excerpt_truncated",
         )
     return excerpt_by_file
 

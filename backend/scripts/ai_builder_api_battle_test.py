@@ -1775,7 +1775,7 @@ def _mapping_list(value: object) -> list[Mapping[str, object]]:
 
 
 def _classifier_runs(
-    diagnostics: Mapping[str, Any] | None,
+    diagnostics: Mapping[str, object] | None,
 ) -> list[Mapping[str, object]]:
     if diagnostics is None:
         return []
@@ -1846,7 +1846,7 @@ def _classifier_claim_summary(
 
 
 def _classifier_claim_matches(
-    actual: Mapping[str, Any],
+    actual: Mapping[str, object],
     expected: Mapping[str, object],
 ) -> bool:
     for key in (
@@ -1964,7 +1964,7 @@ def _classifier_slot_is_commit_grade(
 
 def _classifier_assumptions(
     runs: list[Mapping[str, object]],
-    event_summary: Mapping[str, Any],
+    event_summary: Mapping[str, object],
 ) -> list[str]:
     assumptions = _string_list(event_summary.get("assumptions"))
     for run in runs:
@@ -1983,7 +1983,7 @@ def _quality_report(
     summary: JsonObject,
     expected: Mapping[str, Any],
     event_summary: Mapping[str, Any] | None = None,
-    classifier_diagnostics: Mapping[str, Any] | None = None,
+    classifier_diagnostics: Mapping[str, object] | None = None,
     attached_file_ids: tuple[str, ...] = (),
 ) -> JsonObject:
     checks: list[JsonObject] = []

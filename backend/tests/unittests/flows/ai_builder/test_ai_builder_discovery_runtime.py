@@ -9,6 +9,7 @@ import pytest
 from eneo.files.file_models import FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
 )
@@ -25,9 +26,14 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
+    slot_classification_provider_identity,
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -189,6 +195,33 @@ def test_slot_classification_input_preserves_typed_source_chronology() -> None:
         "internal planner prose" not in source.text
         for source in classification_input.sources
     )
+
+
+def test_slot_classification_input_rejects_attachment_inventory_over_limit() -> None:
+    attachment_context = AIBuilderAttachmentContext(
+        context=None,
+        evidence=tuple(
+            AIBuilderAttachmentEvidence(
+                file_id=uuid4(),
+                filename=f"source-{index}.txt",
+                file_type=FileType.TEXT,
+                mimetype="text/plain",
+                has_readable_text=True,
+                excerpt="evidence",
+                coverage="fully_seen",
+            )
+            for index in range(AI_BUILDER_MAX_ATTACHMENTS + 1)
+        ),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=False,
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as error:
+        build_slot_classification_input([], attachment_context)
+
+    assert error.value.code is AIBuilderErrorCode.BAD_REQUEST
+    assert str(AI_BUILDER_MAX_ATTACHMENTS) in str(error.value)
 
 
 def test_slot_classification_input_preserves_selected_option_only_answer() -> None:
@@ -1142,6 +1175,13 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
         )
     )
 
+    provider_kwargs: dict[str, object] = {
+        "custom_llm_provider": "azure",
+        "api_base": "https://flow-builder.example.com",
+        "api_version": "2026-01-01",
+        "deployment_name": "flow-builder",
+        "api_key": "test-only-secret",
+    }
     result = await build_discovery_runtime_result(
         [
             ConversationMessage(
@@ -1157,8 +1197,8 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
             )
         ],
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        litellm_model="azure/gpt-test",
+        litellm_kwargs=provider_kwargs,
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -1173,6 +1213,12 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     assert "final_output_mode" not in question_ids
     assert analysis.ready_for_confirmation is True
     assert result.slot_classification_metadata is not None
+    assert result.slot_classification_metadata.provider == (
+        slot_classification_provider_identity(
+            litellm_model="azure/gpt-test",
+            litellm_kwargs=provider_kwargs,
+        )
+    )
     assert {
         slot.slot_name: (slot.value, slot.evidence_level)
         for slot in result.slot_classification_metadata.slots

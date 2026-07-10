@@ -20,6 +20,8 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     SessionListItemResponse,
 )
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+    AI_BUILDER_MAX_ATTACHMENTS,
     readable_attachment_text,
 )
 from eneo.flows.ai_builder.ai_builder_context import (
@@ -371,6 +373,18 @@ class AIBuilderService:
         | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
+        session_file_ids = await self.repo.list_session_file_ids(
+            session_id=session.id,
+            tenant_id=self.user.tenant_id,
+        )
+        merged_file_ids = set(session_file_ids)
+        merged_file_ids.update(message_file_ids or ())
+        if len(merged_file_ids) > AI_BUILDER_MAX_ATTACHMENTS:
+            raise AIBuilderBadRequestException(
+                AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+                code=AIBuilderErrorCode.BAD_REQUEST,
+            )
+
         planner_context = build_planner_context(
             space,
             model_id=model_id,
@@ -403,10 +417,6 @@ class AIBuilderService:
                     code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
                 )
 
-        session_file_ids = await self.repo.list_session_file_ids(
-            session_id=session.id,
-            tenant_id=self.user.tenant_id,
-        )
         attachment_files: list[File] = []
         if session_file_ids:
             if self.file_service is None:
@@ -416,13 +426,10 @@ class AIBuilderService:
             attachment_files = await self.file_service.get_files_by_ids(
                 session_file_ids
             )
-        if validated_files:
-            merged_files: dict[UUID, File] = {
-                file.id: file for file in attachment_files
-            }
-            for file in validated_files:
-                merged_files[file.id] = file
-            attachment_files = list(merged_files.values())
+        merged_files: dict[UUID, File] = {file.id: file for file in attachment_files}
+        for file in validated_files:
+            merged_files[file.id] = file
+        attachment_files = list(merged_files.values())
 
         return PreparedMessageContext(
             planner_context=planner_context,

@@ -7,6 +7,8 @@ from typing import Any
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+    AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
     apply_attachment_file_roles_to_planning_state,
     render_ai_builder_attachment_evidence,
@@ -24,6 +26,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+)
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -129,6 +135,15 @@ def build_slot_classification_input(
     conversation: list[ConversationMessage],
     attachment_context: AIBuilderAttachmentContext | None,
 ) -> SlotClassificationInput:
+    if (
+        attachment_context is not None
+        and len(attachment_context.evidence) > AI_BUILDER_MAX_ATTACHMENTS
+    ):
+        raise AIBuilderBadRequestException(
+            AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+            code=AIBuilderErrorCode.BAD_REQUEST,
+        )
+
     transcript_sources: list[SlotClassificationSource] = []
     pending_question_id: str | None = None
     for message in conversation:

@@ -238,6 +238,63 @@ def test_discovery_excerpts_cover_every_file_fairly() -> None:
     assert {item.coverage for item in result.evidence} == {"excerpt_truncated"}
 
 
+def test_discovery_excerpts_redistribute_unused_short_file_capacity() -> None:
+    short_file = _make_file(name="short.txt", text="S")
+    long_file = _make_file(name="long.txt", text="L" * 100)
+
+    result = build_ai_builder_attachment_context(
+        [short_file, long_file],
+        policy=AIBuilderAttachmentContextPolicy(
+            max_discovery_excerpt_chars=100,
+            max_discovery_excerpt_chars_total=30,
+        ),
+    )
+
+    assert result is not None
+    excerpts_by_id = {item.file_id: item.excerpt or "" for item in result.evidence}
+    assert len(excerpts_by_id[short_file.id]) == 1
+    assert len(excerpts_by_id[long_file.id]) == 29
+    assert sum(len(excerpt) for excerpt in excerpts_by_id.values()) == 30
+
+
+def test_discovery_excerpts_mark_exactly_consumed_capacity_fully_seen() -> None:
+    files = [
+        _make_file(name="short.txt", text="S" * 10),
+        _make_file(name="long.txt", text="L" * 20),
+    ]
+
+    result = build_ai_builder_attachment_context(
+        files,
+        policy=AIBuilderAttachmentContextPolicy(
+            max_discovery_excerpt_chars=20,
+            max_discovery_excerpt_chars_total=30,
+        ),
+    )
+
+    assert result is not None
+    assert sum(len(item.excerpt or "") for item in result.evidence) == 30
+    assert {item.coverage for item in result.evidence} == {"fully_seen"}
+
+
+def test_discovery_excerpts_respect_per_file_limits_with_total_room_remaining() -> None:
+    files = [
+        _make_file(name="first.txt", text="A" * 100),
+        _make_file(name="second.txt", text="B" * 100),
+    ]
+
+    result = build_ai_builder_attachment_context(
+        files,
+        policy=AIBuilderAttachmentContextPolicy(
+            max_discovery_excerpt_chars=20,
+            max_discovery_excerpt_chars_total=100,
+        ),
+    )
+
+    assert result is not None
+    assert [len(item.excerpt or "") for item in result.evidence] == [20, 20]
+    assert {item.coverage for item in result.evidence} == {"excerpt_truncated"}
+
+
 def test_large_file_inventory_keeps_the_last_stable_id_beyond_legacy_prefix_budget() -> (
     None
 ):
@@ -283,6 +340,7 @@ def test_discovery_file_inventory_is_permutation_stable() -> None:
     assert {
         item.file_id: (item.excerpt, item.coverage) for item in forward.evidence
     } == {item.file_id: (item.excerpt, item.coverage) for item in reverse.evidence}
+    assert sum(len(item.excerpt or "") for item in forward.evidence) == 31
 
 
 def test_zero_excerpt_budget_keeps_inventory_and_marks_context_truncated() -> None:

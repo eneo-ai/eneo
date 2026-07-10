@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -35,6 +35,9 @@ def _make_repo_mock() -> AsyncMock:
 import pytest
 
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AI_BUILDER_MAX_ATTACHMENTS,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
@@ -47,6 +50,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     PlanStatus,
     SessionStatus,
     TargetKind,
+)
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -988,6 +995,102 @@ class TestPlannerContextPreparation:
         flow_service.get_flow_assistant_snapshots.assert_awaited_once_with(flow)
 
     @pytest.mark.anyio
+    async def test_prepare_message_context_accepts_exact_merged_attachment_limit(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        file_service = AsyncMock()
+        model = _make_model()
+        model.max_input_tokens = 4096
+        model.max_output_tokens = 2048
+        model.provider_type = "openai"
+        space = MagicMock()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+        session = _make_session(tenant_id=user.tenant_id)
+        persisted_files = [
+            _make_file(tenant_id=user.tenant_id, user_id=user.id)
+            for _ in range(AI_BUILDER_MAX_ATTACHMENTS - 1)
+        ]
+        current_file = _make_file(tenant_id=user.tenant_id, user_id=user.id)
+        files_by_id = {file.id: file for file in [*persisted_files, current_file]}
+        repo.list_session_file_ids.return_value = [file.id for file in persisted_files]
+        file_service.get_files_by_ids.side_effect = lambda file_ids: [
+            files_by_id[file_id] for file_id in file_ids
+        ]
+        planner_params_resolver = AsyncMock(return_value=("openai/gpt-test", {}))
+        service = AIBuilderService(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            completion_service=AsyncMock(),
+            space_service=AsyncMock(),
+            file_service=file_service,
+        )
+
+        context = await service.prepare_message_context(
+            session=session,
+            space=space,
+            model_id=None,
+            tenant_flow_settings=None,
+            message_file_ids=[current_file.id],
+            planner_params_resolver=planner_params_resolver,
+        )
+
+        assert len(context.attachment_files) == AI_BUILDER_MAX_ATTACHMENTS
+        assert {file.id for file in context.attachment_files} == set(files_by_id)
+
+    @pytest.mark.anyio
+    async def test_prepare_message_context_rejects_merged_attachment_limit_plus_one(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        file_service = AsyncMock()
+        model = _make_model()
+        model.max_input_tokens = 4096
+        model.max_output_tokens = 2048
+        model.provider_type = "openai"
+        space = MagicMock()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+        session = _make_session(tenant_id=user.tenant_id)
+        repo.list_session_file_ids.return_value = [
+            uuid4() for _ in range(AI_BUILDER_MAX_ATTACHMENTS - 1)
+        ]
+        current_file_ids = [uuid4(), uuid4()]
+        planner_params_resolver = AsyncMock(return_value=("openai/gpt-test", {}))
+        service = AIBuilderService(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            completion_service=AsyncMock(),
+            space_service=AsyncMock(),
+            file_service=file_service,
+        )
+
+        with pytest.raises(
+            AIBuilderBadRequestException,
+            match=f"at most {AI_BUILDER_MAX_ATTACHMENTS}",
+        ) as error:
+            await service.prepare_message_context(
+                session=session,
+                space=space,
+                model_id=None,
+                tenant_flow_settings=None,
+                message_file_ids=current_file_ids,
+                planner_params_resolver=planner_params_resolver,
+            )
+
+        assert error.value.code is AIBuilderErrorCode.BAD_REQUEST
+        assert "Detach an existing attachment" in str(error.value)
+        file_service.get_files_by_ids.assert_not_awaited()
+        planner_params_resolver.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_prepare_message_context_rejects_flow_space_mismatch(self):
         user = _make_user()
         repo = AsyncMock()
@@ -1243,8 +1346,13 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        async def classification_response(**kwargs: Any):
-            prompt = kwargs["messages"][-1]["content"]
+        async def classification_response(**kwargs: object):
+            messages = kwargs["messages"]
+            assert isinstance(messages, list)
+            latest_message = messages[-1]
+            assert isinstance(latest_message, Mapping)
+            prompt = latest_message.get("content")
+            assert isinstance(prompt, str)
             source_id = prompt.split('"source_id": "', maxsplit=1)[1].split(
                 '"', maxsplit=1
             )[0]

@@ -39,6 +39,15 @@ CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
 CLASSIFICATION_NOTE_MAX_LENGTH = 500
 CLASSIFICATION_NOTES_MAX_ITEMS = 10
+_PROVIDER_EXECUTION_IDENTITY_FIELDS = (
+    "api_base",
+    "endpoint",
+    "api_version",
+    "api_type",
+    "organization",
+    "deployment_name",
+)
+_PROVIDER_IDENTITY_LABEL_MAX_LENGTH = 63
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,9 +802,29 @@ def slot_classification_provider_identity(
 ) -> str:
     explicit_provider = litellm_kwargs.get("custom_llm_provider")
     if isinstance(explicit_provider, str) and explicit_provider.strip():
-        return explicit_provider.strip()
-    model_provider, separator, _ = litellm_model.partition("/")
-    return model_provider if separator else "unspecified"
+        provider = explicit_provider.strip()
+    else:
+        model_provider, separator, _ = litellm_model.partition("/")
+        provider = model_provider.strip() if separator else "unspecified"
+        if not provider:
+            provider = "unspecified"
+
+    execution_config = {
+        field: value.strip()
+        for field in _PROVIDER_EXECUTION_IDENTITY_FIELDS
+        if isinstance((value := litellm_kwargs.get(field)), str) and value.strip()
+    }
+    identity_payload = json.dumps(
+        {
+            "execution_config": execution_config,
+            "provider": provider,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(identity_payload.encode("utf-8")).hexdigest()
+    return f"{provider[:_PROVIDER_IDENTITY_LABEL_MAX_LENGTH]}:{digest}"
 
 
 def _bias_prompt_section(bias: SlotClassificationBias | None) -> str:

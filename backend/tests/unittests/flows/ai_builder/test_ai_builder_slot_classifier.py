@@ -661,6 +661,173 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
     assert provider_hash != base_hash
 
 
+def test_provider_execution_identity_partitions_behavior_and_excludes_secrets() -> None:
+    base_kwargs: dict[str, object] = {
+        "custom_llm_provider": "azure",
+        "api_base": "https://deployment-a.example.com",
+        "api_version": "2026-01-01",
+        "api_type": "azure",
+        "organization": "municipality-a",
+        "deployment_name": "flow-builder-a",
+    }
+    base_identity = classifier.slot_classification_provider_identity(
+        litellm_model="azure/gpt-test",
+        litellm_kwargs=base_kwargs,
+    )
+
+    for field, value in (
+        ("api_base", "https://deployment-b.example.com"),
+        ("endpoint", "https://explicit-endpoint.example.com"),
+        ("deployment_name", "flow-builder-b"),
+    ):
+        changed_identity = classifier.slot_classification_provider_identity(
+            litellm_model="azure/gpt-test",
+            litellm_kwargs={**base_kwargs, field: value},
+        )
+        assert changed_identity != base_identity
+
+    credential_only_identity = classifier.slot_classification_provider_identity(
+        litellm_model="azure/gpt-test",
+        litellm_kwargs={
+            **base_kwargs,
+            "api_key": "secret-key-b",
+            "authorization": "Bearer secret-token",
+            "cookie": "session=secret-cookie",
+            "extra_headers": {"X-Secret": "secret-header"},
+            "token": "secret-token",
+        },
+    )
+
+    assert credential_only_identity == base_identity
+    assert len(base_identity) <= 128
+    assert "secret" not in base_identity
+    assert "deployment-a.example.com" not in base_identity
+
+
+@pytest.mark.parametrize(
+    ("field", "first_value", "second_value"),
+    (
+        (
+            "api_base",
+            "https://deployment-a.example.com",
+            "https://deployment-b.example.com",
+        ),
+        ("deployment_name", "flow-builder-a", "flow-builder-b"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_classification_cache_separates_provider_execution_targets(
+    field: str,
+    first_value: str,
+    second_value: str,
+) -> None:
+    litellm_client = AsyncMock()
+    text = f"provider-target-{uuid4()}"
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "PDF report requested",
+                        "evidence": [_evidence(text)],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        )
+    )
+    common_kwargs: dict[str, object] = {
+        "custom_llm_provider": "azure",
+        "api_type": "azure",
+    }
+
+    first = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="azure/gpt-test",
+        litellm_kwargs={**common_kwargs, field: first_value},
+        classification_input=_classification_input(text),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+    second = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="azure/gpt-test",
+        litellm_kwargs={**common_kwargs, field: second_value},
+        classification_input=_classification_input(text),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cached is False
+    assert second.cached is False
+    assert litellm_client.acompletion.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_classification_cache_ignores_credential_only_differences() -> None:
+    litellm_client = AsyncMock()
+    text = f"credential-target-{uuid4()}"
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "PDF report requested",
+                        "evidence": [_evidence(text)],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        )
+    )
+    common_kwargs: dict[str, object] = {
+        "custom_llm_provider": "azure",
+        "api_base": "https://deployment.example.com",
+        "deployment_name": "flow-builder",
+    }
+
+    first = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="azure/gpt-test",
+        litellm_kwargs={
+            **common_kwargs,
+            "api_key": "secret-key-a",
+            "extra_headers": {"X-Secret": "secret-header-a"},
+        },
+        classification_input=_classification_input(text),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+    second = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="azure/gpt-test",
+        litellm_kwargs={
+            **common_kwargs,
+            "api_key": "secret-key-b",
+            "authorization": "Bearer secret-token-b",
+            "cookie": "session=secret-cookie-b",
+            "extra_headers": {"X-Secret": "secret-header-b"},
+        },
+        classification_input=_classification_input(text),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cached is False
+    assert second.cached is True
+    assert litellm_client.acompletion.await_count == 1
+
+
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     messages = classifier._build_slot_classification_prompt(
         classification_input=_classification_input("en fil jag kan ladda ner"),
