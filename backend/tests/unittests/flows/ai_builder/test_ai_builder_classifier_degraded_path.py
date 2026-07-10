@@ -12,14 +12,16 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationInput,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
-CLASSIFIER_EVAL_CASES = (
+CLASSIFIER_MERGE_CONTRACT_CASES = (
     pytest.param(
         "Jag vill transkribera ljud och få en PDF-rapport.",
         {
@@ -107,11 +109,11 @@ KEYWORD_OUTAGE_FALLBACK_CASES = (
 )
 
 
-def test_classifier_eval_cases_cover_all_llm_resolvable_slots() -> None:
+def test_classifier_merge_contract_cases_cover_all_llm_resolvable_slots() -> None:
     covered_slots = {
         slot_name
         for _text, expected_slots, _forbidden_questions in (
-            case.values for case in CLASSIFIER_EVAL_CASES
+            case.values for case in CLASSIFIER_MERGE_CONTRACT_CASES
         )
         for slot_name in expected_slots
     }
@@ -122,6 +124,8 @@ def test_classifier_eval_cases_cover_all_llm_resolvable_slots() -> None:
 def _classifier_result_for(
     text: str,
     expected_slots: dict[str, str],
+    *,
+    source_id: str = "user_message:merge-contract",
 ) -> SlotClassificationResult:
     return SlotClassificationResult(
         slots=tuple(
@@ -129,8 +133,8 @@ def _classifier_result_for(
                 slot_name=slot_name,
                 value=value,
                 confidence="high",
-                reason="understanding eval golden",
-                evidence=(text,),
+                reason="classifier result merge contract",
+                evidence=(ClassifiedEvidence(source_id=source_id, quote=text),),
             )
             for slot_name, value in expected_slots.items()
         )
@@ -245,9 +249,9 @@ async def test_classifier_outage_asks_report_disposition_instead_of_keyword_gues
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("text", "expected_slots", "forbidden_questions"),
-    CLASSIFIER_EVAL_CASES,
+    CLASSIFIER_MERGE_CONTRACT_CASES,
 )
-async def test_classifier_primary_path_suppresses_eval_baseline_questions(
+async def test_classifier_primary_path_merges_result_into_planning_state(
     monkeypatch: pytest.MonkeyPatch,
     text: str,
     expected_slots: dict[str, str],
@@ -255,9 +259,15 @@ async def test_classifier_primary_path_suppresses_eval_baseline_questions(
 ) -> None:
     async def classifier_result(**kwargs: object) -> SlotClassificationResult:
         allowed_slot_values = kwargs["allowed_slot_values"]
+        classification_input = kwargs["classification_input"]
         assert isinstance(allowed_slot_values, dict)
+        assert isinstance(classification_input, SlotClassificationInput)
         assert expected_slots.keys() <= allowed_slot_values.keys()
-        return _classifier_result_for(text, expected_slots)
+        return _classifier_result_for(
+            text,
+            expected_slots,
+            source_id=classification_input.sources[0].source_id,
+        )
 
     monkeypatch.setattr(
         ai_builder_discovery_runtime,
@@ -296,9 +306,9 @@ async def test_classifier_primary_path_suppresses_eval_baseline_questions(
 
 @pytest.mark.parametrize(
     ("text", "expected_slots", "_forbidden_questions"),
-    CLASSIFIER_EVAL_CASES,
+    CLASSIFIER_MERGE_CONTRACT_CASES,
 )
-def test_classifier_eval_cases_are_classifier_shape_ready(
+def test_classifier_merge_contract_cases_are_planning_state_ready(
     text: str,
     expected_slots: dict[str, str],
     _forbidden_questions: set[str],

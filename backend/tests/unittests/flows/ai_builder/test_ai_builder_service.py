@@ -1243,26 +1243,37 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(
-                    content=json.dumps(
-                        {
-                            "slots": [
-                                {
-                                    "slot_name": "report_disposition",
-                                    "value": "synthesized_overview",
-                                    "confidence": "high",
-                                    "reason": "The user wants to compare uploaded documents.",
-                                    "evidence": ["jämföra dem"],
-                                }
-                            ],
-                            "assumptions": [],
-                            "contradictions": [],
-                        }
-                    )
+        async def classification_response(**kwargs: Any):
+            prompt = kwargs["messages"][-1]["content"]
+            source_id = prompt.split('"source_id": "', maxsplit=1)[1].split(
+                '"', maxsplit=1
+            )[0]
+            return _make_llm_response(
+                content=json.dumps(
+                    {
+                        "slots": [
+                            {
+                                "slot_name": "report_disposition",
+                                "value": "synthesized_overview",
+                                "confidence": "high",
+                                "reason": "The user wants to compare uploaded documents.",
+                                "evidence": [
+                                    {
+                                        "source_id": source_id,
+                                        "quote": "jämföra dem",
+                                    }
+                                ],
+                                "evidence_level": "explicit",
+                            }
+                        ],
+                        "assumptions": [],
+                        "contradictions": [],
+                    }
                 )
             )
+
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(side_effect=classification_response)
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,

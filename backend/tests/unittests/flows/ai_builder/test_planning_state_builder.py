@@ -28,11 +28,14 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationConfidence,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -130,7 +133,14 @@ def _classified(
         value=value,
         confidence=confidence,
         reason=f"{slot_name} classified",
-        evidence=evidence or (f"{slot_name} evidence",),
+        evidence=_model_evidence(*(evidence or (f"{slot_name} evidence",))),
+    )
+
+
+def _model_evidence(*quotes: str) -> tuple[ClassifiedEvidence, ...]:
+    return tuple(
+        ClassifiedEvidence(source_id="user_message:test-source", quote=quote)
+        for quote in quotes
     )
 
 
@@ -139,9 +149,24 @@ def _slot_classification_metadata(
     prompt_hash: str = "a" * 64,
     form_intake: ClassifiedFormIntake | None = None,
 ) -> dict[str, object]:
+    evidence_quotes = [item.quote for slot in slots for item in slot.evidence]
+    if form_intake is not None:
+        evidence_quotes.extend(item.quote for item in form_intake.evidence)
     metadata = slot_classification_metadata_from_result(
         SlotClassificationResult(slots=slots, form_intake=form_intake),
         prompt_hash=prompt_hash,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:test-source",
+                    kind="user_message",
+                    text="\n".join(evidence_quotes),
+                    message_id="test-source",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
     )
     assert metadata is not None
     result = metadata_with_slot_classification(None, metadata)
@@ -1417,7 +1442,7 @@ class TestSlotClassificationMetadataReplay:
                             sectioned_form_intake=True,
                             confidence="high",
                             reason="runtime text per section",
-                            evidence=("fritext under varje rubrik",),
+                            evidence=_model_evidence("fritext under varje rubrik"),
                         )
                     ),
                 )
@@ -1485,7 +1510,7 @@ class TestSlotClassificationMetadataReplay:
         assert slot.value == "structured_text"
         assert slot.evidence == [
             "model:terminal_output:" + "a" * 64,
-            "quote:terminal_output evidence",
+            "quote:user_message:test-source:terminal_output evidence",
         ]
 
     def test_model_slot_without_quoted_evidence_is_ignored(self) -> None:
@@ -1897,7 +1922,7 @@ class TestModelSlotMerge:
         assert slot.source == "model"
         assert slot.evidence == [
             "model:runtime_metadata_fields:" + "b" * 64,
-            "quote:runtime_metadata_fields evidence",
+            "quote:user_message:test-source:runtime_metadata_fields evidence",
         ]
 
     def test_high_model_runtime_metadata_without_text_evidence_keeps_policy_default(
@@ -2075,7 +2100,7 @@ class TestModelSlotMerge:
                     sectioned_form_intake=True,
                     confidence="high",
                     reason="runtime text per section",
-                    evidence=("fritext under varje rubrik",),
+                    evidence=_model_evidence("fritext under varje rubrik"),
                 )
             ),
             prompt_hash="b" * 64,
@@ -2091,7 +2116,7 @@ class TestModelSlotMerge:
         ]
         assert state.signals[0].provenance == [
             "model:form_intake_pattern:" + "b" * 64,
-            "quote:fritext under varje rubrik",
+            "quote:user_message:test-source:fritext under varje rubrik",
         ]
 
     def test_model_form_intake_without_quoted_evidence_is_ignored(self) -> None:
@@ -2269,7 +2294,7 @@ class TestModelSlotMerge:
                         role="example_output",
                         confidence="medium",
                         reason="conversation says the upload is an example report",
-                        evidence=("så här ska rapporten se ut",),
+                        evidence=_model_evidence("så här ska rapporten se ut"),
                     ),
                 )
             ),
@@ -2284,7 +2309,7 @@ class TestModelSlotMerge:
         assert role.evidence == [
             "fallback:unclassified_file",
             f"model:file_role:{'h' * 64}",
-            "quote:så här ska rapporten se ut",
+            "quote:user_message:test-source:så här ska rapporten se ut",
         ]
         assert role.candidate_roles == ["context_only", "example_output"]
 
@@ -2350,7 +2375,7 @@ class TestModelSlotMerge:
                         role="example_output",
                         confidence="medium",
                         reason="speculative file role",
-                        evidence=("maybe an example",),
+                        evidence=_model_evidence("maybe an example"),
                     ),
                 )
             ),
@@ -2388,7 +2413,7 @@ class TestModelSlotMerge:
                         role="example_output",
                         confidence="high",
                         reason="semantic role from conversation",
-                        evidence=("så här ska rapporten se ut",),
+                        evidence=_model_evidence("så här ska rapporten se ut"),
                     ),
                 )
             ),

@@ -37,8 +37,11 @@ from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     run_scoped_plan_revision_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -106,11 +109,28 @@ def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, obj
                     value=value,
                     confidence="medium",
                     reason="classified terminal output",
-                    evidence=("ändra output filen till pdf",),
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id="user_message:user-1",
+                            quote="ändra output filen till pdf",
+                        ),
+                    ),
                 ),
             )
         ),
         prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text="ändra output filen till pdf",
+                    message_id="user-1",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
     )
     result = metadata_with_slot_classification(None, metadata)
     assert result is not None

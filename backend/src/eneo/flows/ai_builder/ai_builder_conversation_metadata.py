@@ -23,6 +23,9 @@ from pydantic import (
     model_validator,
 )
 
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentCoverage,
+)
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
     normalize_question_answer,
@@ -45,16 +48,23 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     CLASSIFICATION_NOTE_MAX_LENGTH,
     CLASSIFICATION_NOTES_MAX_ITEMS,
     CLASSIFICATION_REASON_MAX_LENGTH,
+    SLOT_CLASSIFICATION_SCHEMA_VERSION,
     UNKNOWN_SLOT_VALUE,
+    ClassifiedEvidence,
+    ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
+    SlotClassificationSourceKind,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
+from eneo.flows.ai_builder.planning_state import FileRole
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.main.logging import get_logger
@@ -86,10 +96,85 @@ LLMResolvableSlotName: TypeAlias = Literal[
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 
 
-SlotClassificationEvidence: TypeAlias = Annotated[
-    str,
-    Field(min_length=1, max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH),
-]
+class SlotClassificationEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(min_length=1, max_length=256)
+    quote: str = Field(min_length=1, max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH)
+
+    def to_classified_evidence(self) -> ClassifiedEvidence:
+        return ClassifiedEvidence(source_id=self.source_id, quote=self.quote)
+
+
+class SlotClassificationSourceMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(min_length=1, max_length=256)
+    kind: SlotClassificationSourceKind
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    message_id: str | None = Field(default=None, min_length=1, max_length=128)
+    question_id: str | None = Field(default=None, min_length=1, max_length=128)
+    selected_value: str | None = Field(default=None, max_length=500)
+    file_id: UUID | None = None
+    coverage: AIBuilderAttachmentCoverage | None = None
+    truncated: bool = False
+
+    @model_validator(mode="after")
+    def require_kind_identity(self) -> "SlotClassificationSourceMetadata":
+        if self.kind == "user_message" and self.message_id is None:
+            raise ValueError("user-message classification source requires message_id")
+        if self.kind == "structured_answer" and (
+            self.message_id is None
+            or self.question_id is None
+            or not self.selected_value
+        ):
+            raise ValueError(
+                "structured-answer classification source requires message, question, "
+                "and selected value"
+            )
+        if self.kind == "uploaded_file" and (
+            self.file_id is None or self.coverage is None
+        ):
+            raise ValueError(
+                "uploaded-file classification source requires file id and coverage"
+            )
+        return self
+
+
+def _empty_slot_classification_evidence() -> list[SlotClassificationEvidence]:
+    return []
+
+
+class SlotClassificationFileRoleMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: UUID
+    role: FileRole
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        default_factory=_empty_slot_classification_evidence,
+        max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+    )
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
+
+    @model_validator(mode="after")
+    def require_evidence_for_supported_confidence(
+        self,
+    ) -> "SlotClassificationFileRoleMetadata":
+        if self.confidence != "low" and not self.evidence:
+            raise ValueError("supported file role classification requires evidence")
+        return self
+
+    def to_classified_file_role(self) -> ClassifiedFileRole:
+        return ClassifiedFileRole(
+            file_id=self.file_id,
+            role=self.role,
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+            evidence_level=self.evidence_level,
+        )
 
 
 class SlotClassificationSlotMetadata(BaseModel):
@@ -100,7 +185,7 @@ class SlotClassificationSlotMetadata(BaseModel):
     confidence: SlotClassificationConfidence
     reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
-        min_length=1,
+        default_factory=_empty_slot_classification_evidence,
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     )
     evidence_level: SlotClassificationEvidenceLevel = "inferred"
@@ -110,6 +195,8 @@ class SlotClassificationSlotMetadata(BaseModel):
         legal_values = legal_slot_values(self.slot_name) | {"unknown"}
         if self.value not in legal_values:
             raise ValueError(f"unsupported slot value for {self.slot_name}")
+        if self.confidence != "low" and not self.evidence:
+            raise ValueError("supported slot classification requires evidence")
         return self
 
     def to_classified_slot(self) -> ClassifiedSlot:
@@ -118,7 +205,7 @@ class SlotClassificationSlotMetadata(BaseModel):
             value=self.value,
             confidence=self.confidence,
             reason=self.reason,
-            evidence=tuple(self.evidence),
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
             evidence_level=self.evidence_level,
         )
 
@@ -131,14 +218,17 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
     confidence: SlotClassificationConfidence
     reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
     evidence: list[SlotClassificationEvidence] = Field(
-        min_length=1,
+        default_factory=_empty_slot_classification_evidence,
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     )
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
 
     @model_validator(mode="after")
     def require_positive_signal(self) -> "SlotClassificationFormIntakeMetadata":
         if not self.needs_form_fields and not self.sectioned_form_intake:
             raise ValueError("form_intake metadata must contain a positive signal")
+        if self.confidence != "low" and not self.evidence:
+            raise ValueError("supported form intake classification requires evidence")
         return self
 
     def to_classified_form_intake(self) -> ClassifiedFormIntake:
@@ -147,7 +237,8 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
             sectioned_form_intake=self.sectioned_form_intake,
             confidence=self.confidence,
             reason=self.reason,
-            evidence=tuple(self.evidence),
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+            evidence_level=self.evidence_level,
         )
 
 
@@ -158,6 +249,14 @@ SlotClassificationNote: TypeAlias = Annotated[
 
 
 def _empty_slot_classification_slots() -> list[SlotClassificationSlotMetadata]:
+    return []
+
+
+def _empty_slot_classification_sources() -> list[SlotClassificationSourceMetadata]:
+    return []
+
+
+def _empty_slot_classification_file_roles() -> list[SlotClassificationFileRoleMetadata]:
     return []
 
 
@@ -172,10 +271,21 @@ def _empty_result_obligations() -> list[ResultObligation]:
 class SlotClassificationMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: int
     prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model: str = Field(min_length=1, max_length=256)
+    provider: str = Field(min_length=1, max_length=128)
+    source_inventory: list[SlotClassificationSourceMetadata] = Field(
+        default_factory=_empty_slot_classification_sources,
+        max_length=500,
+    )
     slots: list[SlotClassificationSlotMetadata] = Field(
         default_factory=_empty_slot_classification_slots,
         max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
+    )
+    file_roles: list[SlotClassificationFileRoleMetadata] = Field(
+        default_factory=_empty_slot_classification_file_roles,
+        max_length=100,
     )
     secondary_obligations: list[ResultObligation] = Field(
         default_factory=_empty_result_obligations,
@@ -191,6 +301,13 @@ class SlotClassificationMetadata(BaseModel):
         max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
     )
 
+    @field_validator("schema_version")
+    @classmethod
+    def require_current_schema_version(cls, schema_version: int) -> int:
+        if schema_version != SLOT_CLASSIFICATION_SCHEMA_VERSION:
+            raise ValueError("unsupported slot classification metadata version")
+        return schema_version
+
     @field_validator("slots")
     @classmethod
     def ensure_unique_slots(
@@ -202,9 +319,56 @@ class SlotClassificationMetadata(BaseModel):
             raise ValueError("slot classification metadata must not duplicate slots")
         return slots
 
+    @field_validator("source_inventory")
+    @classmethod
+    def ensure_unique_sources(
+        cls,
+        sources: list[SlotClassificationSourceMetadata],
+    ) -> list[SlotClassificationSourceMetadata]:
+        source_ids = [source.source_id for source in sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("slot classification metadata must not duplicate sources")
+        return sources
+
+    @field_validator("file_roles")
+    @classmethod
+    def ensure_unique_file_roles(
+        cls,
+        file_roles: list[SlotClassificationFileRoleMetadata],
+    ) -> list[SlotClassificationFileRoleMetadata]:
+        file_ids = [item.file_id for item in file_roles]
+        if len(file_ids) != len(set(file_ids)):
+            raise ValueError(
+                "slot classification metadata must not duplicate file roles"
+            )
+        return file_roles
+
+    @model_validator(mode="after")
+    def validate_evidence_sources(self) -> "SlotClassificationMetadata":
+        source_ids = {source.source_id for source in self.source_inventory}
+        evidence_items = [evidence for slot in self.slots for evidence in slot.evidence]
+        evidence_items.extend(
+            evidence for file_role in self.file_roles for evidence in file_role.evidence
+        )
+        if self.form_intake is not None:
+            evidence_items.extend(self.form_intake.evidence)
+        if any(evidence.source_id not in source_ids for evidence in evidence_items):
+            raise ValueError("classification evidence must cite inventoried sources")
+        file_ids = {
+            source.file_id
+            for source in self.source_inventory
+            if source.kind == "uploaded_file" and source.file_id is not None
+        }
+        if any(file_role.file_id not in file_ids for file_role in self.file_roles):
+            raise ValueError("classified file roles must cite inventoried files")
+        return self
+
     def to_result(self) -> SlotClassificationResult:
         return SlotClassificationResult(
             slots=tuple(slot.to_classified_slot() for slot in self.slots),
+            file_roles=tuple(
+                file_role.to_classified_file_role() for file_role in self.file_roles
+            ),
             form_intake=self.form_intake.to_classified_form_intake()
             if self.form_intake is not None
             else None,
@@ -505,6 +669,9 @@ def slot_classification_metadata_from_result(
     result: SlotClassificationResult,
     *,
     prompt_hash: str,
+    classification_input: SlotClassificationInput,
+    model: str,
+    provider: str,
 ) -> SlotClassificationMetadata | None:
     slot_payloads: list[dict[str, object]] = []
     seen_slot_names: set[str] = set()
@@ -518,18 +685,28 @@ def slot_classification_metadata_from_result(
         slot_payloads.append(payload)
         seen_slot_names.add(slot_name)
     form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
+    file_role_payloads = [
+        _slot_classification_file_role_payload(file_role)
+        for file_role in result.file_roles
+    ]
     secondary_obligations = [
         obligation
         for obligation in result.secondary_obligations
         if obligation in RESULT_OBLIGATION_VALUES
     ][:_MAX_RESULT_OBLIGATIONS]
-    if not slot_payloads and not secondary_obligations and form_intake_payload is None:
-        return None
     try:
         return SlotClassificationMetadata.model_validate(
             {
+                "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
                 "prompt_hash": prompt_hash,
+                "model": model,
+                "provider": provider,
+                "source_inventory": [
+                    _slot_classification_source_payload(source)
+                    for source in classification_input.sources
+                ],
                 "slots": slot_payloads,
+                "file_roles": file_role_payloads,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake_payload,
                 "assumptions": [
@@ -551,20 +728,9 @@ def slot_classification_metadata_from_result(
 def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object] | None:
     if slot.slot_name not in LLM_RESOLVABLE_SLOT_NAMES:
         return None
-    if slot.confidence == "low" or slot.value == UNKNOWN_SLOT_VALUE:
-        return None
-    if slot.value not in legal_slot_values(slot.slot_name):
-        return None
-    evidence = [
-        _bounded_metadata_text(
-            value,
-            fallback="slot evidence",
-            max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-        )
-        for value in slot.evidence
-        if value.strip()
-    ][:CLASSIFICATION_EVIDENCE_MAX_ITEMS]
-    if not evidence:
+    if slot.value != UNKNOWN_SLOT_VALUE and slot.value not in legal_slot_values(
+        slot.slot_name
+    ):
         return None
     return {
         "slot_name": slot.slot_name,
@@ -574,7 +740,7 @@ def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object]
             slot.reason,
             fallback="slot classification",
         ),
-        "evidence": evidence,
+        "evidence": _slot_classification_evidence_payloads(slot.evidence),
         "evidence_level": slot.evidence_level,
     }
 
@@ -584,20 +750,7 @@ def _slot_classification_form_intake_payload(
 ) -> dict[str, object] | None:
     if form_intake is None:
         return None
-    if form_intake.confidence == "low":
-        return None
     if not form_intake.needs_form_fields and not form_intake.sectioned_form_intake:
-        return None
-    evidence = [
-        _bounded_metadata_text(
-            value,
-            fallback="form intake evidence",
-            max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-        )
-        for value in form_intake.evidence
-        if value.strip()
-    ][:CLASSIFICATION_EVIDENCE_MAX_ITEMS]
-    if not evidence:
         return None
     return {
         "needs_form_fields": form_intake.needs_form_fields
@@ -608,8 +761,64 @@ def _slot_classification_form_intake_payload(
             form_intake.reason,
             fallback="form intake classification",
         ),
-        "evidence": evidence,
+        "evidence": _slot_classification_evidence_payloads(form_intake.evidence),
+        "evidence_level": form_intake.evidence_level,
     }
+
+
+def _slot_classification_file_role_payload(
+    file_role: ClassifiedFileRole,
+) -> dict[str, object]:
+    return {
+        "file_id": str(file_role.file_id),
+        "role": file_role.role,
+        "confidence": file_role.confidence,
+        "reason": _bounded_metadata_text(
+            file_role.reason,
+            fallback="file role classification",
+        ),
+        "evidence": _slot_classification_evidence_payloads(file_role.evidence),
+        "evidence_level": file_role.evidence_level,
+    }
+
+
+def _slot_classification_evidence_payloads(
+    evidence: tuple[ClassifiedEvidence, ...],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "source_id": item.source_id,
+            "quote": _bounded_metadata_text(
+                item.quote,
+                fallback="classification evidence",
+                max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+            ),
+        }
+        for item in evidence
+        if item.source_id.strip() and item.quote.strip()
+    ][:CLASSIFICATION_EVIDENCE_MAX_ITEMS]
+
+
+def _slot_classification_source_payload(
+    source: SlotClassificationSource,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "source_id": source.source_id,
+        "kind": source.kind,
+        "source_sha256": hashlib.sha256(source.text.encode("utf-8")).hexdigest(),
+    }
+    if source.message_id is not None:
+        payload["message_id"] = source.message_id
+    if source.question_id is not None:
+        payload["question_id"] = source.question_id
+    if source.selected_value is not None:
+        payload["selected_value"] = source.selected_value[:500]
+    if source.file_id is not None:
+        payload["file_id"] = str(source.file_id)
+    if source.coverage is not None:
+        payload["coverage"] = source.coverage
+    payload["truncated"] = source.truncated
+    return payload
 
 
 def slot_classification_to_metadata(

@@ -8,6 +8,10 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
     AIBuilderAttachmentContextPolicy,
     build_ai_builder_attachment_context,
+    render_ai_builder_attachment_evidence,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
+    build_slot_classification_input,
 )
 from eneo.flows.ai_builder.planning_state import FileRole
 
@@ -92,19 +96,13 @@ def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> N
     assert result.evidence[0].file_type == FileType.DOCUMENT
     assert result.evidence[0].inferred_role == "context_only"
     assert result.evidence[0].role_confidence == "low"
+    assert result.evidence[0].coverage == "fully_seen"
     assert result.evidence[1].file_id == files[1].id
     assert result.evidence[1].filename == "meeting.m4a"
     assert result.evidence[1].file_type == FileType.AUDIO
     assert result.evidence[1].inferred_role == "runtime_input_sample"
     assert result.evidence[1].role_confidence == "high"
-    assert result.discovery_context is not None
-    assert f"file_id: {files[0].id}" in result.discovery_context
-    assert "filename: beslutsmall.docx" in result.discovery_context
-    assert "file_type: document" in result.discovery_context
-    assert "inferred_role: context_only" in result.discovery_context
-    assert "filename: meeting.m4a" in result.discovery_context
-    assert "file_type: audio" in result.discovery_context
-    assert "inferred_role: runtime_input_sample" in result.discovery_context
+    assert result.evidence[1].coverage == "fully_seen"
 
 
 def test_build_ai_builder_attachment_context_detects_structural_template_placeholders() -> (
@@ -160,8 +158,6 @@ def test_build_ai_builder_attachment_context_does_not_infer_semantic_roles() -> 
     assert evidence.role_confidence == "low"
     assert evidence.candidate_roles == ("context_only",)
     assert evidence.role_evidence == ("fallback:unclassified_file",)
-    assert result.discovery_context is not None
-    assert "inferred_role: context_only" in result.discovery_context
 
 
 def test_build_ai_builder_attachment_context_avoids_substring_role_false_positives() -> (
@@ -216,8 +212,91 @@ def test_build_ai_builder_attachment_context_surfaces_unreadable_files_for_disco
 
     assert result is not None
     assert result.context is None
-    assert result.discovery_context is not None
-    assert "filename: beslutsmall.docx" in result.discovery_context
-    assert "has_readable_text: false" in result.discovery_context
+    assert result.evidence[0].filename == "beslutsmall.docx"
     assert result.evidence[0].has_readable_text is False
+    assert result.evidence[0].excerpt is None
+    assert result.evidence[0].coverage == "inventory_only"
+
+
+def test_discovery_excerpts_cover_every_file_fairly() -> None:
+    files = [
+        _make_file(name=f"{index}.txt", text=character * 100)
+        for index, character in enumerate(("A", "B", "C"), start=1)
+    ]
+
+    result = build_ai_builder_attachment_context(
+        files,
+        policy=AIBuilderAttachmentContextPolicy(
+            max_discovery_excerpt_chars=100,
+            max_discovery_excerpt_chars_total=30,
+        ),
+    )
+
+    assert result is not None
+    assert {item.file_id for item in result.evidence} == {file.id for file in files}
+    assert [len(item.excerpt or "") for item in result.evidence] == [10, 10, 10]
+    assert {item.coverage for item in result.evidence} == {"excerpt_truncated"}
+
+
+def test_large_file_inventory_keeps_the_last_stable_id_beyond_legacy_prefix_budget() -> (
+    None
+):
+    files = [
+        _make_file(
+            name=f"source-{index:02d}-{'x' * 60}.txt",
+            text=f"Source {index} " + "evidence " * 200,
+        )
+        for index in range(30)
+    ]
+
+    result = build_ai_builder_attachment_context(files)
+
+    assert result is not None
+    stable_evidence = sorted(result.evidence, key=lambda item: str(item.file_id))
+    rendered_inventory = "\n".join(
+        render_ai_builder_attachment_evidence(item) for item in stable_evidence
+    )
+    assert len(rendered_inventory) > 4_000
+    last_file_id = max((file.id for file in files), key=str)
+    classification_input = build_slot_classification_input([], result)
+    last_source = classification_input.sources[-1]
+    assert last_source.source_id == f"uploaded_file:{last_file_id}"
+    assert last_source.file_id == last_file_id
+    assert last_source.coverage == "excerpt_truncated"
+
+
+def test_discovery_file_inventory_is_permutation_stable() -> None:
+    files = [
+        _make_file(name=f"{index}.txt", text=character * 100)
+        for index, character in enumerate(("A", "B", "C"), start=1)
+    ]
+    policy = AIBuilderAttachmentContextPolicy(
+        max_discovery_excerpt_chars=100,
+        max_discovery_excerpt_chars_total=31,
+    )
+
+    forward = build_ai_builder_attachment_context(files, policy=policy)
+    reverse = build_ai_builder_attachment_context(list(reversed(files)), policy=policy)
+
+    assert forward is not None
+    assert reverse is not None
+    assert {
+        item.file_id: (item.excerpt, item.coverage) for item in forward.evidence
+    } == {item.file_id: (item.excerpt, item.coverage) for item in reverse.evidence}
+
+
+def test_zero_excerpt_budget_keeps_inventory_and_marks_context_truncated() -> None:
+    file = _make_file(name="source.txt", text="Readable source content")
+
+    result = build_ai_builder_attachment_context(
+        [file],
+        policy=AIBuilderAttachmentContextPolicy(
+            max_discovery_excerpt_chars=100,
+            max_discovery_excerpt_chars_total=0,
+        ),
+    )
+
+    assert result is not None
+    assert result.truncated is True
+    assert result.evidence[0].coverage == "inventory_only"
     assert result.evidence[0].excerpt is None

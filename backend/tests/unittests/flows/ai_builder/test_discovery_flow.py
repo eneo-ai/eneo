@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
     ClassifiedSlot,
     SlotClassificationResult,
 )
@@ -66,6 +67,10 @@ from eneo.flows.domain.flow import Flow, FlowStep
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _classifier_evidence(quote: str) -> tuple[ClassifiedEvidence, ...]:
+    return (ClassifiedEvidence(source_id="user_message:test-source", quote=quote),)
 
 
 def _make_turn(
@@ -181,7 +186,7 @@ class TestLowConfidenceDiscoveryGate:
                             value="structured_text",
                             confidence="medium",
                             reason="user asked for text output",
-                            evidence=("output report",),
+                            evidence=_classifier_evidence("output report"),
                         ),
                     )
                 ),
@@ -257,7 +262,7 @@ class TestLowConfidenceDiscoveryGate:
                     value=classifier_value,
                     confidence="medium",
                     reason="user asked for this output",
-                    evidence=("output report",),
+                    evidence=_classifier_evidence("output report"),
                 ),
             )
         )
@@ -1782,7 +1787,7 @@ class TestExtendedClarificationHints:
                         value="summarize_or_overview",
                         confidence="high",
                         reason="The model guessed a useful document summary.",
-                        evidence=("skapa något användbart",),
+                        evidence=_classifier_evidence("skapa något användbart"),
                     ),
                 )
             )
@@ -1834,7 +1839,7 @@ class TestExtendedClarificationHints:
                         value="summarize_or_overview",
                         confidence="high",
                         reason="The model guessed a transcript summary.",
-                        evidence=("transkriberingsflöde",),
+                        evidence=_classifier_evidence("transkriberingsflöde"),
                     ),
                 )
             )
@@ -2123,7 +2128,7 @@ class TestExtendedClarificationHints:
                         value="no_runtime_metadata",
                         confidence="high",
                         reason="No separate runtime metadata requested.",
-                        evidence=("summarize the uploaded policy",),
+                        evidence=_classifier_evidence("summarize the uploaded policy"),
                     ),
                 )
             )
@@ -2163,14 +2168,14 @@ class TestExtendedClarificationHints:
                         value="extract_key_information",
                         confidence="high",
                         reason="OCR suggests extracting readable text.",
-                        evidence=("OCR-flöde",),
+                        evidence=_classifier_evidence("OCR-flöde"),
                     ),
                     ClassifiedSlot(
                         slot_name="terminal_output",
                         value="structured_text",
                         confidence="high",
                         reason="OCR commonly returns text.",
-                        evidence=("OCR-flöde",),
+                        evidence=_classifier_evidence("OCR-flöde"),
                     ),
                 )
             )
@@ -2228,14 +2233,14 @@ class TestExtendedClarificationHints:
                         value="stop_after_primary_operation",
                         confidence="high",
                         reason="transcription flow",
-                        evidence=("transkriberingsflöde",),
+                        evidence=_classifier_evidence("transkriberingsflöde"),
                     ),
                     ClassifiedSlot(
                         slot_name="structured_analysis_need",
                         value="text_only_analysis",
                         confidence="high",
                         reason="raw transcription",
-                        evidence=("transkriberingsflöde",),
+                        evidence=_classifier_evidence("transkriberingsflöde"),
                     ),
                 )
             )

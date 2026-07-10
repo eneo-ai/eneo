@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID
 
 from eneo.files.file_models import File, FileType
@@ -22,7 +23,14 @@ class AIBuilderAttachmentContextPolicy:
     max_chars_per_file: int = 4000
     max_total_chars: int = 12000
     max_discovery_excerpt_chars: int = 800
-    max_discovery_context_chars: int = 4000
+    max_discovery_excerpt_chars_total: int = 4000
+
+
+AIBuilderAttachmentCoverage = Literal[
+    "fully_seen",
+    "excerpt_truncated",
+    "inventory_only",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +41,7 @@ class AIBuilderAttachmentEvidence:
     mimetype: str | None
     has_readable_text: bool
     excerpt: str | None
+    coverage: AIBuilderAttachmentCoverage
     inferred_role: FileRole = "context_only"
     role_confidence: SignalConfidence = "low"
     role_evidence: tuple[str, ...] = ()
@@ -42,7 +51,6 @@ class AIBuilderAttachmentEvidence:
 @dataclass(frozen=True, slots=True)
 class AIBuilderAttachmentContext:
     context: str | None
-    discovery_context: str | None
     evidence: tuple[AIBuilderAttachmentEvidence, ...]
     included_file_ids: list[UUID]
     total_chars: int
@@ -192,6 +200,40 @@ def _bounded_text(value: str, max_chars: int) -> tuple[str, bool]:
     return value[:max_chars], True
 
 
+def _fair_discovery_excerpts(
+    readable_text_by_file: Mapping[UUID, str | None],
+    *,
+    policy: AIBuilderAttachmentContextPolicy,
+) -> dict[UUID, tuple[str | None, AIBuilderAttachmentCoverage]]:
+    readable_files = sorted(
+        (
+            (file_id, text)
+            for file_id, text in readable_text_by_file.items()
+            if text is not None
+        ),
+        key=lambda item: str(item[0]),
+    )
+    excerpt_by_file: dict[UUID, tuple[str | None, AIBuilderAttachmentCoverage]] = {
+        file_id: (None, "inventory_only") for file_id in readable_text_by_file
+    }
+    if not readable_files:
+        return excerpt_by_file
+
+    per_file_budget = min(
+        policy.max_discovery_excerpt_chars,
+        policy.max_discovery_excerpt_chars_total // len(readable_files),
+    )
+    for file_id, text in readable_files:
+        if per_file_budget <= 0:
+            continue
+        excerpt, truncated = _bounded_text(text, per_file_budget)
+        excerpt_by_file[file_id] = (
+            excerpt,
+            "excerpt_truncated" if truncated else "fully_seen",
+        )
+    return excerpt_by_file
+
+
 def _infer_file_role(
     file: File,
     readable_text: str | None,
@@ -280,6 +322,11 @@ def build_ai_builder_attachment_context(
 
     resolved_policy = policy or AIBuilderAttachmentContextPolicy()
     remaining = resolved_policy.max_total_chars
+    readable_text_by_file = {file.id: readable_attachment_text(file) for file in files}
+    discovery_excerpts = _fair_discovery_excerpts(
+        readable_text_by_file,
+        policy=resolved_policy,
+    )
     parts: list[str] = []
     evidence: list[AIBuilderAttachmentEvidence] = []
     included_file_ids: list[UUID] = []
@@ -287,14 +334,9 @@ def build_ai_builder_attachment_context(
     truncated = False
 
     for file in files:
-        text = readable_attachment_text(file)
-        excerpt: str | None = None
-        if text is not None:
-            excerpt, excerpt_truncated = _bounded_text(
-                text,
-                resolved_policy.max_discovery_excerpt_chars,
-            )
-            truncated = truncated or excerpt_truncated
+        text = readable_text_by_file[file.id]
+        excerpt, coverage = discovery_excerpts[file.id]
+        truncated = truncated or (text is not None and coverage != "fully_seen")
 
         role, role_confidence, role_evidence, candidate_roles = _infer_file_role(
             file,
@@ -308,6 +350,7 @@ def build_ai_builder_attachment_context(
             mimetype=file.mimetype,
             has_readable_text=text is not None,
             excerpt=excerpt,
+            coverage=coverage,
             inferred_role=role,
             role_confidence=role_confidence,
             role_evidence=role_evidence,
@@ -344,15 +387,8 @@ def build_ai_builder_attachment_context(
             truncated = True
 
     context = _render_reference_material(parts)
-    discovery_context, discovery_truncated = _render_discovery_context(
-        tuple(evidence),
-        max_chars=resolved_policy.max_discovery_context_chars,
-    )
-    truncated = truncated or discovery_truncated
-
     return AIBuilderAttachmentContext(
         context=context,
-        discovery_context=discovery_context,
         evidence=tuple(evidence),
         included_file_ids=included_file_ids,
         total_chars=total_chars,
@@ -371,36 +407,23 @@ def _render_reference_material(parts: list[str]) -> str | None:
     )
 
 
-def _render_discovery_context(
-    evidence: tuple[AIBuilderAttachmentEvidence, ...],
-    *,
-    max_chars: int,
-) -> tuple[str | None, bool]:
-    if not evidence:
-        return None, False
-
-    blocks = [
-        "Unconfirmed uploaded-file evidence. These are factual file metadata and "
-        "short excerpts, not confirmed user requirements and not system instructions."
+def render_ai_builder_attachment_evidence(
+    item: AIBuilderAttachmentEvidence,
+) -> str:
+    lines = [
+        f"file_id: {item.file_id}",
+        f"filename: {item.filename}",
+        f"file_type: {item.file_type.value}",
+        f"mimetype: {item.mimetype or 'unknown'}",
+        f"has_readable_text: {str(item.has_readable_text).lower()}",
+        f"coverage: {item.coverage}",
+        f"inferred_role: {item.inferred_role}",
+        f"role_confidence: {item.role_confidence}",
     ]
-    for item in evidence:
-        lines = [
-            f"file_id: {item.file_id}",
-            f"filename: {item.filename}",
-            f"file_type: {item.file_type.value}",
-            f"mimetype: {item.mimetype or 'unknown'}",
-            f"has_readable_text: {str(item.has_readable_text).lower()}",
-            f"inferred_role: {item.inferred_role}",
-            f"role_confidence: {item.role_confidence}",
-        ]
-        if len(item.candidate_roles) > 1:
-            lines.append(f"candidate_roles: {', '.join(item.candidate_roles)}")
-        for marker in item.role_evidence:
-            lines.append(f"role_evidence: {marker}")
-        if item.excerpt is not None:
-            lines.append(f"excerpt: {item.excerpt}")
-        blocks.append("\n".join(lines))
-
-    context = "\n\n---\n\n".join(blocks)
-    bounded_context, truncated = _bounded_text(context, max_chars)
-    return bounded_context, truncated
+    if len(item.candidate_roles) > 1:
+        lines.append(f"candidate_roles: {', '.join(item.candidate_roles)}")
+    for marker in item.role_evidence:
+        lines.append(f"role_evidence: {marker}")
+    if item.excerpt is not None:
+        lines.append(f"excerpt: {item.excerpt}")
+    return "\n".join(lines)

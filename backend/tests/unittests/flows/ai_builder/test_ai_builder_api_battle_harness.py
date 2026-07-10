@@ -7,7 +7,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from pytest import MonkeyPatch
+from pytest import MonkeyPatch, raises
 
 
 def _battle_harness() -> ModuleType:
@@ -112,6 +112,123 @@ def _document_plan_with_extra_text_helper() -> dict[str, Any]:
     }
 
 
+def _classifier_diagnostics() -> dict[str, Any]:
+    return {
+        "session_id": "00000000-0000-0000-0000-000000000001",
+        "classifier_runs": [
+            {
+                "message_id": "assistant-1",
+                "schema_version": 13,
+                "prompt_hash": "a" * 64,
+                "model": "openai/gpt-test",
+                "provider": "openai",
+                "source_inventory": [
+                    {
+                        "source_id": "user_message:user-1",
+                        "kind": "user_message",
+                        "source_sha256": "b" * 64,
+                        "message_id": "user-1",
+                    },
+                    {
+                        "source_id": "uploaded_file:file-1",
+                        "kind": "uploaded_file",
+                        "source_sha256": "c" * 64,
+                        "file_id": "file-1",
+                        "coverage": "fully_seen",
+                    },
+                ],
+                "slots": [
+                    {
+                        "slot_name": "report_disposition",
+                        "value": "both",
+                        "confidence": "high",
+                        "reason": "explicit source sections and overview",
+                        "evidence": [
+                            {
+                                "source_id": "user_message:user-1",
+                                "quote": "källavsnitt och en samlad rapport",
+                            }
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
+                "file_roles": [
+                    {
+                        "file_id": "file-1",
+                        "role": "example_output",
+                        "confidence": "high",
+                        "reason": "user calls it an example",
+                        "evidence": [
+                            {
+                                "source_id": "user_message:user-1",
+                                "quote": "bifogade exempelrapporten",
+                            }
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
+                "secondary_obligations": [],
+                "form_intake": None,
+                "assumptions": ["Source labels remain visible."],
+                "contradictions": [],
+            }
+        ],
+    }
+
+
+def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "bad-classifier-expectation",
+                        "prompt": "Build a report.",
+                        "expected": {
+                            "expected_classifier_slots": [
+                                {
+                                    "slot_nam": "terminal_output",
+                                    "value": "pdf_document",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="unknown keys: slot_nam"):
+        _battle_harness()._read_cases_file(cases_path)
+
+
+def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "bad-posture-key",
+                        "prompt": "Build a report.",
+                        "expected": {
+                            "expected_classifier_slotz": [
+                                {"slot_name": "terminal_output"}
+                            ]
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="unknown evidence-posture keys"):
+        _battle_harness()._read_cases_file(cases_path)
+
+
 def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     harness = _battle_harness()
     plan = _document_plan(
@@ -161,6 +278,101 @@ def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
     assert bad_checks["terminal_document_output_mode"]["passed"] is False
     assert bad_checks["renderer_previous_step_bound"]["passed"] is False
     assert bad_report["metrics"]["renderer_is_previous_step_bound"] is False
+
+
+def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
+    harness = _battle_harness()
+    expected = {
+        "expected_classifier_slots": [
+            {
+                "slot_name": "report_disposition",
+                "value": "both",
+                "confidence": "high",
+                "evidence_level": "explicit",
+                "required_source_kinds": ["user_message"],
+                "evidence_contains": ["samlad rapport"],
+            }
+        ],
+        "expected_file_roles": [
+            {
+                "file_index": 0,
+                "role": "example_output",
+                "confidence": "high",
+                "evidence_level": "explicit",
+                "coverage": "fully_seen",
+                "required_source_kinds": ["user_message"],
+            }
+        ],
+        "expected_assumption_topics": ["source labels"],
+        "forbidden_assumption_topics": ["invented default"],
+    }
+
+    def checks_for(diagnostics: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        report = harness._quality_report(
+            plan={},
+            summary={},
+            expected=expected,
+            event_summary={},
+            classifier_diagnostics=diagnostics,
+            attached_file_ids=("file-1",),
+        )
+        return {check["name"]: check for check in report["checks"]}
+
+    baseline_checks = checks_for(_classifier_diagnostics())
+    assert baseline_checks["classifier_slot:report_disposition"]["passed"] is True
+    assert baseline_checks["classifier_file_role:file-1"]["passed"] is True
+    assert baseline_checks["expected_assumption_topics"]["passed"] is True
+    assert baseline_checks["forbidden_assumption_topics"]["passed"] is True
+
+    mutations = (
+        (
+            "slots",
+            "value",
+            "synthesized_overview",
+            "classifier_slot:report_disposition",
+        ),
+        ("slots", "confidence", "low", "classifier_slot:report_disposition"),
+        ("slots", "evidence_level", "inferred", "classifier_slot:report_disposition"),
+        ("file_roles", "role", "reference_material", "classifier_file_role:file-1"),
+        ("file_roles", "confidence", "medium", "classifier_file_role:file-1"),
+        ("file_roles", "evidence_level", "inferred", "classifier_file_role:file-1"),
+    )
+    for collection, field, value, check_name in mutations:
+        mutated = json.loads(json.dumps(_classifier_diagnostics()))
+        mutated["classifier_runs"][0][collection][0][field] = value
+        assert checks_for(mutated)[check_name]["passed"] is False
+
+    wrong_source = json.loads(json.dumps(_classifier_diagnostics()))
+    wrong_source["classifier_runs"][0]["source_inventory"][0]["kind"] = "uploaded_file"
+    assert (
+        checks_for(wrong_source)["classifier_slot:report_disposition"]["passed"]
+        is False
+    )
+
+    wrong_coverage = json.loads(json.dumps(_classifier_diagnostics()))
+    wrong_coverage["classifier_runs"][0]["source_inventory"][1]["coverage"] = (
+        "inventory_only"
+    )
+    assert checks_for(wrong_coverage)["classifier_file_role:file-1"]["passed"] is False
+
+    forbidden_assumption = json.loads(json.dumps(_classifier_diagnostics()))
+    forbidden_assumption["classifier_runs"][0]["assumptions"].append(
+        "Invented default for report layout."
+    )
+    assert (
+        checks_for(forbidden_assumption)["forbidden_assumption_topics"]["passed"]
+        is False
+    )
+
+    negative_report = harness._quality_report(
+        plan={},
+        summary={},
+        expected={"forbid_classifier_commit_grade_slots": ["report_disposition"]},
+        event_summary={},
+        classifier_diagnostics=_classifier_diagnostics(),
+    )
+    negative_checks = {check["name"]: check for check in negative_report["checks"]}
+    assert negative_checks["forbid_classifier_commit_grade_slots"]["passed"] is False
 
 
 def test_harness_allows_template_fill_document_terminal_without_renderer_binding() -> (
@@ -412,6 +624,31 @@ def test_attachment_case_file_ids_can_resolve_from_environment(
     cli_args = type("Args", (), {"file_ids": ["file-cli-1"]})()
     assert harness._missing_file_id_envs(case, cli_args) == ()
     assert harness._case_file_ids(case, cli_args) == ("file-cli-1",)
+
+
+def test_attachment_and_ambiguous_cases_gate_classifier_posture() -> None:
+    harness = _battle_harness()
+    cases = harness._read_cases_file(
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    by_id = {case.case_id: case for case in cases}
+
+    example = by_id["attachment_example_report_infers_disposition"].expected
+    assert example is not None
+    assert example["expected_classifier_slots"][0]["value"] == "both"
+    assert example["expected_file_roles"][0]["role"] == "example_output"
+
+    template = by_id["attachment_docx_template_placeholders_to_fields"].expected
+    assert template is not None
+    assert template["expected_classifier_slots"][0]["value"] == "docx_document"
+    assert template["expected_file_roles"][0]["role"] == "template"
+
+    ambiguous = by_id["ambiguous_report_without_attachment_asks_one_question"].expected
+    assert ambiguous is not None
+    assert ambiguous["expected_question_event_ids"] == ["report_disposition"]
+    assert ambiguous["forbid_classifier_commit_grade_slots"] == ["report_disposition"]
 
 
 def test_suite_reliability_counts_invalid_plan_errors() -> None:

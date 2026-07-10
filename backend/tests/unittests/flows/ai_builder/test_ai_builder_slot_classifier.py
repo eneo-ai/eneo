@@ -2,16 +2,40 @@ from __future__ import annotations
 
 import json
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
+    SlotClassificationInput,
+    SlotClassificationSource,
     classify_slots,
     parse_slot_classification_response,
     slot_classification_prompt_hash,
 )
+
+
+def _classification_input(
+    text: str,
+    *,
+    source_id: str = "user_message:user-1",
+) -> SlotClassificationInput:
+    return SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id=source_id,
+                kind="user_message",
+                text=text,
+                message_id="user-1",
+            ),
+        )
+    )
+
+
+def _evidence(quote: str, *, source_id: str = "user_message:user-1") -> dict[str, str]:
+    return {"source_id": source_id, "quote": quote}
 
 
 def _make_response(content: str) -> MagicMock:
@@ -39,6 +63,7 @@ def test_parse_slot_classification_response_uses_canonical_slots_shape_only() ->
             }
         ),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("PDF report"),
     )
 
     assert result is not None
@@ -46,6 +71,9 @@ def test_parse_slot_classification_response_uses_canonical_slots_shape_only() ->
 
 
 def test_parse_slot_classification_response_filters_invalid_entries() -> None:
+    source_text = (
+        "Slutrapporten ska vara en pdf fil. Materialet kan vara en eller flera filer."
+    )
     result = parse_slot_classification_response(
         json.dumps(
             {
@@ -55,7 +83,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
                         "value": "pdf_document",
                         "confidence": "high",
                         "reason": "explicit PDF report",
-                        "evidence": ["Slutrapporten ska vara en pdf fil"],
+                        "evidence": [_evidence("Slutrapporten ska vara en pdf fil")],
                         "evidence_level": "explicit",
                     },
                     {
@@ -81,7 +109,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
                         "value": "unknown",
                         "confidence": "low",
                         "reason": "ambiguous input",
-                        "evidence": ["en eller flera filer"],
+                        "evidence": [_evidence("en eller flera filer")],
                     },
                 ],
                 "assumptions": ["PDF is requested"],
@@ -92,6 +120,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
             "terminal_output": {"pdf_document", "structured_text"},
             "primary_runtime_input": {"text", "documents"},
         },
+        classification_input=_classification_input(source_text),
     )
 
     assert result is not None
@@ -101,7 +130,12 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     ]
     assert result.slots[0].value == "pdf_document"
     assert result.slots[1].value == "unknown"
-    assert result.slots[0].evidence == ("Slutrapporten ska vara en pdf fil",)
+    assert result.slots[0].evidence == (
+        ClassifiedEvidence(
+            source_id="user_message:user-1",
+            quote="Slutrapporten ska vara en pdf fil",
+        ),
+    )
     assert result.slots[0].evidence_level == "explicit"
     assert result.slots[1].evidence_level == "inferred"
     assert result.assumptions == ("PDF is requested",)
@@ -109,6 +143,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
 
 
 def test_parse_slot_classification_response_downgrades_unsupported_claims() -> None:
+    file_id = uuid4()
     result = parse_slot_classification_response(
         json.dumps(
             {
@@ -122,7 +157,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
                 ],
                 "file_roles": [
                     {
-                        "file_id": str(uuid4()),
+                        "file_id": str(file_id),
                         "role": "example_output",
                         "confidence": "high",
                         "reason": "unsupported file role",
@@ -131,11 +166,204 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
             }
         ),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="uploaded_file:file-1",
+                    kind="uploaded_file",
+                    text="filename: unsupported.pdf",
+                    file_id=file_id,
+                    coverage="inventory_only",
+                ),
+            )
+        ),
     )
 
     assert result is not None
     assert result.slots[0].confidence == "low"
     assert result.slots[0].evidence == ()
+    assert result.file_roles[0].confidence == "low"
+    assert result.file_roles[0].evidence == ()
+
+
+def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "fabricated evidence",
+                        "evidence": [_evidence("User requested a PDF")],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("User requested a DOCX"),
+    )
+
+    assert result is not None
+    assert result.slots[0].evidence == ()
+    assert result.slots[0].confidence == "low"
+    assert result.slots[0].evidence_level == "inferred"
+
+
+def test_attachment_only_evidence_cannot_be_explicit() -> None:
+    file_id = uuid4()
+    source_id = f"uploaded_file:{file_id}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "medium",
+                        "reason": "attachment implies PDF",
+                        "evidence": [
+                            _evidence("filename: example.pdf", source_id=source_id)
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="uploaded_file",
+                    text="filename: example.pdf",
+                    file_id=file_id,
+                    coverage="inventory_only",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    assert result.slots[0].confidence == "medium"
+    assert result.slots[0].evidence_level == "inferred"
+
+
+def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> None:
+    structured_source_id = "structured_answer:user-1:0"
+    user_source_id = "user_message:user-2"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "report_disposition",
+                        "value": "both",
+                        "confidence": "high",
+                        "reason": "cross-slot claim",
+                        "evidence": [
+                            _evidence(
+                                "docx_document",
+                                source_id=structured_source_id,
+                            ),
+                            _evidence(
+                                "En fil jag kan ladda ner",
+                                source_id=user_source_id,
+                            ),
+                        ],
+                        "evidence_level": "explicit",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "docx_document",
+                        "confidence": "high",
+                        "reason": "matching structured answer",
+                        "evidence": [
+                            _evidence(
+                                "docx_document",
+                                source_id=structured_source_id,
+                            )
+                        ],
+                        "evidence_level": "explicit",
+                    },
+                ]
+            }
+        ),
+        allowed_slot_values={
+            "report_disposition": {"both"},
+            "terminal_output": {"docx_document"},
+        },
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=structured_source_id,
+                    kind="structured_answer",
+                    text="docx_document",
+                    message_id="user-1",
+                    question_id="terminal_output",
+                    selected_value="docx_document",
+                ),
+                SlotClassificationSource(
+                    source_id=user_source_id,
+                    kind="user_message",
+                    text="En fil jag kan ladda ner",
+                    message_id="user-2",
+                    question_id="terminal_output",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    assert result.slots[0].slot_name == "report_disposition"
+    assert result.slots[0].evidence_level == "inferred"
+    assert result.slots[1].slot_name == "terminal_output"
+    assert result.slots[1].evidence_level == "explicit"
+
+
+def test_file_role_rejects_evidence_from_a_different_file() -> None:
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    second_source_id = f"uploaded_file:{second_file_id}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(first_file_id),
+                        "role": "template",
+                        "confidence": "high",
+                        "reason": "wrong file evidence",
+                        "evidence": [
+                            _evidence(
+                                "template marker",
+                                source_id=second_source_id,
+                            )
+                        ],
+                        "evidence_level": "inferred",
+                    }
+                ],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=tuple(
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{file_id}",
+                    kind="uploaded_file",
+                    text="template marker",
+                    file_id=file_id,
+                    coverage="fully_seen",
+                )
+                for file_id in (first_file_id, second_file_id)
+            )
+        ),
+    )
+
+    assert result is not None
     assert result.file_roles[0].confidence == "low"
     assert result.file_roles[0].evidence == ()
 
@@ -154,6 +382,7 @@ def test_parse_slot_classification_response_filters_secondary_obligations() -> N
             }
         ),
         allowed_slot_values={"post_processing_goal": {"compare_or_validate"}},
+        classification_input=_classification_input("Compare and report risks"),
     )
 
     assert result is not None
@@ -172,7 +401,8 @@ def test_parse_slot_classification_response_filters_file_roles() -> None:
                         "role": "example_output",
                         "confidence": "medium",
                         "reason": "user says this PDF shows the desired report",
-                        "evidence": ["den här PDF:en visar önskad rapport"],
+                        "evidence": [_evidence("den här PDF:en visar önskad rapport")],
+                        "evidence_level": "explicit",
                     },
                     {
                         "file_id": str(file_id),
@@ -196,6 +426,23 @@ def test_parse_slot_classification_response_filters_file_roles() -> None:
             }
         ),
         allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text="den här PDF:en visar önskad rapport",
+                    message_id="user-1",
+                ),
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{file_id}",
+                    kind="uploaded_file",
+                    text="filename: example.pdf",
+                    file_id=file_id,
+                    coverage="inventory_only",
+                ),
+            )
+        ),
     )
 
     assert result is not None
@@ -203,7 +450,13 @@ def test_parse_slot_classification_response_filters_file_roles() -> None:
     assert result.file_roles[0].file_id == file_id
     assert result.file_roles[0].role == "example_output"
     assert result.file_roles[0].confidence == "medium"
-    assert result.file_roles[0].evidence == ("den här PDF:en visar önskad rapport",)
+    assert result.file_roles[0].evidence == (
+        ClassifiedEvidence(
+            source_id="user_message:user-1",
+            quote="den här PDF:en visar önskad rapport",
+        ),
+    )
+    assert result.file_roles[0].evidence_level == "explicit"
 
 
 def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> None:
@@ -216,12 +469,13 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
                         "value": "unknown",
                         "confidence": "high",
                         "reason": "user_explicit_uncertain",
-                        "evidence": ["Jag vet inte exakt vilket format"],
+                        "evidence": [_evidence("Jag vet inte exakt vilket format")],
                     },
                 ],
             }
         ),
         allowed_slot_values={"terminal_output": {"docx_document", "structured_text"}},
+        classification_input=_classification_input("Jag vet inte exakt vilket format"),
     )
 
     assert result is not None
@@ -231,7 +485,12 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
     assert slot.value == "unknown"
     assert slot.confidence == "high"
     assert slot.reason == "user_explicit_uncertain"
-    assert slot.evidence == ("Jag vet inte exakt vilket format",)
+    assert slot.evidence == (
+        ClassifiedEvidence(
+            source_id="user_message:user-1",
+            quote="Jag vet inte exakt vilket format",
+        ),
+    )
 
 
 def test_parse_slot_classification_response_accepts_form_intake_evidence() -> None:
@@ -244,11 +503,13 @@ def test_parse_slot_classification_response_accepts_form_intake_evidence() -> No
                     "sectioned_form_intake": True,
                     "confidence": "high",
                     "reason": "runtime free text per heading",
-                    "evidence": ["fritext under varje rubrik"],
+                    "evidence": [_evidence("fritext under varje rubrik")],
+                    "evidence_level": "explicit",
                 },
             }
         ),
         allowed_slot_values={},
+        classification_input=_classification_input("fritext under varje rubrik"),
     )
 
     assert result is not None
@@ -256,7 +517,13 @@ def test_parse_slot_classification_response_accepts_form_intake_evidence() -> No
     assert result.form_intake.needs_form_fields is True
     assert result.form_intake.sectioned_form_intake is True
     assert result.form_intake.confidence == "high"
-    assert result.form_intake.evidence == ("fritext under varje rubrik",)
+    assert result.form_intake.evidence == (
+        ClassifiedEvidence(
+            source_id="user_message:user-1",
+            quote="fritext under varje rubrik",
+        ),
+    )
+    assert result.form_intake.evidence_level == "explicit"
 
 
 def test_parse_slot_classification_response_downgrades_unsupported_form_intake() -> (
@@ -275,6 +542,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_form_intake()
             }
         ),
         allowed_slot_values={},
+        classification_input=_classification_input("No runtime fields requested"),
     )
 
     assert result is not None
@@ -283,57 +551,46 @@ def test_parse_slot_classification_response_downgrades_unsupported_form_intake()
     assert result.form_intake.evidence == ()
 
 
-def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
-    text = "Sammanfatta ärendet"
-
+def test_prompt_hash_uses_sorted_names_and_stable_serialization() -> None:
+    classification_input = _classification_input("Sammanfatta ärendet")
     prompt_hash = slot_classification_prompt_hash(
-        text=text,
+        classification_input=classification_input,
         ui_language="sv",
         allowed_slot_values={
             "terminal_output": {"pdf_document", "structured_text"},
             "primary_runtime_input": {"audio", "documents"},
         },
+        litellm_model="openai/gpt-test",
+        provider="openai",
     )
 
     assert prompt_hash == slot_classification_prompt_hash(
-        text=text,
+        classification_input=classification_input,
         ui_language="sv",
         allowed_slot_values={
             "primary_runtime_input": {"documents", "audio"},
             "terminal_output": {"structured_text", "pdf_document"},
         },
-    )
-    assert (
-        prompt_hash
-        == classifier.hashlib.sha256(
-            json.dumps(
-                {
-                    "allowed_slot_values": {
-                        "primary_runtime_input": ["audio", "documents"],
-                        "terminal_output": ["pdf_document", "structured_text"],
-                    },
-                    "schema_version": 12,
-                    "text": text,
-                    "ui_language": "sv",
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            ).encode("utf-8")
-        ).hexdigest()
+        litellm_model="openai/gpt-test",
+        provider="openai",
     )
 
 
 def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
     base_hash = slot_classification_prompt_hash(
-        text="Sammanfatta ärendet",
+        classification_input=_classification_input("Sammanfatta ärendet"),
         ui_language="sv",
         allowed_slot_values={"terminal_output": {"pdf_document"}},
+        litellm_model="openai/gpt-test",
+        provider="openai",
     )
 
     changed_hash = slot_classification_prompt_hash(
-        text="Sammanfatta ärendet",
+        classification_input=_classification_input("Sammanfatta ärendet"),
         ui_language="sv",
         allowed_slot_values={"terminal_output": {"pdf_document", "structured_text"}},
+        litellm_model="openai/gpt-test",
+        provider="openai",
     )
 
     assert changed_hash != base_hash
@@ -341,20 +598,25 @@ def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
 
 def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
     allowed = {"terminal_output": {"docx_document", "structured_text"}}
+    classification_input = _classification_input("en fil jag kan ladda ner")
     base_hash = slot_classification_prompt_hash(
-        text="en fil jag kan ladda ner",
+        classification_input=classification_input,
         ui_language="sv",
         allowed_slot_values=allowed,
+        litellm_model="openai/gpt-test",
+        provider="openai",
     )
 
     biased_hash = slot_classification_prompt_hash(
-        text="en fil jag kan ladda ner",
+        classification_input=classification_input,
         ui_language="sv",
         allowed_slot_values=allowed,
+        litellm_model="openai/gpt-test",
+        provider="openai",
         bias=classifier.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
-            latest_user_answer="en fil jag kan ladda ner",
+            answer_source_id="user_message:user-1",
         ),
     )
 
@@ -362,34 +624,52 @@ def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
     assert biased_hash != base_hash
 
 
-def test_prompt_hash_changes_when_uploaded_file_evidence_changes() -> None:
+def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
     allowed = {"terminal_output": {"docx_document", "structured_text"}}
     base_hash = slot_classification_prompt_hash(
-        text="Jag vill bygga ett transkriberingsflöde.",
+        classification_input=_classification_input("filename: mall.docx"),
         ui_language="sv",
         allowed_slot_values=allowed,
-        uploaded_file_evidence="filename: mall.docx\nfile_type: document",
+        litellm_model="openai/gpt-test",
+        provider="openai",
     )
 
-    changed_hash = slot_classification_prompt_hash(
-        text="Jag vill bygga ett transkriberingsflöde.",
+    source_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("filename: lagtext.pdf"),
         ui_language="sv",
         allowed_slot_values=allowed,
-        uploaded_file_evidence="filename: lagtext.pdf\nfile_type: document",
+        litellm_model="openai/gpt-test",
+        provider="openai",
+    )
+    model_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("filename: mall.docx"),
+        ui_language="sv",
+        allowed_slot_values=allowed,
+        litellm_model="openai/gpt-next",
+        provider="openai",
+    )
+    provider_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("filename: mall.docx"),
+        ui_language="sv",
+        allowed_slot_values=allowed,
+        litellm_model="openai/gpt-test",
+        provider="azure",
     )
 
-    assert changed_hash != base_hash
+    assert source_hash != base_hash
+    assert model_hash != base_hash
+    assert provider_hash != base_hash
 
 
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     messages = classifier._build_slot_classification_prompt(
-        text="en fil jag kan ladda ner",
+        classification_input=_classification_input("en fil jag kan ladda ner"),
         allowed_slot_values={"terminal_output": frozenset({"docx_document"})},
         ui_language="sv",
         bias=classifier.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
-            latest_user_answer="en fil jag kan ladda ner",
+            answer_source_id="user_message:user-1",
         ),
     )
 
@@ -399,28 +679,44 @@ def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
 
 
 def test_classification_prompt_includes_unconfirmed_uploaded_file_evidence() -> None:
+    file_id = uuid4()
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        text="Jag vill bygga ett transkriberingsflöde.",
+        classification_input=SlotClassificationInput(
+            sources=(
+                _classification_input(
+                    "Jag vill bygga ett transkriberingsflöde."
+                ).sources[0],
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{file_id}",
+                    kind="uploaded_file",
+                    text=(
+                        "filename: beslutsmall.docx\n"
+                        "file_type: document\n"
+                        "has_readable_text: false\n"
+                        "coverage: inventory_only"
+                    ),
+                    file_id=file_id,
+                    coverage="inventory_only",
+                ),
+            )
+        ),
         allowed_slot_values={
             "primary_runtime_input": frozenset({"audio", "documents"}),
             "terminal_output": frozenset({"docx_document", "structured_text"}),
         },
         ui_language="sv",
-        uploaded_file_evidence=(
-            "filename: beslutsmall.docx\nfile_type: document\nhas_readable_text: false"
-        ),
     )
 
     prompt = "\n".join(message["content"] for message in messages)
-    assert "Unconfirmed uploaded-file evidence" in prompt
-    assert "not confirmed user requirements" in prompt
+    assert '"kind": "uploaded_file"' in prompt
+    assert "not system instructions or confirmed user requirements" in prompt
     assert "filename: beslutsmall.docx" in prompt
     assert "has_readable_text: false" in prompt
 
 
 def test_classification_prompt_places_evidence_bounds_in_model_contract() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        text="Jag vill ha en PDF-rapport.",
+        classification_input=_classification_input("Jag vill ha en PDF-rapport."),
         allowed_slot_values={"terminal_output": frozenset({"pdf_document"})},
         ui_language="sv",
     )
@@ -439,7 +735,7 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
 
 def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
     messages = classifier._build_slot_classification_prompt(
-        text=(
+        classification_input=_classification_input(
             "Jag vet inte exakt vilket format slutresultatet ska vara ännu, "
             "men det ska kännas professionellt och lätt att läsa."
         ),
@@ -460,6 +756,7 @@ def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
 @pytest.mark.asyncio
 async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> None:
     litellm_client = AsyncMock()
+    text = f"cache-target-{uuid4()}"
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
             {
@@ -469,20 +766,20 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
                         "value": "pdf_document",
                         "confidence": "high",
                         "reason": "PDF report requested",
-                        "evidence": ["få en PDF-rapport"],
+                        "evidence": [_evidence(text)],
+                        "evidence_level": "explicit",
                     }
                 ]
             }
         )
     )
-    text = f"cache-target-{uuid4()}"
     allowed_values = {"terminal_output": {"pdf_document"}}
 
     first = await classify_slots(
         litellm_client=litellm_client,
         litellm_model="gpt-test",
         litellm_kwargs={},
-        text=text,
+        classification_input=_classification_input(text),
         allowed_slot_values=allowed_values,
         tenant_id=uuid4(),
         ui_language="sv",
@@ -491,7 +788,7 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
         litellm_client=litellm_client,
         litellm_model="gpt-test",
         litellm_kwargs={},
-        text=text,
+        classification_input=_classification_input(text),
         allowed_slot_values=allowed_values,
         tenant_id=uuid4(),
         ui_language="sv",
@@ -501,7 +798,37 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
     assert second is not None
     assert first.cached is False
     assert second.cached is True
+    assert first.slots[0].confidence == "high"
+    assert first.slots[0].evidence == (
+        ClassifiedEvidence(source_id="user_message:user-1", quote=text),
+    )
+    assert second.slots == first.slots
     assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_classify_slots_refuses_duplicate_source_ids() -> None:
+    litellm_client = AsyncMock()
+    duplicate_source = SlotClassificationSource(
+        source_id="user_message:duplicate",
+        kind="user_message",
+        text="first",
+        message_id="duplicate",
+    )
+
+    result = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="openai/gpt-test",
+        litellm_kwargs={},
+        classification_input=SlotClassificationInput(
+            sources=(duplicate_source, duplicate_source)
+        ),
+        allowed_slot_values={"terminal_output": {"structured_text"}},
+        tenant_id=uuid4(),
+    )
+
+    assert result is None
+    litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -524,7 +851,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         litellm_client=litellm_client,
         litellm_model="gpt-test",
         litellm_kwargs={},
-        text=f"json-format-target-{uuid4()}",
+        classification_input=_classification_input(f"json-format-target-{uuid4()}"),
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
         tenant_id=uuid4(),
         ui_language="sv",
@@ -533,7 +860,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
-    assert json_schema["name"] == "ai_builder_slot_classification_v12"
+    assert json_schema["name"] == "ai_builder_slot_classification_v13"
     assert json_schema["strict"] is False
 
     schema = json_schema["schema"]
@@ -572,7 +899,9 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         == classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS
     )
     assert (
-        slot_variant["properties"]["evidence"]["items"]["maxLength"]
+        slot_variant["properties"]["evidence"]["items"]["properties"]["quote"][
+            "maxLength"
+        ]
         == classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     assert (
@@ -587,7 +916,9 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
 
 def test_slot_classification_prompt_separates_source_material_from_artifacts() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        text="Ladda upp en ljudfil och få ett Word-dokument.",
+        classification_input=_classification_input(
+            "Ladda upp en ljudfil och få ett Word-dokument."
+        ),
         allowed_slot_values={
             "primary_runtime_input": frozenset({"audio", "documents"}),
         },
@@ -602,7 +933,9 @@ def test_slot_classification_prompt_separates_source_material_from_artifacts() -
 
 def test_slot_classification_prompt_explains_report_disposition_values() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        text="Skriv ett rapportavsnitt för varje uppladdat dokument.",
+        classification_input=_classification_input(
+            "Skriv ett rapportavsnitt för varje uppladdat dokument."
+        ),
         allowed_slot_values={
             "report_disposition": frozenset(
                 {"both", "per_source_sections", "synthesized_overview"}
@@ -620,12 +953,25 @@ def test_slot_classification_prompt_explains_report_disposition_values() -> None
 
 
 def test_slot_classification_prompt_explains_example_output_evidence() -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000111")
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        text="Bygg en rapport utifrån uppladdade dokument.",
-        uploaded_file_evidence=(
-            "file_id: 00000000-0000-0000-0000-000000000111\n"
-            "filename: bilaga.pdf\n"
-            "excerpt: så här ska rapporten se ut"
+        classification_input=SlotClassificationInput(
+            sources=(
+                _classification_input(
+                    "Bygg en rapport utifrån uppladdade dokument."
+                ).sources[0],
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{file_id}",
+                    kind="uploaded_file",
+                    text=(
+                        f"file_id: {file_id}\n"
+                        "filename: bilaga.pdf\n"
+                        "excerpt: så här ska rapporten se ut"
+                    ),
+                    file_id=file_id,
+                    coverage="excerpt_truncated",
+                ),
+            )
         ),
         allowed_slot_values={
             "report_disposition": frozenset(
@@ -637,7 +983,7 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "example_output means the user attached a file as an example" in prompt
-    assert '"evidence": [exact_quote_str]' in prompt
+    assert '"evidence": [{"source_id": str, "quote": exact_quote_str}]' in prompt
     assert "attachment-only conclusions as medium confidence" in prompt
     assert '"file_roles": [{"file_id": str, "role": str' in prompt
     assert "Use the conversation and file evidence together" in prompt
@@ -649,7 +995,7 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
 
 def test_slot_classification_system_prompt_stays_domain_neutral() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        text="Skapa ett generellt flöde.",
+        classification_input=_classification_input("Skapa ett generellt flöde."),
         allowed_slot_values={
             "primary_runtime_input": frozenset({"audio", "documents", "text"}),
             "terminal_output": frozenset({"structured_json", "structured_text"}),
@@ -690,7 +1036,7 @@ async def test_classify_slots_logs_tenant_context(
         litellm_client=litellm_client,
         litellm_model="gpt-test",
         litellm_kwargs={},
-        text=f"log-target-{uuid4()}",
+        classification_input=_classification_input(f"log-target-{uuid4()}"),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=tenant_id,
         ui_language="sv",

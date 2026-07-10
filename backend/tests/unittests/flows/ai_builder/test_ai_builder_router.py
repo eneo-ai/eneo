@@ -62,7 +62,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     detach_session_attachment,
     get_plan,
     get_session,
-    get_session_classifier_slot_diagnostics,
+    get_session_classifier_diagnostics,
     get_session_models,
     list_session_plans,
     list_sessions,
@@ -864,14 +864,30 @@ class TestGetSessionEndpoint:
                 content="Jag förstår att flödet bara ska transkribera.",
                 metadata={
                     "slot_classification": {
+                        "schema_version": 13,
                         "prompt_hash": "a" * 64,
+                        "model": "openai/gpt-test",
+                        "provider": "openai",
+                        "source_inventory": [
+                            {
+                                "source_id": "user_message:user-1",
+                                "kind": "user_message",
+                                "source_sha256": "b" * 64,
+                                "message_id": "user-1",
+                            }
+                        ],
                         "slots": [
                             {
                                 "slot_name": "post_processing_goal",
                                 "value": "stop_after_primary_operation",
                                 "confidence": "high",
                                 "reason": "The user asked for transcription only.",
-                                "evidence": ["bara får en ordagrann transkription"],
+                                "evidence": [
+                                    {
+                                        "source_id": "user_message:user-1",
+                                        "quote": "bara får en ordagrann transkription",
+                                    }
+                                ],
                                 "evidence_level": "explicit",
                             }
                         ],
@@ -882,7 +898,7 @@ class TestGetSessionEndpoint:
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
-        result = await get_session_classifier_slot_diagnostics(
+        result = await get_session_classifier_diagnostics(
             request=MagicMock(),
             session_id=session.id,
             container=container,
@@ -890,19 +906,66 @@ class TestGetSessionEndpoint:
 
         assert result.model_dump(mode="json") == {
             "session_id": str(session.id),
-            "classifier_slot_rows": [
+            "classifier_runs": [
                 {
                     "message_id": "assistant-1",
-                    "slot_name": "post_processing_goal",
-                    "value": "stop_after_primary_operation",
-                    "confidence": "high",
-                    "reason": "The user asked for transcription only.",
-                    "evidence": ["bara får en ordagrann transkription"],
-                    "evidence_level": "explicit",
+                    "schema_version": 13,
+                    "prompt_hash": "a" * 64,
+                    "model": "openai/gpt-test",
+                    "provider": "openai",
+                    "source_inventory": [
+                        {
+                            "source_id": "user_message:user-1",
+                            "kind": "user_message",
+                            "source_sha256": "b" * 64,
+                            "message_id": "user-1",
+                            "question_id": None,
+                            "selected_value": None,
+                            "file_id": None,
+                            "coverage": None,
+                            "truncated": False,
+                        }
+                    ],
+                    "slots": [
+                        {
+                            "slot_name": "post_processing_goal",
+                            "value": "stop_after_primary_operation",
+                            "confidence": "high",
+                            "reason": "The user asked for transcription only.",
+                            "evidence": [
+                                {
+                                    "source_id": "user_message:user-1",
+                                    "quote": "bara får en ordagrann transkription",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        }
+                    ],
+                    "file_roles": [],
+                    "secondary_obligations": [],
+                    "form_intake": None,
+                    "assumptions": [],
+                    "contradictions": [],
                 }
             ],
         }
         service.get_session_attachment_snapshot.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_classifier_diagnostics_reject_non_creator(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await get_session_classifier_diagnostics(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
 
     @pytest.mark.anyio
     async def test_returns_session_attachments(self):

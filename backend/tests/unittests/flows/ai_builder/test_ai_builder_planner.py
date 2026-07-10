@@ -909,11 +909,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
     }
     attachment_context = SimpleNamespace(
         context=None,
-        discovery_context=(
-            "Unconfirmed uploaded-file evidence:\n"
-            "filename: beslutsmall.docx\n"
-            "file_type: document"
-        ),
         evidence=(),
         included_file_ids=[],
         total_chars=0,
@@ -1017,7 +1012,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
             return_value=SimpleNamespace(
                 context="attachment context",
-                discovery_context="uploaded file evidence",
                 evidence=(),
                 included_file_ids=[],
                 total_chars=18,

@@ -296,6 +296,74 @@ def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
     ]
 
 
+_CLASSIFIER_SLOT_EXPECTATION_KEYS = frozenset(
+    {
+        "slot_name",
+        "value",
+        "confidence",
+        "confidence_in",
+        "evidence_level",
+        "source_kinds",
+        "required_source_kinds",
+        "evidence_quotes",
+        "evidence_contains",
+    }
+)
+_CLASSIFIER_FILE_ROLE_EXPECTATION_KEYS = frozenset(
+    {
+        "file_id",
+        "file_index",
+        "role",
+        "confidence",
+        "confidence_in",
+        "evidence_level",
+        "coverage",
+        "coverage_in",
+        "source_kinds",
+        "required_source_kinds",
+        "evidence_quotes",
+        "evidence_contains",
+    }
+)
+_CLASSIFIER_EXPECTATION_STRING_LIST_KEYS = frozenset(
+    {
+        "confidence_in",
+        "coverage_in",
+        "source_kinds",
+        "required_source_kinds",
+        "evidence_quotes",
+        "evidence_contains",
+    }
+)
+_CLASSIFIER_EXPECTATION_STRING_KEYS = frozenset(
+    {
+        "slot_name",
+        "value",
+        "file_id",
+        "role",
+        "confidence",
+        "evidence_level",
+        "coverage",
+    }
+)
+_EVIDENCE_POSTURE_EXPECTATION_KEYS = frozenset(
+    {
+        "expected_classifier_slots",
+        "expected_file_roles",
+        "forbid_classifier_commit_grade_slots",
+        "expected_assumption_topics",
+        "forbidden_assumption_topics",
+    }
+)
+_EVIDENCE_POSTURE_EXPECTATION_PREFIXES = (
+    "expected_classifier",
+    "expected_file_role",
+    "forbid_classifier",
+    "expected_assumption",
+    "forbidden_assumption",
+)
+
+
 def _read_cases_file(path: Path) -> list[BattleCase]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     raw_cases = payload.get("cases") if isinstance(payload, Mapping) else None
@@ -329,6 +397,8 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
         expected = raw_case.get("expected")
         if expected is not None and not isinstance(expected, Mapping):
             raise ValueError(f"{path} case {case_id}.expected must be an object.")
+        if isinstance(expected, Mapping):
+            _validate_classifier_expectations(path, case_id, expected)
         scripted_answers = raw_case.get("scripted_question_answers")
         if scripted_answers is not None and not isinstance(scripted_answers, Mapping):
             raise ValueError(
@@ -351,6 +421,112 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             )
         )
     return cases
+
+
+def _validate_classifier_expectations(
+    path: Path,
+    case_id: str,
+    expected: Mapping[str, object],
+) -> None:
+    unknown_evidence_posture_keys = [
+        key
+        for key in expected
+        if isinstance(key, str)
+        and key.startswith(_EVIDENCE_POSTURE_EXPECTATION_PREFIXES)
+        and key not in _EVIDENCE_POSTURE_EXPECTATION_KEYS
+    ]
+    if unknown_evidence_posture_keys:
+        raise ValueError(
+            f"{path} case {case_id}.expected has unknown evidence-posture keys: "
+            f"{', '.join(sorted(unknown_evidence_posture_keys))}."
+        )
+    for key in (
+        "forbid_classifier_commit_grade_slots",
+        "expected_assumption_topics",
+        "forbidden_assumption_topics",
+    ):
+        value = expected.get(key)
+        if value is not None and (
+            not isinstance(value, list)
+            or not value
+            or not all(isinstance(item, str) and item.strip() for item in value)
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.expected.{key} must be a non-empty string list."
+            )
+    for key, allowed_keys, required_string in (
+        (
+            "expected_classifier_slots",
+            _CLASSIFIER_SLOT_EXPECTATION_KEYS,
+            "slot_name",
+        ),
+        (
+            "expected_file_roles",
+            _CLASSIFIER_FILE_ROLE_EXPECTATION_KEYS,
+            "role",
+        ),
+    ):
+        raw_rows = expected.get(key)
+        if raw_rows is None:
+            continue
+        if not isinstance(raw_rows, list):
+            raise ValueError(f"{path} case {case_id}.{key} must be an object list.")
+        for index, raw_row in enumerate(raw_rows):
+            if not isinstance(raw_row, Mapping):
+                raise ValueError(
+                    f"{path} case {case_id}.{key}[{index}] must be an object."
+                )
+            unknown_keys = set(raw_row) - allowed_keys
+            if unknown_keys:
+                raise ValueError(
+                    f"{path} case {case_id}.{key}[{index}] has unknown keys: "
+                    f"{', '.join(sorted(str(item) for item in unknown_keys))}."
+                )
+            if (
+                not isinstance(raw_row.get(required_string), str)
+                or not str(raw_row[required_string]).strip()
+            ):
+                raise ValueError(
+                    f"{path} case {case_id}.{key}[{index}].{required_string} "
+                    "must be a non-empty string."
+                )
+            for list_key in _CLASSIFIER_EXPECTATION_STRING_LIST_KEYS.intersection(
+                raw_row
+            ):
+                value = raw_row[list_key]
+                if (
+                    not isinstance(value, list)
+                    or not value
+                    or not all(isinstance(item, str) and item.strip() for item in value)
+                ):
+                    raise ValueError(
+                        f"{path} case {case_id}.{key}[{index}].{list_key} "
+                        "must be a non-empty string list."
+                    )
+            for string_key in _CLASSIFIER_EXPECTATION_STRING_KEYS.intersection(raw_row):
+                value = raw_row[string_key]
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(
+                        f"{path} case {case_id}.{key}[{index}].{string_key} "
+                        "must be a non-empty string."
+                    )
+            if key == "expected_file_roles":
+                file_id = raw_row.get("file_id")
+                file_index = raw_row.get("file_index")
+                has_file_id = isinstance(file_id, str) and bool(file_id.strip())
+                has_file_index = isinstance(file_index, int) and not isinstance(
+                    file_index, bool
+                )
+                if has_file_index and file_index < 0:
+                    raise ValueError(
+                        f"{path} case {case_id}.{key}[{index}].file_index must "
+                        "be non-negative."
+                    )
+                if has_file_id == has_file_index:
+                    raise ValueError(
+                        f"{path} case {case_id}.{key}[{index}] must set exactly one "
+                        "of file_id or file_index."
+                    )
 
 
 def _expected_overrides_from_args(args: argparse.Namespace) -> dict[str, JsonObject]:
@@ -574,11 +750,18 @@ def _run_case(
     plan_summary = _summarize_plan(plan)
     event_summary = _interaction_event_summary(interactions)
     failure_summary = _failure_summary(event_summary)
+    classifier_diagnostics = _request_json(
+        config=config,
+        method="GET",
+        path=(f"/flows/ai-builder/sessions/{session_id}/_diagnostics/classifier-slots"),
+    )
     quality_report = _quality_report(
         plan=plan,
         summary=plan_summary,
         expected=case.expected or {},
         event_summary=event_summary,
+        classifier_diagnostics=classifier_diagnostics,
+        attached_file_ids=file_ids,
     )
 
     return {
@@ -605,6 +788,7 @@ def _run_case(
         "plan_summary": plan_summary,
         "event_summary": event_summary,
         "failure_summary": failure_summary,
+        "classifier_diagnostics": classifier_diagnostics,
         "quality_report": quality_report,
     }
 
@@ -1020,6 +1204,16 @@ def _reanalyze_bundles(
                 summary=summary,
                 expected=expected,
                 event_summary=event_summary,
+                classifier_diagnostics=(
+                    bundle.get("classifier_diagnostics")
+                    if isinstance(bundle.get("classifier_diagnostics"), Mapping)
+                    else None
+                ),
+                attached_file_ids=tuple(
+                    _string_list(case.get("file_ids"))
+                    if isinstance(case, Mapping)
+                    else ()
+                ),
             )
             refreshed = {
                 **bundle,
@@ -1574,12 +1768,223 @@ def _looks_like_question_text(text: str) -> bool:
     )
 
 
+def _mapping_list(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _classifier_runs(
+    diagnostics: Mapping[str, Any] | None,
+) -> list[Mapping[str, object]]:
+    if diagnostics is None:
+        return []
+    return _mapping_list(diagnostics.get("classifier_runs"))
+
+
+def _latest_classifier_claim(
+    runs: list[Mapping[str, object]],
+    *,
+    collection_name: str,
+    identity_name: str,
+    identity_value: str,
+) -> tuple[Mapping[str, object], Mapping[str, object]] | None:
+    for run in reversed(runs):
+        claims = _mapping_list(run.get(collection_name))
+        for claim in reversed(claims):
+            if claim.get(identity_name) == identity_value:
+                return run, claim
+    return None
+
+
+def _classifier_claim_summary(
+    run: Mapping[str, object],
+    claim: Mapping[str, object],
+) -> JsonObject:
+    source_kinds_by_id = {
+        source_id: source.get("kind")
+        for source in _mapping_list(run.get("source_inventory"))
+        if (source_id := _optional_string(source, "source_id")) is not None
+    }
+    evidence = _mapping_list(claim.get("evidence"))
+    source_ids = [
+        source_id
+        for item in evidence
+        if (source_id := _optional_string(item, "source_id")) is not None
+    ]
+    source_kinds = list(
+        dict.fromkeys(
+            str(source_kinds_by_id[source_id])
+            for source_id in source_ids
+            if source_id in source_kinds_by_id
+        )
+    )
+    summary: JsonObject = {
+        key: claim.get(key)
+        for key in (
+            "slot_name",
+            "value",
+            "file_id",
+            "role",
+            "confidence",
+            "evidence_level",
+        )
+        if claim.get(key) is not None
+    }
+    summary.update(
+        {
+            "source_ids": source_ids,
+            "source_kinds": source_kinds,
+            "evidence_quotes": [
+                quote
+                for item in evidence
+                if (quote := _optional_string(item, "quote")) is not None
+            ],
+        }
+    )
+    return summary
+
+
+def _classifier_claim_matches(
+    actual: Mapping[str, Any],
+    expected: Mapping[str, object],
+) -> bool:
+    for key in (
+        "slot_name",
+        "value",
+        "file_id",
+        "role",
+        "confidence",
+        "evidence_level",
+        "coverage",
+    ):
+        if key in expected and actual.get(key) != expected.get(key):
+            return False
+    for key, actual_key in (
+        ("confidence_in", "confidence"),
+        ("coverage_in", "coverage"),
+    ):
+        allowed_values = _string_list(expected.get(key))
+        if allowed_values and actual.get(actual_key) not in allowed_values:
+            return False
+    expected_source_kinds = _string_list(expected.get("source_kinds"))
+    if expected_source_kinds and set(_string_list(actual.get("source_kinds"))) != set(
+        expected_source_kinds
+    ):
+        return False
+    required_source_kinds = set(_string_list(expected.get("required_source_kinds")))
+    if required_source_kinds and not required_source_kinds.issubset(
+        _string_list(actual.get("source_kinds"))
+    ):
+        return False
+    expected_quotes = _string_list(expected.get("evidence_quotes"))
+    if (
+        expected_quotes
+        and _string_list(actual.get("evidence_quotes")) != expected_quotes
+    ):
+        return False
+    required_quote_fragments = _string_list(expected.get("evidence_contains"))
+    actual_quotes = _string_list(actual.get("evidence_quotes"))
+    if any(
+        not _contains_topic(actual_quotes, fragment)
+        for fragment in required_quote_fragments
+    ):
+        return False
+    return True
+
+
+def _invalid_classifier_evidence_sources(
+    runs: list[Mapping[str, object]],
+) -> list[str]:
+    invalid: list[str] = []
+    for run_index, run in enumerate(runs):
+        source_ids = {
+            source_id
+            for source in _mapping_list(run.get("source_inventory"))
+            if (source_id := _optional_string(source, "source_id")) is not None
+        }
+        claims = [
+            *_mapping_list(run.get("slots")),
+            *_mapping_list(run.get("file_roles")),
+        ]
+        form_intake = run.get("form_intake")
+        if isinstance(form_intake, Mapping):
+            claims.append(form_intake)
+        for claim_index, claim in enumerate(claims):
+            for evidence in _mapping_list(claim.get("evidence")):
+                source_id = _optional_string(evidence, "source_id")
+                if source_id is None or source_id not in source_ids:
+                    invalid.append(f"run:{run_index}:claim:{claim_index}:{source_id}")
+    return invalid
+
+
+def _expected_file_id(
+    expected: Mapping[str, object],
+    attached_file_ids: tuple[str, ...],
+) -> str | None:
+    explicit_file_id = _optional_string(expected, "file_id")
+    if explicit_file_id is not None:
+        return explicit_file_id
+    file_index = _int_value(expected.get("file_index"))
+    if file_index is None or not 0 <= file_index < len(attached_file_ids):
+        return None
+    return attached_file_ids[file_index]
+
+
+def _classifier_file_coverage(
+    run: Mapping[str, object],
+    file_id: str,
+) -> str | None:
+    for source in _mapping_list(run.get("source_inventory")):
+        if source.get("file_id") != file_id:
+            continue
+        return _optional_string(source, "coverage")
+    return None
+
+
+def _classifier_slot_is_commit_grade(
+    runs: list[Mapping[str, object]],
+    slot_name: str,
+) -> bool:
+    claim = _latest_classifier_claim(
+        runs,
+        collection_name="slots",
+        identity_name="slot_name",
+        identity_value=slot_name,
+    )
+    if claim is None:
+        return False
+    summary = _classifier_claim_summary(*claim)
+    return (
+        summary.get("value") != "unknown"
+        and summary.get("confidence") in {"high", "medium"}
+        and bool(_string_list(summary.get("evidence_quotes")))
+    )
+
+
+def _classifier_assumptions(
+    runs: list[Mapping[str, object]],
+    event_summary: Mapping[str, Any],
+) -> list[str]:
+    assumptions = _string_list(event_summary.get("assumptions"))
+    for run in runs:
+        _extend_unique_strings(assumptions, _string_list(run.get("assumptions")))
+    return assumptions
+
+
+def _contains_topic(values: list[str], topic: str) -> bool:
+    folded_topic = topic.casefold()
+    return any(folded_topic in value.casefold() for value in values)
+
+
 def _quality_report(
     *,
     plan: JsonObject | None,
     summary: JsonObject,
     expected: Mapping[str, Any],
     event_summary: Mapping[str, Any] | None = None,
+    classifier_diagnostics: Mapping[str, Any] | None = None,
+    attached_file_ids: tuple[str, ...] = (),
 ) -> JsonObject:
     checks: list[JsonObject] = []
     warnings: list[str] = []
@@ -1665,6 +2070,129 @@ def _quality_report(
             question_event_count <= max_question_count,
             question_event_count,
             max_question_count,
+        )
+
+    diagnostic_expectation_keys = {
+        "expected_classifier_slots",
+        "expected_file_roles",
+        "forbid_classifier_commit_grade_slots",
+    }
+    classifier_runs = _classifier_runs(classifier_diagnostics)
+    if diagnostic_expectation_keys.intersection(expected):
+        add_check(
+            "classifier_diagnostics_present",
+            bool(classifier_runs),
+            len(classifier_runs),
+            ">= 1",
+        )
+    if classifier_runs:
+        invalid_evidence_sources = _invalid_classifier_evidence_sources(classifier_runs)
+        add_check(
+            "classifier_evidence_sources",
+            invalid_evidence_sources == [],
+            invalid_evidence_sources,
+            [],
+        )
+
+    for expected_slot in _mapping_list(expected.get("expected_classifier_slots")):
+        slot_name = _optional_string(expected_slot, "slot_name")
+        if slot_name is None:
+            continue
+        actual_slot = _latest_classifier_claim(
+            classifier_runs,
+            collection_name="slots",
+            identity_name="slot_name",
+            identity_value=slot_name,
+        )
+        actual_summary = (
+            _classifier_claim_summary(*actual_slot) if actual_slot is not None else None
+        )
+        add_check(
+            f"classifier_slot:{slot_name}",
+            actual_summary is not None
+            and _classifier_claim_matches(actual_summary, expected_slot),
+            actual_summary,
+            dict(expected_slot),
+        )
+
+    for expected_role in _mapping_list(expected.get("expected_file_roles")):
+        file_id = _expected_file_id(expected_role, attached_file_ids)
+        if file_id is None:
+            add_check(
+                "classifier_file_role:<unresolved>",
+                False,
+                None,
+                dict(expected_role),
+            )
+            continue
+        actual_role = _latest_classifier_claim(
+            classifier_runs,
+            collection_name="file_roles",
+            identity_name="file_id",
+            identity_value=file_id,
+        )
+        actual_summary = None
+        if actual_role is not None:
+            actual_summary = _classifier_claim_summary(*actual_role)
+            actual_summary["coverage"] = _classifier_file_coverage(
+                actual_role[0],
+                file_id,
+            )
+        expected_summary = {**expected_role, "file_id": file_id}
+        add_check(
+            f"classifier_file_role:{file_id}",
+            actual_summary is not None
+            and _classifier_claim_matches(actual_summary, expected_summary),
+            actual_summary,
+            dict(expected_summary),
+        )
+
+    forbidden_commit_grade_slots = set(
+        _string_list(expected.get("forbid_classifier_commit_grade_slots"))
+    )
+    if forbidden_commit_grade_slots:
+        matched_commit_grade = [
+            slot_name
+            for slot_name in sorted(forbidden_commit_grade_slots)
+            if _classifier_slot_is_commit_grade(classifier_runs, slot_name)
+        ]
+        add_check(
+            "forbid_classifier_commit_grade_slots",
+            matched_commit_grade == [],
+            matched_commit_grade,
+            [],
+        )
+
+    assumptions = _classifier_assumptions(classifier_runs, event_summary)
+    expected_assumption_topics = _string_list(
+        expected.get("expected_assumption_topics")
+    )
+    if expected_assumption_topics:
+        missing_topics = [
+            topic
+            for topic in expected_assumption_topics
+            if not _contains_topic(assumptions, topic)
+        ]
+        add_check(
+            "expected_assumption_topics",
+            missing_topics == [],
+            assumptions,
+            expected_assumption_topics,
+        )
+    forbidden_assumption_topics = _string_list(
+        expected.get("forbidden_assumption_topics")
+    )
+    if forbidden_assumption_topics:
+        matched_topics = [
+            topic
+            for topic in forbidden_assumption_topics
+            if _contains_topic(assumptions, topic)
+        ]
+        add_check(
+            "forbidden_assumption_topics",
+            matched_topics == [],
+            matched_topics,
+            [],
         )
     if plan is None:
         return {"checks": checks, "warnings": warnings}

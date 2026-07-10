@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     _targeted_classification_bias,
     build_discovery_runtime_result,
     build_runtime_discovery_context,
+    build_slot_classification_input,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -45,6 +46,10 @@ def _make_response(content: str) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def _cited(quote: str, *, message_id: str = "user-1") -> dict[str, str]:
+    return {"source_id": f"user_message:{message_id}", "quote": quote}
 
 
 def _resolved_state() -> PlanningState:
@@ -90,13 +95,6 @@ def _slot(
 def _attachment_context() -> AIBuilderAttachmentContext:
     return AIBuilderAttachmentContext(
         context=None,
-        discovery_context=(
-            "Unconfirmed uploaded-file evidence:\n"
-            "filename: beslutsmall.docx\n"
-            "file_type: document\n"
-            "mimetype: application/vnd.openxmlformats-officedocument.wordprocessingml.document\n"
-            "has_readable_text: false"
-        ),
         evidence=(
             AIBuilderAttachmentEvidence(
                 file_id=uuid4(),
@@ -107,6 +105,7 @@ def _attachment_context() -> AIBuilderAttachmentContext:
                 ),
                 has_readable_text=False,
                 excerpt=None,
+                coverage="inventory_only",
                 inferred_role="template",
                 role_confidence="medium",
                 role_evidence=("content:template_placeholder:kundnamn",),
@@ -116,6 +115,195 @@ def _attachment_context() -> AIBuilderAttachmentContext:
         total_chars=0,
         truncated=False,
     )
+
+
+def test_slot_classification_input_preserves_typed_source_chronology() -> None:
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content="Behåll OriginalCase i rapporten.",
+        ),
+        ConversationMessage(
+            message_id="assistant-1",
+            role="assistant",
+            content="Vilket format?",
+            metadata={"question_id": "terminal_output"},
+        ),
+        ConversationMessage(
+            message_id="user-2",
+            role="user",
+            content="docx_document",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_value": "docx_document",
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="tool-1",
+            role="tool",
+            content="internal planner prose",
+        ),
+    ]
+    attachment_context = AIBuilderAttachmentContext(
+        context=None,
+        evidence=tuple(
+            AIBuilderAttachmentEvidence(
+                file_id=file_id,
+                filename=filename,
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                has_readable_text=True,
+                excerpt=excerpt,
+                coverage="fully_seen",
+            )
+            for file_id, filename, excerpt in (
+                (second_file_id, "second.pdf", "SECOND"),
+                (first_file_id, "first.pdf", "FIRST"),
+            )
+        ),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=False,
+    )
+
+    classification_input = build_slot_classification_input(
+        conversation,
+        attachment_context,
+    )
+
+    assert classification_input.sources[0].source_id == "user_message:user-1"
+    assert classification_input.sources[0].text == "Behåll OriginalCase i rapporten."
+    assert classification_input.sources[1].source_id == "structured_answer:user-2:0"
+    assert classification_input.sources[1].question_id == "terminal_output"
+    assert classification_input.sources[1].selected_value == "docx_document"
+    assert [source.file_id for source in classification_input.sources[2:]] == sorted(
+        (first_file_id, second_file_id),
+        key=str,
+    )
+    assert all(
+        "internal planner prose" not in source.text
+        for source in classification_input.sources
+    )
+
+
+def test_slot_classification_input_preserves_selected_option_only_answer() -> None:
+    classification_input = build_slot_classification_input(
+        [
+            ConversationMessage(
+                message_id="user-option",
+                role="user",
+                content="docx_document",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_option_id": "docx_document",
+                    }
+                },
+            )
+        ],
+        None,
+    )
+
+    assert [source.source_id for source in classification_input.sources] == [
+        "structured_answer:user-option:0"
+    ]
+    source = classification_input.sources[0]
+    assert source.question_id == "terminal_output"
+    assert source.selected_value == "docx_document"
+    assert source.text == "docx_document"
+
+
+def test_slot_classification_input_carries_each_answering_question_identity() -> None:
+    classification_input = build_slot_classification_input(
+        [
+            ConversationMessage(
+                message_id="assistant-input",
+                role="assistant",
+                content="Vilket underlag?",
+                metadata={"question_id": "primary_runtime_input"},
+            ),
+            ConversationMessage(
+                message_id="user-input",
+                role="user",
+                content="Flera dokument per ärende.",
+            ),
+            ConversationMessage(
+                message_id="assistant-output",
+                role="assistant",
+                content="Vilket slutformat?",
+                metadata={"question_id": "terminal_output"},
+            ),
+            ConversationMessage(
+                message_id="tool-between",
+                role="tool",
+                content="internal tool output",
+            ),
+            ConversationMessage(
+                message_id="user-output",
+                role="user",
+                content="En fil jag kan ladda ner.",
+            ),
+        ],
+        None,
+    )
+
+    assert [
+        (source.source_id, source.question_id)
+        for source in classification_input.sources
+    ] == [
+        ("user_message:user-input", "primary_runtime_input"),
+        ("user_message:user-output", "terminal_output"),
+    ]
+
+
+def test_slot_classification_input_bounds_transcript_without_starving_late_sources() -> (
+    None
+):
+    classification_input = build_slot_classification_input(
+        [
+            ConversationMessage(
+                message_id="user-old",
+                role="user",
+                content="old:" + "A" * 9_000,
+            ),
+            ConversationMessage(
+                message_id="user-answer",
+                role="user",
+                content="structured_json",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_value": "structured_json",
+                    }
+                },
+            ),
+            ConversationMessage(
+                message_id="user-latest",
+                role="user",
+                content="latest:" + "B" * 9_000,
+            ),
+        ],
+        None,
+    )
+
+    assert [source.source_id for source in classification_input.sources] == [
+        "user_message:user-old",
+        "structured_answer:user-answer:0",
+        "user_message:user-latest",
+    ]
+    assert sum(len(source.text) for source in classification_input.sources) == (
+        runtime._MAX_CLASSIFICATION_TRANSCRIPT_CHARS
+    )
+    assert classification_input.sources[0].truncated is True
+    assert classification_input.sources[1].truncated is False
+    assert classification_input.sources[2].truncated is True
+    assert classification_input.sources[1].selected_value == "structured_json"
+    assert classification_input.sources[-1].text.startswith("latest:")
 
 
 def test_discovery_analysis_carries_classifier_assumptions() -> None:
@@ -177,7 +365,9 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
                         "value": "basic_case_metadata",
                         "confidence": "high",
                         "reason": "runtime fields requested",
-                        "evidence": ["Användaren ska ange målgrupp och detaljnivå"],
+                        "evidence": [
+                            _cited("Användaren ska ange målgrupp och detaljnivå")
+                        ],
                     }
                 ]
             }
@@ -193,6 +383,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content="Användaren ska ange målgrupp och detaljnivå vid körning.",
                 )
@@ -232,7 +423,6 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
     file_id = uuid4()
     attachment_context = AIBuilderAttachmentContext(
         context=None,
-        discovery_context=None,
         evidence=(
             AIBuilderAttachmentEvidence(
                 file_id=file_id,
@@ -241,6 +431,7 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
                 mimetype="application/pdf",
                 has_readable_text=True,
                 excerpt="Fyll i {{ kundnamn }}.",
+                coverage="fully_seen",
                 inferred_role="template",
                 role_confidence="medium",
                 role_evidence=("content:template_placeholder:kundnamn",),
@@ -289,7 +480,6 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
-                discovery_context=None,
                 evidence=(
                     AIBuilderAttachmentEvidence(
                         file_id=file_id,
@@ -301,6 +491,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
                         ),
                         has_readable_text=True,
                         excerpt="Fyll i {{ kundnamn }}.",
+                        coverage="fully_seen",
                         inferred_role="template",
                         role_confidence="medium",
                         role_evidence=("content:template_placeholder:kundnamn",),
@@ -365,14 +556,14 @@ async def test_runtime_planning_state_overlays_heuristic_slots_with_model_eviden
                         "value": "text",
                         "confidence": "high",
                         "reason": "mentions text input",
-                        "evidence": ["klistra in ett kundmeddelande"],
+                        "evidence": [_cited("klistra in ett kundmeddelande")],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "medium",
                         "reason": "asks for a summary",
-                        "evidence": ["få en tydlig sammanfattning"],
+                        "evidence": [_cited("få en tydlig sammanfattning")],
                     },
                 ]
             }
@@ -383,6 +574,7 @@ async def test_runtime_planning_state_overlays_heuristic_slots_with_model_eviden
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content=(
                         "Jag vill klistra in ett kundmeddelande och få en tydlig "
@@ -432,7 +624,7 @@ async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_gu
                         "value": "documents",
                         "confidence": "high",
                         "reason": "the user uploads written material",
-                        "evidence": ["ladda upp flera PDF-dokument"],
+                        "evidence": [_cited("ladda upp flera PDF-dokument")],
                     },
                 ]
             }
@@ -448,6 +640,7 @@ async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_gu
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content="Jag vill ladda upp flera PDF-dokument och analysera dem.",
                 )
@@ -463,7 +656,7 @@ async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_gu
     slot = state.resolved_slots["primary_runtime_input"]
     assert slot.source == "model"
     assert slot.value == "documents"
-    assert "quote:ladda upp flera PDF-dokument" in slot.evidence
+    assert "quote:user_message:user-1:ladda upp flera PDF-dokument" in slot.evidence
 
 
 @pytest.mark.asyncio
@@ -493,7 +686,7 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
-    assert "Unconfirmed uploaded-file evidence" in prompt
+    assert '"kind": "uploaded_file"' in prompt
     assert "filename: beslutsmall.docx" in prompt
     assert "has_readable_text: false" in prompt
 
@@ -512,7 +705,8 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
                         "role": "example_output",
                         "confidence": "medium",
                         "reason": "conversation ties the upload to desired output",
-                        "evidence": ["så här ska rapporten se ut"],
+                        "evidence": [_cited("så här ska rapporten se ut")],
+                        "evidence_level": "explicit",
                     }
                 ],
             }
@@ -523,6 +717,7 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content=(
                         "Jag bifogar en rapport som visar ungefär så här ska "
@@ -538,17 +733,6 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
             ui_language="sv",
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
-                discovery_context=(
-                    "Unconfirmed uploaded-file evidence:\n"
-                    f"file_id: {file_id}\n"
-                    "filename: exempelrapport.pdf\n"
-                    "file_type: document\n"
-                    "mimetype: application/pdf\n"
-                    "has_readable_text: true\n"
-                    "inferred_role: context_only\n"
-                    "role_confidence: low\n"
-                    "excerpt: Titel\nSammanfattning\nRekommendation"
-                ),
                 evidence=(
                     AIBuilderAttachmentEvidence(
                         file_id=file_id,
@@ -557,6 +741,7 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
                         mimetype="application/pdf",
                         has_readable_text=True,
                         excerpt="Titel\nSammanfattning\nRekommendation",
+                        coverage="fully_seen",
                         inferred_role="context_only",
                         role_confidence="low",
                         role_evidence=("fallback:unclassified_file",),
@@ -573,7 +758,7 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
     assert role.role == "example_output"
     assert role.source == "model"
     assert role.confidence == "medium"
-    assert "quote:så här ska rapporten se ut" in role.evidence
+    assert "quote:user_message:user-1:så här ska rapporten se ut" in role.evidence
 
 
 @pytest.mark.asyncio
@@ -609,14 +794,18 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
                         "value": "pdf_document",
                         "confidence": "high",
                         "reason": "user requests a PDF report",
-                        "evidence": ["PDF-rapport med samma upplägg"],
+                        "evidence": [_cited("PDF-rapport med samma upplägg")],
+                        "evidence_level": "explicit",
                     },
                     {
                         "slot_name": "report_disposition",
                         "value": "both",
                         "confidence": "high",
                         "reason": "example report shows sections and overview",
-                        "evidence": ["samma upplägg som bifogad exempelrapport"],
+                        "evidence": [
+                            _cited("samma upplägg som bifogad exempelrapport")
+                        ],
+                        "evidence_level": "explicit",
                     },
                 ],
                 "file_roles": [
@@ -625,7 +814,8 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
                         "role": "example_output",
                         "confidence": "high",
                         "reason": "conversation ties the upload to desired output",
-                        "evidence": ["bifogad exempelrapport"],
+                        "evidence": [_cited("bifogad exempelrapport")],
+                        "evidence_level": "explicit",
                     }
                 ],
             }
@@ -633,6 +823,7 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
     )
     conversation = [
         ConversationMessage(
+            message_id="user-1",
             role="user",
             content=(
                 "Jag vill analysera flera dokument och skapa en PDF-rapport med "
@@ -651,17 +842,6 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
         ui_language="sv",
         attachment_context=AIBuilderAttachmentContext(
             context=None,
-            discovery_context=(
-                "Unconfirmed uploaded-file evidence:\n"
-                f"file_id: {file_id}\n"
-                "filename: exempelrapport.pdf\n"
-                "file_type: document\n"
-                "mimetype: application/pdf\n"
-                "has_readable_text: true\n"
-                "inferred_role: context_only\n"
-                "role_confidence: low\n"
-                "excerpt: Inledning\nAvsnitt per källa\nSamlad bedömning"
-            ),
             evidence=(
                 AIBuilderAttachmentEvidence(
                     file_id=file_id,
@@ -670,6 +850,7 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
                     mimetype="application/pdf",
                     has_readable_text=True,
                     excerpt="Inledning\nAvsnitt per källa\nSamlad bedömning",
+                    coverage="fully_seen",
                     inferred_role="context_only",
                     role_confidence="low",
                     role_evidence=("fallback:unclassified_file",),
@@ -747,14 +928,14 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
                         "value": "json",
                         "confidence": "high",
                         "reason": "the runtime source is a JSON payload",
-                        "evidence": ["tar emot JSON"],
+                        "evidence": [_cited("tar emot JSON")],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_json",
                         "confidence": "high",
                         "reason": "the user asks for JSON output",
-                        "evidence": ["returnerar JSON"],
+                        "evidence": [_cited("returnerar JSON")],
                     },
                 ]
             }
@@ -770,6 +951,7 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content=(
                         "Jag vill bygga ett flöde som tar emot JSON och returnerar JSON."
@@ -822,7 +1004,8 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
                         "value": UNKNOWN_SLOT_VALUE,
                         "confidence": "high",
                         "reason": "user_explicit_uncertain",
-                        "evidence": ["Jag vet inte exakt vilket format"],
+                        "evidence": [_cited("Jag vet inte exakt vilket format")],
+                        "evidence_level": "explicit",
                     },
                 ],
             }
@@ -838,6 +1021,7 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content=(
                         "Jag har en svensk ljudinspelning från ett möte. Jag vet "
@@ -875,14 +1059,15 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
                         "value": "documents",
                         "confidence": "high",
                         "reason": "incorrect model guess",
-                        "evidence": ["sammanfatta detta"],
+                        "evidence": [_cited("sammanfattar innehållet tydligt")],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "high",
                         "reason": "summary requested",
-                        "evidence": ["sammanfatta detta"],
+                        "evidence": [_cited("sammanfattar innehållet tydligt")],
+                        "evidence_level": "explicit",
                     },
                 ]
             }
@@ -893,6 +1078,7 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
         await build_runtime_discovery_context(
             [
                 ConversationMessage(
+                    message_id="user-structured",
                     role="user",
                     content="Text",
                     metadata={
@@ -903,6 +1089,7 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
                     },
                 ),
                 ConversationMessage(
+                    message_id="user-1",
                     role="user",
                     content="Bygg ett flöde som sammanfattar innehållet tydligt.",
                 ),
@@ -917,6 +1104,8 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
 
     assert state.resolved_slots["primary_runtime_input"].source == "structured_answer"
     assert state.resolved_slots["primary_runtime_input"].value == "text"
+    assert state.resolved_slots["terminal_output"].source == "model"
+    assert state.resolved_slots["terminal_output"].value == "structured_text"
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
@@ -937,41 +1126,43 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
                         "value": "text",
                         "confidence": "high",
                         "reason": "the source material is user-provided prose",
-                        "evidence": ["klistrar in ett kundmeddelande"],
+                        "evidence": [_cited("klistrar in ett kundmeddelande")],
+                        "evidence_level": "explicit",
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_json",
                         "confidence": "high",
                         "reason": "structured data is requested for downstream use",
-                        "evidence": ["strukturerad data"],
+                        "evidence": [_cited("strukturerad data")],
+                        "evidence_level": "explicit",
                     },
                 ]
             }
         )
     )
 
-    analysis = (
-        await build_discovery_runtime_result(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Gör ett smart supportflöde där användaren klistrar in ett "
-                        "kundmeddelande, klassificerar avsikt och prioritet, föreslår "
-                        "svar, markerar om mänsklig granskning behövs och returnerar "
-                        "både kort text och strukturerad data."
-                    ),
-                    metadata={"ui_language": "sv"},
-                )
-            ],
-            litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
-            tenant_id=uuid4(),
-            ui_language="sv",
-        )
-    ).discovery_analysis
+    result = await build_discovery_runtime_result(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=(
+                    "Gör ett smart supportflöde där användaren klistrar in ett "
+                    "kundmeddelande, klassificerar avsikt och prioritet, föreslår "
+                    "svar, markerar om mänsklig granskning behövs och returnerar "
+                    "både kort text och strukturerad data."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    analysis = result.discovery_analysis
 
     question_ids = {
         issue.suggestion.question_id
@@ -981,6 +1172,14 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     assert "input_material_mode" not in question_ids
     assert "final_output_mode" not in question_ids
     assert analysis.ready_for_confirmation is True
+    assert result.slot_classification_metadata is not None
+    assert {
+        slot.slot_name: (slot.value, slot.evidence_level)
+        for slot in result.slot_classification_metadata.slots
+    } == {
+        "primary_runtime_input": ("text", "explicit"),
+        "terminal_output": ("structured_json", "explicit"),
+    }
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
@@ -989,55 +1188,34 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
 
 
 @pytest.mark.asyncio
-async def test_runtime_discovery_asks_output_question_when_model_guesses_uncertain_output() -> (
+async def test_runtime_discovery_blocks_output_classification_when_user_is_uncertain() -> (
     None
 ):
     litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps(
-            {
-                "slots": [
-                    {
-                        "slot_name": "primary_runtime_input",
-                        "value": "audio",
-                        "confidence": "high",
-                        "reason": "the source material is a meeting recording",
-                        "evidence": ["svensk ljudinspelning från ett möte"],
-                    },
-                    {
-                        "slot_name": "terminal_output",
-                        "value": "structured_text",
-                        "confidence": "high",
-                        "reason": "a readable result is implied",
-                        "evidence": ["något användbart som jag kan dela"],
-                    },
-                ],
-            }
-        )
-    )
+    litellm_client.acompletion.return_value = _make_response(json.dumps({"slots": []}))
 
-    analysis = (
-        await build_discovery_runtime_result(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Jag har en svensk ljudinspelning från ett möte och vill "
-                        "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
-                        "vad som sades och skapa något användbart som jag kan dela "
-                        "vidare efteråt. Jag vet inte exakt vilket format "
-                        "slutresultatet ska vara ännu."
-                    ),
-                    metadata={"ui_language": "sv"},
-                )
-            ],
-            litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
-            tenant_id=uuid4(),
-            ui_language="sv",
-        )
-    ).discovery_analysis
+    result = await build_discovery_runtime_result(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=(
+                    "Jag har en svensk ljudinspelning från ett möte och vill "
+                    "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
+                    "vad som sades och skapa något användbart som jag kan dela "
+                    "vidare efteråt. Jag vet inte exakt vilket format "
+                    "slutresultatet ska vara ännu."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    analysis = result.discovery_analysis
 
     question_ids = {
         issue.suggestion.question_id
@@ -1066,48 +1244,51 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
                         "value": "documents",
                         "confidence": "high",
                         "reason": "the source material is uploaded documents",
-                        "evidence": ["flera relaterade dokument"],
+                        "evidence": [_cited("flera leverantörsavtal och bilagor")],
+                        "evidence_level": "explicit",
                     },
                     {
                         "slot_name": "document_material_scope",
                         "value": "multiple_documents_case",
                         "confidence": "high",
                         "reason": "the user says several related files",
-                        "evidence": ["flera relaterade dokument"],
+                        "evidence": [_cited("flera leverantörsavtal och bilagor")],
+                        "evidence_level": "explicit",
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_json",
                         "confidence": "high",
                         "reason": "structured JSON is requested for another system",
-                        "evidence": ["skicka vidare till ett annat system"],
+                        "evidence": [_cited("strukturerad JSON")],
+                        "evidence_level": "explicit",
                     },
                 ]
             }
         )
     )
 
-    analysis = (
-        await build_discovery_runtime_result(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Skapa ett flöde som tar emot flera leverantörsavtal och "
-                        "bilagor, extraherar risker, rekommendationer och öppna "
-                        "frågor, låter en människa granska, och returnerar "
-                        "strukturerad JSON för ett uppföljningssystem."
-                    ),
-                    metadata={"ui_language": "sv"},
-                )
-            ],
-            litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
-            tenant_id=uuid4(),
-            ui_language="sv",
-        )
-    ).discovery_analysis
+    result = await build_discovery_runtime_result(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=(
+                    "Skapa ett flöde som tar emot flera leverantörsavtal och "
+                    "bilagor, extraherar risker, rekommendationer och öppna "
+                    "frågor, låter en människa granska, och returnerar "
+                    "strukturerad JSON för ett uppföljningssystem."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    analysis = result.discovery_analysis
 
     question_ids = {
         issue.suggestion.question_id
@@ -1118,6 +1299,14 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
     assert "document_material_scope" not in question_ids
     assert "final_output_mode" not in question_ids
     assert analysis.ready_for_confirmation is True
+    assert result.slot_classification_metadata is not None
+    assert {
+        slot.slot_name: slot.value for slot in result.slot_classification_metadata.slots
+    } == {
+        "primary_runtime_input": "documents",
+        "document_material_scope": "multiple_documents_case",
+        "terminal_output": "structured_json",
+    }
 
 
 @pytest.mark.asyncio
@@ -1134,14 +1323,14 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
                         "value": "text",
                         "confidence": "high",
                         "reason": "the user provides text",
-                        "evidence": ["klistrar in intervjusvar"],
+                        "evidence": [_cited("klistrar in intervjusvar")],
                     },
                     {
                         "slot_name": "terminal_output",
                         "value": "structured_text",
                         "confidence": "high",
                         "reason": "a readable summary is requested",
-                        "evidence": ["läsbar sammanfattning"],
+                        "evidence": [_cited("läsbar sammanfattning")],
                     },
                 ]
             }
@@ -1150,6 +1339,7 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
 
     conversation = [
         ConversationMessage(
+            message_id="user-1",
             role="user",
             content=(
                 "Bygg ett flöde där användaren klistrar in intervjusvar och får "
@@ -1181,35 +1371,43 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
 
 
 def test_targeted_bias_canonicalizes_legacy_question_id_to_slot() -> None:
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content="Vilket format?",
+            metadata={"question_id": "final_output_mode"},
+        ),
+        ConversationMessage(
+            message_id="user-answer-1",
+            role="user",
+            content="en fil jag kan ladda ner",
+        ),
+    ]
     bias = _targeted_classification_bias(
-        [
-            ConversationMessage(
-                role="assistant",
-                content="Vilket format?",
-                metadata={"question_id": "final_output_mode"},
-            ),
-            ConversationMessage(role="user", content="en fil jag kan ladda ner"),
-        ],
+        conversation,
         {"terminal_output": {"docx_document", "structured_text"}},
+        build_slot_classification_input(conversation, None),
     )
 
     assert bias is not None
     assert bias.target_slot_name == "terminal_output"
     assert bias.asked_question_id == "terminal_output"
-    assert bias.latest_user_answer == "en fil jag kan ladda ner"
+    assert bias.answer_source_id == "user_message:user-answer-1"
 
 
 def test_targeted_bias_is_none_when_target_already_resolved() -> None:
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content="Vilket format?",
+            metadata={"question_id": "final_output_mode"},
+        ),
+        ConversationMessage(role="user", content="en fil"),
+    ]
     bias = _targeted_classification_bias(
-        [
-            ConversationMessage(
-                role="assistant",
-                content="Vilket format?",
-                metadata={"question_id": "final_output_mode"},
-            ),
-            ConversationMessage(role="user", content="en fil"),
-        ],
+        conversation,
         {"primary_runtime_input": {"text", "documents"}},
+        build_slot_classification_input(conversation, None),
     )
 
     assert bias is None

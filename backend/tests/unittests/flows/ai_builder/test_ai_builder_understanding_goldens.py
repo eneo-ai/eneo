@@ -1,8 +1,7 @@
-"""Golden cases for AI Builder DOCX understanding behavior.
+"""Deterministic phrase-routing contracts for AI Builder DOCX intent.
 
-Phase 2 intentionally flips the previously characterized DOCX misroutes into
-their desired DOCX-specific behavior. These tests now lock the corrected
-discovery routing and resolved slot state so future changes stay explicit.
+These cases exercise the owned heuristic and planning-state merge paths. They
+do not measure live model accuracy; the battle harness owns that separate gate.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ def _question_ids_for(conversation: list[ConversationMessage]) -> list[str]:
         ),
     ],
 )
-def test_docx_output_characterization_cases(
+def test_docx_output_deterministic_routing(
     prompt: str,
     expected_issue_id: str | None,
     expected_question_id: str | None,
@@ -122,7 +121,7 @@ def test_docx_output_characterization_cases(
         ),
     ],
 )
-def test_docx_output_characterization_slots(
+def test_docx_output_deterministic_slots(
     prompt: str,
     expected_slots: list[tuple[str, str, str]],
 ) -> None:
@@ -141,9 +140,7 @@ def test_docx_output_characterization_slots(
     ] == expected_slots
 
 
-def test_generated_docx_without_template_characterization_excludes_docx_mode_question() -> (
-    None
-):
+def test_generated_docx_without_template_excludes_docx_mode_question() -> None:
     conversation = [
         ConversationMessage(
             role="user",
@@ -160,7 +157,7 @@ def test_generated_docx_without_template_characterization_excludes_docx_mode_que
     assert "final_pdf_type" not in question_ids
 
 
-def test_docx_template_characterization_excludes_docx_mode_question() -> None:
+def test_docx_template_excludes_docx_mode_question() -> None:
     conversation = [
         ConversationMessage(
             role="user",

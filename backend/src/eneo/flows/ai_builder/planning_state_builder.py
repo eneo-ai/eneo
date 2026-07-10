@@ -620,7 +620,7 @@ def merge_llm_resolved_slots(
             source="model",
             evidence=[
                 f"model:{classified_slot.slot_name}:{prompt_hash}",
-                *[f"quote:{item}" for item in classified_slot.evidence],
+                *[item.planning_reference() for item in classified_slot.evidence],
             ],
             confidence=classified_slot.confidence,
         )
@@ -652,7 +652,7 @@ def _merge_model_form_intake(
                 source="model",
                 provenance=[
                     f"model:{FORM_INTAKE_SIGNAL_ID}:{prompt_hash}",
-                    *[f"quote:{item}" for item in form_intake.evidence],
+                    *[item.planning_reference() for item in form_intake.evidence],
                 ],
             )
         )
@@ -707,7 +707,7 @@ def _merge_model_file_roles(
                 "evidence": [
                     *existing_role.evidence,
                     f"model:file_role:{prompt_hash}",
-                    *[f"quote:{item}" for item in classified_role.evidence],
+                    *[item.planning_reference() for item in classified_role.evidence],
                 ],
                 "candidate_roles": _merged_file_role_candidates(
                     existing_role.candidate_roles or [existing_role.role],

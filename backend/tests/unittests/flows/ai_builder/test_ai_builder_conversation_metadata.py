@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
+from uuid import uuid4
 
 from eneo.flows.ai_builder import ai_builder_conversation_metadata as metadata_module
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -26,15 +27,54 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
+    ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedSlot,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
 )
+_CLASSIFICATION_SOURCE_ID = "user_message:user-1"
+
+
+def _classified_evidence(quote: str) -> ClassifiedEvidence:
+    return ClassifiedEvidence(source_id=_CLASSIFICATION_SOURCE_ID, quote=quote)
+
+
+def _classification_input(*quotes: str) -> SlotClassificationInput:
+    return SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id=_CLASSIFICATION_SOURCE_ID,
+                kind="user_message",
+                text="\n".join(quotes),
+                message_id="user-1",
+            ),
+        )
+    )
+
+
+def _persisted_classification_header() -> dict[str, object]:
+    return {
+        "schema_version": 13,
+        "prompt_hash": "a" * 64,
+        "model": "openai/gpt-test",
+        "provider": "openai",
+        "source_inventory": [
+            {
+                "source_id": _CLASSIFICATION_SOURCE_ID,
+                "kind": "user_message",
+                "source_sha256": "b" * 64,
+                "message_id": "user-1",
+            }
+        ],
+    }
 
 
 def _capture_metadata_warnings(monkeypatch) -> list[tuple[str, dict[str, object]]]:
@@ -232,6 +272,7 @@ def test_requirements_summary_round_trips_through_canonical_metadata() -> None:
 
 
 def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
+    file_id = uuid4()
     values_by_slot = {
         "primary_runtime_input": "documents",
         "terminal_output": "structured_text",
@@ -248,7 +289,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
                 value=value,
                 confidence="high",
                 reason=f"{slot_name} evidence",
-                evidence=(f"{slot_name} quote",),
+                evidence=(_classified_evidence(f"{slot_name} quote"),),
                 evidence_level="explicit",
             )
             for slot_name, value in values_by_slot.items()
@@ -258,7 +299,18 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             sectioned_form_intake=True,
             confidence="high",
             reason="runtime text per section",
-            evidence=("fritext under varje rubrik",),
+            evidence=(_classified_evidence("fritext under varje rubrik"),),
+            evidence_level="explicit",
+        ),
+        file_roles=(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role="template",
+                confidence="high",
+                reason="user identifies the file as a template",
+                evidence=(_classified_evidence("use the attached template"),),
+                evidence_level="explicit",
+            ),
         ),
         secondary_obligations=("risks", "actions"),
         assumptions=("User wants runtime form fields.",),
@@ -268,6 +320,31 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     classification = slot_classification_metadata_from_result(
         result,
         prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=_CLASSIFICATION_SOURCE_ID,
+                    kind="user_message",
+                    text="\n".join(
+                        [
+                            *(f"{slot_name} quote" for slot_name in values_by_slot),
+                            "fritext under varje rubrik",
+                            "use the attached template",
+                        ]
+                    ),
+                    message_id="user-1",
+                ),
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{file_id}",
+                    kind="uploaded_file",
+                    text="filename: template.docx",
+                    file_id=file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
     )
     metadata = metadata_with_slot_classification(None, classification)
     parsed = slot_classification_from_metadata(metadata)
@@ -278,7 +355,11 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
     assert parsed.to_result().slots == result.slots
     assert parsed.to_result().form_intake == result.form_intake
+    assert parsed.to_result().file_roles == result.file_roles
     assert parsed.to_result().secondary_obligations == ("risks", "actions")
+    assert parsed.model == "openai/gpt-test"
+    assert parsed.provider == "openai"
+    assert parsed.source_inventory[0].source_id == _CLASSIFICATION_SOURCE_ID
 
 
 def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:
@@ -286,14 +367,19 @@ def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:
         slot_classification_from_metadata(
             {
                 "slot_classification": {
-                    "prompt_hash": "a" * 64,
+                    **_persisted_classification_header(),
                     "slots": [
                         {
                             "slot_name": "terminal_output",
                             "value": "structured_text",
                             "confidence": "high",
                             "reason": "report output",
-                            "evidence": ["user asked for a report"],
+                            "evidence": [
+                                {
+                                    "source_id": _CLASSIFICATION_SOURCE_ID,
+                                    "quote": "user asked for a report",
+                                }
+                            ],
                             "extra": "not persisted",
                         }
                     ],
@@ -309,14 +395,19 @@ def test_slot_classification_metadata_rejects_overlong_reason() -> None:
         slot_classification_from_metadata(
             {
                 "slot_classification": {
-                    "prompt_hash": "a" * 64,
+                    **_persisted_classification_header(),
                     "slots": [
                         {
                             "slot_name": "terminal_output",
                             "value": "structured_text",
                             "confidence": "high",
                             "reason": "x" * 501,
-                            "evidence": ["user asked for a report"],
+                            "evidence": [
+                                {
+                                    "source_id": _CLASSIFICATION_SOURCE_ID,
+                                    "quote": "user asked for a report",
+                                }
+                            ],
                         }
                     ],
                 }
@@ -333,14 +424,19 @@ def test_slot_classification_metadata_logs_invalid_persisted_shape(monkeypatch) 
         slot_classification_from_metadata(
             {
                 "slot_classification": {
-                    "prompt_hash": "a" * 64,
+                    **_persisted_classification_header(),
                     "slots": [
                         {
                             "slot_name": "terminal_output",
                             "value": "structured_text",
                             "confidence": "high",
                             "reason": "x" * 501,
-                            "evidence": ["user asked for a report"],
+                            "evidence": [
+                                {
+                                    "source_id": _CLASSIFICATION_SOURCE_ID,
+                                    "quote": "user asked for a report",
+                                }
+                            ],
                         }
                     ],
                 }
@@ -353,6 +449,51 @@ def test_slot_classification_metadata_logs_invalid_persisted_shape(monkeypatch) 
     message, extra = warnings[0]
     assert message == "AI Builder ignored invalid persisted conversation metadata"
     assert extra["metadata_kind"] == "slot_classification"
+
+
+def test_slot_classification_metadata_rejects_versionless_preproduction_shape(
+    monkeypatch,
+) -> None:
+    warnings = _capture_metadata_warnings(monkeypatch)
+    payload = _persisted_classification_header()
+    del payload["schema_version"]
+    payload["slots"] = []
+
+    assert slot_classification_from_metadata({"slot_classification": payload}) is None
+    assert warnings
+    validation_errors = warnings[0][1]["validation_errors"]
+    assert isinstance(validation_errors, list)
+    assert any(error.get("loc") == ("schema_version",) for error in validation_errors)
+
+
+def test_slot_classification_metadata_rejects_incomplete_typed_source_identity() -> (
+    None
+):
+    incomplete_sources = [
+        {
+            "source_id": "structured_answer:user-1:0",
+            "kind": "structured_answer",
+            "source_sha256": "b" * 64,
+            "message_id": "user-1",
+            "question_id": "terminal_output",
+        },
+        {
+            "source_id": f"uploaded_file:{uuid4()}",
+            "kind": "uploaded_file",
+            "source_sha256": "b" * 64,
+            "file_id": str(uuid4()),
+        },
+    ]
+
+    for source in incomplete_sources:
+        payload = {
+            **_persisted_classification_header(),
+            "source_inventory": [source],
+            "slots": [],
+        }
+        assert (
+            slot_classification_from_metadata({"slot_classification": payload}) is None
+        )
 
 
 def test_requirements_summary_metadata_logs_invalid_persisted_shape(
@@ -383,7 +524,7 @@ def test_slot_classification_metadata_rejects_missing_evidence() -> None:
         slot_classification_from_metadata(
             {
                 "slot_classification": {
-                    "prompt_hash": "a" * 64,
+                    **_persisted_classification_header(),
                     "slots": [
                         {
                             "slot_name": "terminal_output",
@@ -408,21 +549,25 @@ def test_slot_classification_writer_bounds_reason_text() -> None:
                     value="structured_text",
                     confidence="high",
                     reason="x" * 800,
-                    evidence=("user asked for a report",),
+                    evidence=(_classified_evidence("user asked for a report"),),
                 ),
             )
         ),
         prompt_hash="a" * 64,
+        classification_input=_classification_input("user asked for a report"),
+        model="openai/gpt-test",
+        provider="openai",
     )
 
     assert classification is not None
     assert len(classification.slots[0].reason) == 500
-    assert classification.slots[0].evidence == ["user asked for a report"]
+    assert classification.slots[0].evidence[0].model_dump() == {
+        "source_id": _CLASSIFICATION_SOURCE_ID,
+        "quote": "user asked for a report",
+    }
 
 
-def test_slot_classification_writer_keeps_valid_slots_when_one_slot_is_invalid() -> (
-    None
-):
+def test_slot_classification_writer_filters_invalid_and_keeps_low_diagnostic() -> None:
     classification = slot_classification_metadata_from_result(
         SlotClassificationResult(
             slots=(
@@ -431,29 +576,39 @@ def test_slot_classification_writer_keeps_valid_slots_when_one_slot_is_invalid()
                     value="structured_text",
                     confidence="high",
                     reason="valid",
-                    evidence=("valid quote",),
+                    evidence=(_classified_evidence("valid quote"),),
                 ),
                 ClassifiedSlot(
                     slot_name="runtime_metadata_fields",
                     value="not_a_runtime_metadata_value",
                     confidence="high",
                     reason="invalid",
-                    evidence=("invalid quote",),
+                    evidence=(_classified_evidence("invalid quote"),),
                 ),
                 ClassifiedSlot(
                     slot_name="primary_runtime_input",
                     value="unknown",
                     confidence="low",
-                    reason="ignored",
-                    evidence=("ignored quote",),
+                    reason="retained for negative calibration",
+                    evidence=(_classified_evidence("uncertain quote"),),
                 ),
             )
         ),
         prompt_hash="a" * 64,
+        classification_input=_classification_input(
+            "valid quote",
+            "invalid quote",
+            "uncertain quote",
+        ),
+        model="openai/gpt-test",
+        provider="openai",
     )
 
     assert classification is not None
-    assert [slot.slot_name for slot in classification.slots] == ["terminal_output"]
+    assert [slot.slot_name for slot in classification.slots] == [
+        "terminal_output",
+        "primary_runtime_input",
+    ]
 
 
 def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
@@ -465,18 +620,21 @@ def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
                     value="structured_text",
                     confidence="high",
                     reason="first valid slot",
-                    evidence=("first quote",),
+                    evidence=(_classified_evidence("first quote"),),
                 ),
                 ClassifiedSlot(
                     slot_name="terminal_output",
                     value="structured_json",
                     confidence="high",
                     reason="duplicate valid slot",
-                    evidence=("second quote",),
+                    evidence=(_classified_evidence("second quote"),),
                 ),
             )
         ),
         prompt_hash="a" * 64,
+        classification_input=_classification_input("first quote", "second quote"),
+        model="openai/gpt-test",
+        provider="openai",
     )
 
     assert classification is not None
@@ -487,21 +645,31 @@ def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
 
 def test_slot_classification_model_rejects_duplicate_slots() -> None:
     metadata = {
-        "prompt_hash": "a" * 64,
+        **_persisted_classification_header(),
         "slots": [
             {
                 "slot_name": "terminal_output",
                 "value": "structured_text",
                 "confidence": "high",
                 "reason": "first",
-                "evidence": ["first quote"],
+                "evidence": [
+                    {
+                        "source_id": _CLASSIFICATION_SOURCE_ID,
+                        "quote": "first quote",
+                    }
+                ],
             },
             {
                 "slot_name": "terminal_output",
                 "value": "structured_json",
                 "confidence": "high",
                 "reason": "second",
-                "evidence": ["second quote"],
+                "evidence": [
+                    {
+                        "source_id": _CLASSIFICATION_SOURCE_ID,
+                        "quote": "second quote",
+                    }
+                ],
             },
         ],
     }
@@ -514,14 +682,19 @@ def test_slot_classification_model_rejects_non_llm_slot_name() -> None:
         slot_classification_from_metadata(
             {
                 "slot_classification": {
-                    "prompt_hash": "a" * 64,
+                    **_persisted_classification_header(),
                     "slots": [
                         {
                             "slot_name": "docx_output_mode",
                             "value": "generated_docx",
                             "confidence": "high",
                             "reason": "not LLM resolvable",
-                            "evidence": ["not LLM resolvable quote"],
+                            "evidence": [
+                                {
+                                    "source_id": _CLASSIFICATION_SOURCE_ID,
+                                    "quote": "not LLM resolvable quote",
+                                }
+                            ],
                         }
                     ],
                 }

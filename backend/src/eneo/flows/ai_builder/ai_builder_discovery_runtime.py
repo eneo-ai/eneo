@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     apply_attachment_file_roles_to_planning_state,
+    render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
+    StructuredQuestionAnswerMetadata,
+    question_answer_from_metadata,
+    question_answer_values,
     slot_classification_metadata_from_result,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
@@ -25,13 +30,17 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     slot_names_blocked_by_explicit_uncertainty,
 )
 from eneo.flows.ai_builder.ai_builder_question_state import (
+    assistant_question_id,
     last_answered_question,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationBias,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
     classify_slots,
     slot_classification_prompt_hash,
+    slot_classification_provider_identity,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -42,6 +51,10 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
 )
 from eneo.flows.domain.flow import Flow
+
+_MAX_CLASSIFICATION_TRANSCRIPT_CHARS = 12_000
+_MAX_CLASSIFICATION_TRANSCRIPT_SOURCES = 120
+_MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +74,7 @@ class DiscoveryRuntimeResult:
 def _targeted_classification_bias(
     conversation: list[ConversationMessage],
     allowed_slot_values: Mapping[str, Collection[str]],
+    classification_input: SlotClassificationInput,
 ) -> SlotClassificationBias | None:
     """Bias classification toward the slot the user just answered, when unresolved.
 
@@ -75,11 +89,184 @@ def _targeted_classification_bias(
     target_slot = asked_question_id
     if target_slot not in allowed_slot_values:
         return None
+    answer_message_id = next(
+        (
+            message.message_id
+            for message in reversed(conversation)
+            if message.role == "user"
+            and isinstance(message.content, str)
+            and message.content.strip() == latest_answer
+        ),
+        None,
+    )
+    if answer_message_id is None:
+        return None
+    answer_source = next(
+        (
+            source
+            for source in reversed(classification_input.sources)
+            if source.message_id == answer_message_id
+            and (
+                (
+                    source.kind == "structured_answer"
+                    and source.question_id == asked_question_id
+                )
+                or source.kind == "user_message"
+            )
+        ),
+        None,
+    )
+    if answer_source is None:
+        return None
     return SlotClassificationBias(
         target_slot_name=target_slot,
         asked_question_id=asked_question_id,
-        latest_user_answer=latest_answer,
+        answer_source_id=answer_source.source_id,
     )
+
+
+def build_slot_classification_input(
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> SlotClassificationInput:
+    transcript_sources: list[SlotClassificationSource] = []
+    pending_question_id: str | None = None
+    for message in conversation:
+        question_id = assistant_question_id(message)
+        if question_id is not None:
+            pending_question_id = question_id
+            continue
+        if message.role != "user":
+            continue
+        answer = question_answer_from_metadata(message.metadata)
+        if isinstance(message.content, str) and message.content.strip():
+            if answer is None or not _is_structured_answer_echo(
+                message.content, answer
+            ):
+                transcript_sources.append(
+                    SlotClassificationSource(
+                        source_id=f"user_message:{message.message_id}",
+                        kind="user_message",
+                        text=message.content.strip(),
+                        message_id=message.message_id,
+                        question_id=pending_question_id,
+                    )
+                )
+        if answer is None or answer.question_id is None:
+            pending_question_id = None
+            continue
+        for index, selected_value in enumerate(_structured_answer_values(answer)):
+            transcript_sources.append(
+                SlotClassificationSource(
+                    source_id=f"structured_answer:{message.message_id}:{index}",
+                    kind="structured_answer",
+                    text=selected_value,
+                    message_id=message.message_id,
+                    question_id=answer.question_id,
+                    selected_value=selected_value,
+                )
+            )
+        pending_question_id = None
+
+    sources = list(_bound_classification_transcript(transcript_sources))
+    if attachment_context is not None:
+        for item in sorted(
+            attachment_context.evidence,
+            key=lambda candidate: str(candidate.file_id),
+        ):
+            sources.append(
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{item.file_id}",
+                    kind="uploaded_file",
+                    text=render_ai_builder_attachment_evidence(item),
+                    file_id=item.file_id,
+                    coverage=item.coverage,
+                    truncated=item.coverage != "fully_seen",
+                )
+            )
+    return SlotClassificationInput(sources=tuple(sources))
+
+
+def _bound_classification_transcript(
+    sources: list[SlotClassificationSource],
+) -> tuple[SlotClassificationSource, ...]:
+    if not sources:
+        return ()
+    bounded_sources = [
+        replace(
+            source,
+            text=source.text[:_MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS],
+            selected_value=source.text[:_MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS],
+            truncated=len(source.text) > _MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS,
+        )
+        if source.kind == "structured_answer"
+        else source
+        for source in sources
+    ]
+    retained = bounded_sources[-_MAX_CLASSIFICATION_TRANSCRIPT_SOURCES:]
+    fair_share = _MAX_CLASSIFICATION_TRANSCRIPT_CHARS // len(retained)
+    included_lengths = [min(len(source.text), fair_share) for source in retained]
+    remaining = _MAX_CLASSIFICATION_TRANSCRIPT_CHARS - sum(included_lengths)
+    for index in range(len(retained) - 1, -1, -1):
+        if remaining <= 0:
+            break
+        available = len(retained[index].text) - included_lengths[index]
+        added = min(available, remaining)
+        included_lengths[index] += added
+        remaining -= added
+
+    return tuple(
+        replace(
+            source,
+            text=source.text[:included_length],
+            truncated=source.truncated or included_length < len(source.text),
+            selected_value=source.text[:included_length]
+            if source.kind == "structured_answer"
+            else source.selected_value,
+        )
+        for source, included_length in zip(retained, included_lengths, strict=True)
+    )
+
+
+def _structured_answer_values(
+    answer: StructuredQuestionAnswerMetadata,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    raw_values: list[str | int | float | bool | None] = []
+    if answer.selected_values is not None:
+        raw_values.extend(answer.selected_values)
+    raw_values.extend(
+        [
+            answer.selected_value,
+            answer.answer,
+            answer.custom_value,
+        ]
+    )
+    for item in raw_values:
+        if item is None:
+            continue
+        value = item.strip() if isinstance(item, str) else json.dumps(item)
+        if value and value not in values:
+            values.append(value)
+    if not values:
+        option_ids = [*(answer.selected_option_ids or [])]
+        if answer.selected_option_id is not None:
+            option_ids.append(answer.selected_option_id)
+        values.extend(value for value in option_ids if value)
+    return tuple(values)
+
+
+def _is_structured_answer_echo(
+    content: str,
+    answer: StructuredQuestionAnswerMetadata,
+) -> bool:
+    normalized = content.casefold().strip().rstrip(" .?!")
+    if not normalized:
+        return True
+    return normalized in {
+        value.casefold().strip().rstrip(" .?!")
+        for value in question_answer_values(answer)
+    }
 
 
 async def build_runtime_discovery_context(
@@ -100,10 +287,11 @@ async def build_runtime_discovery_context(
         return RuntimeDiscoveryContext(planning_state=state)
 
     text = aggregate_freeform_user_text(conversation)
-    uploaded_file_evidence = (
-        attachment_context.discovery_context if attachment_context is not None else None
+    classification_input = build_slot_classification_input(
+        conversation,
+        attachment_context,
     )
-    if not text.strip() and uploaded_file_evidence is None:
+    if not classification_input.sources:
         return RuntimeDiscoveryContext(planning_state=state)
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
@@ -120,27 +308,35 @@ async def build_runtime_discovery_context(
         }
     if not allowed_values:
         return RuntimeDiscoveryContext(planning_state=state)
-    bias = _targeted_classification_bias(conversation, allowed_values)
+    bias = _targeted_classification_bias(
+        conversation,
+        allowed_values,
+        classification_input,
+    )
     result = await classify_slots(
         litellm_client=litellm_client,
         litellm_model=litellm_model,
         litellm_kwargs=litellm_kwargs or {},
-        text=text,
+        classification_input=classification_input,
         allowed_slot_values=allowed_values,
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,
-        uploaded_file_evidence=uploaded_file_evidence,
     )
     if result is None:
         return RuntimeDiscoveryContext(planning_state=state)
 
+    provider = slot_classification_provider_identity(
+        litellm_model=litellm_model,
+        litellm_kwargs=litellm_kwargs or {},
+    )
     prompt_hash = slot_classification_prompt_hash(
-        text=text,
+        classification_input=classification_input,
         ui_language=ui_language,
         allowed_slot_values=allowed_values,
+        litellm_model=litellm_model,
+        provider=provider,
         bias=bias,
-        uploaded_file_evidence=uploaded_file_evidence,
     )
     merge_llm_resolved_slots(
         state,
@@ -156,6 +352,9 @@ async def build_runtime_discovery_context(
         slot_classification_metadata=slot_classification_metadata_from_result(
             result,
             prompt_hash=prompt_hash,
+            classification_input=classification_input,
+            model=litellm_model,
+            provider=provider,
         ),
     )
 

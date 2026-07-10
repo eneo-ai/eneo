@@ -905,6 +905,37 @@
         "max_all_previous_steps": 0,
         "forbid_input_sources": ["all_previous_steps"],
         "forbidden_question_event_ids": ["report_disposition"],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "report_disposition",
+            "value": "both",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": ["user_message"],
+            "evidence_contains": [
+              "skriva källavsnitt och skapa en samlad rapport"
+            ]
+          },
+          {
+            "slot_name": "terminal_output",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": ["user_message"],
+            "evidence_contains": ["PDF-rapport"]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "example_output",
+            "confidence_in": ["high", "medium"],
+            "evidence_level": "explicit",
+            "coverage_in": ["fully_seen", "excerpt_truncated"],
+            "required_source_kinds": ["user_message"],
+            "evidence_contains": ["bifogade exempelrapporten"]
+          }
+        ],
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
           ["section_title", "rubrik", "title"],
@@ -930,6 +961,27 @@
           ["case_id", "caseid", "arendenummer"]
         ],
         "forbidden_question_event_ids": ["docx_output_mode"],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "docx_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": ["user_message"],
+            "evidence_contains": ["returnera en ifylld DOCX"]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "template",
+            "confidence_in": ["high", "medium"],
+            "evidence_level": "explicit",
+            "coverage_in": ["fully_seen", "excerpt_truncated"],
+            "required_source_kinds": ["user_message"],
+            "evidence_contains": ["bifogade DOCX-mallen"]
+          }
+        ],
         "max_all_previous_steps": 0,
         "forbid_input_sources": ["all_previous_steps"],
         "forbid_primary_material_form_fields": true
@@ -943,7 +995,15 @@
       "expected": {
         "allow_question_instead_of_plan": true,
         "expected_question_event_count": 1,
-        "max_question_event_count": 1
+        "max_question_event_count": 1,
+        "expected_question_event_ids": ["report_disposition"],
+        "forbid_classifier_commit_grade_slots": ["report_disposition"],
+        "forbidden_assumption_topics": [
+          "per source",
+          "per källa",
+          "synthesized overview",
+          "samlad översikt"
+        ]
       }
     }
   ]
