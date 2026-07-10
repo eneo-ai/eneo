@@ -7,8 +7,8 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
-  import { Check, X, Loader2, ChevronRight, Wrench } from "lucide-svelte";
+  import { Check, X, Loader2, ChevronRight } from "lucide-svelte";
+  import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -32,50 +32,16 @@
   } = $props();
 
   let argsOpen = $state(false);
-  let result = $state<string | null>(null);
-  let resultLoaded = $state(false);
-  let resultLoading = $state(false);
   const hasArgs = $derived(args != null && Object.keys(args).length > 0);
   const canViewResult = $derived(
     !!toolCallId && !!onLoadResult && (status === "complete" || status === "failed")
   );
   const canExpand = $derived(hasArgs || canViewResult);
 
-  async function loadResult(force = false) {
-    if (resultLoading || (resultLoaded && !force) || !onLoadResult) return;
-
-    resultLoading = true;
-    try {
-      result = await onLoadResult();
-    } catch (error) {
-      // A failed automatic attempt stays silent: mid-stream the result is
-      // simply not persisted yet (404), and toasting would fire on every
-      // still-streaming turn. Manual re-expands (force) surface real errors.
-      if (force) toastError(error, m.mcp_tool_response_load_error());
-    } finally {
-      // Attempted is attempted, success or not — the auto-load effect below
-      // must never retry on its own, or a pending result becomes a request
-      // loop against the 404ing result endpoint.
-      resultLoaded = true;
-      resultLoading = false;
-    }
-  }
-
   function toggleOpen() {
     if (!canExpand) return;
     argsOpen = !argsOpen;
-    if (argsOpen && canViewResult) {
-      // Re-opening retries when nothing was captured (e.g. the first attempt
-      // ran before the stream persisted the result).
-      void loadResult(result == null);
-    }
   }
-
-  $effect(() => {
-    if (argsOpen && canViewResult && !resultLoaded) {
-      void loadResult();
-    }
-  });
 
   // Visuals per status: icon colour, badge label, and badge tone. Kept in one
   // map so the header and badge never drift out of sync.
@@ -151,36 +117,5 @@
     {/if}
   </button>
 
-  {#if argsOpen}
-    <div class="border-dimmer border-t px-3 py-2.5">
-      {#if hasArgs}
-        <div class="text-muted mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
-          <Wrench class="h-3 w-3 shrink-0" />
-          <span>{m.chat_reasoning_parameters()}</span>
-        </div>
-        <pre
-          class="bg-primary/60 text-secondary overflow-x-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
-            args,
-            null,
-            2
-          )}</pre>
-      {/if}
-
-      {#if canViewResult}
-        <div class={hasArgs ? "border-dimmer mt-2.5 border-t pt-2.5" : ""}>
-          <div class="text-muted mb-1.5 text-xs font-semibold">
-            {m.mcp_tool_response_title({ toolName })}
-          </div>
-          {#if resultLoading}
-            <p class="text-muted text-xs">{m.loading_ellipsis()}</p>
-          {:else if resultLoaded && result}
-            <pre
-              class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{result}</pre>
-          {:else if resultLoaded}
-            <p class="text-muted text-xs italic">{m.mcp_tool_response_empty()}</p>
-          {/if}
-        </div>
-      {/if}
-    </div>
-  {/if}
+  <ToolCallDetailsPanel open={argsOpen} {toolName} {args} {toolCallId} {onLoadResult} {status} />
 </div>
