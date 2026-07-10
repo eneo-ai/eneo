@@ -61,7 +61,7 @@
         <span class="text-primary text-sm font-semibold tracking-[-0.005em]">{title}</span>
         {#if badge}
           <span
-            class="border-default text-secondary shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+            class="border-default text-secondary shrink-0 rounded-full border px-1.5 py-0.5 text-xs font-medium"
           >
             {badge}
           </span>

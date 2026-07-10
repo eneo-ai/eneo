@@ -69,8 +69,8 @@
       <svelte:fragment slot="title">
         <Tooltip.Provider delayDuration={150}>
           <Tooltip.Root>
-            <Tooltip.Trigger>
-              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+            <Tooltip.Trigger aria-label={m.flow_step_input_contract_tooltip()}>
+              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" aria-hidden="true" />
             </Tooltip.Trigger>
             <Tooltip.Content>{m.flow_step_input_contract_tooltip()}</Tooltip.Content>
           </Tooltip.Root>
@@ -126,8 +126,8 @@
       <svelte:fragment slot="title">
         <Tooltip.Provider delayDuration={150}>
           <Tooltip.Root>
-            <Tooltip.Trigger>
-              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+            <Tooltip.Trigger aria-label={m.flow_step_output_contract_tooltip()}>
+              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" aria-hidden="true" />
             </Tooltip.Trigger>
             <Tooltip.Content>{m.flow_step_output_contract_tooltip()}</Tooltip.Content>
           </Tooltip.Root>

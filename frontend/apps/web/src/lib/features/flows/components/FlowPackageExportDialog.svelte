@@ -136,7 +136,7 @@
     <div class="overflow-y-auto px-5 py-5 sm:px-6">
       <div class="flex flex-col gap-6">
         <section class="flex flex-col gap-4">
-          <h3 class="text-muted text-[11px] font-semibold tracking-wide uppercase">
+          <h3 class="text-muted text-xs font-semibold tracking-wide uppercase">
             {m.flow_package_export_section_identity()}
           </h3>
           <Field.Group>
@@ -172,7 +172,7 @@
         </section>
 
         <section class="flex flex-col gap-4">
-          <h3 class="text-muted text-[11px] font-semibold tracking-wide uppercase">
+          <h3 class="text-muted text-xs font-semibold tracking-wide uppercase">
             {m.flow_package_export_section_presentation()}
           </h3>
           <Field.Group>

@@ -128,11 +128,11 @@
   <div
     class="border-default bg-secondary/30 flex items-center justify-between border-b px-3.5 py-2.5"
   >
-    <h3 class="text-secondary text-[0.8125rem] font-medium">
+    <h2 class="text-secondary text-[0.8125rem] font-medium">
       {m.flow_steps()}
-    </h3>
+    </h2>
     <span
-      class="text-muted bg-primary/70 border-default rounded-full border px-1.5 py-0.5 text-[11px] leading-none font-semibold tabular-nums"
+      class="text-muted bg-primary/70 border-default rounded-full border px-1.5 py-0.5 text-xs leading-none font-semibold tabular-nums"
     >
       {steps.length}
     </span>

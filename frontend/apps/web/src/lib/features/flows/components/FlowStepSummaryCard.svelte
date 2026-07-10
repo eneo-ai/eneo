@@ -40,11 +40,19 @@
 
   const source = $derived(getSummarySourceText(step, summaryModel, previousStep));
   const aiWork = $derived(getStepAiWork(step, { instructionPresent: aiInstructionPresent }));
+  // Enkel speaks plain language: no "JSON" or abbreviated channel jargon.
+  const outputLabel = $derived(
+    !isAdvancedMode && step.output_type === "json"
+      ? m.flow_output_type_simple_structured()
+      : getOutputTypeLabel(step.output_type)
+  );
   const nextChannel = $derived(
     step.output_mode === "transcribe_only"
       ? m.flow_step_summary_next_channel_transcript()
       : summaryModel?.downstreamKind === "text_and_structured"
-        ? m.flow_step_summary_next_channel_text_and_structured_short()
+        ? isAdvancedMode
+          ? m.flow_step_summary_next_channel_text_and_structured_short()
+          : m.flow_step_summary_next_channel_text_and_structured()
         : m.flow_step_summary_next_channel_text_short()
   );
 
@@ -96,14 +104,14 @@
     <span class="text-muted" aria-hidden="true">&rarr;</span>
 
     <span class="text-secondary">
-      <span class="text-primary font-medium">{getOutputTypeLabel(step.output_type)}</span>
+      <span class="text-primary font-medium">{outputLabel}</span>
       · {m.flow_capsule_next()}: {nextChannel}
     </span>
 
     {#if !isAdvancedMode && hasAdvancedSettingsActive(step, hasInputTemplateOverride)}
       <Badge
         variant="outline"
-        class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger ml-auto text-[11px]"
+        class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger ml-auto text-xs"
       >
         {m.flow_step_summary_badge_advanced()}
       </Badge>

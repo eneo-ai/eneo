@@ -94,7 +94,8 @@
         size="icon"
         variant="outline"
         class="size-7 text-xs font-bold"
-        title="{m.flow_variable_insert()} — @ för genväg"
+        title={m.flow_variable_insert()}
+        aria-label={m.flow_variable_insert()}
       >
         &#123; &#125;
       </Button>
@@ -143,6 +144,7 @@
           onclick={() => insert("flow_input.text")}
         >
           <span class="flex w-full items-center justify-between">
+            <!-- eslint-disable-next-line eneo/no-hardcoded-text -- runtime variable identifier, not UI copy -->
             <span class={getChipClasses("technical")}> text </span>
             <span class="text-muted ml-2 text-xs">{m.flow_variable_flow_input_text_desc()}</span>
           </span>
@@ -160,6 +162,7 @@
           class="!justify-start !px-3 !py-1.5 !text-sm"
           onclick={() => insert("transkribering")}
         >
+          <!-- eslint-disable-next-line eneo/no-hardcoded-text -- runtime variable identifier, not UI copy -->
           <span class={getChipClasses("system")}> transkribering </span>
         </DropdownMenu.Item>
       {/if}
@@ -168,6 +171,7 @@
           class="!justify-start !px-3 !py-1.5 !text-sm"
           onclick={() => insert("föregående_steg")}
         >
+          <!-- eslint-disable-next-line eneo/no-hardcoded-text -- runtime variable identifier, not UI copy -->
           <span class={getChipClasses("system")}> föregående_steg </span>
         </DropdownMenu.Item>
       {/if}

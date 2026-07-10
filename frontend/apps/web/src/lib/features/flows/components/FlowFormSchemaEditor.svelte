@@ -508,7 +508,7 @@
               <div class="flex shrink-0 items-center gap-2">
                 {#if field.required}
                   <span
-                    class="bg-accent-dimmer/60 text-accent-stronger inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium"
+                    class="bg-accent-dimmer/60 text-accent-stronger inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
                   >
                     {m.flow_form_field_required()}
                   </span>
@@ -590,10 +590,10 @@
                     {m.flow_form_field_variable_name()}
                     <Tooltip.Provider delayDuration={150}>
                       <Tooltip.Root>
-                        <Tooltip.Trigger>
+                        <Tooltip.Trigger aria-label={m.flow_form_field_variable_name_help_label()}>
                           <Info
                             class="text-muted hover:text-primary size-3.5 transition-colors"
-                            aria-label={m.flow_form_field_variable_name_help_label()}
+                            aria-hidden="true"
                           />
                         </Tooltip.Trigger>
                         <Tooltip.Content class="max-w-72">

@@ -23,7 +23,7 @@
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <Badge variant="outline" class="font-mono text-[11px]">
+            <Badge variant="outline" class="font-mono text-xs">
               {m.flow_run_evidence_trace_id()}: {traceId}
             </Badge>
           </Tooltip.Trigger>
@@ -35,7 +35,7 @@
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <Badge variant="outline" class="text-[11px]">
+            <Badge variant="outline" class="text-xs">
               {m.flow_run_evidence_redacted()}
             </Badge>
           </Tooltip.Trigger>

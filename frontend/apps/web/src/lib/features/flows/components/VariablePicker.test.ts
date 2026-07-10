@@ -22,7 +22,7 @@ describe("VariablePicker", () => {
       onInsert
     });
 
-    await fireEvent.click(screen.getByTitle(/@ för genväg/));
+    await fireEvent.click(screen.getByTitle("Infoga variabel"));
     await fireEvent.click(await screen.findByText("kundnamn"));
 
     expect(onInsert).toHaveBeenCalledWith("{{flow_input.kundnamn}}");

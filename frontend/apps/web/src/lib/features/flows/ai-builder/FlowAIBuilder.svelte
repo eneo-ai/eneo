@@ -14,14 +14,18 @@
   interface Props {
     targetKind?: "create" | "edit";
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
+    initialPrompt?: string | null;
   }
 
-  let { targetKind = "edit", onapplied }: Props = $props();
+  let { targetKind = "edit", onapplied, initialPrompt = null }: Props = $props();
 
   const service = getAIBuilderService();
 
   let chatRef = $state<FlowAIBuilderChat | undefined>();
   let wasAutoResumed = $state(false);
+  // One-shot seed: only the value present at mount matters, by design.
+  // svelte-ignore state_referenced_locally
+  let pendingPrefill = $state(initialPrompt);
 
   const hasPlanContent = $derived(
     service.currentPlan !== null ||
@@ -53,7 +57,21 @@
 
   onMount(() => {
     if (!service.hasSession) {
-      void service.initialize(targetKind);
+      // A seeded prompt from the create dialog always starts a fresh session:
+      // initialize() would otherwise defer to draft recovery and the seed
+      // could silently attach to (or be ignored by) an old draft.
+      if (targetKind === "create" && pendingPrefill) {
+        void service.startFreshSession("create");
+      } else {
+        void service.initialize(targetKind);
+      }
+    }
+  });
+
+  $effect(() => {
+    if (pendingPrefill && service.hasSession && !service.isInitializing && chatRef) {
+      chatRef.focusInput({ prefill: pendingPrefill });
+      pendingPrefill = null;
     }
   });
 

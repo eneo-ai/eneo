@@ -108,13 +108,25 @@
     step.user_description || m.flow_step_fallback_label({ order: String(step.step_order) })
   );
   const inputLabel = $derived(INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source);
-  const outputLabel = $derived(OUTPUT_TYPE_LABELS[step.output_type]?.() ?? step.output_type);
-  const railOutputLabel = $derived(RAIL_OUTPUT_LABELS[step.output_type] ?? outputLabel);
+  // Enkel speaks plain language: "JSON" and abbreviated channel names are
+  // Avancerad vocabulary.
+  const outputLabel = $derived(
+    !isPowerUser && step.output_type === "json"
+      ? m.flow_output_type_simple_structured()
+      : (OUTPUT_TYPE_LABELS[step.output_type]?.() ?? step.output_type)
+  );
+  const railOutputLabel = $derived(
+    !isPowerUser && step.output_type === "json"
+      ? m.flow_output_type_simple_structured()
+      : (RAIL_OUTPUT_LABELS[step.output_type] ?? outputLabel)
+  );
   const nextChannelLabel = $derived(
     step.output_mode === "transcribe_only"
       ? m.flow_step_summary_next_channel_transcript_short()
       : getDownstreamKindForOutput(step.output_type) === "text_and_structured"
-        ? m.flow_step_summary_next_channel_text_and_structured_short()
+        ? isPowerUser
+          ? m.flow_step_summary_next_channel_text_and_structured_short()
+          : m.flow_step_summary_next_channel_text_and_structured()
         : m.flow_step_summary_next_channel_text_short()
   );
   const inputTypeLabel = $derived(INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type);
@@ -210,14 +222,14 @@
           {#if step.output_mode === "template_fill"}
             <Badge
               variant="secondary"
-              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
             >
               {m.flow_template_fill_card_badge()}
             </Badge>
             {#if templateReadiness}
               <Badge
                 variant="secondary"
-                class="h-5 px-1.5 text-[10px] font-semibold tabular-nums {templateReadiness.incomplete
+                class="h-5 px-1.5 text-xs font-semibold tabular-nums {templateReadiness.incomplete
                   ? 'bg-warning-dimmer text-warning-stronger'
                   : 'bg-positive-dimmer text-positive-stronger'}"
               >
@@ -227,7 +239,7 @@
           {:else}
             <Badge
               variant="secondary"
-              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
             >
               {m.flow_transcribe_only_title()}
             </Badge>
@@ -239,23 +251,23 @@
         <div class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <Badge
             variant="secondary"
-            class="h-5 px-1.5 text-[10px] font-semibold tracking-wide {inputBadgeClass}"
+            class="h-5 px-1.5 text-xs font-semibold tracking-wide {inputBadgeClass}"
             >{inputTypeLabel}</Badge
           >
-          <span class="text-muted text-[10px]" aria-hidden="true">&rarr;</span>
+          <span class="text-muted text-xs" aria-hidden="true">&rarr;</span>
           <Badge
             variant="secondary"
-            class="h-5 px-1.5 text-[10px] font-semibold tracking-wide {outputBadgeClass}"
+            class="h-5 px-1.5 text-xs font-semibold tracking-wide {outputBadgeClass}"
             >{railOutputLabel}</Badge
           >
-          <span class="text-muted text-[10px]" aria-hidden="true">&middot;</span>
-          <span class="text-accent-stronger text-[10px] font-medium tabular-nums">
+          <span class="text-muted text-xs" aria-hidden="true">&middot;</span>
+          <span class="text-accent-stronger text-xs font-medium tabular-nums">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
           {#if mcpSummary?.hasActiveMcp}
             <Badge
               variant="secondary"
-              class="bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-[10px] font-semibold tabular-nums"
+              class="bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-xs font-semibold tabular-nums"
               >{m.flow_step_mcp_tools_badge({
                 count: String(mcpSummary.enabledToolCount)
               })}</Badge

@@ -134,7 +134,7 @@
                   m.flow_step_fallback_label({ order: String(result.stepOrder) })}
               </span>
               <span
-                class="text-secondary flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] tracking-[0.015em]"
+                class="text-secondary flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs tracking-[0.015em]"
               >
                 <span class="truncate">{step?.input_type ?? "text"}</span>
                 <span class="text-muted" aria-hidden="true">&rarr;</span>

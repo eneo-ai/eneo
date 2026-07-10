@@ -129,7 +129,7 @@
                   <span class="text-muted" aria-hidden="true">&middot;</span>
                   <Badge
                     variant="outline"
-                    class="h-auto rounded-full border-transparent px-2 py-0.5 text-[0.6875rem] font-medium tracking-[0.01em] {badge.variant ===
+                    class="h-auto rounded-full border-transparent px-2 py-0.5 text-xs font-medium tracking-[0.01em] {badge.variant ===
                     'building'
                       ? 'bg-warning-dimmer text-warning-stronger'
                       : badge.variant === 'reviewing'

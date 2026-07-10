@@ -61,7 +61,7 @@
         <div class="flex min-w-0 items-center gap-3">
           <Badge
             variant="outline"
-            class="size-6 shrink-0 justify-center rounded-full p-0 text-[11px] font-semibold"
+            class="size-6 shrink-0 justify-center rounded-full p-0 text-xs font-semibold"
           >
             {index + 1}
           </Badge>
@@ -73,7 +73,7 @@
               <Tooltip.Provider delayDuration={150}>
                 <Tooltip.Root>
                   <Tooltip.Trigger>
-                    <span class="text-muted font-mono text-[10px]">
+                    <span class="text-muted font-mono text-xs">
                       {reference.id_short ?? reference.id.slice(0, 8)}
                     </span>
                   </Tooltip.Trigger>
@@ -102,7 +102,7 @@
               <Tooltip.Trigger>
                 <Badge
                   class={[
-                    "rounded-full text-[11px]",
+                    "rounded-full text-xs",
                     getKnowledgeRelevanceBadgeClass(Number(reference.best_score ?? 0))
                   ]}
                 >

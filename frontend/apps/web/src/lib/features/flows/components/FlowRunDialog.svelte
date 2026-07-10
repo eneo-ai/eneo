@@ -264,13 +264,6 @@
   const currentStepSkippedMessage = $derived(
     currentRuntimeStep ? fileInputState.getSkippedMessage(currentRuntimeStep.step_id) : null
   );
-  const currentStepBlockers = $derived(
-    currentRuntimeStep
-      ? runBlockers.filter(
-          (b) => b.pageId === runtimeStepPageId(currentRuntimeStep.step_id) && b.blocksProgress
-        )
-      : []
-  );
   const isDirty = $derived.by(
     () =>
       fileInputState.hasActiveRecording ||
@@ -1155,7 +1148,6 @@
             uploadError={currentStepUploadError}
             recordingNotice={currentStepRecordingNotice}
             skippedMessage={currentStepSkippedMessage}
-            blockers={currentStepBlockers}
             dragging={fileInputState.isDraggingStep(currentRuntimeStep.step_id)}
             {labels}
             {locale}

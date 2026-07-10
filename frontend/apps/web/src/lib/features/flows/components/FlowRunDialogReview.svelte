@@ -105,7 +105,7 @@
       <dl class="grid gap-2 sm:grid-cols-2">
         {#each completedFormFieldSummaries as item (item.field.name)}
           <div class="border-default bg-secondary/25 rounded-lg border px-3 py-2.5">
-            <dt class="text-muted text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
+            <dt class="text-muted text-xs font-medium tracking-[0.08em] uppercase">
               {getFlowFormFieldLabel(item.field)}
             </dt>
             <dd class="text-primary mt-1 text-sm leading-relaxed break-words">{item.value}</dd>
@@ -129,7 +129,7 @@
       <div class="mt-3 flex flex-col gap-4">
         {#each reviewFileGroups as group (group.step.step_id)}
           <div class="flex flex-col gap-2">
-            <p class="text-muted text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
+            <p class="text-muted text-xs font-medium tracking-[0.08em] uppercase">
               {labels.runtimeReviewStep(group.step.step_order, getStepLabel(group.step))}
             </p>
             <ul class="flex flex-col gap-1.5">

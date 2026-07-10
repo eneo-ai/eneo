@@ -9,13 +9,20 @@ import { getInputTypeLabel, getOutputTypeLabel } from "./flowStepEditHelpers";
  * the expanded controls read from one source and cannot drift.
  */
 
-export function getChapterWhatStatus(step: FlowStep): string {
-  return `${getInputTypeLabel(step.input_type)} → ${getOutputTypeLabel(step.output_type)}`;
+// Enkel avoids raw contract tokens: "JSON" reads as a fixed-format answer.
+function getOutputTypeDisplay(step: FlowStep, isAdvancedMode: boolean): string {
+  return !isAdvancedMode && step.output_type === "json"
+    ? m.flow_output_type_simple_structured()
+    : getOutputTypeLabel(step.output_type);
 }
 
-export function getChapterOutputStatus(step: FlowStep): string {
+export function getChapterWhatStatus(step: FlowStep, isAdvancedMode = true): string {
+  return `${getInputTypeLabel(step.input_type)} → ${getOutputTypeDisplay(step, isAdvancedMode)}`;
+}
+
+export function getChapterOutputStatus(step: FlowStep, isAdvancedMode = true): string {
   const modeLabel = OUTPUT_MODES.find((option) => option.value === step.output_mode)?.label ?? "";
-  const outputLabel = getOutputTypeLabel(step.output_type);
+  const outputLabel = getOutputTypeDisplay(step, isAdvancedMode);
   return modeLabel ? `${outputLabel} · ${modeLabel}` : outputLabel;
 }
 

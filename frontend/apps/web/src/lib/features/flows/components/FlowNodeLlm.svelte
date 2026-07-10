@@ -109,7 +109,7 @@
         {#if isAssembly}
           <Badge
             variant="secondary"
-            class="bg-warning-dimmer text-warning-stronger text-[10px] font-bold"
+            class="bg-warning-dimmer text-warning-stronger text-xs font-bold"
           >
             {m.flow_node_assembly_format_badge()}
           </Badge>
@@ -119,7 +119,7 @@
         {#if data.assistantClassLevel != null}
           <Badge
             variant="secondary"
-            class="bg-accent-dimmer text-accent-stronger text-[10px] font-bold"
+            class="bg-accent-dimmer text-accent-stronger text-xs font-bold"
           >
             {m.flow_node_model_class_badge({ level: String(data.assistantClassLevel) })}
           </Badge>
@@ -127,7 +127,7 @@
         {#if data.classLevel != null && data.classLevel !== data.assistantClassLevel}
           <Badge
             variant="secondary"
-            class="text-[10px] font-bold
+            class="text-xs font-bold
             {data.classLevel >= 3
               ? 'bg-negative-dimmer text-negative-stronger'
               : data.classLevel >= 2
@@ -144,15 +144,15 @@
         <div class="text-secondary">{data.modelName}</div>
       {/if}
       <div class="flex flex-wrap items-center gap-1">
-        <Badge variant="secondary" class="bg-hover-dimmer text-primary text-[10px]">
+        <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
           {m.flow_step_card_input_short()}: {inputTypeLabel}
         </Badge>
-        <Badge variant="secondary" class="bg-positive-dimmer text-positive-stronger text-[10px]">
+        <Badge variant="secondary" class="bg-positive-dimmer text-positive-stronger text-xs">
           {m.flow_step_card_output_short()}: {outputTypeLabel}
         </Badge>
         <Badge
           variant="secondary"
-          class="text-[10px] {isAssembly
+          class="text-xs {isAssembly
             ? 'bg-warning-dimmer text-warning-stronger'
             : 'bg-accent-dimmer text-accent-stronger'}"
         >

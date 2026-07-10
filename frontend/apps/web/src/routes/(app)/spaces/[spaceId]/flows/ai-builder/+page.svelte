@@ -5,6 +5,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import FlowAIBuilder from "$lib/features/flows/ai-builder/FlowAIBuilder.svelte";
   import { initAIBuilderService } from "$lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts";
+  import { consumeAIBuilderSeed } from "$lib/features/flows/ai-builder/flowAIBuilderSeed";
   import { m } from "$lib/paraglide/messages";
   import { onDestroy, untrack } from "svelte";
 
@@ -15,6 +16,9 @@
   } = getSpacesManager();
 
   const aiBuilderService = untrack(() => initAIBuilderService(data.eneo, $currentSpace.id, null));
+
+  // Task description handed over from the create dialog, if any.
+  const seedPrompt = untrack(() => consumeAIBuilderSeed($currentSpace.id));
 
   onDestroy(() => {
     aiBuilderService.destroy();
@@ -40,6 +44,7 @@
     <div class="flex flex-1 flex-col overflow-hidden">
       <FlowAIBuilder
         targetKind="create"
+        initialPrompt={seedPrompt}
         onapplied={async (detail) => {
           goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${detail.flow_id}`));
         }}

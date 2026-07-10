@@ -18,7 +18,6 @@
   import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
-  import type { FlowRunBlocker } from "$lib/features/flows/flowRunWizard";
   import { formatBytes } from "$lib/features/flows/flowByteSize";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
   import FlowRunResumePrompt from "./FlowRunResumePrompt.svelte";
@@ -35,7 +34,6 @@
     uploadError,
     recordingNotice,
     skippedMessage,
-    blockers,
     dragging,
     labels,
     locale,
@@ -74,7 +72,6 @@
     uploadError: string | null;
     recordingNotice: string | null;
     skippedMessage: string | null;
-    blockers: FlowRunBlocker[];
     dragging: boolean;
     labels: FlowRunDialogLabels;
     locale: "sv" | "en";
@@ -202,9 +199,6 @@
             {step.description}
           </p>
         {/if}
-        <p class="text-muted mt-2 text-sm leading-relaxed">
-          {labels.runtimeScopeHint(step.step_order)}
-        </p>
       </div>
       <div class="text-secondary flex flex-wrap gap-2 text-xs">
         <span class="border-default rounded-full border px-2 py-0.5">
@@ -217,21 +211,11 @@
         {/if}
         {#if step.max_file_size_bytes != null}
           <span class="border-default rounded-full border px-2 py-0.5">
-            Max {formatBytes(step.max_file_size_bytes)}/{locale === "sv" ? "fil" : "file"}
+            {labels.maxFileSize(formatBytes(step.max_file_size_bytes))}
           </span>
         {/if}
       </div>
     </div>
-
-    {#if blockers.length > 0}
-      <div
-        class="border-accent-default/20 bg-accent-dimmer/30 text-accent-stronger mt-5 rounded-lg border px-3.5 py-2.5 text-sm"
-        role="status"
-        aria-live="polite"
-      >
-        {blockers[0]?.title}
-      </div>
-    {/if}
 
     {#if isUploading}
       <div

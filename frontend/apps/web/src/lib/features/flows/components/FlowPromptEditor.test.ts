@@ -60,7 +60,7 @@ describe("FlowPromptEditor", () => {
       onCommit
     });
 
-    await fireEvent.click(screen.getByTitle(/@ för genväg/));
+    await fireEvent.click(screen.getByTitle("Infoga variabel"));
     await fireEvent.click(await screen.findByText("Textutdata"));
 
     expect(onChange).toHaveBeenCalledWith("{{step_4.output.text}}");

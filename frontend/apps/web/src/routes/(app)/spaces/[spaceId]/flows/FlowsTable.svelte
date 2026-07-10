@@ -7,7 +7,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import FlowActions from "./FlowActions.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { localizeHref } from "$lib/paraglide/runtime";
+  import { getLocale, localizeHref } from "$lib/paraglide/runtime";
 
   let { flows }: { flows: FlowSparse[] } = $props();
 
@@ -22,7 +22,7 @@
   function formatUpdatedAt(value: string | null | undefined): string {
     if (!value) return "—";
     try {
-      return new Date(value).toLocaleDateString();
+      return new Date(value).toLocaleDateString(getLocale());
     } catch {
       return "—";
     }
@@ -104,7 +104,7 @@
             >
               {#if flow.published_version != null}
                 <Badge variant="secondary" class="h-5 font-medium tabular-nums">
-                  v{flow.published_version}
+                  {getVersionLabel(flow)}
                 </Badge>
               {:else}
                 <Badge variant="outline" class="text-muted h-5 font-medium">

@@ -24,7 +24,7 @@
 <div class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 lg:px-8">
   <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_17rem] md:items-center">
     <div class="min-w-0">
-      <p class="text-muted mb-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
+      <p class="text-muted mb-1 text-xs font-medium tracking-[0.08em] uppercase">
         {#if currentPage.kind === "runtime-step"}
           {m.flow_run_input_progress({
             n: String(currentInputPosition),

@@ -56,7 +56,7 @@
         <span class="text-primary truncate text-sm font-medium">{m.flow_graph_preview()}</span>
         {#if hasSteps}
           <span
-            class="text-secondary bg-hover-dimmer/70 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
+            class="text-secondary bg-hover-dimmer/70 shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold tabular-nums"
           >
             {stepCount}
           </span>

@@ -677,8 +677,12 @@
   // Set when the capsule's "add instruction" action fires so the instruction
   // editor focuses once it mounts (the AI section is unmounted while collapsed).
   let focusInstructionPending = $state(false);
-  const chapterWhatStatus = $derived(activeStep ? getChapterWhatStatus(activeStep) : "");
-  const chapterOutputStatus = $derived(activeStep ? getChapterOutputStatus(activeStep) : "");
+  const chapterWhatStatus = $derived(
+    activeStep ? getChapterWhatStatus(activeStep, isAdvancedMode) : ""
+  );
+  const chapterOutputStatus = $derived(
+    activeStep ? getChapterOutputStatus(activeStep, isAdvancedMode) : ""
+  );
   const chapterControlStatus = $derived(activeStep ? getChapterControlStatus(activeStep) : "");
   const chapterAdvancedStatus = $derived(
     activeStep ? getChapterAdvancedStatus(activeStep) : m.flow_chapter_advanced_default()
@@ -805,7 +809,7 @@
         <IconWorkflow class="text-secondary size-8" />
       </div>
       <div class="flex flex-col gap-2">
-        <h3 class="text-lg font-semibold">{m.flow_no_steps_welcome_title()}</h3>
+        <h2 class="text-lg font-semibold">{m.flow_no_steps_welcome_title()}</h2>
         <p class="text-secondary max-w-md text-sm leading-relaxed">
           {m.flow_no_steps_welcome_description()}
         </p>
@@ -819,7 +823,7 @@
   {:else}
     <div class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
       <MousePointerClick class="text-muted/40 mb-3 size-10" />
-      <h3 class="text-lg font-semibold">{m.flow_step_select_prompt()}</h3>
+      <h2 class="text-lg font-semibold">{m.flow_step_select_prompt()}</h2>
       <p class="text-secondary max-w-md text-sm">
         {m.flow_step_select_prompt_desc()}
       </p>

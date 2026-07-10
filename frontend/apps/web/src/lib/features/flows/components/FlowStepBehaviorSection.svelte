@@ -123,13 +123,33 @@
       <svelte:fragment slot="title">
         <Tooltip.Provider delayDuration={150}>
           <Tooltip.Root>
-            <Tooltip.Trigger>
-              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+            <Tooltip.Trigger aria-label={m.flow_step_instructions_tooltip()}>
+              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" aria-hidden="true" />
             </Tooltip.Trigger>
             <Tooltip.Content>{m.flow_step_instructions_tooltip()}</Tooltip.Content>
           </Tooltip.Root>
         </Tooltip.Provider>
       </svelte:fragment>
+      <!-- Enkel treats the raw prompt as a technical control: it stays in
+           Avancerad. The one exception is a missing instruction, which the
+           user must be able to fix without switching modes. The stored
+           prompt text can contain backend-compiled contract scaffolding, so
+           a read-only preview of it is deliberately NOT shown here. -->
+      {#if isAdvancedMode || instructionMissing}
+        {@render instructionEditor()}
+      {:else}
+        <div class="border-default bg-secondary/15 rounded-xl border px-3.5 py-3">
+          <p class="text-primary text-sm font-medium">
+            {m.flow_step_instructions_user_mode_ready()}
+          </p>
+          <p class="text-secondary mt-1 text-xs leading-relaxed">
+            {m.flow_step_instructions_user_mode_hint()}
+          </p>
+        </div>
+      {/if}
+    </Settings.Row>
+
+    {#snippet instructionEditor()}
       <div class="flex flex-col gap-2">
         {#if instructionMissing || showTips}
           <div class="grid gap-3 md:grid-cols-2">
@@ -235,7 +255,7 @@
           </p>
         {/if}
       </div>
-    </Settings.Row>
+    {/snippet}
 
     {#if isAdvancedMode}
       <FlowStepSection

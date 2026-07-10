@@ -119,7 +119,7 @@
               {statusLabel(rag.status)}
             </span>
           </div>
-          <div class="text-muted flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+          <div class="text-muted flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <span
               >{m.flow_run_knowledge_sources_label()}: {rag.unique_sources ??
                 references.length}</span

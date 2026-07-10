@@ -42,7 +42,7 @@
         >
           <Badge
             variant="outline"
-            class="bg-secondary/60 text-muted hover:bg-secondary h-5 cursor-help px-1.5 text-[10.5px] font-medium tabular-nums transition-colors"
+            class="bg-secondary/60 text-muted hover:bg-secondary h-5 cursor-help px-1.5 text-xs font-medium tabular-nums transition-colors"
           >
             {m.ai_builder_token_usage_badge({ count: formatCompact(usage.total) })}
             {#if usage.estimated}

@@ -185,6 +185,7 @@
               <Button
                 variant="destructive"
                 size="icon"
+                aria-label={m.remove()}
                 onclick={() => onRemoveAttachment?.({ file })}
               >
                 <IconTrash></IconTrash>
@@ -213,7 +214,12 @@
               </div>
             </div>
             <div class="min-w-8">
-              <Button variant="destructive" size="icon" onclick={() => upload.remove()}>
+              <Button
+                variant="destructive"
+                size="icon"
+                aria-label={m.cancel()}
+                onclick={() => upload.remove()}
+              >
                 <IconCancel />
               </Button>
             </div>

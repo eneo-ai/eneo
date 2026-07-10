@@ -1,5 +1,6 @@
 <script lang="ts">
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { Space } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import type { AIBuilderClientTransport, FlowAIBuilderState } from "../FlowAIBuilderDriver";
@@ -24,6 +25,8 @@
       }
     }
   }: Props = $props();
+
+  initFlowUserMode();
 
   const service = untrack(() => {
     const spacesManagerParams: Parameters<typeof initSpacesManager>[0] = {

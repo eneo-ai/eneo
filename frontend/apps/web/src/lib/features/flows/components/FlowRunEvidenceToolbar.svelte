@@ -43,7 +43,7 @@
         <Tooltip.Provider delayDuration={150}>
           <Tooltip.Root>
             <Tooltip.Trigger>
-              <Badge variant="outline" class="bg-primary text-muted font-mono text-[11px]">
+              <Badge variant="outline" class="bg-primary text-muted font-mono text-xs">
                 {m.flow_run_evidence_trace_id()}: {traceId}
               </Badge>
             </Tooltip.Trigger>
@@ -55,7 +55,7 @@
         <Tooltip.Provider delayDuration={150}>
           <Tooltip.Root>
             <Tooltip.Trigger>
-              <Badge variant="outline" class="bg-primary text-[11px]">
+              <Badge variant="outline" class="bg-primary text-xs">
                 {m.flow_run_evidence_redacted()}
               </Badge>
             </Tooltip.Trigger>
@@ -66,7 +66,7 @@
     </div>
 
     {#if hideExportActions}
-      <Badge variant="outline" class="bg-primary text-muted text-[11px]">
+      <Badge variant="outline" class="bg-primary text-muted text-xs">
         {m.flow_sensitive_evidence_export_disabled()}
       </Badge>
     {:else}

@@ -1,5 +1,6 @@
 <script lang="ts" generics="TTab extends string">
   import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import { m } from "$lib/paraglide/messages";
   import type { Snippet } from "svelte";
 
   let {
@@ -24,13 +25,14 @@
 <header class="border-default bg-primary sticky top-0 z-[60] ml-6 border-b">
   <!-- Row 1: Back + Title + Actions -->
   <div class="flex items-center gap-3 px-4 py-2.5 sm:px-5">
-    <!-- Back arrow + flow name -->
-    <div class="flex min-w-0 flex-1 items-center gap-2">
+    <!-- Back arrow + flow name. The min width keeps the flow name readable
+         instead of letting the action buttons squeeze it out at narrow widths. -->
+    <div class="flex min-w-32 flex-1 items-center gap-2">
       <!-- eslint-disable svelte/no-navigation-without-resolve -- backHref is a typed prop passed from caller -->
       <a
         href={backHref}
         class="text-muted hover:text-primary hover:bg-hover-dimmer -ml-1 inline-flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors"
-        aria-label="Tillbaka till flöden"
+        aria-label={m.go_back()}
       >
         <svg
           class="size-4"

@@ -31,6 +31,12 @@ describe("getChapterWhatStatus", () => {
       `mystery → ${m.flow_output_type_text()}`
     );
   });
+
+  it("replaces JSON with the plain-language label outside advanced mode", () => {
+    expect(getChapterWhatStatus(step({ output_type: "json" }), false)).toBe(
+      `${m.flow_type_text()} → ${m.flow_output_type_simple_structured()}`
+    );
+  });
 });
 
 describe("getChapterOutputStatus", () => {
@@ -44,6 +50,12 @@ describe("getChapterOutputStatus", () => {
     expect(
       getChapterOutputStatus(step({ output_type: "json", output_mode: "unknown" as never }))
     ).toBe(m.flow_output_type_json());
+  });
+
+  it("replaces JSON with the plain-language label outside advanced mode", () => {
+    expect(
+      getChapterOutputStatus(step({ output_type: "json", output_mode: "unknown" as never }), false)
+    ).toBe(m.flow_output_type_simple_structured());
   });
 });
 

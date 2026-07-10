@@ -189,7 +189,7 @@
               }) || m.flow_run_knowledge_untitled_source()}
             </div>
             {#if sourceUrl && title && !title.startsWith("http")}
-              <div class="text-muted mt-0.5 truncate font-mono text-[11px]">
+              <div class="text-muted mt-0.5 truncate font-mono text-xs">
                 {formatKnowledgeSourceLabel(null, sourceUrl, {
                   maxPathLength: 30,
                   maxFallbackLength: 50
@@ -201,9 +201,7 @@
                 <Tooltip.Provider delayDuration={150}>
                   <Tooltip.Root>
                     <Tooltip.Trigger>
-                      <span class="text-muted font-mono text-[11px] opacity-60"
-                        >{sourceIdShort}</span
-                      >
+                      <span class="text-muted font-mono text-xs opacity-60">{sourceIdShort}</span>
                     </Tooltip.Trigger>
                     <Tooltip.Content>{infoBlobId}</Tooltip.Content>
                   </Tooltip.Root>
@@ -212,7 +210,7 @@
               {#if sourceUrl}
                 <button
                   type="button"
-                  class="text-accent-stronger text-[11px] font-medium hover:underline"
+                  class="text-accent-stronger text-xs font-medium hover:underline"
                   onclick={openSourceUrl}
                 >
                   {m.go_to_website()}
@@ -236,7 +234,7 @@
               {#if activeChunkIndex !== null}
                 <button
                   type="button"
-                  class="text-accent-stronger hover:bg-hover-default rounded px-2 py-1 text-[11px] font-medium"
+                  class="text-accent-stronger hover:bg-hover-default rounded px-2 py-1 text-xs font-medium"
                   onclick={resetChunkHighlight}
                 >
                   {m.clear()}
@@ -267,7 +265,7 @@
                           <Tooltip.Trigger>
                             <span
                               class={[
-                                "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                                "rounded-full px-1.5 py-0.5 text-xs font-medium",
                                 getKnowledgeRelevanceBadgeClass(Number(chunk.score ?? 0))
                               ]}
                             >
@@ -278,7 +276,7 @@
                         </Tooltip.Root>
                       </Tooltip.Provider>
                     </div>
-                    <p class="text-muted mt-1 line-clamp-3 text-[11px] leading-relaxed">
+                    <p class="text-muted mt-1 line-clamp-3 text-xs leading-relaxed">
                       {chunk.snippet}
                     </p>
                   </button>
@@ -312,7 +310,7 @@
             <div
               class="border-default bg-hover-dimmer flex items-center justify-between border-t px-4 py-2.5"
             >
-              <div class="text-muted inline-flex items-center gap-2 text-[11px]">
+              <div class="text-muted inline-flex items-center gap-2 text-xs">
                 <span class="legend-swatch"></span>
                 <span>{m.flow_run_knowledge_highlight_legend()}</span>
               </div>
@@ -320,7 +318,7 @@
                 <Button variant="outline" class="text-xs" onclick={previousChunk}>
                   {m.flow_run_knowledge_prev_match()}
                 </Button>
-                <span class="text-muted px-2 text-[11px] tabular-nums">
+                <span class="text-muted px-2 text-xs tabular-nums">
                   {#if activeChunkIndex !== null}
                     {m.flow_run_knowledge_chunk_position({
                       current: String(activeChunkIndex + 1),

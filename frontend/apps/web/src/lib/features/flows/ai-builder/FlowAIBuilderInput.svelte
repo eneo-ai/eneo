@@ -1,4 +1,7 @@
 <script lang="ts">
+  /* eslint-disable eneo/no-raw-color -- composer styles derive colors from the
+     accent token via relative oklch() syntax; the rest are near-transparent
+     shadow overlays with no token equivalent */
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -16,6 +19,7 @@
   import { IconCheck } from "@eneo/icons/check";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { AIBuilderPlanEditContext } from "./protocol";
 
   interface Props {
@@ -26,6 +30,7 @@
   let { editContext = null, oncleareditcontext }: Props = $props();
 
   const service = getAIBuilderService();
+  const userMode = getFlowUserMode();
   const { limits } = getAppContext();
   const attachmentRules = getAIBuilderAttachmentRules(limits);
   const {
@@ -346,7 +351,8 @@
           <span class="composer-attach-label">{m.attach_files()}</span>
         </button>
 
-        {#if service.modelsLoaded}
+        <!-- Model choice is a technical control: visible only in Avancerad. -->
+        {#if service.modelsLoaded && $userMode === "power_user"}
           {#if hasMultipleModels}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>

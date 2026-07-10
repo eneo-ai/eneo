@@ -39,7 +39,7 @@ describe("FlowRunStatusBadge", () => {
       props: { status: "failed", size: "xs" }
     });
 
-    expect(body).toContain("text-[11px]");
+    expect(body).toContain("text-xs");
     expect(body).toContain("gap-1.5");
     expect(body).toContain("bg-negative-default");
   });

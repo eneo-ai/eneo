@@ -6,7 +6,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAppContext } from "$lib/core/AppContext";
   import { getFlowWizardMetadata, initFlowEditor } from "$lib/features/flows/FlowEditor";
-  import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import FlowStepList from "$lib/features/flows/components/FlowStepList.svelte";
   import FlowStepEditPanel from "$lib/features/flows/components/FlowStepEditPanel.svelte";
   import FlowGraphPanel from "$lib/features/flows/components/FlowGraphPanel.svelte";
@@ -20,6 +20,7 @@
   import FlowPackageExportDialog from "$lib/features/flows/components/FlowPackageExportDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -50,6 +51,10 @@
 
   let { data } = $props();
   let publishLoading = $state(false);
+  let showUnpublishDialog = $state(false);
+  // Which affordance opened the unpublish dialog: "edit" frames it as the
+  // path to editing; "service" is the deliberate take-out-of-service action.
+  let unpublishIntent = $state<"edit" | "service">("edit");
   let validationBannerExpanded = $state(false);
   let showRunDialog = $state(false);
   let runsReloadTrigger = $state(0);
@@ -68,7 +73,7 @@
     allOf: ["flows_manage", "flows_ai_builder"]
   });
 
-  const userMode = initFlowUserMode();
+  const userMode = getFlowUserMode();
 
   const flowEditor = initFlowEditor({
     flow: untrack(() => data.flow),
@@ -323,28 +328,29 @@
           {m.flow_run_trigger()}
         </Button>
         <Button
-          variant="destructive"
+          variant="outline"
           disabled={publishLoading}
-          onclick={async () => {
-            publishLoading = true;
-            try {
-              const updated = await data.eneo.flows.unpublish({ id: $resource.id });
-              flowEditor.setResource(updated);
-            } catch (e) {
-              const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
-              console.error("Unpublish failed:", msg);
-              toast.error(m.flow_unpublish_failed({ message: msg }));
-            } finally {
-              publishLoading = false;
-            }
+          onclick={() => {
+            unpublishIntent = "edit";
+            showUnpublishDialog = true;
           }}
         >
           {#if publishLoading}
             <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
             {m.flow_unpublish_loading()}
           {:else}
-            {m.flow_unpublish_to_edit()}
+            {m.edit()}
           {/if}
+        </Button>
+        <Button
+          variant="outline"
+          disabled={publishLoading}
+          onclick={() => {
+            unpublishIntent = "service";
+            showUnpublishDialog = true;
+          }}
+        >
+          {m.flow_unpublish_confirm_action()}
         </Button>
       {:else}
         <FlowPackageExportDialog
@@ -450,7 +456,7 @@
       <div class="border-default bg-primary/95 sticky top-0 z-10 border-b backdrop-blur-sm">
         <nav
           class="mx-auto flex max-w-[1600px] items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 md:px-6 md:py-3.5"
-          aria-label="Flow builder stages"
+          aria-label={m.flow_stages_nav_aria()}
         >
           <!-- Steps — scrollable on small screens -->
           <ol
@@ -465,15 +471,15 @@
 
               {#if i > 0}
                 <div
-                  class="mx-1 h-0.5 w-4 shrink-0 transition-colors duration-200 sm:mx-1.5 sm:w-6 lg:mx-3 lg:w-auto lg:flex-1
+                  class="mx-1 h-0.5 w-4 shrink-0 transition-colors duration-200 sm:mx-1.5 sm:w-6 xl:mx-3 xl:w-auto xl:flex-1
                     {isPreviousCompleted ? 'bg-accent-default' : 'bg-border-default'}"
                 ></div>
               {/if}
 
-              <li class="shrink-0">
+              <li class="min-w-0">
                 <button
                   type="button"
-                  class="hover:bg-hover-dimmer flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm transition-all duration-200 sm:gap-2 sm:px-2 lg:gap-2.5 lg:px-2.5
+                  class="hover:bg-hover-dimmer flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm transition-all duration-200 sm:gap-2 sm:px-2 lg:gap-2.5 lg:px-2.5
                     {isActive ? 'text-primary font-semibold' : ''}"
                   aria-current={isActive ? "step" : undefined}
                   onclick={() => void navigateToStage(stage.id)}
@@ -512,9 +518,12 @@
                     </span>
                   {/if}
 
-                  <!-- Label — only on large screens -->
+                  <!-- The current stage keeps its label at every width; other
+                       stages show labels only when the full row fits (xl+). -->
                   <span
-                    class="hidden text-sm whitespace-nowrap lg:inline
+                    class="{isActive
+                      ? 'inline'
+                      : 'hidden xl:inline'} truncate text-sm whitespace-nowrap
                       {isActive
                       ? 'text-primary font-semibold'
                       : isSkipped
@@ -856,7 +865,9 @@
                               {languageLabel}
                             </Select.Trigger>
                             <Select.Content>
+                              <!-- eslint-disable-next-line eneo/no-hardcoded-text (language autonym, shown in its own language by convention) -->
                               <Select.Item value="sv" label="Svenska">Svenska</Select.Item>
+                              <!-- eslint-disable-next-line eneo/no-hardcoded-text (language autonym, shown in its own language by convention) -->
                               <Select.Item value="en" label="English">English</Select.Item>
                               <Select.Item
                                 value="auto"
@@ -923,7 +934,7 @@
             class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden lg:flex-row"
           >
             <div
-              class="border-default bg-primary max-h-[42vh] w-full overflow-hidden rounded-xl border shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:max-h-[48vh] lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
+              class="border-default bg-primary max-h-[42vh] w-full overflow-hidden rounded-xl border shadow-sm sm:max-h-[48vh] lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
             >
               <FlowStepList
                 steps={$update.steps}
@@ -976,7 +987,7 @@
             </div>
 
             <div
-              class="border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-[0_1px_2px_rgba(0,0,0,0.02)] lg:max-w-[900px] 2xl:max-w-[1000px]"
+              class="border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm lg:max-w-[900px] 2xl:max-w-[1000px]"
             >
               <div class="h-full overflow-y-auto">
                 <FlowStepEditPanel
@@ -1013,7 +1024,7 @@
             <div class="mx-auto w-full max-w-6xl space-y-5 md:space-y-6">
               <!-- Pipeline summary -->
               <section
-                class="border-default bg-primary rounded-2xl border p-5 shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:p-6"
+                class="border-default bg-primary rounded-2xl border p-5 shadow-sm sm:p-6"
                 aria-labelledby="flow-review-pipeline-heading"
               >
                 <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -1024,7 +1035,7 @@
                     {m.flow_review_pipeline_title()}
                   </h3>
                   <span
-                    class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase tabular-nums"
+                    class="text-muted text-xs font-semibold tracking-[0.06em] uppercase tabular-nums"
                   >
                     {($update.steps ?? []).length}&nbsp;&middot;&nbsp;{m.flow_steps()}
                   </span>
@@ -1046,7 +1057,7 @@
                       class="border-default/80 bg-secondary/20 hover:bg-secondary/35 flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 transition-colors"
                     >
                       <span
-                        class="bg-hover-dimmer text-secondary flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold tabular-nums"
+                        class="bg-hover-dimmer text-secondary flex size-5 shrink-0 items-center justify-center rounded-md text-xs font-semibold tabular-nums"
                         aria-hidden="true"
                       >
                         {stepIdx + 1}
@@ -1064,7 +1075,7 @@
                         </span>
                         {#if completionModel?.name}
                           <span
-                            class="text-muted max-w-[14rem] truncate text-[11px] leading-snug tabular-nums"
+                            class="text-muted max-w-[14rem] truncate text-xs leading-snug tabular-nums"
                             title={completionModel.name}
                           >
                             {completionModel.name}
@@ -1084,7 +1095,7 @@
 
               <!-- Test section -->
               <section
-                class="border-default bg-primary rounded-2xl border p-5 shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:p-6"
+                class="border-default bg-primary rounded-2xl border p-5 shadow-sm sm:p-6"
                 aria-labelledby="flow-review-testing-heading"
               >
                 <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
@@ -1108,7 +1119,7 @@
                   {#if !$isPublished}
                     {#if $validationErrors.size === 0 && !hasStepJsonValidationErrors}
                       <span
-                        class="border-positive-default/30 bg-positive-dimmer/70 text-positive-stronger inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.015em]"
+                        class="border-positive-default/30 bg-positive-dimmer/70 text-positive-stronger inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold tracking-[0.015em]"
                         role="status"
                       >
                         <CheckCircle2 class="size-3" aria-hidden="true" />
@@ -1116,7 +1127,7 @@
                       </span>
                     {:else}
                       <span
-                        class="border-warning-default/30 bg-warning-dimmer/70 text-warning-stronger inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.015em] tabular-nums"
+                        class="border-warning-default/30 bg-warning-dimmer/70 text-warning-stronger inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold tracking-[0.015em] tabular-nums"
                       >
                         {m.flow_validation_errors_count({
                           count: $validationErrors.size + (hasStepJsonValidationErrors ? 1 : 0)
@@ -1235,6 +1246,43 @@
     runsReloadTrigger++;
   }}
 />
+
+<AlertDialog.Root bind:open={showUnpublishDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>
+        {unpublishIntent === "edit"
+          ? m.flow_unpublish_confirm_title()
+          : m.flow_unpublish_service_confirm_title()}
+      </AlertDialog.Title>
+      <AlertDialog.Description>{m.flow_unpublish_confirm_body()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        variant="destructive"
+        onclick={async () => {
+          showUnpublishDialog = false;
+          publishLoading = true;
+          try {
+            const updated = await data.eneo.flows.unpublish({ id: $resource.id });
+            flowEditor.setResource(updated);
+          } catch (e) {
+            const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
+            console.error("Unpublish failed:", msg);
+            toast.error(m.flow_unpublish_failed({ message: msg }));
+          } finally {
+            publishLoading = false;
+          }
+        }}
+      >
+        {unpublishIntent === "edit"
+          ? m.flow_unpublish_and_edit_action()
+          : m.flow_unpublish_confirm_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <style>
   @media (prefers-reduced-motion: reduce) {

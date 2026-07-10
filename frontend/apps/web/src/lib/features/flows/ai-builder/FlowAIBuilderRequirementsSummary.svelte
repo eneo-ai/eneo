@@ -24,6 +24,8 @@
   // Manual reveal after confirmation; before confirmation the summary stays expanded.
   let userExpanded = $state(false);
   const expanded = $derived(!confirmed || userExpanded);
+  // Assumptions are supporting detail, collapsed so the summary reads fast.
+  let assumptionsExpanded = $state(false);
 
   function toggleExpanded() {
     userExpanded = !userExpanded;
@@ -81,7 +83,7 @@
 
       {#if userRequest}
         <section class="border-default bg-secondary/30 rounded-lg border px-3 py-2.5">
-          <h3 class="text-muted mb-1 text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
+          <h3 class="text-muted mb-1 text-xs font-semibold tracking-[0.06em] uppercase">
             {m.ai_builder_requirements_user_request()}
           </h3>
           <p class="text-secondary text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
@@ -92,7 +94,7 @@
 
       {#if hasDecisions}
         <section class="flex flex-col gap-2">
-          <h3 class="text-muted text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
+          <h3 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
             {m.ai_builder_requirements_decisions()}
           </h3>
           <dl class="divide-default flex flex-col divide-y">
@@ -110,14 +112,14 @@
 
       <div class="border-default grid gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-2">
         <div class="flex flex-col gap-1">
-          <span class="text-muted text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
+          <span class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
             {m.ai_builder_requirements_input()}
           </span>
           <span class="text-primary text-[0.8125rem] leading-snug">{summary.input_description}</span
           >
         </div>
         <div class="flex flex-col gap-1">
-          <span class="text-muted text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
+          <span class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
             {m.ai_builder_requirements_output()}
           </span>
           <span class="text-primary text-[0.8125rem] leading-snug"
@@ -128,26 +130,48 @@
 
       {#if hasAssumptions}
         <section class="flex flex-col gap-1.5">
-          <span class="text-muted text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
-            {m.ai_builder_assumptions()}
-          </span>
-          <ul class="flex flex-col gap-1 p-0">
-            {#each summary.assumptions ?? [] as assumption (assumption)}
-              <li class="text-secondary flex items-start gap-2 text-[0.8125rem] leading-snug">
-                <span
-                  class="bg-accent-default mt-[0.55em] block size-1.5 shrink-0 rounded-full opacity-70"
-                  aria-hidden="true"
-                ></span>
-                <span>{assumption}</span>
-              </li>
-            {/each}
-          </ul>
+          <button
+            type="button"
+            class="text-muted hover:text-primary focus-visible:ring-accent-default/30 flex w-fit items-center gap-1.5 rounded text-xs font-semibold tracking-[0.06em] uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none"
+            aria-expanded={assumptionsExpanded}
+            onclick={() => (assumptionsExpanded = !assumptionsExpanded)}
+          >
+            <span>{m.ai_builder_assumptions()} ({(summary.assumptions ?? []).length})</span>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              class="size-3.5 transition-transform duration-200 ease-out {assumptionsExpanded
+                ? 'rotate-180'
+                : ''}"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </button>
+          {#if assumptionsExpanded}
+            <ul class="flex flex-col gap-1 p-0">
+              {#each summary.assumptions ?? [] as assumption (assumption)}
+                <li class="text-secondary flex items-start gap-2 text-[0.8125rem] leading-snug">
+                  <span
+                    class="bg-accent-default mt-[0.55em] block size-1.5 shrink-0 rounded-full opacity-70"
+                    aria-hidden="true"
+                  ></span>
+                  <span>{assumption}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </section>
       {/if}
 
       {#if hasManualNotes}
         <section class="flex flex-col gap-1.5">
-          <span class="text-muted text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
+          <span class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
             {m.ai_builder_requirements_manual_notes()}
           </span>
           <ul class="flex flex-col gap-1 p-0">

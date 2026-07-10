@@ -22,7 +22,7 @@
       cancelled: m.flow_run_status_cancelled
     })
   );
-  const textClass = $derived(size === "xs" ? "text-[11px]" : size === "md" ? "text-sm" : "text-xs");
+  const textClass = $derived(size === "xs" ? "text-xs" : size === "md" ? "text-sm" : "text-xs");
   const gapClass = $derived(size === "xs" ? "gap-1.5" : "gap-2");
   const shouldPulse = $derived(pulsing ?? view.pulseDot);
   const dotClass = $derived(`${view.dotClass}${shouldPulse ? " animate-pulse" : ""}`);

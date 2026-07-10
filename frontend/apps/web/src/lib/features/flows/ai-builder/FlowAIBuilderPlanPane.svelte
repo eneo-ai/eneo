@@ -11,6 +11,7 @@
   import FlowAIBuilderCanvas from "./FlowAIBuilderCanvas.svelte";
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
   import {
     AIBuilderIssueKind,
@@ -40,6 +41,9 @@
   let { onapplied, onsuggestchange }: Props = $props();
 
   const service = getAIBuilderService();
+  const userMode = getFlowUserMode();
+  const isPowerUser = $derived($userMode === "power_user");
+  let assumptionsOpen = $state(false);
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -333,7 +337,7 @@
                 <span class="text-primary flex-1 text-[0.8125rem] font-medium">
                   {m.ai_builder_reference_material()}
                 </span>
-                <Badge variant="outline" class="h-5 px-1.5 text-[10.5px] tabular-nums">
+                <Badge variant="outline" class="h-5 px-1.5 text-xs tabular-nums">
                   {attachments.length}
                 </Badge>
                 <svg
@@ -367,7 +371,7 @@
                           <div class="text-muted truncate text-xs">{file.mimetype}</div>
                         </div>
                         <span
-                          class="text-muted shrink-0 font-mono text-[10.5px] tabular-nums"
+                          class="text-muted shrink-0 font-mono text-xs tabular-nums"
                           aria-label={m.file_size()}
                         >
                           {m.kb({ value: Math.max(1, Math.round(file.size / 1024)) })}
@@ -391,7 +395,7 @@
             <div class="flex flex-wrap items-center gap-2">
               <Badge
                 variant="outline"
-                class="bg-accent-default/8 border-accent-default/25 text-accent-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+                class="bg-accent-default/8 border-accent-default/25 text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
               >
                 {m.ai_builder_draft_pill()}
               </Badge>
@@ -400,7 +404,9 @@
               </span>
               <span class="text-muted text-xs">·</span>
               <span class="text-muted text-xs">{m.ai_builder_phase_reviewing()}</span>
-              <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
+              {#if isPowerUser}
+                <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
+              {/if}
             </div>
             <h2
               id="plan-heading"
@@ -421,7 +427,7 @@
               class="section-enter border-default border-t px-5 py-4 md:px-6"
               aria-live="polite"
             >
-              <h3 class="text-muted mb-2 text-[11px] font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_description_diff_title()}
               </h3>
               {#if descriptionDiff}
@@ -459,7 +465,7 @@
           <!-- Plan rationale -->
           {#if plan.proposal.plan_rationale}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-1.5 text-[11px] font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-muted mb-1.5 text-xs font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_plan_rationale()}
               </h3>
               <p
@@ -470,30 +476,54 @@
             </section>
           {/if}
 
-          <!-- Assumptions -->
+          <!-- Assumptions: collapsed by default so the review reads as a short
+               summary, not a bullet wall. -->
           {#if planAssumptions.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-2 text-[11px] font-semibold tracking-[0.06em] uppercase">
-                {m.ai_builder_assumptions()}
-              </h3>
-              <ul class="text-secondary flex flex-col gap-1.5 text-[0.8125rem] leading-relaxed">
-                {#each planAssumptions as assumption (assumption)}
-                  <li class="flex items-start gap-2">
-                    <span
-                      class="bg-muted mt-[0.55em] block size-1 shrink-0 rounded-full opacity-60"
-                      aria-hidden="true"
-                    ></span>
-                    <span>{assumption}</span>
-                  </li>
-                {/each}
-              </ul>
+              <Collapsible.Root bind:open={assumptionsOpen}>
+                <Collapsible.Trigger
+                  class="text-muted hover:text-primary focus-visible:ring-accent-default/30 flex w-full items-center gap-1.5 rounded text-xs font-semibold tracking-[0.06em] uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  <span>{m.ai_builder_assumptions()} ({planAssumptions.length})</span>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    class="size-3.5 transition-transform duration-200 ease-out {assumptionsOpen
+                      ? 'rotate-180'
+                      : ''}"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </Collapsible.Trigger>
+                <Collapsible.Content>
+                  <ul
+                    class="text-secondary mt-2 flex flex-col gap-1.5 text-[0.8125rem] leading-relaxed"
+                  >
+                    {#each planAssumptions as assumption (assumption)}
+                      <li class="flex items-start gap-2">
+                        <span
+                          class="bg-muted mt-[0.55em] block size-1 shrink-0 rounded-full opacity-60"
+                          aria-hidden="true"
+                        ></span>
+                        <span>{assumption}</span>
+                      </li>
+                    {/each}
+                  </ul>
+                </Collapsible.Content>
+              </Collapsible.Root>
             </section>
           {/if}
 
           <!-- Edit advisories (non-description) -->
           {#if otherAdvisories.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6" aria-live="polite">
-              <h3 class="text-muted mb-2 text-[11px] font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_advisory_section_title()}
               </h3>
               <ul class="flex flex-col gap-1.5">
@@ -518,7 +548,7 @@
           <!-- Form fields -->
           {#if spec.form_fields && spec.form_fields.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-2 text-[11px] font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_form_fields_title()}
               </h3>
               <div class="grid gap-2.5 sm:grid-cols-2">
@@ -529,12 +559,12 @@
                         {field.label}
                       </span>
                       <span
-                        class="border-default text-muted bg-primary rounded-full border px-1.5 py-0.5 font-mono text-[10px]"
+                        class="border-default text-muted bg-primary rounded-full border px-1.5 py-0.5 font-mono text-xs"
                       >
                         {field.type}
                       </span>
                     </div>
-                    <div class="text-muted flex flex-wrap items-center gap-x-2 text-[11.5px]">
+                    <div class="text-muted flex flex-wrap items-center gap-x-2 text-xs">
                       <span class="font-mono">{field.name}</span>
                       <span>·</span>
                       <span>
@@ -547,7 +577,7 @@
                       <div class="mt-2 flex flex-wrap gap-1">
                         {#each field.options as option (option)}
                           <span
-                            class="border-default text-secondary rounded-full border px-2 py-0.5 text-[11px]"
+                            class="border-default text-secondary rounded-full border px-2 py-0.5 text-xs"
                           >
                             {option}
                           </span>
@@ -565,7 +595,7 @@
             <section class="border-default border-t px-5 py-4 md:px-6">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <h3
-                  class="text-warning-stronger flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.06em] uppercase"
+                  class="text-warning-stronger flex items-center gap-1.5 text-xs font-semibold tracking-[0.06em] uppercase"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -612,7 +642,7 @@
               onValueChange={(v) => (stepsView = v as "diagram" | "details")}
             >
               <div class="mb-3 flex items-center justify-between gap-3">
-                <h3 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                <h3 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                   {m.flow_steps()}
                 </h3>
                 <Tabs.List class="h-8">
@@ -634,6 +664,7 @@
                       {step}
                       stepNumber={i + 1}
                       planId={plan.plan_id}
+                      {isPowerUser}
                       changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
                       {resolveModelName}
                       {resolveMcpServerName}
@@ -670,7 +701,7 @@
           <!-- Removed steps -->
           {#if removedStepChanges.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-2 text-[11px] font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_removed_steps_title()}
               </h3>
               <ul class="flex flex-col gap-1">
@@ -678,7 +709,7 @@
                   <li class="text-muted flex items-center gap-2 py-1 text-[0.8125rem] leading-snug">
                     <Badge
                       variant="outline"
-                      class="border-warning-default/25 bg-warning-dimmer text-warning-stronger h-5 shrink-0 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+                      class="border-warning-default/25 bg-warning-dimmer text-warning-stronger h-5 shrink-0 px-1.5 text-xs font-semibold tracking-wide uppercase"
                     >
                       {m.ai_builder_badge_removed()}
                     </Badge>
@@ -856,7 +887,11 @@
             onclick={handleApprove}
             disabled={isApproving || isApplying || isUnpublishingAndApplying}
           >
-            {isApproving ? m.ai_builder_approving() : m.ai_builder_approve()}
+            {isApproving
+              ? m.ai_builder_approving()
+              : service.session?.target_kind === "create"
+                ? m.ai_builder_approve_create()
+                : m.ai_builder_approve()}
           </Button>
         {/if}
 

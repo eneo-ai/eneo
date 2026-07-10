@@ -53,7 +53,7 @@
   />
   <span class={compact ? "max-w-[18ch] truncate" : ""}>{file.name}</span>
   {#if extraCount > 0}
-    <Badge variant="secondary" class={compact ? "ml-1 h-5 px-1.5 text-[10px] tabular-nums" : ""}>
+    <Badge variant="secondary" class={compact ? "ml-1 h-5 px-1.5 text-xs tabular-nums" : ""}>
       +{extraCount}
     </Badge>
   {:else if !isAvailable}

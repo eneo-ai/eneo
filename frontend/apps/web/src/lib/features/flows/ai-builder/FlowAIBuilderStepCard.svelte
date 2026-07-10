@@ -18,6 +18,7 @@
     isFirst?: boolean;
     isLast?: boolean;
     planStatus?: string;
+    isPowerUser?: boolean;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     resolveModelName?: (ref: string | null) => string | null;
     resolveMcpServerName?: (ref: string) => string | null;
@@ -32,6 +33,7 @@
     buildDiagnosticReport,
     isFirst = false,
     planStatus = "",
+    isPowerUser = true,
     onsuggestchange,
     resolveModelName,
     resolveMcpServerName,
@@ -98,17 +100,40 @@
   const mcpToolRefs = $derived(step.assistant_spec.mcp_tool_refs ?? []);
   const hasMcp = $derived(mcpServerRefs.length > 0 || mcpToolRefs.length > 0);
   const hasDiagnosticCopy = $derived(planStatus === "proposed" && !!buildDiagnosticReport);
+  // Bindings, contracts, model refs, and diagnostics are Avancerad vocabulary;
+  // Enkel reviews the step through its instructions and knowledge only.
+  const hasTechnicalDetails = $derived(
+    !!resolvedModel || hasBindings || hasInputContract || hasOutputContract || hasDiagnosticCopy
+  );
   const hasAnyDetails = $derived(
     hasInstructions ||
-      resolvedModel ||
       usesFlowTranscriptionModel ||
       hasKnowledge ||
       hasMcp ||
-      hasBindings ||
-      hasInputContract ||
-      hasOutputContract ||
-      hasDiagnosticCopy
+      (isPowerUser && hasTechnicalDetails)
   );
+
+  // Enkel shows localized plain-language type words instead of raw contract tokens.
+  function simpleTypeLabel(value: string): string {
+    switch (value) {
+      case "json":
+        return m.flow_output_type_simple_structured();
+      case "document":
+        return m.flow_type_document();
+      case "text":
+        return m.flow_type_text();
+      case "audio":
+        return m.flow_type_audio();
+      case "pdf":
+        return m.flow_output_type_pdf();
+      case "docx":
+        return m.flow_output_type_docx();
+      default:
+        return value;
+    }
+  }
+  const inputTypeDisplay = $derived(isPowerUser ? inputType : simpleTypeLabel(inputType));
+  const outputTypeDisplay = $derived(isPowerUser ? outputType : simpleTypeLabel(outputType));
 
   function mcpServerLabel(ref: string): string {
     return resolveMcpServerName?.(ref) ?? ref;
@@ -172,14 +197,14 @@
             {#if changeKind === "added"}
               <Badge
                 variant="outline"
-                class="border-positive-default/30 bg-positive-dimmer text-positive-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+                class="border-positive-default/30 bg-positive-dimmer text-positive-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
               >
                 {m.ai_builder_badge_new()}
               </Badge>
             {:else if changeKind === "modified"}
               <Badge
                 variant="outline"
-                class="border-warning-default/30 bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+                class="border-warning-default/30 bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
               >
                 {m.ai_builder_badge_modified()}
               </Badge>
@@ -188,13 +213,13 @@
             {#if hasMcp}
               <Badge
                 variant="outline"
-                class="bg-accent-default/6 border-accent-default/20 text-accent-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+                class="bg-accent-default/6 border-accent-default/20 text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
               >
                 {m.mcp()}
               </Badge>
             {/if}
 
-            {#if resolvedModel}
+            {#if resolvedModel && isPowerUser}
               <span class="text-muted ml-auto hidden max-w-[10rem] truncate text-xs sm:inline">
                 {resolvedModel}
               </span>
@@ -211,18 +236,18 @@
               <span aria-hidden="true">·</span>
               <span class="text-secondary">{inputSourceLabel}</span>
               <span aria-hidden="true" class="opacity-50">→</span>
-              <span class="text-secondary">{inputType}</span>
+              <span class="text-secondary">{inputTypeDisplay}</span>
             </span>
             <span aria-hidden="true" class="opacity-40">•</span>
             <span class="inline-flex items-center gap-1">
               <span class="font-medium">{m.ai_builder_step_output()}</span>
               <span aria-hidden="true">·</span>
-              <span class="text-secondary">{outputType}</span>
-              {#if outputMode !== "pass_through"}
+              <span class="text-secondary">{outputTypeDisplay}</span>
+              {#if outputMode !== "pass_through" && isPowerUser}
                 <span class="opacity-60">({outputMode})</span>
               {/if}
             </span>
-            {#if resolvedModel}
+            {#if resolvedModel && isPowerUser}
               <span class="sr-only">· {m.ai_builder_step_model()} {resolvedModel}</span>
             {/if}
           </div>
@@ -253,7 +278,7 @@
             <div class="bg-secondary/25 flex flex-col gap-5 px-4 py-4 sm:px-5 sm:py-5">
               {#if hasInstructions}
                 <section class="flex flex-col gap-2">
-                  <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                  <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_instructions()}
                   </h4>
                   <p
@@ -278,11 +303,11 @@
                 </section>
               {/if}
 
-              {#if resolvedModel || usesFlowTranscriptionModel || hasKnowledge || hasMcp}
+              {#if (resolvedModel && isPowerUser) || usesFlowTranscriptionModel || hasKnowledge || hasMcp}
                 <section class="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-                  {#if resolvedModel}
+                  {#if resolvedModel && isPowerUser}
                     <div class="flex flex-col gap-1">
-                      <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                      <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                         {m.ai_builder_step_model()}
                       </h4>
                       <p class="text-secondary text-[13px] leading-snug">{resolvedModel}</p>
@@ -290,7 +315,7 @@
                   {/if}
                   {#if usesFlowTranscriptionModel}
                     <div class="flex flex-col gap-1">
-                      <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                      <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                         {m.ai_builder_step_transcription_model()}
                       </h4>
                       <p class="text-secondary text-[13px] leading-snug">
@@ -300,7 +325,7 @@
                   {/if}
                   {#if hasKnowledge}
                     <div class="flex flex-col gap-1">
-                      <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                      <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                         {m.ai_builder_step_knowledge()}
                       </h4>
                       <p class="text-secondary text-[13px] leading-snug">
@@ -310,7 +335,7 @@
                   {/if}
                   {#if hasMcp}
                     <div class="flex flex-col gap-2 sm:col-span-2">
-                      <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                      <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                         {m.ai_builder_step_mcp_tools()}
                       </h4>
                       <div class="flex flex-wrap gap-1.5">
@@ -318,7 +343,7 @@
                           {#each mcpToolRefs as ref (ref)}
                             <Badge
                               variant="outline"
-                              class="bg-accent-default/6 border-accent-default/20 text-accent-stronger max-w-full px-2 py-0.5 text-[11px] font-medium"
+                              class="bg-accent-default/6 border-accent-default/20 text-accent-stronger max-w-full px-2 py-0.5 text-xs font-medium"
                               title={ref}
                             >
                               <span class="truncate">{mcpToolLabel(ref)}</span>
@@ -328,7 +353,7 @@
                           {#each mcpServerRefs as ref (ref)}
                             <Badge
                               variant="outline"
-                              class="bg-accent-default/6 border-accent-default/20 text-accent-stronger max-w-full px-2 py-0.5 text-[11px] font-medium"
+                              class="bg-accent-default/6 border-accent-default/20 text-accent-stronger max-w-full px-2 py-0.5 text-xs font-medium"
                               title={ref}
                             >
                               <span class="truncate">{mcpServerLabel(ref)}</span>
@@ -344,13 +369,13 @@
                 </section>
               {/if}
 
-              {#if hasBindings}
+              {#if hasBindings && isPowerUser}
                 <section class="flex flex-col gap-2">
-                  <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                  <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_bindings()}
                   </h4>
                   <pre
-                    class="border-default bg-primary text-secondary max-h-64 overflow-auto rounded-md border px-3 py-2 font-mono text-[11.5px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+                    class="border-default bg-primary text-secondary max-h-64 overflow-auto rounded-md border px-3 py-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                       step.input_bindings,
                       null,
                       2
@@ -358,9 +383,9 @@
                 </section>
               {/if}
 
-              {#if hasOutputContract}
+              {#if hasOutputContract && isPowerUser}
                 <section class="flex flex-col gap-2">
-                  <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                  <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_output_contract()}
                   </h4>
                   <dl
@@ -371,7 +396,7 @@
                         class="bg-primary grid grid-cols-[auto_auto_1fr] items-baseline gap-x-3 px-3 py-2 text-[12.5px]"
                       >
                         <code class="text-primary font-semibold">{name}</code>
-                        <Badge variant="outline" class="h-4 px-1.5 py-0 text-[10px] font-normal">
+                        <Badge variant="outline" class="h-4 px-1.5 py-0 text-xs font-normal">
                           {schema.type ?? "object"}
                         </Badge>
                         {#if schema.description}
@@ -383,9 +408,9 @@
                 </section>
               {/if}
 
-              {#if hasInputContract}
+              {#if hasInputContract && isPowerUser}
                 <section class="flex flex-col gap-2">
-                  <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                  <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
                     {m.ai_builder_step_input_contract()}
                   </h4>
                   <dl
@@ -396,7 +421,7 @@
                         class="bg-primary grid grid-cols-[auto_auto_1fr] items-baseline gap-x-3 px-3 py-2 text-[12.5px]"
                       >
                         <code class="text-primary font-semibold">{name}</code>
-                        <Badge variant="outline" class="h-4 px-1.5 py-0 text-[10px] font-normal">
+                        <Badge variant="outline" class="h-4 px-1.5 py-0 text-xs font-normal">
                           {schema.type ?? "object"}
                         </Badge>
                         {#if schema.description}
@@ -434,7 +459,9 @@
                     </svg>
                     {m.ai_builder_suggest_change()}
                   </button>
-                  <FlowAIBuilderDiagnosticCopyButton buildReport={buildDiagnosticReport} />
+                  {#if isPowerUser}
+                    <FlowAIBuilderDiagnosticCopyButton buildReport={buildDiagnosticReport} />
+                  {/if}
                 </div>
               {/if}
             </div>
