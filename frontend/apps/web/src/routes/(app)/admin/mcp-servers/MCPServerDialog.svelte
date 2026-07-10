@@ -17,25 +17,45 @@
   type Props = {
     openController: Writable<boolean>;
     mcpServer?: MCPServerSettings | null;
+    /** Purpose used when creating a new server. Defaults to "general". */
+    purpose?: "general" | "web_search";
     onSubmit: (data: Record<string, unknown>, id?: string) => Promise<void>;
   };
 
-  const { openController, mcpServer, onSubmit }: Props = $props();
+  const { openController, mcpServer, purpose = "general", onSubmit }: Props = $props();
 
   const isEditMode = $derived(!!mcpServer);
+  const isWebSearch = $derived(purpose === "web_search");
+
+  // Web-search providers get provider wording; the general MCP variant is
+  // unchanged.
+  const dialogTitle = $derived(
+    isWebSearch
+      ? isEditMode
+        ? m.edit_search_provider()
+        : m.add_search_provider()
+      : isEditMode
+        ? m.edit_mcp_server()
+        : m.add_mcp_server()
+  );
+  const submitLabel = $derived(
+    isEditMode ? m.save() : isWebSearch ? m.add_search_provider() : m.add_mcp_server()
+  );
 
   const classifications = getSecurityContext().security_classifications;
 
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer">("none");
+  let http_auth_type = $state<"none" | "bearer" | "api_key_header">("none");
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
 
   // Authentication credentials
   let bearer_token = $state("");
+  let api_key_header_name = $state("");
+  let api_key_token = $state("");
 
   let submitting = $state(false);
   let errorMessage = $state("");
@@ -46,7 +66,7 @@
       name = mcpServer.name || "";
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
-      http_auth_type = (mcpServer.http_auth_type as "none" | "bearer") || "none";
+      http_auth_type = (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header") || "none";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
       forward_identity = mcpServer.forward_identity ?? false;
@@ -59,8 +79,12 @@
       security_classification = null;
       forward_identity = false;
     }
-    // Always clear auth credentials (they're stored securely, not shown)
+    // Always clear auth credentials (they're stored securely, not shown).
+    // The stored header name is not exposed by the API either; in edit mode
+    // an empty header-name field means "keep the stored one".
     bearer_token = "";
+    api_key_header_name = "";
+    api_key_token = "";
     errorMessage = "";
   });
 
@@ -70,6 +94,11 @@
 
     try {
       const data: Record<string, unknown> = { name };
+
+      // Purpose is set at creation time only (e.g. web-search providers).
+      if (!isEditMode && purpose !== "general") {
+        data.purpose = purpose;
+      }
 
       // Only send connection-affecting fields when actually changed to avoid
       // unnecessary connection validation on the backend for simple edits
@@ -94,6 +123,13 @@
       if (http_auth_type === "bearer" && bearer_token) {
         data.http_auth_config_schema = { token: bearer_token };
       }
+      if (http_auth_type === "api_key_header" && api_key_token) {
+        // A token-only replacement omits header_name; the backend keeps the
+        // stored header name in that case.
+        data.http_auth_config_schema = api_key_header_name
+          ? { header_name: api_key_header_name, token: api_key_token }
+          : { token: api_key_token };
+      }
 
       await onSubmit(data, mcpServer?.mcp_server_id);
 
@@ -105,6 +141,8 @@
         http_auth_type = "none";
         documentation_url = "";
         bearer_token = "";
+        api_key_header_name = "";
+        api_key_token = "";
         security_classification = null;
         forward_identity = false;
       }
@@ -151,7 +189,7 @@
             />
           </svg>
         </span>
-        {isEditMode ? m.edit_mcp_server() : m.add_mcp_server()}
+        {dialogTitle}
       </span>
     </Dialog.Title>
 
@@ -186,6 +224,14 @@
           </div>
         {/if}
 
+        {#if isWebSearch && !isEditMode}
+          <p
+            class="border-dimmer bg-secondary/50 text-secondary rounded-lg border px-4 py-3 text-sm"
+          >
+            {m.web_search_provider_managed_note()}
+          </p>
+        {/if}
+
         <!-- Server Identity Section -->
         <fieldset class="space-y-4">
           <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
@@ -204,24 +250,28 @@
               bind:value={name}
               required
               aria-required="true"
-              placeholder={m.mcp_name_placeholder()}
+              placeholder={isWebSearch
+                ? m.web_search_provider_name_placeholder()
+                : m.mcp_name_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             />
           </div>
 
-          <div>
-            <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
-              {m.description()}
-              <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
-            </label>
-            <textarea
-              id="mcp-description"
-              bind:value={description}
-              rows="2"
-              placeholder={m.mcp_description_placeholder()}
-              class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-            ></textarea>
-          </div>
+          {#if !isWebSearch}
+            <div>
+              <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
+                {m.description()}
+                <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
+              </label>
+              <textarea
+                id="mcp-description"
+                bind:value={description}
+                rows="2"
+                placeholder={m.mcp_description_placeholder()}
+                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+              ></textarea>
+            </div>
+          {/if}
         </fieldset>
 
         <!-- Connection Section -->
@@ -317,12 +367,53 @@
           <Select.Simple
             options={[
               { value: "none", label: "Publik (ingen autentisering)" },
-              { value: "bearer", label: "Bearer Token" }
+              { value: "bearer", label: "Bearer Token" },
+              { value: "api_key_header", label: m.api_key_header_auth() }
             ]}
             bind:value={http_auth_type}
           >
             {m.authentication_type()}
           </Select.Simple>
+
+          {#if http_auth_type === "api_key_header"}
+            <div>
+              <label
+                for="mcp-api_key_header_name"
+                class="text-default mb-1.5 block text-sm font-medium"
+                >{m.api_key_header_name()}</label
+              >
+              <input
+                id="mcp-api_key_header_name"
+                type="text"
+                bind:value={api_key_header_name}
+                placeholder={m.api_key_header_name_placeholder()}
+                autocomplete="off"
+                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+              />
+              {#if isEditMode}
+                <p class="text-muted mt-1.5 text-xs">{m.api_key_header_name_keep_hint()}</p>
+              {/if}
+            </div>
+            <div>
+              <label for="mcp-api_key_token" class="text-default mb-1.5 block text-sm font-medium"
+                >{m.api_key()}</label
+              >
+              <input
+                id="mcp-api_key_token"
+                type="password"
+                bind:value={api_key_token}
+                placeholder={authPlaceholder}
+                autocomplete="off"
+                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+              />
+              <p class="text-muted mt-1.5 text-xs">
+                {#if isEditMode}<span class="text-warning-default"
+                    >{m.leave_empty_keep_existing()}.
+                  </span>{/if}
+                {m.api_key_header_sent_as()}
+              </p>
+            </div>
+          {/if}
 
           {#if http_auth_type === "bearer"}
             <div>
@@ -379,7 +470,7 @@
               <span class="text-default text-sm font-medium">{m.mcp_forward_identity()}</span>
             </label>
             <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
-              {m.mcp_forward_identity_hint()}
+              {isWebSearch ? m.web_search_forward_identity_hint() : m.mcp_forward_identity_hint()}
             </p>
           </div>
         </fieldset>
@@ -425,7 +516,12 @@
       <Button
         variant="primary"
         onclick={handleSubmit}
-        disabled={submitting || !name || !http_url}
+        disabled={submitting ||
+          !name ||
+          !http_url ||
+          (http_auth_type === "api_key_header" &&
+            !isEditMode &&
+            (!api_key_header_name || !api_key_token))}
         class="min-w-[140px]"
       >
         {#if submitting}
@@ -440,7 +536,7 @@
           </svg>
           {m.loading()}
         {:else}
-          {isEditMode ? m.save() : m.add_mcp_server()}
+          {submitLabel}
         {/if}
       </Button>
     </Dialog.Controls>

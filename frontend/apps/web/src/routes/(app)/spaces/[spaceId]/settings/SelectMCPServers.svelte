@@ -20,6 +20,7 @@
     id: string;
     name: string;
     description?: string | null;
+    purpose?: string | null;
     tags?: string[] | null;
     security_classification?: { security_level: number; name?: string } | null;
     tools: MCPTool[];
@@ -48,6 +49,12 @@
 
   const { selectableServers }: Props = $props();
 
+  // This section manages general-purpose servers only; the web-search
+  // capability has its own settings row (WebSearchCapability).
+  const generalServers = $derived(
+    selectableServers.filter((server) => server.purpose !== "web_search")
+  );
+
   // Track expanded servers
   const expandedServers = new SvelteSet<string>();
 
@@ -68,6 +75,7 @@
   interface SpaceMCPServer {
     id: string;
     name: string;
+    purpose?: string | null;
     tools?: SpaceMCPTool[];
   }
 
@@ -156,7 +164,7 @@
     {/if}
   </svelte:fragment>
 
-  {#each selectableServers as server (server.id)}
+  {#each generalServers as server (server.id)}
     {@const serverTools = getServerTools(server.id)}
     {@const hasTools = $currentlySelectedServers.includes(server.id) && serverTools.length > 0}
     {@const isExpanded = expandedServers.has(server.id)}

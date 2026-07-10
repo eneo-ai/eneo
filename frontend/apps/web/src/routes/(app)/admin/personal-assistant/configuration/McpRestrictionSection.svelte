@@ -8,7 +8,7 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, ChevronRight, Info, Plug } from "lucide-svelte";
+  import { AlertCircle, ChevronRight, Globe, Info, Plug } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
   import PolicySection from "./PolicySection.svelte";
 
@@ -17,6 +17,7 @@
     id: string;
     name: string;
     description?: string | null;
+    purpose?: string | null;
     tools: McpTool[];
   };
   type ReadableMap<K, V> = {
@@ -129,6 +130,14 @@
                   <span class="text-sm font-medium {isSelected ? '' : 'text-secondary'}">
                     {server.name}
                   </span>
+                  {#if server.purpose === "web_search"}
+                    <span
+                      class="bg-secondary text-secondary inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    >
+                      <Globe class="h-3 w-3" aria-hidden="true" />
+                      {m.web_search()}
+                    </span>
+                  {/if}
                   {#if isSelected && hasTools}
                     <span
                       class="bg-secondary text-secondary inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"

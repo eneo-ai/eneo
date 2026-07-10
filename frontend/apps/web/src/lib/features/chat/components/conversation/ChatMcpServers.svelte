@@ -8,7 +8,9 @@
     automatically or require per-call approval. State is owned by the parent
     (ConversationInput) so it can be sent with each ask request — this component
     only renders and mutates it. Eneo's own internal (loopback) servers are
-    listed too, but they are always active and cannot be toggled.
+    listed too, but they are always active and cannot be toggled. The tenant's
+    web-search provider is a real MCP server under the hood but is presented as
+    a togglable capability row, not a server.
 -->
 <script lang="ts">
   import { buttonVariants } from "$lib/components/ui/button/index.js";
@@ -18,7 +20,7 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
-  import { BookOpen, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
+  import { BookOpen, Globe, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
   import type { SvelteSet } from "svelte/reactivity";
 
   type McpServer = {
@@ -34,7 +36,10 @@
   };
 
   type Props = {
+    /** General-purpose external MCP servers. */
     servers: McpServer[];
+    /** The tenant's web-search provider(s): rendered as a capability, not a server. */
+    webSearchServers?: McpServer[];
     /** Eneo's built-in loopback servers active for this partner (not togglable). */
     internalServers?: InternalMcpServer[];
     /** Server ids the user has switched off for this conversation (mutated in place). */
@@ -45,6 +50,7 @@
 
   let {
     servers,
+    webSearchServers = [],
     internalServers = [],
     disabledServerIds,
     autoAcceptTools = $bindable()
@@ -55,11 +61,18 @@
     files: Paperclip
   };
 
-  const total = $derived(servers.length + internalServers.length);
+  // Built-ins are always active; web-search and external servers toggle via
+  // disabledServerIds.
+  const total = $derived(servers.length + webSearchServers.length + internalServers.length);
   const disabledCount = $derived(
-    servers.filter((server) => disabledServerIds.has(server.id)).length
+    [...servers, ...webSearchServers].filter((server) => disabledServerIds.has(server.id)).length
   );
   const activeCount = $derived(total - disabledCount);
+  // All-on/all-off only sweeps the general external servers, so its disabled
+  // states must not count the web-search toggle.
+  const generalDisabledCount = $derived(
+    servers.filter((server) => disabledServerIds.has(server.id)).length
+  );
 
   function setServer(id: string, on: boolean) {
     if (on) disabledServerIds.delete(id);
@@ -97,14 +110,14 @@
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={disabledCount === 0}
+              disabled={generalDisabledCount === 0}
               onclick={() => setAll(true)}>{m.mcp_all_on()}</button
             >
             <span aria-hidden="true" class="text-border">·</span>
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={disabledCount === servers.length}
+              disabled={generalDisabledCount === servers.length}
               onclick={() => setAll(false)}>{m.mcp_all_off()}</button
             >
           </span>
@@ -136,50 +149,81 @@
       </div>
     {/if}
 
-    <div
-      class="flex max-h-64 flex-col overflow-y-auto p-1"
-      role="group"
-      aria-label={m.mcp_servers()}
-    >
-      {#each servers as server (server.id)}
-        {@const on = !disabledServerIds.has(server.id)}
-        {@const descId = server.description ? `mcp-desc-${server.id}` : undefined}
-        <label
-          class="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
-        >
-          <span
-            class="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-semibold {on
-              ? ''
-              : 'opacity-50'}"
-            aria-hidden="true"
+    {#if webSearchServers.length > 0}
+      <div class="border-b p-1" role="group" aria-label={m.web_search()}>
+        {#each webSearchServers as server (server.id)}
+          {@const on = !disabledServerIds.has(server.id)}
+          <!-- Capability framing: Globe + "Web search", deliberately without
+               server avatar styling or provider identity. Which provider
+               serves the search is an admin concern. -->
+          <label
+            class="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
           >
-            {#if server.icon_url}
-              <img src={server.icon_url} alt="" class="size-full object-cover" />
-            {:else}
-              {server.name.charAt(0).toUpperCase()}
-            {/if}
-          </span>
-          <span class="min-w-0 flex-1 {on ? '' : 'opacity-60'}">
-            <span class="text-foreground block truncate text-sm font-medium">{server.name}</span>
-            {#if server.description}
-              <span
-                id={descId}
-                class="text-muted-foreground block truncate text-xs"
-                title={server.description}>{server.description}</span
+            <Globe
+              class="text-muted-foreground size-5 shrink-0 {on ? '' : 'opacity-50'}"
+              aria-hidden="true"
+            />
+            <span class="min-w-0 flex-1 {on ? '' : 'opacity-60'}">
+              <span class="text-foreground block truncate text-sm font-medium"
+                >{m.web_search()}</span
               >
-            {/if}
-          </span>
-          <Switch
-            checked={on}
-            onCheckedChange={(value) => setServer(server.id, value)}
-            aria-label={server.name}
-            aria-describedby={descId}
-          />
-        </label>
-      {/each}
-    </div>
+            </span>
+            <Switch
+              checked={on}
+              onCheckedChange={(value) => setServer(server.id, value)}
+              aria-label={m.web_search()}
+            />
+          </label>
+        {/each}
+      </div>
+    {/if}
 
     {#if servers.length > 0}
+      <div
+        class="flex max-h-64 flex-col overflow-y-auto p-1"
+        role="group"
+        aria-label={m.mcp_servers()}
+      >
+        {#each servers as server (server.id)}
+          {@const on = !disabledServerIds.has(server.id)}
+          {@const descId = server.description ? `mcp-desc-${server.id}` : undefined}
+          <label
+            class="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
+          >
+            <span
+              class="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-semibold {on
+                ? ''
+                : 'opacity-50'}"
+              aria-hidden="true"
+            >
+              {#if server.icon_url}
+                <img src={server.icon_url} alt="" class="size-full object-cover" />
+              {:else}
+                {server.name.charAt(0).toUpperCase()}
+              {/if}
+            </span>
+            <span class="min-w-0 flex-1 {on ? '' : 'opacity-60'}">
+              <span class="text-foreground block truncate text-sm font-medium">{server.name}</span>
+              {#if server.description}
+                <span
+                  id={descId}
+                  class="text-muted-foreground block truncate text-xs"
+                  title={server.description}>{server.description}</span
+                >
+              {/if}
+            </span>
+            <Switch
+              checked={on}
+              onCheckedChange={(value) => setServer(server.id, value)}
+              aria-label={server.name}
+              aria-describedby={descId}
+            />
+          </label>
+        {/each}
+      </div>
+    {/if}
+
+    {#if servers.length > 0 || webSearchServers.length > 0}
       <Separator />
 
       <div class="p-1">

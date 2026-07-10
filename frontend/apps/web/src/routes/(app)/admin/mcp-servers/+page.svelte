@@ -10,6 +10,7 @@
   import { invalidate } from "$app/navigation";
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import MCPServersTable from "./MCPServersTable.svelte";
@@ -49,6 +50,13 @@
   <Page.Main>
     <Settings.Page>
       <Settings.Group title={m.available_mcp_servers()}>
+        <p class="text-muted pb-2 text-sm">
+          {m.web_search_managed_elsewhere_hint()}
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from typed route literal -->
+          <a href={localizeHref("/admin/web-search")} class="text-accent-default underline">
+            {m.web_search_go_to_page()}
+          </a>
+        </p>
         {#if mcpServers.length > 0}
           <MCPServersTable {mcpServers} />
         {:else}

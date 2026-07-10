@@ -66,9 +66,7 @@
     return { id: infoBlobId, metadata: { title } } as unknown as InfoBlob;
   }
 
-  const totalRefs = $derived(
-    message.references.length + message.web_search_references.length + mcpRefDocs.length
-  );
+  const totalRefs = $derived(message.references.length + mcpRefDocs.length);
 
   async function handleCopy(format: AssistantCopyFormat = preferredCopyFormat) {
     await copyAssistantAnswer(message.answer, format);
@@ -159,19 +157,6 @@
         {/if}
       {/each}
 
-      {#each message.web_search_references as searchResult (searchResult.id)}
-        <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search result URL -->
-        <a class="hover:bg-hover-default flex items-center gap-2" href={searchResult.url}>
-          <span
-            class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
-            style:background-image="url({faviconService.getFavicon(searchResult.url)})"
-            aria-hidden="true"
-          ></span>
-          {searchResult.title}
-        </a>
-        <!-- eslint-enable svelte/no-navigation-without-resolve -->
-      {/each}
-
       {#each mcpRefDocs as ref, docIndex (ref.id)}
         {@const info = readMeta(ref)}
         {@const docNumber = docIndex + 1}
@@ -186,8 +171,10 @@
               {info.title}
             </button>
           </BlobPreview>
-        {:else if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
+        {:else if (info.sourceType === "crawl-page" || info.sourceType === "web-search") && /^https?:\/\//i.test(ref.uri)}
+          <!-- Web pages the answer cites: crawled pages and web-search results
+               both link out to the source URL with a favicon chip. -->
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from MCP reference -->
           <a class="hover:bg-hover-default flex items-center gap-2" href={ref.uri}>
             {@render docBadge(docNumber)}
             <span

@@ -537,7 +537,6 @@ export class ChatService {
       question: string,
       attachments?: UploadedFile[],
       tools?: ConversationTools,
-      useWebSearch?: boolean,
       requireToolApproval?: boolean,
       abortController?: AbortController,
       disabledMcpServerIds?: string[]
@@ -568,7 +567,6 @@ export class ChatService {
           files: (attachments ?? []).map((fileRef) => ({ id: fileRef.id })),
           tools,
           abortController,
-          useWebSearch,
           requireToolApproval,
           disabledMcpServerIds,
           callbacks: {
@@ -1025,7 +1023,6 @@ function emptyMessage(partial?: Partial<ConversationMessage>): ConversationMessa
     answer: "",
     references: [],
     files: [],
-    web_search_references: [],
     tools: {
       assistants: []
     },

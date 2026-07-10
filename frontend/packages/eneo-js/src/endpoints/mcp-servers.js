@@ -7,13 +7,17 @@ export function initMCPServers(client) {
      * Lists all MCP servers from the global catalog (admin only).
      * @param {Object} [params]
      * @param {string[]} [params.tags] Optional tags to filter by
+     * @param {"general" | "web_search"} [params.purpose] Optional purpose to filter by
      * @throws {EneoError}
      * */
     list: async (params = {}) => {
+      const query = {};
+      if (params.tags) query.tags = params.tags;
+      if (params.purpose) query.purpose = params.purpose;
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "get",
         params: {
-          query: params.tags ? { tags: params.tags } : undefined
+          query: Object.keys(query).length > 0 ? query : undefined
         }
       });
       return res;
@@ -41,7 +45,8 @@ export function initMCPServers(client) {
      * @param {string} params.name Name of the MCP server
      * @param {string} params.http_url HTTP URL to the MCP server
      * @param {"sse" | "streamable_http"} [params.transport_type] Transport type (default: sse)
-     * @param {"none" | "bearer"} [params.http_auth_type] Authentication type (default: none)
+     * @param {"none" | "bearer" | "api_key_header"} [params.http_auth_type] Authentication type (default: none)
+     * @param {"general" | "web_search"} [params.purpose] Server purpose (default: general)
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
@@ -57,6 +62,7 @@ export function initMCPServers(client) {
       http_url,
       transport_type,
       http_auth_type,
+      purpose,
       description,
       http_auth_config_schema,
       config_schema,
@@ -72,6 +78,7 @@ export function initMCPServers(client) {
         http_url,
         transport_type,
         http_auth_type,
+        purpose,
         description,
         http_auth_config_schema,
         config_schema,
@@ -97,7 +104,7 @@ export function initMCPServers(client) {
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
      * @param {"sse" | "streamable_http"} [params.transport_type] Transport type
-     * @param {"none" | "bearer"} [params.http_auth_type] Authentication type
+     * @param {"none" | "bearer" | "api_key_header"} [params.http_auth_type] Authentication type
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
@@ -168,11 +175,49 @@ export function initMCPServers(client) {
     /**
      * Get all available MCP servers with tenant enablement status.
      * Shows both enabled and disabled MCPs for the current tenant.
+     * @param {Object} [params]
+     * @param {"general" | "web_search"} [params.purpose] Optional purpose to filter by
      * @throws {EneoError}
      * */
-    listSettings: async () => {
+    listSettings: async (params = {}) => {
       const res = await client.fetch("/api/v1/mcp-servers/settings/", {
-        method: "get"
+        method: "get",
+        params: {
+          query: params.purpose ? { purpose: params.purpose } : undefined
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Activate an MCP server as the tenant's web-search provider (admin only).
+     * Atomic switch: any previously active provider is deactivated.
+     * @param {Object} params
+     * @param {string} params.id The MCP server ID
+     * @throws {EneoError}
+     * */
+    activateWebSearch: async ({ id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/activate-web-search/", {
+        method: "post",
+        params: {
+          path: { id }
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Deactivate a web-search provider (admin only).
+     * @param {Object} params
+     * @param {string} params.id The MCP server ID
+     * @throws {EneoError}
+     * */
+    deactivateWebSearch: async ({ id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/deactivate-web-search/", {
+        method: "post",
+        params: {
+          path: { id }
+        }
       });
       return res;
     },
@@ -287,6 +332,31 @@ export function initMCPServers(client) {
         requestBody: {
           "application/json": {
             is_enabled
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Set or clear the admin-owned display name for a tool (admin only).
+     * The display name only changes how the tool is presented to users;
+     * null or blank clears the override.
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @param {string} params.tool_id The tool ID
+     * @param {string | null} params.display_name New display name (null clears)
+     * @throws {EneoError}
+     * */
+    updateToolDisplayName: async ({ mcp_server_id, tool_id, display_name }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/{tool_id}/display-name/", {
+        method: "put",
+        params: {
+          path: { id: mcp_server_id, tool_id }
+        },
+        requestBody: {
+          "application/json": {
+            display_name
           }
         }
       });

@@ -15,6 +15,7 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import WebSearchCapabilityToggle from "$lib/features/mcp/components/WebSearchCapabilityToggle.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
@@ -589,6 +590,26 @@
           {/if}
         </Settings.Row>
       </Settings.Group>
+
+      {#if !mcpEnforced}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row
+            title={m.capabilities()}
+            description={m.capabilities_row_description()}
+            hasChanges={$currentChanges.diff.mcp_servers !== undefined}
+            revertFn={() => {
+              discardChanges("mcp_servers");
+              discardChanges("mcp_tools");
+            }}
+          >
+            <WebSearchCapabilityToggle
+              bind:selectedMCPServers={$update.mcp_servers}
+              bind:selectedMCPTools={$update.mcp_tools}
+              allowedMCPServers={availableMCPServers}
+            />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
 
       <Settings.Group title={m.security_and_privacy()}>
         {#if isHelpAssistant}

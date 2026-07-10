@@ -276,7 +276,7 @@
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex items-center gap-2">
                 <span class="text-default truncate text-sm font-medium"
-                  >{toolDisplayName(toolCall.tool_name, toolCall.server_name)}</span
+                  >{toolDisplayName(toolCall.tool_name, toolCall.server_name, toolCall.title)}</span
                 >
                 {#if pendingDetail}
                   <span class="text-muted min-w-0 truncate text-xs">{pendingDetail}</span>

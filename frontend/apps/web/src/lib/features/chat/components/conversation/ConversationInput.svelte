@@ -16,10 +16,9 @@
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
   import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
-  import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { Globe, AlertTriangle, X } from "lucide-svelte";
+  import { AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
@@ -28,10 +27,11 @@
     name: string;
     description?: string | null;
     icon_url?: string | null;
+    /** "general" for ordinary MCP servers, "web_search" for the tenant's web-search provider. */
+    purpose?: string | null;
   };
 
   const chat = getChatService();
-  const { featureFlags } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -123,7 +123,6 @@
   async function ask() {
     if (isAskingDisabled) return;
     inputError = null;
-    const webSearchEnabled = featureFlags.showWebSearch && useWebSearch;
     const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
     abortController = new AbortController();
     const tools =
@@ -144,7 +143,6 @@
         $question,
         files,
         tools,
-        webSearchEnabled,
         toolApprovalEnabled,
         abortController,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
@@ -223,8 +221,6 @@
     chat.requestPreflight($question, fileIds, tools);
   });
 
-  let useWebSearch = $state(false);
-
   const shouldShowMentionButton = $derived.by(() => {
     const hasTools = chat.partner.tools.assistants.length > 0;
     const isEnabled =
@@ -248,6 +244,14 @@
     }
     return [];
   });
+
+  // The tenant's web-search provider flows through the same MCP inheritance
+  // chain as other servers but is presented as a capability, not a server:
+  // split it out of the generic rows and give it its own popover entry.
+  const generalMcpServers = $derived(
+    mcpServers.filter((server) => server.purpose !== "web_search")
+  );
+  const webSearchServers = $derived(mcpServers.filter((server) => server.purpose === "web_search"));
 
   $effect(() => {
     const validIds = new Set(mcpServers.map((server) => server.id));
@@ -347,9 +351,6 @@
     }).map((name) => ({ name }));
   });
 
-  const showWebSearch = $derived(
-    chat.partner.type === "default-assistant" && featureFlags.showWebSearch
-  );
   // ChatModelSelect edits the personal space's default assistant via the
   // SpacesManager context, which only the spaces route tree provides. Other
   // mounts of the default assistant (e.g. a deep link into the dashboard chat)
@@ -479,22 +480,12 @@
 
       {#if hasMcpTools || internalMcpServers.length > 0}
         <ChatMcpServers
-          servers={mcpServers}
+          servers={generalMcpServers}
+          {webSearchServers}
           internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
           bind:autoAcceptTools
         />
-      {/if}
-
-      {#if showWebSearch}
-        <PromptInput.Button
-          variant={useWebSearch ? "secondary" : "ghost"}
-          onclick={() => (useWebSearch = !useWebSearch)}
-          title={m.search()}
-        >
-          <Globe class="size-4" />
-          <span class="hidden sm:inline">{m.search()}</span>
-        </PromptInput.Button>
       {/if}
     </PromptInput.Tools>
 

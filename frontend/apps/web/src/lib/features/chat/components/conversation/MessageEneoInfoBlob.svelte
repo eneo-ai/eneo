@@ -13,11 +13,10 @@
   const faviconService = getFaviconUrlService();
   const { current } = getMessageContext();
 
-  const [references, webSearchResults, mcpToolReferences] = $derived.by(() => {
+  const [references, mcpToolReferences] = $derived.by(() => {
     const message = current();
     return [
       message.references,
-      message.web_search_references,
       // Same filtered list MessageTools numbers its chips over: image
       // references render as thumbnails and hold no citation number.
       textDocumentReferences(message.mcp_tool_references ?? [])
@@ -29,15 +28,6 @@
     if (idx > -1)
       return {
         ...references[idx],
-        number: idx + 1
-      };
-  });
-
-  const webReference = $derived.by(() => {
-    const idx = webSearchResults.findIndex((ref) => ref.id.startsWith(token.id));
-    if (idx > -1)
-      return {
-        ...webSearchResults[idx],
         number: idx + 1
       };
   });
@@ -112,30 +102,12 @@
     </Tooltip>
   {/if}
 {/if}
-{#if webReference}
-  <Tooltip text={webReference.title} renderInline>
-    <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search reference URL -->
-    <a
-      href={webReference.url}
-      target="_blank"
-      rel="noreferrer"
-      class="hover:bg-secondary border-default !m-0 inline-block items-center overflow-clip rounded-lg border align-middle"
-      aria-label="{m.favicon_for()} {webReference.url}"
-    >
-      <span
-        class="favicon-bg !m-0 inline-block h-7 w-7 align-middle"
-        style:background-image="url({faviconService.getFavicon(webReference.url)})"
-        role="img"
-        aria-label="{m.favicon_for()} {webReference.url}"
-      ></span>
-    </a>
-    <!-- eslint-enable svelte/no-navigation-without-resolve -->
-  </Tooltip>
-{/if}
 {#if mcpReference}
-  {#if mcpReference.sourceType === "crawl-page" && /^https?:\/\//i.test(mcpReference.uri)}
+  {#if (mcpReference.sourceType === "crawl-page" || mcpReference.sourceType === "web-search") && /^https?:\/\//i.test(mcpReference.uri)}
     <Tooltip text={mcpReference.title} renderInline>
-      <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
+      <!-- Web pages the answer cites: crawled pages and web-search results
+           both render as an external favicon chip linking to the source. -->
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from MCP reference -->
       <a
         href={mcpReference.uri}
         target="_blank"

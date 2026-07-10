@@ -5441,7 +5441,7 @@ export interface paths {
     };
     /**
      * Get Mcp Servers
-     * @description Get all MCP servers from global catalog with optional tag filtering.
+     * @description Get all MCP servers from global catalog with optional tag/purpose filtering.
      */
     get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
     put?: never;
@@ -5552,6 +5552,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/{id}/activate-web-search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Activate Web Search
+     * @description Activate this server as the tenant's web-search provider (admin only).
+     */
+    post: operations["activate_web_search_api_v1_mcp_servers__id__activate_web_search__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/deactivate-web-search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Deactivate Web Search
+     * @description Deactivate this web-search provider (admin only).
+     */
+    post: operations["deactivate_web_search_api_v1_mcp_servers__id__deactivate_web_search__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/tools/": {
     parameters: {
       query?: never;
@@ -5646,6 +5686,26 @@ export interface paths {
      * @description Approve all pending tool changes for an MCP server (admin only).
      */
     post: operations["approve_all_tool_changes_api_v1_mcp_servers__id__tools_review_approve_all__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/display-name/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tool Display Name
+     * @description Set or clear the admin display name for a tool (admin only).
+     */
+    put: operations["update_tool_display_name_api_v1_mcp_servers__id__tools__tool_id__display_name__put"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -8512,8 +8572,6 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
       tools: components["schemas"]["UseTools"];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -9870,11 +9928,6 @@ export interface components {
        */
       stream?: boolean;
       tools?: components["schemas"]["UseTools"] | null;
-      /**
-       * Use Web Search
-       * @default false
-       */
-      use_web_search?: boolean;
       /**
        * Require Tool Approval
        * @default false
@@ -12085,7 +12138,13 @@ export interface components {
        * @default none
        * @enum {string}
        */
-      http_auth_type?: "none" | "bearer";
+      http_auth_type?: "none" | "bearer" | "api_key_header";
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -12131,6 +12190,17 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search";
+      /**
+       * Is Enabled
+       * @default true
+       */
+      is_enabled?: boolean;
       /** Has Credentials */
       has_credentials: boolean;
       /** Credential Preview */
@@ -12160,6 +12230,8 @@ export interface components {
       http_url: string | null;
       /** Http Auth Type */
       http_auth_type: string | null;
+      /** Purpose */
+      purpose: string;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12201,6 +12273,17 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search";
+      /**
+       * Is Enabled
+       * @default true
+       */
+      is_enabled?: boolean;
       /** Has Credentials */
       has_credentials: boolean;
       /** Credential Preview */
@@ -12278,6 +12361,8 @@ export interface components {
       name: string;
       /** Title */
       title?: string | null;
+      /** Display Name */
+      display_name?: string | null;
       /** Description */
       description: string | null;
       /** Input Schema */
@@ -12302,6 +12387,16 @@ export interface components {
        * @default false
        */
       removed_from_remote?: boolean;
+    };
+    /**
+     * MCPServerToolRename
+     * @description DTO for setting an admin display name on a tool.
+     *
+     *     None clears the override, falling back to the remote-synced title.
+     */
+    MCPServerToolRename: {
+      /** Display Name */
+      display_name?: string | null;
     };
     /**
      * MCPServerToolSyncResponse
@@ -12350,7 +12445,7 @@ export interface components {
       /** Http Url */
       http_url?: string | null;
       /** Http Auth Type */
-      http_auth_type?: ("none" | "bearer") | null;
+      http_auth_type?: ("none" | "bearer" | "api_key_header") | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -12462,8 +12557,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -12509,8 +12602,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -17792,17 +17883,17 @@ export interface components {
        */
       slots_released?: number;
     };
-    /** WebSearchResultPublic */
-    WebSearchResultPublic: {
+    /**
+     * WebSearchActivationResponse
+     * @description Response after activating a web-search provider.
+     */
+    WebSearchActivationResponse: {
+      server: components["schemas"]["MCPServerPublic"];
       /**
-       * Id
-       * Format: uuid
+       * Deactivated Server Ids
+       * @default []
        */
-      id: string;
-      /** Title */
-      title: string;
-      /** Url */
-      url: string;
+      deactivated_server_ids?: string[];
     };
     /** WebsiteCreate */
     WebsiteCreate: {
@@ -18436,8 +18527,6 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
       tools: components["schemas"]["UseTools"];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -22330,8 +22419,6 @@ export interface operations {
             /** References */
             references: components["schemas"]["InfoBlobAskAssistantPublic"][];
             tools: components["schemas"]["UseTools"];
-            /** Web Search References */
-            web_search_references: components["schemas"]["WebSearchResultPublic"][];
             /**
              * Mcp Tool References
              * @default []
@@ -22595,18 +22682,6 @@ export interface operations {
               UseTools: {
                 /** Assistants */
                 assistants: components["schemas"]["ToolAssistant"][];
-              };
-              /** WebSearchResultPublic */
-              WebSearchResultPublic: {
-                /**
-                 * Id
-                 * Format: uuid
-                 */
-                id: string;
-                /** Title */
-                title: string;
-                /** Url */
-                url: string;
               };
             };
           };
@@ -22751,8 +22826,6 @@ export interface operations {
             /** References */
             references: components["schemas"]["InfoBlobAskAssistantPublic"][];
             tools: components["schemas"]["UseTools"];
-            /** Web Search References */
-            web_search_references: components["schemas"]["WebSearchResultPublic"][];
             /**
              * Mcp Tool References
              * @default []
@@ -23016,18 +23089,6 @@ export interface operations {
               UseTools: {
                 /** Assistants */
                 assistants: components["schemas"]["ToolAssistant"][];
-              };
-              /** WebSearchResultPublic */
-              WebSearchResultPublic: {
-                /**
-                 * Id
-                 * Format: uuid
-                 */
-                id: string;
-                /** Title */
-                title: string;
-                /** Url */
-                url: string;
               };
             };
           };
@@ -24131,8 +24192,6 @@ export interface operations {
                 /** References */
                 references: components["schemas"]["InfoBlobAskAssistantPublic"][];
                 tools: components["schemas"]["UseTools"];
-                /** Web Search References */
-                web_search_references: components["schemas"]["WebSearchResultPublic"][];
                 /**
                  * Mcp Tool References
                  * @default []
@@ -24250,18 +24309,6 @@ export interface operations {
                   UseTools: {
                     /** Assistants */
                     assistants: components["schemas"]["ToolAssistant"][];
-                  };
-                  /** WebSearchResultPublic */
-                  WebSearchResultPublic: {
-                    /**
-                     * Id
-                     * Format: uuid
-                     */
-                    id: string;
-                    /** Title */
-                    title: string;
-                    /** Url */
-                    url: string;
                   };
                 };
               }
@@ -36471,6 +36518,7 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
+        purpose?: ("general" | "web_search") | null;
       };
       header?: never;
       path?: never;
@@ -36569,7 +36617,9 @@ export interface operations {
   };
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
-      query?: never;
+      query?: {
+        purpose?: ("general" | "web_search") | null;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -36592,6 +36642,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -36978,6 +37037,122 @@ export interface operations {
       };
     };
   };
+  activate_web_search_api_v1_mcp_servers__id__activate_web_search__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebSearchActivationResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  deactivate_web_search_api_v1_mcp_servers__id__deactivate_web_search__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_mcp_server_tools_api_v1_mcp_servers__id__tools__get: {
     parameters: {
       query?: never;
@@ -37218,6 +37393,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ToolReviewResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_tool_display_name_api_v1_mcp_servers__id__tools__tool_id__display_name__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        tool_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolRename"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
         };
       };
       /** @description Bad Request */

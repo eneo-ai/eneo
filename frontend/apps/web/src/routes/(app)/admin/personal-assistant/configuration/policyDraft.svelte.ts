@@ -47,6 +47,7 @@ type McpServer = {
   id: string;
   name: string;
   description?: string | null;
+  purpose?: string | null;
   is_available?: boolean;
   tools?: McpTool[] | null;
 };
