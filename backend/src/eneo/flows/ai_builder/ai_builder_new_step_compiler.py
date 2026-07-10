@@ -888,7 +888,14 @@ def _nested_output_field_guidance(
             continue
         field_path = f"{parent_path}.{field.name}" if parent_path else field.name
         if field.field_type == "array" and field.item_fields:
-            item_names = _field_name_list(field.item_fields)
+            runtime_item_names = _runtime_managed_field_name_list(field.item_fields)
+            item_names = _model_emitted_field_name_list(field.item_fields)
+            if runtime_item_names:
+                lines.append(
+                    f"Runtime-managed fields for items of {field_path}: "
+                    f"{runtime_item_names}. These are added by the runtime; "
+                    "do not generate or remove them."
+                )
             if item_names:
                 lines.append(
                     f"Allowed fields for items of {field_path}: {item_names}. "
@@ -901,7 +908,14 @@ def _nested_output_field_guidance(
                 )
             )
         elif field.field_type == "object" and field.fields:
-            object_names = _field_name_list(field.fields)
+            runtime_object_names = _runtime_managed_field_name_list(field.fields)
+            object_names = _model_emitted_field_name_list(field.fields)
+            if runtime_object_names:
+                lines.append(
+                    f"Runtime-managed fields for object {field_path}: "
+                    f"{runtime_object_names}. These are added by the runtime; "
+                    "do not generate or remove them."
+                )
             if object_names:
                 lines.append(
                     f"Allowed fields for object {field_path}: {object_names}. "
@@ -916,5 +930,22 @@ def _nested_output_field_guidance(
     return lines
 
 
-def _field_name_list(fields: list[StructuredFieldDraft]) -> str:
-    return ", ".join(field.name for field in fields if field.name)
+_RUNTIME_MANAGED_OUTPUT_FIELD_NAMES: frozenset[str] = frozenset(
+    {"source_label", "source_file_id"}
+)
+
+
+def _model_emitted_field_name_list(fields: list[StructuredFieldDraft]) -> str:
+    return ", ".join(
+        field.name
+        for field in fields
+        if field.name and field.name not in _RUNTIME_MANAGED_OUTPUT_FIELD_NAMES
+    )
+
+
+def _runtime_managed_field_name_list(fields: list[StructuredFieldDraft]) -> str:
+    return ", ".join(
+        field.name
+        for field in fields
+        if field.name and field.name in _RUNTIME_MANAGED_OUTPUT_FIELD_NAMES
+    )
