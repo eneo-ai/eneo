@@ -52,15 +52,24 @@ uv sync --reinstall-package eneo
 # Install pre-commit globally and setup hooks
 cd /workspace
 uv tool install pre-commit
-LOCAL_HOOKS_PATH="$(git config --local --get core.hooksPath || true)"
-if [ -n "$LOCAL_HOOKS_PATH" ] && [ ! -d "$LOCAL_HOOKS_PATH" ]; then
-    echo "Resetting repo-local core.hooksPath ('$LOCAL_HOOKS_PATH') to Git default for the devcontainer"
-    git config --local --unset-all core.hooksPath
+git config --global --add safe.directory /workspace || true
+
+if git -C /workspace rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    LOCAL_HOOKS_PATH="$(git -C /workspace config --local --get core.hooksPath || true)"
+    if [ -n "$LOCAL_HOOKS_PATH" ] && [ ! -d "$LOCAL_HOOKS_PATH" ]; then
+        echo "Resetting repo-local core.hooksPath ('$LOCAL_HOOKS_PATH') to Git default for the devcontainer"
+        git -C /workspace config --local --unset-all core.hooksPath
+    fi
+    pre-commit install --overwrite --install-hooks \
+        --hook-type pre-commit \
+        --hook-type commit-msg \
+        --hook-type pre-push
+else
+    echo "Skipping pre-commit hook installation: /workspace is not a usable Git work tree inside this container."
+    if [ -f /workspace/.git ] && grep -q '^gitdir: /' /workspace/.git; then
+        echo "The workspace appears to be a Git worktree whose .git file points at an absolute host path outside the container mount."
+    fi
 fi
-pre-commit install --overwrite --install-hooks \
-    --hook-type pre-commit \
-    --hook-type commit-msg \
-    --hook-type pre-push
 
 # Install Bun
 curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
