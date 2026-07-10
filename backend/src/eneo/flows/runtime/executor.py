@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Sequence, assert_never, cast
@@ -199,6 +200,10 @@ _RERUN_MULTIPLE_ACTIVE_OPERATIONS_RUN_ERROR_MESSAGE = (
 _RERUN_ATTEMPT_LINEAGE_CONFLICT_RUN_ERROR_MESSAGE = (
     "Rerun failed because the invalidated step is already linked to another attempt."
 )
+_PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV = (
+    "ENEO_TEST_FLOW_CRASH_AFTER_ATTEMPT_START_RUN_ID"
+)
+_PROCESS_TEST_CRASH_EXIT_CODE = 86
 
 
 def _typed_io_failure_code(raw_code: str | None) -> FlowApiErrorCode:
@@ -897,6 +902,12 @@ class FlowRunExecutor:
                     ),
                 )
                 await self._commit()
+                # A zero-model step can cross this commit before an external test
+                # can stop it; exact test mode and run identity keep the exit inert.
+                if get_settings().testing and os.environ.get(
+                    _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV
+                ) == str(run_id):
+                    os._exit(_PROCESS_TEST_CRASH_EXIT_CODE)
             except FlowRunRerunAttemptLineageConflictError:
                 return await self._handle_attempt_start_failure(
                     run_id=run_id,
