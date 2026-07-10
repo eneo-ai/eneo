@@ -15,6 +15,7 @@ from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationRes
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
+    OutputMode,
     OutputType,
     StepSpec,
 )
@@ -32,35 +33,6 @@ _MULTI_GOAL_INDICATORS = [
     " därefter ",
     " followed by ",
 ]
-_SECTION_WRITER_MARKERS = (
-    "skriv avsnitt",
-    "skriv rubrik",
-    "för avsnittet",
-    "write the section",
-    "write section",
-)
-_SECTION_FORMAT_MARKERS = (
-    "tabell",
-    "kolumn",
-    "inled med",
-    "börja med",
-    "table",
-    "column",
-    "start with",
-)
-_REPORT_ASSEMBLER_MARKERS = (
-    "sammanställ",
-    "sammanhållet",
-    "assemble",
-    "compile",
-)
-_REPORT_DOCUMENT_MARKERS = (
-    "rapport",
-    "dokument",
-    "report",
-    "document",
-    "memo",
-)
 
 
 def lint_all_previous_steps_overuse(
@@ -97,7 +69,15 @@ def lint_vague_step_names(
 def lint_multi_goal_prompts(
     spec: FlowDraftSpecCore, result: SpecValidationResult
 ) -> None:
+    document_body_writer_refs = frozenset(spec.document_body_writer_step_refs or ())
     for step in spec.steps:
+        is_model_document_body_writer = (
+            step.plan_step_ref in document_body_writer_refs
+            and step.output_mode is OutputMode.PASS_THROUGH
+            and step.output_type is OutputType.TEXT
+        )
+        if is_model_document_body_writer:
+            continue
         if _should_warn_multi_goal_prompt(step):
             result.add_warning(
                 step_ref=step.plan_step_ref,
@@ -114,34 +94,7 @@ def _should_warn_multi_goal_prompt(step: StepSpec) -> bool:
     if len(instructions) <= 300:
         return False
     instructions_lower = instructions.casefold()
-    if not any(indicator in instructions_lower for indicator in _MULTI_GOAL_INDICATORS):
-        return False
-    return not (
-        _looks_like_section_writer_with_output_format(step)
-        or _looks_like_report_assembler(step)
-    )
-
-
-def _looks_like_section_writer_with_output_format(step: StepSpec) -> bool:
-    if step.output_type != OutputType.TEXT:
-        return False
-    text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
-    return _has_any(text, _SECTION_WRITER_MARKERS) and _has_any(
-        text, _SECTION_FORMAT_MARKERS
-    )
-
-
-def _looks_like_report_assembler(step: StepSpec) -> bool:
-    if step.output_type != OutputType.TEXT:
-        return False
-    text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
-    return _has_any(text, _REPORT_ASSEMBLER_MARKERS) and _has_any(
-        text, _REPORT_DOCUMENT_MARKERS
-    )
-
-
-def _has_any(text: str, markers: tuple[str, ...]) -> bool:
-    return any(marker in text for marker in markers)
+    return any(indicator in instructions_lower for indicator in _MULTI_GOAL_INDICATORS)
 
 
 def lint_single_step_flow(

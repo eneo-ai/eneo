@@ -1597,6 +1597,53 @@ class TestQualityLint:
         assert result.valid
         assert not any(w.code == "vague_step_name" for w in result.warnings)
 
+    def test_document_body_writer_with_ordered_clauses_no_multi_goal_warning(
+        self,
+    ) -> None:
+        instructions = (
+            "Skriv rapporten från det föregående dokumentunderlaget. "
+            "Ordna innehållet under tydliga rubriker för bakgrund, centrala "
+            "iakttagelser, risker och rekommendationer. Redovisa varje slutsats "
+            "med stöd i källmaterialet och skilj fakta från bedömningar. Avsluta "
+            "därefter med en kort gemensam slutsats som binder ihop källorna och "
+            "kontrollera att inga påståenden saknar stöd. Markera uttryckligen "
+            "när underlaget inte räcker för en slutsats och behåll ett "
+            "konsekvent, professionellt språk genom hela rapporten."
+        )
+        spec = FlowDraftSpecCore(
+            flow_name="Dokumentrapport",
+            steps=[
+                _step(ref="step_a", name="Läs dokument"),
+                _step(
+                    ref="step_b",
+                    name="Skriv rapporten",
+                    instructions=instructions,
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_a", "output": "text"}]
+                    },
+                ),
+                _step(
+                    ref="step_c",
+                    name="Rendera PDF",
+                    instructions="Rendera rapporttexten som PDF.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.RENDER_VERBATIM,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+            document_body_writer_step_refs=("step_b",),
+        )
+
+        result = validate_spec(spec)
+
+        assert result.valid
+        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
+
     def test_multi_goal_prompt_warned(self) -> None:
         long_instructions = (
             "Extrahera alla viktiga fakta och sedan bedöm konsekvenserna "
@@ -1627,7 +1674,16 @@ class TestQualityLint:
             "[Behöver kompletteras: kostnadsuppgift]."
         )
         result = validate_spec(
-            _spec([_step(name="Skriv Resursåtgång", instructions=instructions)])
+            FlowDraftSpecCore(
+                flow_name="Resursrapport",
+                steps=[
+                    _step(
+                        name="Skriv Resursåtgång",
+                        instructions=instructions,
+                    )
+                ],
+                document_body_writer_step_refs=("step_a",),
+            )
         )
         assert result.valid
         assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
@@ -1645,13 +1701,15 @@ class TestQualityLint:
             "för generering som Word-dokument."
         )
         result = validate_spec(
-            _spec(
-                [
+            FlowDraftSpecCore(
+                flow_name="Beslutsunderlag",
+                steps=[
                     _step(
                         name="Kvalitetsgranska och sammanställ beslutsunderlaget",
                         instructions=instructions,
                     )
-                ]
+                ],
+                document_body_writer_step_refs=("step_a",),
             )
         )
         assert result.valid
