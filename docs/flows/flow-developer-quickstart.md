@@ -223,14 +223,25 @@ Important builder rules:
 
 - The classifier or understanding call produces evidence. It does not write
   questions.
+- Prefer one bounded, typed understanding pass per Builder turn when model
+  interpretation is needed. Split it only for a measured context-window limit;
+  do not scatter semantic ownership across phrase scans.
 - Server policy decides whether to ask, what to ask, and when the question
   budget is exhausted.
 - High-confidence assumptions must be visible in the requirements summary so
   the user can reject them.
 - Attachments are first-class evidence through typed file role and output schema
   evidence. Avoid semantic filename or phrase-list heuristics.
+- Treat MIME type, shape, and literal placeholders as structural facts. Semantic
+  file roles and intent require quoted, confidence-bearing evidence.
+- Route attachments through existing evidence, asset, and runtime-input owners;
+  do not create a parallel attachment lifecycle.
 - Build-time understanding is allowed when it prevents bad or inefficient
   runtime Flows. A Flow is built once and may run many times.
+- Delete semantic keyword or marker ownership one family at a time only after
+  deterministic and owned-live evaluation proves the replacement.
+- Prevent invalid topology at the typed understanding or compile boundary
+  instead of adding runtime or proposal repair layers.
 
 ## Canonical owners
 

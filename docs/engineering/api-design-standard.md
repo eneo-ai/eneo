@@ -1,10 +1,11 @@
-# API Design Standard
+# API design standard
 
 Routers are HTTP adapters, not business logic owners.
 
-## API Consumer Standard
+## API consumer standard
 
-An external developer should understand the API without reading backend source. The API must make these journeys obvious:
+An external developer should understand the API without reading backend source.
+The API must make these journeys obvious:
 
 - authenticate
 - list resources
@@ -17,9 +18,10 @@ An external developer should understand the API without reading backend source. 
 - retrieve final result and artifacts
 - pause, edit, resume, retry, and handle errors safely
 
-## API Maintainer Standard
+## API maintainer standard
 
-Every endpoint must have a clear owner for:
+Every endpoint change must account for the applicable items below and mark
+irrelevant ones not applicable:
 
 - path naming
 - operation ID
@@ -33,9 +35,15 @@ Every endpoint must have a clear owner for:
 - idempotency
 - OpenAPI and generated client impact
 
-Domain/application code must not raise FastAPI `HTTPException`. Translate domain errors at the router boundary.
+Each request, response, and error shape has one canonical schema owner. Routers
+attach HTTP metadata, obtain authorization decisions from the canonical policy
+owner, and adapt application results without duplicating either contract.
 
-## Contract Review
+Domain/application code must not raise FastAPI `HTTPException`. Translate domain
+errors at the HTTP adapter boundary through a router or centralized exception
+adapter.
+
+## Contract review
 
 For every API recommendation, include:
 

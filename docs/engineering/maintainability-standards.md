@@ -1,192 +1,281 @@
 # Maintainability Standards
 
-This is the shared standard for architecture reviews, refactors, implementation plans, and custom agents in this repository.
+## Purpose
 
-## Operating Model
+This document owns the shared standard for architecture reviews, refactors,
+implementation plans, persistence design, and review-to-implementation handoff.
+Focused API, runtime, testing, frontend, readability, and AI-review standards
+own their narrower subjects.
 
-Optimize for human maintainability, reliability, future change safety, clear ownership, typed contracts, deep modules, deletion of accidental complexity, and code a new senior engineer can understand in week one.
+Optimize for human maintainability, reliability, future change safety, clear
+ownership, typed contracts, deep modules, and deletion of accidental
+complexity. A new senior engineer should find the correct owner and change path
+in their first week.
 
-Every reviewer and implementation agent must first ask:
+Start every non-trivial change with one question:
 
-> What is the canonical home for this concept, and am I about to create or preserve a parallel implementation?
+> What is the canonical home for this concept, and am I about to create or
+> preserve a parallel implementation?
 
-## Scorecard
+## Canonical ownership
 
-Score every important module or change from 1-10. The overall score is the minimum dimension score.
+Before creating, preserving, or recommending a module, function, type,
+component, state, schema, or setting:
 
-| Dimension | High-score signals |
-|---|---|
-| Maintainability | Confident change path, useful tests, strict typing, clean dependency direction, structured observability |
-| Code Quality | Correct, idiomatic, low duplication, no dead code, no unjustified ignores |
-| Clean Architecture | Domain does not depend on frameworks; adapters depend inward; transactions have clear owners |
-| Separation of Concerns | One reason to change; no god objects; concerns separable by deletion |
-| Single Source of Truth | One canonical schema/status/setting/derived value; generated types where appropriate |
-| Human Readability | Domain language, clear names, short comprehensible functions, comments explain why |
-| Human Reviewability | Coherent diffs, explicit contracts, behavior tests, visible deletion/move/rename/change boundaries |
+1. Search for the same responsibility and domain language.
+2. Name the closest existing owners and any competing paths.
+3. Choose reuse, extend, rename, move, merge, delete, or create.
+4. Explain why the chosen owner protects the invariant better than its callers.
+5. If creating something new, explain why the existing owners are insufficient.
 
-Action bands:
+Use this table when duplication is material:
 
-| Score | Action |
-|---|---|
-| Any dimension <= 3 | Refactor required before further feature work |
-| 4-6 | Refactor opportunistically; do not worsen |
-| 7-8 | Ship-ready with normal follow-up |
-| 9-10 | Exemplar worth referencing |
-
-## Canonical Ownership Rule
-
-Before creating, preserving, or recommending a module/function/type/component:
-
-1. Does this concept already exist elsewhere?
-2. Is there already a canonical owner?
-3. Are there parallel implementations?
-4. Is new code deepening the canonical owner, or creating a competing path?
-5. Can something be deleted or merged instead of added?
-
-Use this table for duplicates:
-
-| Concept | Location A | Location B | Difference | Canonical home | Delete/merge path |
+| Concept | Location A | Location B | Difference | Canonical home | Delete or merge path |
 |---|---|---|---|---|---|
 
-Forbidden defaults:
+One concept has one canonical type and lifecycle owner. Generated projections,
+adapters, and views may represent it, but they must not become independent
+authorities.
 
-- create a new helper
-- add a new service
-- add another adapter
-- keep both for flexibility
+## Reuse and deletion before invention
 
-Allowed only with two real use cases, a stable boundary, a smaller interface than implementation complexity, and a documented canonical owner.
+Prefer this order:
 
-## Reuse-Before-Inventing Protocol
+1. Reuse the existing owner.
+2. Deepen the owner with the missing invariant.
+3. Rename or move misplaced logic.
+4. Merge duplicate paths.
+5. Delete obsolete behavior, compatibility, tests, and comments.
+6. Create new code only when the existing owner cannot hold the responsibility
+   without becoming less coherent.
 
-Before proposing a new abstraction, file, component, utility, schema, status, helper, service, or interface:
+Delete first:
 
-1. Search for existing concepts with the same responsibility.
-2. Name the closest existing owners.
-3. Decide: reuse, extend, rename, move, merge, delete, or create.
-4. If creating new, explain why existing owners are insufficient.
+- never-shipped compatibility and fallback paths;
+- wrappers that add no invariant or useful compression;
+- tests that preserve deleted or invalid behavior;
+- repair layers that hide an invalid boundary;
+- duplicate schemas, statuses, derived values, and permission logic;
+- generic configuration that postpones a product decision;
+- comments that narrate code or implementation history.
 
-Avoid `utils`, `helpers`, `common`, `manager`, `shared`, `misc`, `types`, and `constants` unless the file has a narrow domain name and one clear reason to change.
+Avoid names such as `utils`, `helpers`, `common`, `manager`, `processor`,
+`shared`, and `misc` when they hide domain ownership. A narrow domain name is
+better than a generic bucket.
 
-## Delete-First Refactoring
+## Deep modules and justified abstractions
 
-Before proposing a new abstraction, ask what can be deleted.
+A useful module hides substantial complexity behind a smaller, stable
+interface. A useful abstraction is justified by either:
 
-Prefer deleting:
+- multiple real implementations with the same contract; or
+- a real external, volatile, persistence, queue, generated-client, or
+  cross-process seam.
 
-- duplicate code before improving the canonical owner
-- never-shipped compatibility
-- fallback paths that hide invalid state
-- wrappers with no independent responsibility
-- tests that protect bad architecture
-- comments that restate code
-- dead branches instead of documenting them
+In both cases, the abstraction must be smaller than the complexity it hides and
+must make callers easier to use correctly.
 
-Every recommendation must state what to add, change, delete, and not preserve.
+Before adding an interface, protocol, port, base class, adapter, or service,
+answer:
 
-## Interface Justification Checklist
+- What complexity or volatility does it contain?
+- What invariant belongs behind it?
+- What are its inputs, outputs, errors, ordering, idempotency, authorization,
+  transaction, and performance assumptions?
+- Could callers use the concrete owner directly?
+- What code becomes simpler or disappears?
+- Is the seam real, or was it introduced only to make mocking convenient?
 
-Before recommending an interface, protocol, port, base class, adapter, service, or abstraction, answer:
+Reject pass-through services, one-method ports without a real boundary, generic
+factories, service locators, and abstractions whose interface is as complex as
+their implementation.
 
-- What complexity does this interface hide?
-- Is the interface smaller than the implementation?
-- Are there two real implementations today?
-- If not, what real future implementation is already planned?
-- Is the seam external, volatile, or cross-process?
-- Would tests be better with a fake at this seam?
-- Could the concrete class be injected directly instead?
-- Does the interface speak domain language?
-- Are ordering, errors, idempotency, and transaction behavior documented?
-- What code becomes simpler because this interface exists?
+## Clean boundaries and typed contracts
 
-If the main reason is "for mocking," reject the interface.
+Clean architecture is a dependency rule, not a directory ceremony.
 
-## Change-Path Analysis
+- Domain and application logic do not depend on HTTP frameworks, ORM sessions,
+  UI components, or provider SDK response shapes.
+- Routers, workers, persistence repositories, and frontend clients adapt at the
+  boundary and depend inward.
+- Transaction ownership is explicit. Do not spread commits across callers and
+  repositories without one lifecycle owner.
+- Translate domain/application errors at the adapter boundary.
+- Catch broad exceptions only at a true containment boundary. Preserve
+  unexpected-failure visibility, sanitize diagnostics, and deliberately
+  re-raise, translate, or continue under an explicit partial-failure contract.
+- Use strict types to make invalid states hard to construct. Keep strict Pyright
+  and TypeScript checks meaningful; do not silence them with `Any`, `as any`,
+  `@ts-ignore`, or unjustified ignores.
+- Untrusted boundary data may begin as `unknown`, but it must be validated or
+  narrowed before application or UI state depends on it.
 
-For each important concept, describe how a future developer would change it. Common examples:
+Use a concrete class when one implementation and no volatile seam exist. Tests
+should exercise public behavior rather than force production abstractions for
+mocking.
 
-- add a new status
-- add a new API field
-- add a new permission
-- add a new step type
-- add a new frontend state
-- add a new provider
-- change persistence shape
-- add a background task
-- add a validation rule
+## Persistence integrity
 
-For each path, answer:
+Data-model quality is architecture quality. Every persistent concept names:
 
-1. Which files must be touched?
-2. Is there one obvious place to start?
-3. Does the change require parallel backend/frontend/tests/docs edits?
-4. Is drift possible?
-5. Is the type system helping?
-6. Are tests protecting behavior?
-7. Would a new senior engineer find the path in week one?
+- its canonical table or typed aggregate;
+- tenant and ownership boundary;
+- relationships and deletion behavior;
+- constraints and indexes that enforce real invariants;
+- lifecycle states and terminal states;
+- transaction and locking owner;
+- expected access shape, boundedness or pagination, and N+1/query-count risk;
+- corruption, repair, and migration behavior;
+- retention and audit consequences.
 
-If a common change requires touching 5+ unrelated files, flag it as a maintainability smell.
+Put independently queried or transitioned lifecycle facts in relational
+columns. JSON or JSONB is appropriate for a bounded aggregate that is loaded and
+written as a whole, provided it has a typed schema, version, validation boundary,
+migration policy, and explicit corruption behavior.
 
-## Concept Glossary
+Schema migrations require a read-only preflight for affected data, lock and
+index impact, ordered forward and rollback steps, and representative database
+tests. Do not preserve a misleading foreign-key action or compatibility shape
+when pre-production data can be migrated or deleted safely.
 
-For important concepts, keep a glossary:
+Cross-process lifecycle persistence, retry, effects, and finalization follow the
+[Runtime Reliability Standard](runtime-reliability-standard.md).
 
-| Concept | Definition | Canonical type/module | Forbidden synonyms | Notes |
+## Change-path analysis
+
+Common changes should have one obvious starting owner. For each important
+change path, ask:
+
+- Where does the canonical contract change?
+- Which adapters, generated projections, tests, and docs derive from it?
+- Can drift occur between those consumers?
+- Does the type system expose incomplete propagation?
+- Which behavior check proves the public result?
+- Can a reviewer understand the change without reconstructing hidden wiring?
+
+Touching several files is not itself a defect. Touching unrelated authorities
+for one concept is. Prefer generated propagation and one contract test over
+manually synchronized copies.
+
+## Optional architecture aids
+
+Use a glossary when repeated vocabulary or forbidden synonyms cause real
+confusion:
+
+| Concept | Definition | Canonical type or module | Forbidden synonyms | Notes |
 |---|---|---|---|---|
 
-The `Forbidden synonyms` column matters. Multiple names for the same concept create duplicated logic and review confusion.
+Use an invariant ledger when several boundaries enforce the same durable rule:
 
-## Architecture Invariant Ledger
-
-For durable architecture rules, create or update an invariant ledger:
-
-| Invariant | Why it matters | Enforcement | Current violations | Owner |
+| Invariant | Why it matters | Enforcement | Known violation | Owner |
 |---|---|---|---|---|
 
-Useful invariants include:
+Use diagrams, inventories, scorecards, and matrices only when they make several
+relationships materially easier to verify. Do not require them for narrow work,
+and do not use numeric scores as a substitute for a concrete finding.
 
-- domain must not import HTTP framework
-- runtime state must be persisted
-- frontend API types come from OpenAPI or a central generated source
-- comments explain why, not what
-- public runtime transitions are idempotent and auditable
+## Findings and recommendations
 
-## Bad Recommendations To Avoid
+Lead with the outcome and ranked findings. Every concrete finding names:
 
-Do not recommend:
+- problem and impact;
+- current file:line evidence;
+- current and proposed canonical owner;
+- delete, reuse, move, merge, or create disposition;
+- deliberately excluded scope;
+- acceptance check and behavior test;
+- risk, rollback, or recovery;
+- confidence when evidence is incomplete.
 
-- splitting a file only because it is long
-- creating interfaces without real seams
-- adding design patterns without naming the problem they solve
-- introducing generic helpers
-- preserving compatibility for never-shipped behavior
-- adding tests that assert implementation details
-- replacing clear concrete code with abstract factories
-- moving logic into a service when it belongs on a domain object
-- moving domain logic into a router because it is convenient
-- adding comments instead of improving names
-- adding config flags instead of making a decision
-- using "flexibility" without a concrete second use case
-- keeping old and new paths without a migration plan and deletion date
+Recommendations must be executable and smaller than the problem they solve.
+Replace vague advice such as “consider refactoring,” “extract a helper,” or “add
+tests” with the owner, exact behavior, proof, and deletion boundary.
 
-## Good Recommendation Requirements
+Review formatting is proportional to the decision. Use tables or diagrams for
+real mappings and dependencies, not as mandatory report decoration.
 
-A good recommendation must be evidence-backed, specific, smaller than the problem it solves, deletion-aware, testable, understandable to a new senior engineer, aligned with one canonical owner, explicit about trade-offs, and explicit about what not to do.
+## Review-to-Implementation Handoff
 
-Weak recommendations include "consider refactoring," "could be cleaner," "maybe use a service," "extract helper," "improve naming," and "add tests." Rewrite weak recommendations into executable work items.
+A review is implementation-ready when it defines reviewable work items with
+dependencies, unresolved product decisions, acceptance criteria, tests, risk,
+and recovery. When a review spans several artifacts, designate one entry point,
+one finding authority, and one execution authority. Review citations are a
+snapshot; the implementer reopens current source before editing.
 
-## Required Review Output
+### Dirty worktree ownership
 
-Every architecture or maintainability review must include:
+At the start of a slice, record the branch, `HEAD`, and
+`git status --short --untracked-files=all` or an equivalent complete inventory.
+Treat every pre-existing tracked or untracked change as user-owned unless the
+current task explicitly brings it into scope. Do not stash, reset, restore,
+reformat, stage, or include it in the slice's diff. If the slice overlaps active
+or ambiguous work, preserve it and stop for coordination when the changes cannot
+be separated safely.
 
-1. Five-line TL;DR
-2. Top risks ranked by severity, with confidence and affected files
-3. Canonical ownership map
-4. Duplication map
-5. Delete list
-6. Interface audit
-7. Change-path analysis
-8. Architecture invariant ledger
-9. Concept glossary with forbidden synonyms
-10. Human reviewability findings
-11. Ranked refactor work items with motivation, scope, files affected, acceptance criteria, tests, risk, dependencies, and effort
+At handoff, distinguish the initial state from files changed by the slice.
+
+### One-slice execution
+
+When implementing a multi-item review or roadmap, select one work item whose
+dependencies and product decisions are satisfied. Stop after validating that
+slice and writing its receipt; do not guess an unresolved decision or mix in an
+adjacent roadmap item. A slice includes its behavior tests and may include a
+focused migration or generated contract when those changes are inseparable from
+the behavior.
+
+### Implementation receipt
+
+For a non-trivial slice executed from a review or roadmap, record:
+
+- work-item and finding identifiers, when present;
+- branch, `HEAD`, and initial dirty state;
+- dependencies and product decisions satisfied;
+- current and proposed canonical owner;
+- reuse, move, merge, delete, or create disposition;
+- non-goals and exact files changed;
+- acceptance-criteria disposition;
+- exact validation commands and results;
+- pre-existing failures versus failures introduced by the slice;
+- API, generated-contract, data, migration, and runtime effects;
+- risk, rollback, and recovery;
+- peer-review verdict and locally verified corrections;
+- next dependency or eligible item, without starting it.
+
+Store local receipts under `.codex/artifacts/implementation-receipts/` unless
+the implementation issue or pull request is the durable project owner. Do not
+create a second roadmap or status source in repository documentation.
+
+### Local and tracked artifacts
+
+Tracked documentation is an intentional shared source of truth. Local review
+packets, raw output, scratch notes, and implementation receipts remain in
+ignored local paths unless explicitly promoted.
+
+Do not add a one-off review directory to the tracked `.gitignore`. For an
+artifact that should remain local to this clone, use the file returned by
+`git rev-parse --git-path info/exclude`. Clone-local exclusions may apply to
+linked worktrees sharing the same Git directory, and untracked files do not
+transfer to another worktree or clone. Copy the packet to the target workspace
+or deliberately promote it to tracked documentation.
+
+Add a pattern to `.gitignore` only when every contributor should ignore that
+class of artifact.
+
+## Recommendations to reject
+
+Reject recommendations that:
+
+- split a file only because it is long;
+- create a service, interface, helper, or framework without a real owner or
+  seam;
+- preserve unreleased compatibility without persisted-data evidence, an owner,
+  and a deletion trigger;
+- keep old and new paths without a bounded migration and removal plan;
+- move domain logic into routers, workers, ORM models, or UI components for
+  convenience;
+- add config flags instead of making an owned product decision;
+- replace clear concrete code with patterns that add more concepts than they
+  remove;
+- add mock-heavy tests that assert implementation wiring;
+- add comments instead of improving names, types, ownership, or structure;
+- claim “flexibility” without a concrete second use case or volatile seam.
