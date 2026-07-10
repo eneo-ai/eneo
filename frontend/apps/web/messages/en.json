@@ -4192,6 +4192,7 @@
   "flow_error_typed_io_http_response_too_large": "The HTTP response is too large for this step. Reduce the response size or add a narrower endpoint.",
   "flow_error_typed_io_http_ssrf_blocked": "The HTTP URL was blocked by network safety rules. Use an allowed public endpoint or ask an administrator to review the policy.",
   "flow_error_typed_io_http_timeout": "The HTTP request timed out. Check the target service latency or lower the amount of data requested.",
+  "flow_error_typed_io_input_exceeds_model_window": "The packaged step input exceeds the selected model's context window. Use a smaller source, split the document, or choose a model with a larger context window.",
   "flow_error_typed_io_input_too_large": "The step input is too large. Reduce the text, files, or extracted content and rerun the step.",
   "flow_error_typed_io_invalid_file_type": "A runtime file has an unsupported type for this step. Upload a compatible file and start the run again.",
   "flow_error_typed_io_invalid_input_source_combination": "This step combines input sources that cannot run together. Fix the step input source settings and republish.",

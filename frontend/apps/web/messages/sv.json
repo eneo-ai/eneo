@@ -4192,6 +4192,7 @@
   "flow_error_typed_io_http_response_too_large": "HTTP-svaret är för stort för steget. Minska svarets storlek eller använd en mer avgränsad endpoint.",
   "flow_error_typed_io_http_ssrf_blocked": "HTTP-URL:en blockerades av nätverkssäkerhetsregler. Använd en tillåten publik endpoint eller be en administratör granska policyn.",
   "flow_error_typed_io_http_timeout": "HTTP-anropet tog för lång tid. Kontrollera måltjänstens svarstid eller hämta mindre data.",
+  "flow_error_typed_io_input_exceeds_model_window": "Stegets samlade indata överskrider den valda modellens kontextfönster. Använd en mindre källa, dela upp dokumentet eller välj en modell med ett större kontextfönster.",
   "flow_error_typed_io_input_too_large": "Stegets indata är för stor. Minska text, filer eller extraherat innehåll och kör om steget.",
   "flow_error_typed_io_invalid_file_type": "En runtime-fil har en filtyp som steget inte stöder. Ladda upp en kompatibel fil och starta körningen igen.",
   "flow_error_typed_io_invalid_input_source_combination": "Steget kombinerar indatakällor som inte kan köras tillsammans. Rätta stegets indatakällor och publicera igen.",
