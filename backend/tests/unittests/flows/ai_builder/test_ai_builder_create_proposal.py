@@ -8,6 +8,9 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_create_proposal import (
     process_create_intent_arguments,
 )
@@ -484,9 +487,18 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
                     output_mode="pass_through",
                 )
             ],
-            chosen_patterns=["audio_to_artifact_report"],
+            chosen_patterns=[
+                "audio_to_artifact_report",
+                "form_field_runtime_inputs",
+            ],
             required_capabilities=["input_audio", "output_mode_pass_through"],
         )
+    )
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value=DETAILED_CASE_METADATA,
+        source="structured_answer",
+        confidence="high",
     )
 
     result = await process_create_intent_arguments(
@@ -494,7 +506,10 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
         conversation=[
             ConversationMessage(
                 role="user",
-                content="Bygg ett flöde som transkriberar ljud och skapar DOCX.",
+                content=(
+                    "Bygg ett flöde som transkriberar ljud och skapar DOCX. "
+                    "Användaren ska fylla i ärendenummer och handläggare vid körning."
+                ),
             )
         ],
         arguments={
@@ -502,9 +517,23 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
             "plan_rationale": "Skapa en DOCX-rapport från uppladdat ljud.",
             "steps": [
                 {
-                    "name": "Sammanfatta inspelningen",
-                    "instructions": "Sammanfatta den transkriberade inspelningen.",
-                }
+                    "name": "Analysera inspelningen",
+                    "instructions": "Extrahera sakuppgifter ur transkriptionen.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "sakuppgifter",
+                            "field_type": "string",
+                            "description": "Sakuppgifter ur inspelningen.",
+                        }
+                    ],
+                    "review_mode": "edit",
+                },
+                {
+                    "name": "Skriv rapporten",
+                    "instructions": "Skriv rapporten från sakuppgifterna.",
+                    "output_type": "text",
+                },
             ],
         },
         tool_call_id="call-audio-docx",
@@ -515,9 +544,72 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
 
     assert result.compiled_proposal is not None
     spec = result.compiled_proposal.content.spec
+    assert [field.name for field in spec.form_fields or ()] == [
+        "arendenummer",
+        "handlaggare",
+    ]
     assert spec.steps[0].input_type == InputType.AUDIO
+    analysis_step = spec.steps[1]
+    report_step = spec.steps[2]
+    assert analysis_step.review_policy is not None
+    assert analysis_step.review_policy.mode.value == "edit"
+    assert report_step.input_bindings is not None
+    assert "{{ flow_input.arendenummer }}" in str(report_step.input_bindings)
+    assert "{{ flow_input.handlaggare }}" in str(report_step.input_bindings)
     assert spec.steps[-1].output_type == OutputType.DOCX
+    assert spec.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
     await assert_create_spec_prepares_through_authoring_command_async(spec)
+
+
+@pytest.mark.asyncio
+async def test_committed_unsupported_architecture_hints_raise_typed_error() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=[
+                "audio_to_artifact_report",
+                "text_to_artifact_report",
+            ],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        await process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Bygg ett flöde som skapar en DOCX-rapport från ljud.",
+                )
+            ],
+            arguments={
+                "flow_name": "Ljudrapport",
+                "plan_rationale": "Transkribera ljudet och skriv en rapport.",
+                "steps": [
+                    {
+                        "name": "Skriv rapporten",
+                        "instructions": "Skriv rapporten från transkriptionen.",
+                    }
+                ],
+            },
+            tool_call_id="call-unsupported-committed-hints",
+            available_model_refs=None,
+            available_kb_refs=None,
+            planning_state=state,
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_unsupported_architecture_hints"
+    )
 
 
 @pytest.mark.asyncio

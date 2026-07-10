@@ -61,6 +61,9 @@ PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Now call propose_flow with one complete semantic flow intent. "
     "Do not answer with prose."
 )
+_NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
+    {"assembly_unsupported_architecture_hints"}
+)
 
 
 async def process_create_intent_arguments(
@@ -238,6 +241,8 @@ def _retryable_architecture_failure_code(
     error: AIBuilderArchitectureError,
 ) -> str | None:
     value = error.log_context.get("failure_code")
-    if isinstance(value, str) and value:
-        return value
-    return None
+    if not isinstance(value, str) or not value:
+        return None
+    if value in _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES:
+        return None
+    return value

@@ -75,8 +75,12 @@ _SOURCE_INPUT_TYPES = frozenset(
 _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 _AUDIO_TRANSCRIPTION_PATTERN_ID = "audio_transcription"
 _AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
+_FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID = "form_field_runtime_inputs"
 _AUDIO_PATTERN_IDS = frozenset(
     {_AUDIO_TRANSCRIPTION_PATTERN_ID, _AUDIO_ARTIFACT_PATTERN_ID}
+)
+_AUDIO_PATTERN_IDS_WITH_FORM_FIELDS = _AUDIO_PATTERN_IDS | frozenset(
+    {_FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID}
 )
 _AUDIO_PATTERN_CHAIN_STEPS = frozenset(
     {FLOW_INPUT_AUDIO_TRANSCRIPTION, TERMINAL_ARTIFACT_STEP}
@@ -905,17 +909,30 @@ def _architecture_hints_are_supported(
     if not chain_steps and set(pattern_ids) <= _SUPPORTED_STRUCTURAL_PATTERN_IDS:
         return True
     if runtime_input_type == InputType.AUDIO:
-        return set(pattern_ids) <= _AUDIO_PATTERN_IDS and set(chain_steps) <= set(
-            _AUDIO_PATTERN_CHAIN_STEPS
-        )
+        pattern_id_set = set(pattern_ids)
+        if (
+            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID in pattern_id_set
+            and _AUDIO_ARTIFACT_PATTERN_ID not in pattern_id_set
+        ):
+            return False
+        return pattern_id_set <= _AUDIO_PATTERN_IDS_WITH_FORM_FIELDS and set(
+            chain_steps
+        ) <= set(_AUDIO_PATTERN_CHAIN_STEPS)
     if (
         runtime_input_type in _FILE_INPUT_TYPES
         and final_output_type == OutputType.DOCX
         and final_output_mode == OutputMode.TEMPLATE_FILL
     ):
-        return set(pattern_ids) <= {_DOCX_TEMPLATE_PATTERN_ID} and set(
-            chain_steps
-        ) <= set(_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS)
+        pattern_id_set = set(pattern_ids)
+        if (
+            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID in pattern_id_set
+            and _DOCX_TEMPLATE_PATTERN_ID not in pattern_id_set
+        ):
+            return False
+        return pattern_id_set <= {
+            _DOCX_TEMPLATE_PATTERN_ID,
+            _FORM_FIELD_RUNTIME_INPUTS_PATTERN_ID,
+        } and set(chain_steps) <= set(_DOCX_TEMPLATE_PATTERN_CHAIN_STEPS)
     return False
 
 

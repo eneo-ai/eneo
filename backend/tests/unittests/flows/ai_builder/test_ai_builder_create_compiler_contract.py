@@ -4,6 +4,9 @@ from typing import cast
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -1404,6 +1407,141 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
     assert validate_spec(compiled).valid
 
 
+def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
+        "terminal_output": _slot("terminal_output", "docx_document"),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields",
+            "detailed_case_metadata",
+        ),
+    }
+    architecture = derive_architecture_commit_draft(state)
+
+    assert architecture is not None
+    assert architecture.chosen_patterns == [
+        "audio_to_artifact_report",
+        "form_field_runtime_inputs",
+    ]
+
+    context = create_compile_context_from_planning_state(
+        state,
+        ui_language="sv",
+        runtime_input_hint_text=(
+            "Bygg ett ljudflöde där användaren ska fylla i ärendenummer och "
+            "handläggare vid körning. Skapa sedan en DOCX-rapport."
+        ),
+    )
+    assert context is not None
+    assert context.pattern_ids == tuple(architecture.chosen_patterns)
+    assert context.pattern_chain_steps == (
+        FLOW_INPUT_AUDIO_TRANSCRIPTION,
+        TERMINAL_ARTIFACT_STEP,
+    )
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Ljudbaserad ärenderapport",
+            "flow_description": "Analysera ett ljudunderlag och skapa en DOCX.",
+            "plan_rationale": "Transkribera, analysera, skriv och rendera.",
+            "steps": [
+                {
+                    "name": "Analysera transkriptionen",
+                    "instructions": "Identifiera de viktigaste sakuppgifterna.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "sakuppgifter",
+                            "field_type": "string",
+                            "description": "Verifierade sakuppgifter ur ljudet.",
+                        }
+                    ],
+                    "review_mode": "edit",
+                },
+                {
+                    "name": "Skriv rapporten",
+                    "instructions": "Skriv en tydlig rapport från sakuppgifterna.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    assert [field.name for field in compiled.form_fields or ()] == [
+        "arendenummer",
+        "handlaggare",
+    ]
+    assert [step.name for step in compiled.steps[1:3]] == [
+        "Analysera transkriptionen",
+        "Skriv rapporten",
+    ]
+    transcription_step, analysis_step, report_step, renderer_step = compiled.steps
+    assert transcription_step.output_mode == OutputMode.TRANSCRIBE_ONLY
+    assert transcription_step.input_type == InputType.AUDIO
+    assert analysis_step.output_type == OutputType.JSON
+    assert analysis_step.review_policy is not None
+    assert analysis_step.review_policy.mode.value == "edit"
+    assert report_step.review_policy is None
+    report_question = _question(report_step.input_bindings)
+    assert "arendenummer: {{ flow_input.arendenummer }}" in report_question
+    assert "handlaggare: {{ flow_input.handlaggare }}" in report_question
+    for step in (transcription_step, analysis_step, renderer_step):
+        assert "flow_input.arendenummer" not in repr(step.input_bindings)
+        assert "flow_input.handlaggare" not in repr(step.input_bindings)
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert renderer_step.output_type == OutputType.DOCX
+    assert validate_spec(compiled).valid
+
+
+@pytest.mark.parametrize(
+    "conflicting_pattern_id",
+    ["text_to_artifact_report", "unknown_compiled_pattern"],
+)
+def test_audio_artifact_overlay_still_rejects_conflicting_patterns(
+    conflicting_pattern_id: str,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Ljudrapport",
+            "plan_rationale": "Transkribera och skriv en rapport.",
+            "steps": [
+                {
+                    "name": "Skriv rapporten",
+                    "instructions": "Skriv rapporten från transkriptionen.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                final_output_type=OutputType.DOCX,
+                final_output_mode=OutputMode.PASS_THROUGH,
+                pattern_ids=(
+                    "audio_to_artifact_report",
+                    "form_field_runtime_inputs",
+                    conflicting_pattern_id,
+                ),
+                pattern_chain_steps=(
+                    FLOW_INPUT_AUDIO_TRANSCRIPTION,
+                    TERMINAL_ARTIFACT_STEP,
+                ),
+            ),
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_unsupported_architecture_hints"
+    )
+
+
 def test_compiler_uses_assembly_path_for_docx_template_fill() -> None:
     intent = parse_create_flow_intent_arguments(
         {
@@ -1474,6 +1612,65 @@ def test_compiler_uses_assembly_path_for_docx_template_fill() -> None:
     assert template_step.output_type == OutputType.DOCX
     assert template_step.output_mode == OutputMode.TEMPLATE_FILL
     assert template_step.input_bindings is None
+    assert validate_spec(compiled).valid
+
+
+def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "docx_document"),
+        "docx_output_mode": _slot("docx_output_mode", "template_fill_docx"),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "single_document_case",
+        ),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields",
+            "detailed_case_metadata",
+        ),
+    }
+    context = create_compile_context_from_planning_state(
+        state,
+        ui_language="sv",
+        runtime_input_hint_text=(
+            "Användaren ska fylla i ärendenummer vid körning innan mallen fylls."
+        ),
+    )
+    assert context is not None
+    assert context.pattern_ids == (
+        "document_to_docx_template",
+        "form_field_runtime_inputs",
+    )
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Mallbaserad ärenderapport",
+            "plan_rationale": "Läs mallen, skriv innehållet och fyll dokumentet.",
+            "steps": [
+                {
+                    "name": "Förbered dokumentinnehåll",
+                    "instructions": "Förbered innehållet för dokumentmallen.",
+                    "output_type": "text",
+                    "review_mode": "view",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    assert [field.name for field in compiled.form_fields or ()] == ["arendenummer"]
+    reader_step, content_step, template_step = compiled.steps
+    assert content_step.review_policy is not None
+    assert content_step.review_policy.mode.value == "view"
+    assert "arendenummer: {{ flow_input.arendenummer }}" in _question(
+        content_step.input_bindings
+    )
+    assert "flow_input.arendenummer" not in repr(reader_step.input_bindings)
+    assert "flow_input.arendenummer" not in repr(template_step.input_bindings)
+    assert template_step.output_mode == OutputMode.TEMPLATE_FILL
+    assert template_step.output_type == OutputType.DOCX
     assert validate_spec(compiled).valid
 
 

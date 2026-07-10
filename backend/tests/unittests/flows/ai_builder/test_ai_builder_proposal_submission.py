@@ -7,6 +7,9 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -53,6 +56,11 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommitDraft,
+    PlanningState,
+    StepTriple,
+)
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _compiled_edit_proposal,
     _compiled_outline_proposal,
@@ -252,30 +260,34 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
         },
         tool_call_id="call-architecture",
     )
+    planning_state = PlanningState.empty()
+    planning_state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=[
+                "audio_to_artifact_report",
+                "text_to_artifact_report",
+            ],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
     ctx = _make_context(
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         usage_tracker=tracker,
         request_id="req-architecture",
         text_content="",
-    )
-    process_outline = AsyncMock(
-        side_effect=AIBuilderArchitectureError(
-            public_code="architecture_materialization_failed",
-            detail="invalid skeleton",
-            log_context={"surface": "test"},
-        )
+        planning_state=planning_state,
     )
 
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission."
-            "run_tool_self_correction"
-        ) as repair,
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
-            new=process_outline,
-        ),
-    ):
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction"
+    ) as repair:
         dispatched = submission.dispatch_submission_tool_call(
             ctx=ctx, tool_call=tool_call
         )
@@ -283,7 +295,6 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
         events = _wire_events([event async for event in dispatched])
 
     repair.assert_not_called()
-    process_outline.assert_awaited_once()
     assert [event["event"] for event in events] == ["error"]
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
@@ -291,8 +302,13 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
     assert payload["details"]["architecture_error_code"] == (
         "architecture_materialization_failed"
     )
-    assert payload["details"]["architecture_error_detail"] == "invalid skeleton"
-    assert payload["details"]["surface"] == "test"
+    assert payload["details"]["architecture_error_detail"] == (
+        "The confirmed architecture pattern is not supported by create assembly."
+    )
+    assert payload["details"]["failure_code"] == (
+        "assembly_unsupported_architecture_hints"
+    )
+    assert payload["details"]["reason"] == "unsupported_architecture_hints"
 
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_success"] is False
