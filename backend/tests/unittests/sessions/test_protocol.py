@@ -147,3 +147,24 @@ def test_question_public_omits_persisted_tool_result():
     assert public.tool_calls[0].result is None
     assert question.tool_calls is not None
     assert question.tool_calls[0].result == "large upstream payload"
+
+
+def test_question_public_preserves_context_prompt_tokens():
+    now = datetime.now(timezone.utc)
+    question = Question(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        question="Question",
+        answer="Answer",
+        num_tokens_question=420,
+        num_tokens_answer=12,
+        num_tokens_context=180,
+        tenant_id=uuid4(),
+        session_id=uuid4(),
+    )
+
+    public = to_question_public(question)
+
+    assert question.model_dump()["num_tokens_context"] == 180
+    assert public.num_tokens_context == 180

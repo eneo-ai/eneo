@@ -179,27 +179,29 @@
       {/each}
     </div>
 
-    <Separator />
+    {#if servers.length > 0}
+      <Separator />
 
-    <div class="p-1">
-      <label
-        class="hover:bg-muted flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-2 transition-colors"
-      >
-        <ShieldCheck class="text-muted-foreground mt-0.5 size-5 shrink-0" aria-hidden="true" />
-        <span class="min-w-0 flex-1">
-          <span class="text-foreground block text-sm font-medium"
-            >{m.mcp_run_tools_automatically()}</span
-          >
-          <span id="mcp-auto-accept-desc" class="text-muted-foreground block text-xs">
-            {autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
+      <div class="p-1">
+        <label
+          class="hover:bg-muted flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-2 transition-colors"
+        >
+          <ShieldCheck class="text-muted-foreground mt-0.5 size-5 shrink-0" aria-hidden="true" />
+          <span class="min-w-0 flex-1">
+            <span class="text-foreground block text-sm font-medium"
+              >{m.mcp_run_tools_automatically()}</span
+            >
+            <span id="mcp-auto-accept-desc" class="text-muted-foreground block text-xs">
+              {autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
+            </span>
           </span>
-        </span>
-        <Switch
-          bind:checked={autoAcceptTools}
-          aria-label={m.mcp_run_tools_automatically()}
-          aria-describedby="mcp-auto-accept-desc"
-        />
-      </label>
-    </div>
+          <Switch
+            bind:checked={autoAcceptTools}
+            aria-label={m.mcp_run_tools_automatically()}
+            aria-describedby="mcp-auto-accept-desc"
+          />
+        </label>
+      </div>
+    {/if}
   </Popover.Content>
 </Popover.Root>

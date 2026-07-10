@@ -39,6 +39,7 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.internal_mcp.constants import INTERNAL_MCP_SERVER_NAMES
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -1306,16 +1307,33 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
 
                     # Approval flow
-                    decision_map: dict[str, tuple[bool, str | None]] = {}
+                    approval_metadata = [
+                        tm
+                        for tm in tool_metadata
+                        if tm.server_name not in INTERNAL_MCP_SERVER_NAMES
+                    ]
+                    # Eneo's internal knowledge/files tools are read-only core
+                    # capabilities. Approval controls apply only to external MCP
+                    # servers, even when both kinds are called in one round.
+                    decision_map: dict[str, tuple[bool, str | None]] = {
+                        tm.tool_call_id: (True, None)
+                        for tm in tool_metadata
+                        if tm.tool_call_id is not None
+                        and tm.server_name in INTERNAL_MCP_SERVER_NAMES
+                    }
                     timed_out = False
-                    if require_tool_approval and approval_manager:
+                    if require_tool_approval and approval_manager and approval_metadata:
                         if approval_context is None:
                             raise OpenAIException(
                                 "Missing approval context for tool approval flow"
                             )
 
                         approval_id = str(uuid.uuid4())
-                        tool_call_ids = [tc["id"] for tc in tool_calls if tc["id"]]
+                        tool_call_ids = [
+                            tm.tool_call_id
+                            for tm in approval_metadata
+                            if tm.tool_call_id is not None
+                        ]
                         if pending_approval_ids is not None:
                             pending_approval_ids.add(approval_id)
 
@@ -1330,7 +1348,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                         yield Completion(
                             response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
-                            tool_calls_metadata=tool_metadata,
+                            tool_calls_metadata=approval_metadata,
                             approval_id=approval_id,
                         )
 
@@ -1340,10 +1358,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if pending_approval_ids is not None:
                             pending_approval_ids.discard(approval_id)
                         timed_out = wait_result.timed_out
-                        decision_map = {
-                            d.tool_call_id: (d.approved, d.reason)
-                            for d in wait_result.decisions
-                        }
+                        decision_map.update(
+                            {
+                                d.tool_call_id: (d.approved, d.reason)
+                                for d in wait_result.decisions
+                            }
+                        )
 
                         if timed_out:
                             yield Completion(
@@ -1360,7 +1380,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         result_status="timeout_denied",
                                         mcp_tool_name=tm.mcp_tool_name,
                                     )
-                                    for tm in tool_metadata
+                                    for tm in approval_metadata
                                 ],
                             )
 

@@ -29,6 +29,7 @@ from eneo.internal_mcp.files import (
     read_file,
 )
 from eneo.internal_mcp.registry import internal_mcp_mounts
+from eneo.main.exceptions import NotFoundException
 
 
 def _signed_url(file_id, tenant_id, base_url="https://eneo.example"):
@@ -54,14 +55,18 @@ def _file(**overrides):
     return SimpleNamespace(**defaults)
 
 
-def _patch_tool_context(monkeypatch, *, file=None, user_tenant_id=None):
+def _patch_tool_context(
+    monkeypatch, *, file=None, user_tenant_id=None, repo_error=None
+):
     """Replace the container bootstrap with an in-memory file lookup."""
 
     @asynccontextmanager
     async def fake_context(_ctx):
         async def get_by_id(file_id):
+            if repo_error is not None:
+                raise repo_error
             if file is None:
-                raise LookupError("no such file")
+                raise NotFoundException()
             return file
 
         container = SimpleNamespace(
@@ -225,6 +230,20 @@ class TestReadFileAuthorization:
         assert content[0].text == (
             "File: policy.pdf (application/pdf)\n\nWaste is collected every other week."
         )
+
+    @pytest.mark.asyncio
+    async def test_unexpected_repository_error_propagates(self, monkeypatch):
+        tenant_id = uuid4()
+        file_id = uuid4()
+        url = _signed_url(file_id, tenant_id=tenant_id)
+        _patch_tool_context(
+            monkeypatch,
+            user_tenant_id=tenant_id,
+            repo_error=RuntimeError("database unavailable"),
+        )
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await read_file(url, ctx=None)
 
 
 class TestFileContent:

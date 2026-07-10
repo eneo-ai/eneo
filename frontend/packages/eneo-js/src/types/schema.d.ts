@@ -11288,6 +11288,11 @@ export interface components {
       transcription?: string | null;
       /** Token Count */
       token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -22451,6 +22456,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -22867,6 +22877,11 @@ export interface operations {
                 transcription?: string | null;
                 /** Token Count */
                 token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -24091,6 +24106,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                 };
               }
@@ -24140,6 +24160,11 @@ export interface operations {
                     transcription?: string | null;
                     /** Token Count */
                     token_count?: number | null;
+                    /**
+                     * Has Download Reference
+                     * @default false
+                     */
+                    has_download_reference?: boolean;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {

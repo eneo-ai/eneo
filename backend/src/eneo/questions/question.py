@@ -103,6 +103,9 @@ class ToolCallInfo(BaseModel):
 class QuestionAdd(QuestionBase):
     num_tokens_question: int
     num_tokens_answer: int
+    # Final LLM call's prompt tokens (context-window occupancy). Unlike
+    # num_tokens_question, this is not summed across multi-round tool calls.
+    num_tokens_context: Optional[int] = None
     tenant_id: UUID
     completion_model_id: Optional[UUID] = None
     session_id: Optional[UUID] = None

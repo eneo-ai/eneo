@@ -13,6 +13,8 @@
   import ChatMcpServers from "./ChatMcpServers.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
+  import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
+  import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
@@ -132,6 +134,8 @@
             })
           }
         : undefined;
+    // Approval controls external MCP servers only. Eneo's read-only internal
+    // knowledge/files tools are core capabilities and always auto-execute.
     const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
     scrollToBottom();
 
@@ -304,6 +308,29 @@
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
   });
 
+  const effectiveModel = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner || !("completion_model" in partner)) return undefined;
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  });
+  const supportsToolCalling = $derived(effectiveModel?.supports_tool_calling === true);
+  const runtimeKnowledgeMode = $derived(
+    effectiveKnowledgeMode(partnerKnowledgeMode, supportsToolCalling)
+  );
+
+  // Current uploads and persisted user-message attachments are the only files
+  // the backend's files server considers. Assistant prompt attachments remain
+  // inline and therefore do not activate this tool.
+  const hasDownloadReference = $derived.by(() => {
+    const pending = $attachments
+      .map((attachment) => attachment.fileRef)
+      .filter((file) => file !== undefined);
+    const history = (chat.currentConversation?.messages ?? []).flatMap(
+      (message) => message.files ?? []
+    );
+    return [...pending, ...history].some((file) => file.has_download_reference === true);
+  });
+
   // Eneo's built-in loopback MCP servers that will be active for this partner:
   // always on, not togglable, but surfaced next to the external servers so the
   // user sees every tool the model can reach. Mirrors the backend attach gates
@@ -311,14 +338,13 @@
   // attachments reach the model as signed URLs read by the files server).
   const internalMcpServers = $derived.by(() => {
     const partner = chat.partner as Record<string, unknown> | null;
-    const internal: Array<{ name: string }> = [];
-    if (hasKnowledge && partnerKnowledgeMode === "tool") {
-      internal.push({ name: "knowledge" });
-    }
-    if (partner?.inline_file_text === false) {
-      internal.push({ name: "files" });
-    }
-    return internal;
+    return internalMcpServerNames({
+      supportsToolCalling,
+      hasKnowledge,
+      storedKnowledgeMode: partnerKnowledgeMode,
+      inlineFileText: partner?.inline_file_text !== false,
+      hasDownloadReference
+    }).map((name) => ({ name }));
   });
 
   const showWebSearch = $derived(
@@ -447,7 +473,7 @@
           collections={knowledgeSources.collections}
           websites={knowledgeSources.websites}
           integrations={knowledgeSources.integrations}
-          knowledgeMode={partnerKnowledgeMode}
+          knowledgeMode={runtimeKnowledgeMode}
         />
       {/if}
 

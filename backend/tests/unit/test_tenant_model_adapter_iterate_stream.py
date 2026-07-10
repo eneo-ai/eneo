@@ -144,6 +144,24 @@ class _ResourceMCPProxy(_FakeMCPProxy):
         ]
 
 
+class _InternalMCPProxy(_FakeMCPProxy):
+    def get_allowed_tool_names(self):
+        return {"knowledge__search_knowledge"}
+
+    def get_tool_info(self, prefixed_tool_name: str):
+        return ("knowledge", "search_knowledge", "Search knowledge")
+
+
+class _MixedMCPProxy(_FakeMCPProxy):
+    def get_allowed_tool_names(self):
+        return {"knowledge__search_knowledge", "server__tool"}
+
+    def get_tool_info(self, prefixed_tool_name: str):
+        if prefixed_tool_name == "knowledge__search_knowledge":
+            return ("knowledge", "search_knowledge", "Search knowledge")
+        return ("Server", "tool", "Tool title")
+
+
 def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
@@ -726,6 +744,111 @@ async def test_iterate_stream_yields_approval_required_and_blocks():
     )
     approval_manager.request_approval.assert_awaited_once()
     approval_manager.wait_for_approval.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_internal_tools_auto_execute_when_external_approval_is_required():
+    adapter = _make_adapter()
+    mcp_proxy = _InternalMCPProxy()
+    approval_manager = AsyncMock()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_name="knowledge__search_knowledge")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=True,
+            approval_manager=approval_manager,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert not any(
+        completion.response_type == ResponseType.TOOL_APPROVAL_REQUIRED
+        for completion in completions
+    )
+    approval_manager.request_approval.assert_not_awaited()
+    approval_manager.wait_for_approval.assert_not_awaited()
+    assert mcp_proxy.calls == [[("knowledge__search_knowledge", {"q": "x"})]]
+
+
+@pytest.mark.asyncio
+async def test_external_denial_does_not_disable_internal_tool_in_same_round():
+    adapter = _make_adapter()
+    mcp_proxy = _MixedMCPProxy()
+    approval_manager = AsyncMock()
+    approval_manager.wait_for_approval.return_value = ToolApprovalWaitResult(
+        decisions=[ToolApprovalDecision(tool_call_id="call_2", approved=False)],
+        timed_out=False,
+    )
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_delta_chunk(
+                index=0,
+                tool_call_id="call_1",
+                tool_name="knowledge__search_knowledge",
+            ),
+            _tool_call_delta_chunk(index=0, arguments='{"q":"internal"}'),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="call_2", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(
+                index=1, arguments='{"q":"external"}', finish_reason="tool_calls"
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=True,
+            approval_manager=approval_manager,
+            approval_context={
+                "tenant_id": uuid4(),
+                "user_id": uuid4(),
+                "session_id": uuid4(),
+                "assistant_id": uuid4(),
+            },
+            pending_approval_ids=set(),
+        )
+
+    requested_ids = approval_manager.request_approval.await_args.kwargs["tool_call_ids"]
+    assert requested_ids == ["call_2"]
+    assert mcp_proxy.calls == [[("knowledge__search_knowledge", {"q": "internal"})]]
+    approval_event = next(
+        completion
+        for completion in completions
+        if completion.response_type == ResponseType.TOOL_APPROVAL_REQUIRED
+    )
+    assert [
+        metadata.tool_call_id for metadata in approval_event.tool_calls_metadata or []
+    ] == ["call_2"]
 
 
 @pytest.mark.asyncio

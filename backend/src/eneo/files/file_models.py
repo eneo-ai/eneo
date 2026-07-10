@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -65,6 +65,27 @@ class FilePublic(InDB):
     size: int
     transcription: Optional[str] = None
     token_count: Optional[int] = None  # Token count for the file's content
+    # Public capability signal only; never expose the storage object key. The
+    # chat composer uses this to show the built-in files tool only when a
+    # conversation attachment can actually be represented by a signed URL.
+    has_download_reference: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def storage_key_to_capability(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+
+        data = cast(dict[str, object], value)
+        if "has_download_reference" in data:
+            return data
+
+        file_type = data.get("file_type")
+        return {
+            **data,
+            "has_download_reference": bool(data.get("storage_key"))
+            and file_type in (FileType.TEXT, FileType.TEXT.value),
+        }
 
 
 class AcceptedFileType(BaseModel):

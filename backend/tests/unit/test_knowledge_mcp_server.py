@@ -5,6 +5,7 @@ endpoint actually exposes), token scoping, and the conversion of search hits
 into MCP content blocks that the citation pipeline consumes.
 """
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -29,6 +30,7 @@ from eneo.internal_mcp.knowledge import (
     read_source,
     search_knowledge,
 )
+from eneo.main.exceptions import NotFoundException
 
 
 def _chunk(**overrides):
@@ -41,6 +43,39 @@ def _chunk(**overrides):
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
+
+
+def _patch_read_source_context(monkeypatch, *, blob=None, repo_error=None):
+    assistant_id = uuid4()
+    assistant = SimpleNamespace(
+        collections=[SimpleNamespace(id=blob.group_id)]
+        if blob is not None and blob.group_id is not None
+        else [],
+        websites=[],
+        integration_knowledge_list=[],
+    )
+
+    @asynccontextmanager
+    async def fake_context(_ctx):
+        async def get_assistant(_assistant_id):
+            return assistant, []
+
+        async def get_blob(_blob_id):
+            if repo_error is not None:
+                raise repo_error
+            if blob is None:
+                raise NotFoundException()
+            return blob
+
+        container = SimpleNamespace(
+            assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+            info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+        )
+        yield container, SimpleNamespace(), assistant_id
+
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+    )
 
 
 class TestBuildKnowledgeMcpServer:
@@ -297,6 +332,27 @@ class TestDocumentPageContent:
         assert len(content) == 1
         assert content[0].type == "text"
         assert "past the end" in content[0].text
+
+
+class TestReadSourceErrors:
+    @pytest.mark.asyncio
+    async def test_missing_document_returns_safe_not_found(self, monkeypatch):
+        _patch_read_source_context(monkeypatch, blob=None)
+
+        content = await read_source(str(uuid4()), ctx=None)
+
+        assert content[0].text == (
+            "No document with that id in this assistant's knowledge sources."
+        )
+
+    @pytest.mark.asyncio
+    async def test_unexpected_repository_error_propagates(self, monkeypatch):
+        _patch_read_source_context(
+            monkeypatch, repo_error=RuntimeError("database unavailable")
+        )
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await read_source(str(uuid4()), ctx=None)
 
 
 class TestToolSteering:

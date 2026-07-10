@@ -26,18 +26,16 @@ from mcp.types import TextContent
 
 from eneo.authentication.signed_urls import verify_signed_token
 from eneo.files.file_models import FileType
+from eneo.internal_mcp.constants import FILES_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
     default_page_cap,
     internal_tool_context,
 )
+from eneo.main.exceptions import NotFoundException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
 logger = logging.getLogger(__name__)
-
-# Name of the ephemeral MCP server eneo attaches for URL-only attachments. The
-# MCP proxy prefixes tools with a sanitized form of this (``files__read_file``).
-FILES_SERVER_NAME = "files"
 
 mcp = FastMCP(
     name="Eneo Files",
@@ -168,7 +166,7 @@ async def read_file(
     async with internal_tool_context(ctx) as tool_ctx:
         try:
             file = await tool_ctx.container.file_repo().get_by_id(file_id)
-        except Exception:
+        except NotFoundException:
             # Missing and inaccessible must be indistinguishable to the
             # caller (no existence oracle).
             logger.info("[FILES] read_file file=%s -> not found", file_id)

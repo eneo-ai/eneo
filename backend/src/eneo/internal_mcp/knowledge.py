@@ -19,18 +19,16 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import EmbeddedResource, TextContent, TextResourceContents
 from pydantic import AnyUrl
 
+from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
     default_page_cap,
     internal_tool_context,
 )
+from eneo.main.exceptions import NotFoundException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
 logger = logging.getLogger(__name__)
-
-# Name of the ephemeral MCP server eneo attaches for knowledge search. The MCP
-# proxy prefixes tools with a sanitized form of this (``knowledge__search_knowledge``).
-KNOWLEDGE_SERVER_NAME = "knowledge"
 
 # Ceiling on chunks returned per call regardless of what the model asks for.
 # The model can always call again with a refined query; the proxy additionally
@@ -343,7 +341,7 @@ async def read_source(
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         try:
             blob = await container.info_blob_repo().get(blob_id)
-        except Exception:
+        except NotFoundException:
             # The repo raises on a missing row; out-of-scope and missing must
             # be indistinguishable to the caller (no existence oracle).
             logger.info(

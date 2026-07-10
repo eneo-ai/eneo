@@ -40,7 +40,11 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
 from eneo.icons.icon_repo import IconRepository
-from eneo.internal_mcp import build_files_mcp_server, build_knowledge_mcp_server
+from eneo.internal_mcp import (
+    build_files_mcp_server,
+    build_knowledge_mcp_server,
+    resolve_internal_mcp_availability,
+)
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
@@ -1904,16 +1908,21 @@ class AssistantService:
                 )
             return scoped_token
 
+        history_files = [
+            file for _question in session.questions for file in _question.files
+        ]
+        internal_mcp = resolve_internal_mcp_availability(
+            assistant=assistant_to_ask,
+            completion_model=effective_completion_model,
+            conversation_files=[*files, *history_files],
+        )
+
         # Tool-mode knowledge: attach an ephemeral loopback MCP server whose
         # search tool covers this assistant's knowledge. Models without tool
         # calling never get a server and fall back to legacy
         # retrieve-and-inject inside Assistant.ask.
         knowledge_mcp_server = None
-        if (
-            assistant_to_ask.knowledge_mode == KnowledgeMode.TOOL
-            and assistant_to_ask.has_knowledge()
-            and effective_completion_model.supports_tool_calling
-        ):
+        if internal_mcp.knowledge:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
@@ -1925,13 +1934,7 @@ class AssistantService:
         # the model always has at least one tool that can read them. External
         # servers coexist; tool descriptions steer the choice.
         files_mcp_server = None
-        history_files = [
-            file for _question in session.questions for file in _question.files
-        ]
-        url_only_ids = url_only_file_ids(
-            list(files) + history_files, assistant_to_ask.inline_file_text
-        )
-        if url_only_ids and effective_completion_model.supports_tool_calling:
+        if internal_mcp.files:
             files_mcp_server = await build_files_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
@@ -1939,7 +1942,7 @@ class AssistantService:
             logger.info(
                 "[FILES] assistant=%s files tool attached (%d url-only attachments)",
                 assistant_to_ask.id,
-                len(url_only_ids),
+                len(internal_mcp.url_only_file_ids),
             )
         logger.info(
             "[RAG] assistant=%s knowledge_mode=%s "
