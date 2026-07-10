@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -20,6 +21,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_api_models import (
+    AIBuilderConversationMessage,
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
@@ -42,9 +44,18 @@ from eneo.flows.ai_builder.ai_builder_context import (
     resolve_planner_model,
     serialize_space_models,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    question_answer_from_metadata,
+    requirements_confirmation_from_metadata,
+    requirements_summary_from_metadata,
+    slot_classification_from_metadata,
+    structured_question_payload_from_tool_arguments,
+    tool_calls_from_message,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_ERROR_REGISTRY,
@@ -64,6 +75,8 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderDoneEvent,
     AIBuilderStreamEvent,
     AIBuilderUsageEvent,
+    RequirementsSummaryPayload,
+    StructuredQuestionPayload,
     ai_builder_stream_event_schema,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
@@ -80,6 +93,10 @@ from eneo.flows.ai_builder.ai_builder_service import (
 )
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     summarize_session_telemetry,
+)
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+    CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
@@ -335,6 +352,120 @@ def _to_file_public(file: object) -> FilePublic:
     return FilePublic(**cast(Any, file).model_dump())
 
 
+def _to_public_conversation(
+    conversation: list[ConversationMessage],
+) -> list[AIBuilderConversationMessage]:
+    public_conversation: list[AIBuilderConversationMessage] = []
+    for index, message in enumerate(conversation):
+        if message.role == "user":
+            public_conversation.append(_to_public_user_message(message))
+            continue
+        if message.role == "assistant":
+            public_conversation.append(
+                _to_public_assistant_message(conversation, index, message)
+            )
+    return public_conversation
+
+
+def _classifier_slot_diagnostic_rows(
+    conversation: list[ConversationMessage],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for message in conversation:
+        classification = slot_classification_from_metadata(message.metadata)
+        if classification is None:
+            continue
+        for slot in classification.slots:
+            rows.append(
+                {
+                    "message_id": message.message_id,
+                    "slot_name": slot.slot_name,
+                    "value": slot.value,
+                    "confidence": slot.confidence,
+                    "reason": slot.reason,
+                    "evidence": list(slot.evidence),
+                    "evidence_level": slot.evidence_level,
+                }
+            )
+    return rows
+
+
+def _to_public_user_message(
+    message: ConversationMessage,
+) -> AIBuilderConversationMessage:
+    return AIBuilderConversationMessage(
+        message_id=message.message_id,
+        role="user",
+        content=message.content,
+        timestamp=message.timestamp,
+        question_answer=question_answer_from_metadata(message.metadata),
+        requirements_confirmation=requirements_confirmation_from_metadata(
+            message.metadata
+        ),
+    )
+
+
+def _to_public_assistant_message(
+    conversation: list[ConversationMessage],
+    index: int,
+    message: ConversationMessage,
+) -> AIBuilderConversationMessage:
+    return AIBuilderConversationMessage(
+        message_id=message.message_id,
+        role="assistant",
+        content=message.content,
+        timestamp=message.timestamp,
+        question=_structured_question_from_assistant_message(message),
+        requirements_summary=_requirements_summary_for_assistant_message(
+            conversation,
+            index,
+            message,
+        ),
+    )
+
+
+def _structured_question_from_assistant_message(
+    message: ConversationMessage,
+) -> StructuredQuestionPayload | None:
+    for tool_call in tool_calls_from_message(message):
+        if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
+            continue
+        payload = structured_question_payload_from_tool_arguments(tool_call.arguments)
+        if payload is None:
+            continue
+        try:
+            return StructuredQuestionPayload.model_validate(payload)
+        except ValidationError:
+            continue
+    return None
+
+
+def _requirements_summary_for_assistant_message(
+    conversation: list[ConversationMessage],
+    index: int,
+    message: ConversationMessage,
+) -> RequirementsSummaryPayload | None:
+    parsed = requirements_summary_from_metadata(message.metadata)
+    requirements_summary = parsed.requirements_summary if parsed is not None else None
+    requirements_tool_call_ids = {
+        tool_call.id
+        for tool_call in tool_calls_from_message(message)
+        if tool_call.name == CONFIRM_REQUIREMENTS_TOOL_NAME and tool_call.id
+    }
+    if not requirements_tool_call_ids:
+        return requirements_summary
+
+    for tool_message in conversation[index + 1 :]:
+        if tool_message.role != "tool":
+            break
+        if tool_message.tool_call_id not in requirements_tool_call_ids:
+            continue
+        parsed_tool_summary = requirements_summary_from_metadata(tool_message.metadata)
+        if parsed_tool_summary is not None:
+            requirements_summary = parsed_tool_summary.requirements_summary
+    return requirements_summary
+
+
 def _to_session_response(
     session: BuilderSession,
     *,
@@ -353,7 +484,7 @@ def _to_session_response(
             if telemetry is not None
             else None
         ),
-        conversation=session.conversation,
+        conversation=_to_public_conversation(session.conversation),
         attachments=attachments or [],
         attachment_warnings=attachment_warnings or [],
         created_at=session.created_at,
@@ -844,6 +975,34 @@ async def get_session(
         attachments=[_to_file_public(file) for file in attachment_snapshot.files],
         attachment_warnings=list(attachment_snapshot.warnings),
     )
+
+
+@router.get(
+    "/sessions/{session_id}/_diagnostics/classifier-slots",
+    include_in_schema=False,
+)
+async def get_session_classifier_slot_diagnostics(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder session to inspect."),
+    ],
+    container: ContainerWithUserDep,
+) -> dict[str, object]:
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_SESSION_READ,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
+    return {
+        "session_id": str(session.id),
+        "classifier_slot_rows": _classifier_slot_diagnostic_rows(session.conversation),
+    }
 
 
 @router.delete(

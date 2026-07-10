@@ -9,13 +9,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerRequest,
+    RequirementsConfirmationMetadata,
+    StructuredQuestionAnswerMetadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    ConversationMessage,
     FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
+)
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -185,8 +190,21 @@ AI_BUILDER_APPLY_RESULT_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
 }
 
 
-def _default_conversation() -> list[ConversationMessage]:
+def _default_conversation() -> list["AIBuilderConversationMessage"]:
     return []
+
+
+class AIBuilderConversationMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str
+    role: Literal["user", "assistant"]
+    content: str | None = None
+    timestamp: datetime | None = None
+    question: StructuredQuestionPayload | None = None
+    requirements_summary: RequirementsSummaryPayload | None = None
+    question_answer: StructuredQuestionAnswerMetadata | None = None
+    requirements_confirmation: RequirementsConfirmationMetadata | None = None
 
 
 class CreateSessionRequest(BaseModel):
@@ -264,7 +282,7 @@ class SessionResponse(BaseModel):
     flow_id: UUID | None = None
     latest_plan_id: UUID | None = None
     telemetry: "SessionTelemetrySummary | None" = None
-    conversation: list[ConversationMessage] = Field(
+    conversation: list[AIBuilderConversationMessage] = Field(
         default_factory=_default_conversation
     )
     attachments: list[FilePublic] = Field(
@@ -363,6 +381,7 @@ __all__ = [
     "AI_BUILDER_SESSION_RESPONSE_EXAMPLE",
     "ApplyPlanRequest",
     "ApplyResultResponse",
+    "AIBuilderConversationMessage",
     "CreateSessionRequest",
     "PlanApprovalResponse",
     "PlanResponse",

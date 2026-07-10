@@ -18,12 +18,13 @@ from eneo.main.logging import get_logger
 logger = get_logger(__name__)
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
+SlotClassificationEvidenceLevel = Literal["explicit", "inferred"]
 
 # Tenant id is intentionally log-only; classification depends on text and slot set.
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 11
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 12
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
@@ -38,6 +39,7 @@ class ClassifiedSlot:
     confidence: SlotClassificationConfidence
     reason: str
     evidence: tuple[str, ...] = ()
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +221,7 @@ def parse_slot_classification_response(
         confidence = item_dict.get("confidence")
         reason = item_dict.get("reason")
         evidence = _parse_classification_evidence(item_dict.get("evidence", []))
+        evidence_level = item_dict.get("evidence_level", "inferred")
         if not isinstance(slot_name, str) or slot_name not in slot_values:
             continue
         if slot_name in seen_slot_names:
@@ -233,6 +236,8 @@ def parse_slot_classification_response(
             continue
         if confidence not in {"high", "medium", "low"}:
             continue
+        if evidence_level not in {"explicit", "inferred"}:
+            evidence_level = "inferred"
         confidence_value = cast(SlotClassificationConfidence, confidence)
         slots.append(
             ClassifiedSlot(
@@ -246,6 +251,10 @@ def parse_slot_classification_response(
                 if isinstance(reason, str) and reason.strip()
                 else "slot classification",
                 evidence=evidence,
+                evidence_level=cast(
+                    SlotClassificationEvidenceLevel,
+                    evidence_level,
+                ),
             )
         )
         seen_slot_names.add(slot_name)
@@ -439,7 +448,14 @@ def _slot_classification_slot_schema(
         {
             "type": "object",
             "additionalProperties": False,
-            "required": ["slot_name", "value", "confidence", "reason", "evidence"],
+            "required": [
+                "slot_name",
+                "value",
+                "confidence",
+                "reason",
+                "evidence",
+                "evidence_level",
+            ],
             "properties": {
                 "slot_name": {"type": "string", "enum": [slot_name]},
                 "value": {
@@ -449,6 +465,7 @@ def _slot_classification_slot_schema(
                 "confidence": _classification_confidence_schema(),
                 "reason": _classification_reason_schema(),
                 "evidence": _classification_evidence_array_schema(),
+                "evidence_level": _classification_evidence_level_schema(),
             },
         }
         for slot_name, values in sorted(allowed_slot_values.items())
@@ -496,6 +513,10 @@ def _classified_form_intake_schema() -> dict[str, object]:
 
 def _classification_confidence_schema() -> dict[str, object]:
     return {"type": "string", "enum": ["high", "medium", "low"]}
+
+
+def _classification_evidence_level_schema() -> dict[str, object]:
+    return {"type": "string", "enum": ["explicit", "inferred"]}
 
 
 def _classification_reason_schema() -> dict[str, object]:
@@ -619,6 +640,11 @@ def _build_slot_classification_prompt(
         "characters. Shorten by selecting a shorter exact span, never by "
         "paraphrasing. "
         "If you cannot cite exact evidence, emit confidence low. "
+        "For each slot, set evidence_level to explicit only when the quoted "
+        "evidence directly states that specific slot choice. Set evidence_level "
+        "to inferred when the value is a reasonable model interpretation, "
+        "default, implication, or attachment-only conclusion rather than a "
+        "direct user-owned choice. "
         "Interpret natural Swedish and English phrasing by meaning, not by exact "
         "keywords. The allowed values are framework concepts, so choose a value only "
         "when a normal product user would reasonably expect that architecture. "
@@ -669,6 +695,10 @@ def _build_slot_classification_prompt(
         "from the source material and no separate per-run fields are requested. "
         "If the user says values should be derived from source material, do not "
         "classify that as runtime form fields. "
+        "For runtime_metadata_fields, evidence_level explicit requires the quote "
+        "to directly say whether the runtime user will or will not provide "
+        "separate form fields or metadata at run time. Output fields extracted "
+        "from documents are not explicit runtime metadata evidence. "
         "For form_intake, classify needs_form_fields=true only when the user "
         "wants runtime values that are separate from the primary source material; "
         "classify sectioned_form_intake=true when the user wants a repeated set "
@@ -706,7 +736,7 @@ def _build_slot_classification_prompt(
         f"{obligation_values}\n\n"
         "Return JSON with this shape:\n"
         "{"
-        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]}], '
+        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str], "evidence_level": "explicit"|"inferred"}], '
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [exact_quote_str]} | null, '
         '"secondary_obligations": [str], '

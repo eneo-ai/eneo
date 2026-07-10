@@ -249,6 +249,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
                 confidence="high",
                 reason=f"{slot_name} evidence",
                 evidence=(f"{slot_name} quote",),
+                evidence_level="explicit",
             )
             for slot_name, value in values_by_slot.items()
         ),

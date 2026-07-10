@@ -49,6 +49,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationConfidence,
+    SlotClassificationEvidenceLevel,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
@@ -102,6 +103,7 @@ class SlotClassificationSlotMetadata(BaseModel):
         min_length=1,
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     )
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
 
     @model_validator(mode="after")
     def validate_slot_value(self) -> "SlotClassificationSlotMetadata":
@@ -117,6 +119,7 @@ class SlotClassificationSlotMetadata(BaseModel):
             confidence=self.confidence,
             reason=self.reason,
             evidence=tuple(self.evidence),
+            evidence_level=self.evidence_level,
         )
 
 
@@ -572,6 +575,7 @@ def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object]
             fallback="slot classification",
         ),
         "evidence": evidence,
+        "evidence_level": slot.evidence_level,
     }
 
 

@@ -61,6 +61,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     detach_session_attachment,
     get_plan,
     get_session,
+    get_session_classifier_slot_diagnostics,
     get_session_models,
     list_session_plans,
     list_sessions,
@@ -755,6 +756,152 @@ class TestGetSessionEndpoint:
         assert result.session_id == session.id
         assert result.status == session.status
         assert result.target_kind == session.target_kind
+
+    @pytest.mark.anyio
+    async def test_projects_public_conversation_without_internal_tool_trace(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="PDF, tack.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_option_ids": ["pdf"],
+                    },
+                    "slot_classification": {"internal": "not public"},
+                },
+            ),
+            ConversationMessage(
+                message_id="assistant-1",
+                role="assistant",
+                content="Vilket slutformat vill du ha?",
+                tool_calls=[
+                    {
+                        "id": "tool-question",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "terminal_output",
+                            "question": "Vilket slutformat vill du ha?",
+                            "options": [{"id": "pdf", "label": "PDF"}],
+                            "selection_mode": "single",
+                            "allow_custom": False,
+                        },
+                    },
+                    {
+                        "id": "tool-summary",
+                        "name": "confirm_requirements",
+                        "arguments": {},
+                    },
+                ],
+                metadata={"planner_telemetry": {"internal": "not public"}},
+            ),
+            ConversationMessage(
+                message_id="tool-1",
+                role="tool",
+                tool_call_id="tool-summary",
+                metadata={
+                    "requirements_summary": {
+                        "summary": "Bygg ett PDF-flöde.",
+                        "key_decisions": [{"topic": "Slutformat", "decision": "PDF"}],
+                        "input_description": "Uppladdade filer",
+                        "output_description": "PDF",
+                        "requirements_version": "req-1",
+                    },
+                    "requirements_version": "req-1",
+                },
+            ),
+            ConversationMessage(
+                message_id="system-1",
+                role="system",
+                content="Hidden planner note",
+                metadata={"internal": "not public"},
+            ),
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        service.get_session_attachment_snapshot.return_value = SimpleNamespace(
+            files=[],
+            warnings=[],
+        )
+
+        result = await get_session(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        dumped = result.model_dump(mode="json")
+        assert [message["role"] for message in dumped["conversation"]] == [
+            "user",
+            "assistant",
+        ]
+        for message in dumped["conversation"]:
+            assert "metadata" not in message
+            assert "tool_calls" not in message
+            assert "tool_call_id" not in message
+
+        user_message = result.conversation[0]
+        assistant_message = result.conversation[1]
+        assert user_message.question_answer is not None
+        assert user_message.question_answer.question_id == "terminal_output"
+        assert assistant_message.question is not None
+        assert assistant_message.question.question_id == "terminal_output"
+        assert assistant_message.requirements_summary is not None
+        assert assistant_message.requirements_summary.summary == "Bygg ett PDF-flöde."
+
+    @pytest.mark.anyio
+    async def test_classifier_diagnostics_reads_persisted_metadata(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                message_id="assistant-1",
+                role="assistant",
+                content="Jag förstår att flödet bara ska transkribera.",
+                metadata={
+                    "slot_classification": {
+                        "prompt_hash": "a" * 64,
+                        "slots": [
+                            {
+                                "slot_name": "post_processing_goal",
+                                "value": "stop_after_primary_operation",
+                                "confidence": "high",
+                                "reason": "The user asked for transcription only.",
+                                "evidence": ["bara får en ordagrann transkription"],
+                                "evidence_level": "explicit",
+                            }
+                        ],
+                    }
+                },
+            )
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        result = await get_session_classifier_slot_diagnostics(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result == {
+            "session_id": str(session.id),
+            "classifier_slot_rows": [
+                {
+                    "message_id": "assistant-1",
+                    "slot_name": "post_processing_goal",
+                    "value": "stop_after_primary_operation",
+                    "confidence": "high",
+                    "reason": "The user asked for transcription only.",
+                    "evidence": ["bara får en ordagrann transkription"],
+                    "evidence_level": "explicit",
+                }
+            ],
+        }
+        service.get_session_attachment_snapshot.assert_not_called()
 
     @pytest.mark.anyio
     async def test_returns_session_attachments(self):

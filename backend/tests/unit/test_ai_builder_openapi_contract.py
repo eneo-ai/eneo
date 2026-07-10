@@ -25,6 +25,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 }
 
 REQUIRED_SCHEMAS = {
+    "AIBuilderConversationMessage",
     "AIBuilderDoneEvent",
     "AIBuilderDiagnosticContext",
     "AIBuilderErrorEvent",
@@ -267,6 +268,47 @@ def test_openapi_session_response_includes_telemetry_field(openapi_spec: dict) -
     session_response = schemas["SessionResponse"]
     telemetry_property = session_response["properties"].get("telemetry")
     assert telemetry_property is not None
+
+
+def test_openapi_session_conversation_uses_public_projection(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    session_response = schemas["SessionResponse"]
+
+    conversation_refs = _schema_refs(session_response["properties"]["conversation"])
+    assert "#/components/schemas/AIBuilderConversationMessage" in conversation_refs
+    assert "#/components/schemas/ConversationMessage" not in conversation_refs
+
+    public_message = schemas["AIBuilderConversationMessage"]
+    public_properties = set(public_message["properties"])
+    assert {
+        "message_id",
+        "role",
+        "content",
+        "timestamp",
+        "question",
+        "requirements_summary",
+        "question_answer",
+        "requirements_confirmation",
+    }.issubset(public_properties)
+    assert not {
+        "metadata",
+        "tool_calls",
+        "tool_call_id",
+    }.intersection(public_properties)
+    assert public_message["additionalProperties"] is False
+
+
+def test_openapi_ai_builder_classifier_diagnostics_are_internal(
+    openapi_spec: dict,
+) -> None:
+    paths = openapi_spec.get("paths", {})
+
+    assert (
+        "/api/v1/flows/ai-builder/sessions/{session_id}/_diagnostics/classifier-slots"
+        not in paths
+    )
 
 
 def test_openapi_revise_plan_request_is_keep_current_only(openapi_spec: dict) -> None:

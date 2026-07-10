@@ -56,6 +56,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
                         "confidence": "high",
                         "reason": "explicit PDF report",
                         "evidence": ["Slutrapporten ska vara en pdf fil"],
+                        "evidence_level": "explicit",
                     },
                     {
                         "slot_name": "terminal_output",
@@ -101,6 +102,8 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     assert result.slots[0].value == "pdf_document"
     assert result.slots[1].value == "unknown"
     assert result.slots[0].evidence == ("Slutrapporten ska vara en pdf fil",)
+    assert result.slots[0].evidence_level == "explicit"
+    assert result.slots[1].evidence_level == "inferred"
     assert result.assumptions == ("PDF is requested",)
     assert result.contradictions == ("input is ambiguous",)
 
@@ -309,7 +312,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 11,
+                    "schema_version": 12,
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -530,7 +533,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
-    assert json_schema["name"] == "ai_builder_slot_classification_v11"
+    assert json_schema["name"] == "ai_builder_slot_classification_v12"
     assert json_schema["strict"] is False
 
     schema = json_schema["schema"]
@@ -554,6 +557,11 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "audio",
         "documents",
         "unknown",
+    ]
+    assert "evidence_level" in slot_variant["required"]
+    assert slot_variant["properties"]["evidence_level"]["enum"] == [
+        "explicit",
+        "inferred",
     ]
     assert (
         slot_variant["properties"]["reason"]["maxLength"]
