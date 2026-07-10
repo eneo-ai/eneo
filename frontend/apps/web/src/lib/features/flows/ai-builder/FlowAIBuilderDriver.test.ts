@@ -692,6 +692,195 @@ describe("FlowAIBuilderDriver", () => {
     );
   });
 
+  it("refreshes a structured-answer turn when the stream closes without a visible next action", async () => {
+    const refreshedSession = makeSession({
+      conversation: [
+        {
+          message_id: "assistant-source-question",
+          role: "assistant",
+          content: "Jag behöver förstå slutresultatet lite bättre.",
+          timestamp: "2026-03-15T10:00:00Z",
+          question: {
+            question_id: "source_traceability",
+            question: "Hur ska källor visas i slutresultatet?",
+            options: [{ id: "none", label: "Inga källhänvisningar", value: "none" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          }
+        },
+        {
+          message_id: "user-source-answer",
+          role: "user",
+          content: "Inga källhänvisningar",
+          timestamp: "2026-03-15T10:00:05Z",
+          question_answer: {
+            kind: "structured_question_answer",
+            question_id: "source_traceability",
+            selected_option_ids: ["none"],
+            selected_values: ["none"]
+          }
+        },
+        {
+          message_id: "assistant-reading-question",
+          role: "assistant",
+          content: "Jag behöver förstå detaljnivån lite bättre.",
+          timestamp: "2026-03-15T10:00:10Z",
+          question: {
+            question_id: "reading_depth",
+            question: "Hur ska dokumentgranskningen tas fram?",
+            options: [{ id: "overview", label: "Kort översikt", value: "overview" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          }
+        }
+      ]
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(refreshedSession);
+    const { driver, stream } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        expect(init.requestBody["application/json"].question_answer).toEqual({
+          kind: "structured_question_answer",
+          question_id: "source_traceability",
+          selected_option_ids: ["none"],
+          selected_values: ["none"]
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Inga källhänvisningar", {
+      kind: "structured_question_answer",
+      question_id: "source_traceability",
+      selected_option_ids: ["none"],
+      selected_values: ["none"]
+    });
+
+    expect(stream).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({
+        method: "get",
+        params: { path: { session_id: "session-1" } }
+      })
+    );
+    expect(driver.state.messages.at(-1)?.question?.question_id).toBe("reading_depth");
+    expect(driver.isQuestionAnswered("source_traceability")).toBe(true);
+  });
+
+  it("does not refresh a structured-answer turn when the stream already renders the next question", async () => {
+    const fetch = vi.fn();
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "question",
+          data: JSON.stringify({
+            question_id: "reading_depth",
+            question: "Hur ska dokumentgranskningen tas fram?",
+            options: [{ id: "overview", label: "Kort översikt", value: "overview" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          })
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Inga källhänvisningar", {
+      kind: "structured_question_answer",
+      question_id: "source_traceability",
+      selected_option_ids: ["none"],
+      selected_values: ["none"]
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(driver.state.messages.at(-1)?.question?.question_id).toBe("reading_depth");
+  });
+
+  it("refreshes instead of rendering a repeated answered question from the stream", async () => {
+    const refreshedSession = makeSession({
+      conversation: [
+        {
+          message_id: "assistant-source-question",
+          role: "assistant",
+          content: "Jag behöver förstå slutresultatet lite bättre.",
+          timestamp: "2026-03-15T10:00:00Z",
+          question: {
+            question_id: "source_traceability",
+            question: "Hur ska källor visas i slutresultatet?",
+            options: [{ id: "none", label: "Inga källhänvisningar", value: "none" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          }
+        },
+        {
+          message_id: "user-source-answer",
+          role: "user",
+          content: "Inga källhänvisningar",
+          timestamp: "2026-03-15T10:00:05Z",
+          question_answer: {
+            kind: "structured_question_answer",
+            question_id: "source_traceability",
+            selected_option_ids: ["none"],
+            selected_values: ["none"]
+          }
+        },
+        {
+          message_id: "assistant-summary",
+          role: "assistant",
+          content: "Jag har tillräckligt med information.",
+          timestamp: "2026-03-15T10:00:10Z",
+          requirements_summary: {
+            summary: "Bygg ett PDF-flöde utan källhänvisningar.",
+            key_decisions: [{ topic: "Källspårning", decision: "Inga källhänvisningar" }],
+            input_description: "Uppladdade filer",
+            output_description: "PDF",
+            requirements_version: "req-after-source"
+          }
+        }
+      ]
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(refreshedSession);
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "question",
+          data: JSON.stringify({
+            question_id: "source_traceability",
+            question: "Hur ska källor visas i slutresultatet?",
+            options: [{ id: "none", label: "Inga källhänvisningar", value: "none" }],
+            selection_mode: "single",
+            allow_custom: true,
+            requires_confirm: false
+          })
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Inga källhänvisningar", {
+      kind: "structured_question_answer",
+      question_id: "source_traceability",
+      selected_option_ids: ["none"],
+      selected_values: ["none"]
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(driver.state.messages.at(-1)?.question?.question_id).not.toBe("source_traceability");
+    expect(driver.state.messages.at(-1)?.requirementsSummary?.requirements_version).toBe(
+      "req-after-source"
+    );
+  });
+
   it("forwards file_ids with AI Builder messages", async () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
@@ -1136,17 +1325,20 @@ describe("FlowAIBuilderDriver", () => {
           latest_plan_id: "plan-9",
           conversation: [
             {
+              message_id: "legacy-user-1",
               role: "user",
               content: "Bygg ett ljudflöde",
               timestamp: "2026-03-15T10:00:00Z"
             },
             {
+              message_id: "legacy-assistant-1",
               role: "assistant",
               content: "Jag behöver bekräfta kraven först.",
               timestamp: "2026-03-15T10:00:05Z",
               tool_calls: [{ id: "tool-1", name: "confirm_requirements", arguments: {} }]
             },
             {
+              message_id: "legacy-tool-1",
               role: "tool",
               tool_call_id: "tool-1",
               metadata: {
@@ -1179,6 +1371,86 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan?.plan_id).toBe("plan-9");
   });
 
+  it("hydrates public conversation projection fields when resuming a draft session", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-public-conversation",
+          status: "chatting",
+          conversation: [
+            {
+              message_id: "assistant-question",
+              role: "assistant",
+              content: "Vilket slutformat vill du ha?",
+              timestamp: "2026-03-15T10:00:00Z",
+              question: {
+                question_id: "terminal_output",
+                question: "Vilket slutformat vill du ha?",
+                options: [{ id: "pdf", label: "PDF" }],
+                selection_mode: "single",
+                allow_custom: false,
+                requires_confirm: false
+              }
+            },
+            {
+              message_id: "user-answer",
+              role: "user",
+              content: "PDF",
+              timestamp: "2026-03-15T10:00:05Z",
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "terminal_output",
+                selected_option_ids: ["pdf"]
+              }
+            },
+            {
+              message_id: "assistant-summary",
+              role: "assistant",
+              content: "Jag har tillräckligt med information.",
+              timestamp: "2026-03-15T10:00:10Z",
+              requirements_summary: {
+                summary: "Bygg ett PDF-flöde.",
+                key_decisions: [{ topic: "Slutformat", decision: "PDF" }],
+                input_description: "Uppladdade filer",
+                output_description: "PDF",
+                requirements_version: "req-public"
+              }
+            },
+            {
+              message_id: "user-confirmation",
+              role: "user",
+              content: "Ja, bygg planen.",
+              timestamp: "2026-03-15T10:00:15Z",
+              requirements_confirmation: {
+                kind: "requirements_confirmation",
+                requirements_confirmed: true,
+                requirements_version: "req-public"
+              }
+            }
+          ]
+        })
+      )
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    await driver.resumeSession("session-public-conversation");
+
+    expect(driver.state.messages[0]?.question?.question_id).toBe("terminal_output");
+    expect(driver.state.messages[1]?.metadata).toEqual({
+      question_answer: {
+        question_id: "terminal_output",
+        selected_option_ids: ["pdf"]
+      }
+    });
+    expect(driver.state.messages[2]?.requirementsSummary?.summary).toBe("Bygg ett PDF-flöde.");
+    expect(driver.state.messages[3]?.metadata).toEqual({
+      requirements_confirmed: true,
+      requirements_version: "req-public"
+    });
+  });
+
   it("hydrates requirements summary stored on assistant metadata", async () => {
     const fetch = vi
       .fn()
@@ -1188,11 +1460,13 @@ describe("FlowAIBuilderDriver", () => {
           status: "chatting",
           conversation: [
             {
+              message_id: "legacy-metadata-user-1",
               role: "user",
               content: "Bygg ett dokumentflöde",
               timestamp: "2026-03-15T10:00:00Z"
             },
             {
+              message_id: "legacy-metadata-assistant-1",
               role: "assistant",
               content: "Jag har tillräckligt med information.",
               timestamp: "2026-03-15T10:00:05Z",

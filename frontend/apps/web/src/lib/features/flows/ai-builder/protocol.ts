@@ -13,7 +13,10 @@ import type {
   components,
   operations
 } from "@eneo/eneo-js";
-import type { StructuredQuestion } from "./structuredQuestionAnswer";
+import type {
+  StructuredQuestion,
+  StructuredQuestionAnswerMetadata
+} from "./structuredQuestionAnswer";
 
 type SendAIBuilderMessageOperation = operations["send_ai_builder_message"];
 type GeneratedAIBuilderParsedStreamEvent =
@@ -60,12 +63,32 @@ export interface AIBuilderConversationToolCall {
   arguments?: Record<string, unknown> | null;
 }
 
+export interface AIBuilderRequirementsConfirmationMetadata {
+  kind?: "requirements_confirmation";
+  requirements_confirmed: true;
+  requirements_version?: string | null;
+  ui_language?: string | null;
+}
+
 export type AIBuilderConversationMessage = Omit<
   GeneratedAIBuilderConversationMessage,
-  "role" | "tool_calls"
+  | "role"
+  | "metadata"
+  | "tool_calls"
+  | "tool_call_id"
+  | "question"
+  | "requirements_summary"
+  | "question_answer"
+  | "requirements_confirmation"
 > & {
   role: "user" | "assistant" | "tool" | "system";
+  question?: StructuredQuestion | null;
+  requirements_summary?: RequirementsSummary | null;
+  question_answer?: StructuredQuestionAnswerMetadata | null;
+  requirements_confirmation?: AIBuilderRequirementsConfirmationMetadata | null;
+  metadata?: Record<string, unknown> | null;
   tool_calls?: AIBuilderConversationToolCall[] | null;
+  tool_call_id?: string | null;
 };
 
 export type AIBuilderAttachmentFile = GeneratedAIBuilderAttachmentFile;

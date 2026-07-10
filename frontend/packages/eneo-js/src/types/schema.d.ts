@@ -8582,6 +8582,24 @@ export interface components {
       /** Unknown Model Context Window Tokens */
       unknown_model_context_window_tokens?: number | null;
     };
+    /** AIBuilderConversationMessage */
+    AIBuilderConversationMessage: {
+      /** Message Id */
+      message_id: string;
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: "user" | "assistant";
+      /** Content */
+      content?: string | null;
+      /** Timestamp */
+      timestamp?: string | null;
+      question?: components["schemas"]["StructuredQuestionPayload"] | null;
+      requirements_summary?: components["schemas"]["RequirementsSummaryPayload"] | null;
+      question_answer?: components["schemas"]["StructuredQuestionAnswerMetadata"] | null;
+      requirements_confirmation?: components["schemas"]["RequirementsConfirmationMetadata"] | null;
+    };
     /** AIBuilderDiagnosticContext */
     AIBuilderDiagnosticContext: {
       /** Session Id */
@@ -8698,7 +8716,8 @@ export interface components {
      * AIBuilderOutputMode
      * @enum {string}
      */
-    AIBuilderOutputMode: "pass_through" | "transcribe_only" | "template_fill";
+    AIBuilderOutputMode:
+      "pass_through" | "compose_text" | "transcribe_only" | "template_fill" | "render_verbatim";
     /**
      * AIBuilderPlanEditContext
      * @description Structured intent for revising an already proposed AI Builder plan.
@@ -11567,38 +11586,6 @@ export interface components {
       /** Total Questions */
       total_questions: number;
     };
-    /** ConversationMessage */
-    ConversationMessage: {
-      /**
-       * Message Id
-       * @description Stable id for this conversation turn. Used by evidence refs that must survive conversation compaction (positional indices do not).
-       */
-      message_id?: string;
-      /** Role */
-      role: string;
-      /** Content */
-      content?: string | null;
-      /**
-       * Tool Call Id
-       * @description Planner-internal correlation id for a tool response turn.
-       */
-      tool_call_id?: string | null;
-      /**
-       * Tool Calls
-       * @description Planner-internal tool trace metadata kept in the conversation history for debugging and replay. API consumers should not treat the exact tool trace shape as a stable business contract.
-       */
-      tool_calls?:
-        | {
-            [key: string]: unknown;
-          }[]
-        | null;
-      /** Metadata */
-      metadata?: {
-        [key: string]: unknown;
-      } | null;
-      /** Timestamp */
-      timestamp?: string | null;
-    };
     /** ConversationRenameRequest */
     ConversationRenameRequest: {
       /** Name */
@@ -12911,7 +12898,9 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v7";
+      schema_version: "flow-evidence-export.v8";
+      /** App Version */
+      app_version: string;
       /** Provenance Schema Version Min */
       provenance_schema_version_min: string;
       /** Provenance Schema Version Current */
@@ -13618,6 +13607,7 @@ export interface components {
       | "typed_io_http_response_too_large"
       | "typed_io_http_ssrf_blocked"
       | "typed_io_http_timeout"
+      | "typed_io_input_exceeds_model_window"
       | "typed_io_input_too_large"
       | "typed_io_invalid_file_type"
       | "typed_io_invalid_input_source_combination"
@@ -14087,7 +14077,13 @@ export interface components {
      * FlowOutputMode
      * @enum {string}
      */
-    FlowOutputMode: "pass_through" | "http_post" | "transcribe_only" | "template_fill";
+    FlowOutputMode:
+      | "pass_through"
+      | "compose_text"
+      | "http_post"
+      | "transcribe_only"
+      | "template_fill"
+      | "render_verbatim";
     /**
      * FlowOutputType
      * @enum {string}
@@ -15513,6 +15509,7 @@ export interface components {
         | "typed_io_http_response_too_large"
         | "typed_io_http_ssrf_blocked"
         | "typed_io_http_timeout"
+        | "typed_io_input_exceeds_model_window"
         | "typed_io_input_too_large"
         | "typed_io_invalid_file_type"
         | "typed_io_invalid_input_source_combination"
@@ -15734,6 +15731,7 @@ export interface components {
      *       "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
+     *         "app_version": "DEV",
      *         "artifact_availability_summary": {
      *           "artifact_count": 1,
      *           "artifacts": [
@@ -15800,7 +15798,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v7",
+     *         "schema_version": "flow-evidence-export.v8",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -15820,7 +15818,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v7",
+     *       "schema_version": "flow-evidence-export.v8",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -16138,7 +16136,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v7";
+      schema_version: "flow-evidence-export.v8";
       /**
        * Generated At
        * Format: date-time
@@ -16670,6 +16668,7 @@ export interface components {
             | "typed_io_http_response_too_large"
             | "typed_io_http_ssrf_blocked"
             | "typed_io_http_timeout"
+            | "typed_io_input_exceeds_model_window"
             | "typed_io_input_too_large"
             | "typed_io_invalid_file_type"
             | "typed_io_invalid_input_source_combination"
@@ -17430,6 +17429,7 @@ export interface components {
             | "typed_io_http_response_too_large"
             | "typed_io_http_ssrf_blocked"
             | "typed_io_http_timeout"
+            | "typed_io_input_exceeds_model_window"
             | "typed_io_input_too_large"
             | "typed_io_invalid_file_type"
             | "typed_io_invalid_input_source_combination"
@@ -18222,6 +18222,7 @@ export interface components {
             | "typed_io_http_response_too_large"
             | "typed_io_http_ssrf_blocked"
             | "typed_io_http_timeout"
+            | "typed_io_input_exceeds_model_window"
             | "typed_io_input_too_large"
             | "typed_io_invalid_file_type"
             | "typed_io_invalid_input_source_combination"
@@ -19757,6 +19758,13 @@ export interface components {
       finished_at?: string | null;
     };
     JsonValue: unknown;
+    /** KeyDecisionPayload */
+    KeyDecisionPayload: {
+      /** Topic */
+      topic: string;
+      /** Decision */
+      decision: string;
+    };
     /** Knowledge */
     Knowledge: {
       groups: components["schemas"]["PaginatedPermissions_CollectionPublic_"];
@@ -22500,6 +22508,23 @@ export interface components {
       /** Ui Language */
       ui_language?: string | null;
     };
+    /** RequirementsSummaryPayload */
+    RequirementsSummaryPayload: {
+      /** Requirements Version */
+      requirements_version?: string | null;
+      /** Summary */
+      summary: string;
+      /** Key Decisions */
+      key_decisions: components["schemas"]["KeyDecisionPayload"][];
+      /** Input Description */
+      input_description: string;
+      /** Output Description */
+      output_description: string;
+      /** Assumptions */
+      assumptions?: string[];
+      /** Manual Setup Notes */
+      manual_setup_notes?: string[];
+    };
     /**
      * RerunDependencyKind
      * @enum {string}
@@ -22963,7 +22988,7 @@ export interface components {
      *       "model_id": "00000000-0000-0000-0000-000000000010",
      *       "question_answer": {
      *         "kind": "structured_question_answer",
-     *         "question_id": "final_output_mode",
+     *         "question_id": "terminal_output",
      *         "selected_option_ids": [
      *           "structured_json"
      *         ],
@@ -23433,7 +23458,7 @@ export interface components {
       latest_plan_id?: string | null;
       telemetry?: components["schemas"]["SessionTelemetrySummary"] | null;
       /** Conversation */
-      conversation?: components["schemas"]["ConversationMessage"][];
+      conversation?: components["schemas"]["AIBuilderConversationMessage"][];
       /** Attachments */
       attachments?: components["schemas"]["FilePublic"][];
       /** Attachment Warnings */
@@ -24144,6 +24169,38 @@ export interface components {
       custom_value?: string | null;
       /** Ui Language */
       ui_language?: string | null;
+    };
+    /** StructuredQuestionOptionPayload */
+    StructuredQuestionOptionPayload: {
+      /** Id */
+      id?: string | null;
+      /** Label */
+      label: string;
+      /** Value */
+      value?: string | number | boolean | null;
+      /** Description */
+      description?: string | null;
+    };
+    /** StructuredQuestionPayload */
+    StructuredQuestionPayload: {
+      /** Question Id */
+      question_id: string;
+      /** Question */
+      question: string;
+      /** Options */
+      options: components["schemas"]["StructuredQuestionOptionPayload"][];
+      /**
+       * Selection Mode
+       * @enum {string}
+       */
+      selection_mode: "single" | "multi";
+      /** Allow Custom */
+      allow_custom: boolean;
+      /**
+       * Requires Confirm
+       * @default false
+       */
+      requires_confirm?: boolean;
     };
     /**
      * SubscriptionRenewalResult
@@ -26966,78 +27023,14 @@ export interface components {
       /** Text */
       text: string;
     };
+    /**
+     * AIBuilderStatus
+     * @enum {string}
+     */
+    AIBuilderStatus: "architecture_committed" | "architecture_revised" | "repairing";
     /** AIBuilderStatusEventData */
     AIBuilderStatusEventData: {
-      /** Status */
-      status: string;
-    };
-    /** StructuredQuestionOptionPayload */
-    StructuredQuestionOptionPayload: {
-      /**
-       * Id
-       * @default null
-       */
-      id?: string | null;
-      /** Label */
-      label: string;
-      /**
-       * Value
-       * @default null
-       */
-      value?: string | number | boolean | null;
-      /**
-       * Description
-       * @default null
-       */
-      description?: string | null;
-    };
-    /** StructuredQuestionPayload */
-    StructuredQuestionPayload: {
-      /** Question Id */
-      question_id: string;
-      /** Question */
-      question: string;
-      /** Options */
-      options: components["schemas"]["StructuredQuestionOptionPayload"][];
-      /**
-       * Selection Mode
-       * @enum {string}
-       */
-      selection_mode: "single" | "multi";
-      /** Allow Custom */
-      allow_custom: boolean;
-      /**
-       * Requires Confirm
-       * @default false
-       */
-      requires_confirm?: boolean;
-    };
-    /** KeyDecisionPayload */
-    KeyDecisionPayload: {
-      /** Topic */
-      topic: string;
-      /** Decision */
-      decision: string;
-    };
-    /** RequirementsSummaryPayload */
-    RequirementsSummaryPayload: {
-      /**
-       * Requirements Version
-       * @default null
-       */
-      requirements_version?: string | null;
-      /** Summary */
-      summary: string;
-      /** Key Decisions */
-      key_decisions: components["schemas"]["KeyDecisionPayload"][];
-      /** Input Description */
-      input_description: string;
-      /** Output Description */
-      output_description: string;
-      /** Assumptions */
-      assumptions?: string[];
-      /** Manual Setup Notes */
-      manual_setup_notes?: string[];
+      status: components["schemas"]["AIBuilderStatus"];
     };
     /** AIBuilderPlanEventData */
     AIBuilderPlanEventData: {
@@ -43399,6 +43392,8 @@ export interface operations {
         limit?: number;
         /** @description Number of runs to skip before returning results. */
         offset?: number;
+        /** @description Filter runs by one or more status values. Repeat `status=` to request multiple statuses. */
+        status?: components["schemas"]["FlowRunStatus"][] | null;
       };
       header?: never;
       path: {
@@ -45063,7 +45058,7 @@ export interface operations {
         content: {
           /**
            * @example event: status
-           *     data: {"status":"thinking"}
+           *     data: {"status":"repairing"}
            *
            *     event: text
            *     data: {"text":"I need one more detail."}

@@ -386,6 +386,8 @@ export class FlowAIBuilderDriver {
 
     let assistantText = "";
     let receivedUsageEvent = false;
+    let receivedDurableStreamEvent = false;
+    let receivedStaleQuestionEvent = false;
 
     try {
       const requestBody: {
@@ -425,10 +427,14 @@ export class FlowAIBuilderDriver {
             switch (event.event) {
               case "text": {
                 assistantText += event.data.text;
+                if (event.data.text.trim()) {
+                  receivedDurableStreamEvent = true;
+                }
                 this.#updateOrAddAssistantMessage(assistantText);
                 return;
               }
               case "plan": {
+                receivedDurableStreamEvent = true;
                 const data = this.#normalizePlan(event.data);
                 this.#state.currentPlan = data;
                 this.#state.statusMessage = null;
@@ -444,10 +450,16 @@ export class FlowAIBuilderDriver {
                 return;
               }
               case "question": {
+                if (this.isQuestionAnswered(event.data.question_id)) {
+                  receivedStaleQuestionEvent = true;
+                  return;
+                }
+                receivedDurableStreamEvent = true;
                 this.#updateOrAddAssistantMessage(assistantText, undefined, event.data);
                 return;
               }
               case "requirements_summary": {
+                receivedDurableStreamEvent = true;
                 this.#updateOrAddAssistantMessage(assistantText, undefined, undefined, event.data);
                 return;
               }
@@ -467,7 +479,11 @@ export class FlowAIBuilderDriver {
                   payload: event.data,
                   fallbackMessage: "The AI Builder stream failed. Please try again."
                 });
-                this.#state.error = isSoftBlockAIBuilderError(data) ? null : data;
+                const isSoftBlock = isSoftBlockAIBuilderError(data);
+                this.#state.error = isSoftBlock ? null : data;
+                if (!isSoftBlock) {
+                  receivedDurableStreamEvent = true;
+                }
                 this.#state.statusMessage = null;
                 this.#notify();
                 return;
@@ -491,7 +507,9 @@ export class FlowAIBuilderDriver {
 
       const shouldRefreshAfterStream =
         (fileIds && fileIds.length > 0) ||
-        (!receivedUsageEvent && this.#state.currentPlan !== null);
+        (!receivedUsageEvent && this.#state.currentPlan !== null) ||
+        (questionAnswer?.kind === "structured_question_answer" &&
+          (!receivedDurableStreamEvent || receivedStaleQuestionEvent));
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.refreshSession();
       }
@@ -882,7 +900,7 @@ export class FlowAIBuilderDriver {
         hydrated.push({
           role: "user",
           content: message.content ?? "",
-          metadata: message.metadata ?? undefined,
+          metadata: this.#metadataFromPublicUserMessage(message),
           timestamp: this.#parseTimestamp(message.timestamp)
         });
         continue;
@@ -898,24 +916,32 @@ export class FlowAIBuilderDriver {
         timestamp: this.#parseTimestamp(message.timestamp)
       };
 
-      const metadataRequirementsSummary = this.#parseRequirementsSummaryFromMetadata(
-        message.metadata
+      const publicRequirementsSummary = this.#parseRequirementsSummary(
+        message.requirements_summary
       );
-      if (metadataRequirementsSummary) {
-        assistantMessage.requirementsSummary = metadataRequirementsSummary;
+      if (publicRequirementsSummary) {
+        assistantMessage.requirementsSummary = publicRequirementsSummary;
+      } else {
+        const metadataRequirementsSummary = this.#parseRequirementsSummaryFromMetadata(
+          message.metadata
+        );
+        if (metadataRequirementsSummary) {
+          assistantMessage.requirementsSummary = metadataRequirementsSummary;
+        }
       }
 
       const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-      const structuredQuestionToolCall = toolCalls.find(
-        (toolCall) => toolCall?.name === "ask_structured_question"
-      );
+      const publicStructuredQuestion = this.#parseStructuredQuestion(message.question);
+      const structuredQuestionToolCall = publicStructuredQuestion
+        ? undefined
+        : toolCalls.find((toolCall) => toolCall?.name === "ask_structured_question");
       const requirementsToolCall = toolCalls.find(
         (toolCall) => toolCall?.name === "confirm_requirements"
       );
 
-      const structuredQuestion = this.#parseStructuredQuestion(
-        structuredQuestionToolCall?.arguments
-      );
+      const structuredQuestion =
+        publicStructuredQuestion ??
+        this.#parseStructuredQuestion(structuredQuestionToolCall?.arguments);
       if (structuredQuestion) {
         assistantMessage.question = structuredQuestion;
       }
@@ -942,6 +968,29 @@ export class FlowAIBuilderDriver {
     }
 
     this.#state.messages = hydrated;
+  }
+
+  #metadataFromPublicUserMessage(
+    message: AIBuilderConversationMessage
+  ): ChatMessage["metadata"] | undefined {
+    const metadata =
+      message.metadata && typeof message.metadata === "object" ? { ...message.metadata } : {};
+
+    if (message.question_answer?.kind === "structured_question_answer") {
+      const questionAnswer = toPersistedQuestionAnswerMetadata(message.question_answer);
+      if (questionAnswer) {
+        metadata.question_answer = questionAnswer;
+      }
+    }
+
+    if (message.requirements_confirmation?.requirements_confirmed === true) {
+      metadata.requirements_confirmed = true;
+      if (message.requirements_confirmation.requirements_version) {
+        metadata.requirements_version = message.requirements_confirmation.requirements_version;
+      }
+    }
+
+    return Object.keys(metadata).length > 0 ? metadata : undefined;
   }
 
   #parseStructuredQuestion(payload: unknown): StructuredQuestion | undefined {
