@@ -3,11 +3,18 @@
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
+  import InternalToolStep from "./InternalToolStep.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
-  import { internalReadFileId, serverDisplayName, toolDisplayName } from "../../internalToolLabels";
+  import {
+    internalReadFileId,
+    internalToolDoneLabel,
+    isInternalServer,
+    serverDisplayName,
+    toolDisplayName
+  } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
@@ -118,18 +125,43 @@
               : toolsStillExecuting && isLastTraced
                 ? "running"
                 : "complete";
+      const toolName = toolDisplayName(tc.tool_name, tc.server_name, tc.title, tc.arguments);
       return {
         // Eneo's own built-in tools get localized labels; otherwise prefer the
         // server-provided title annotation, falling back to the raw tool name.
-        toolName: toolDisplayName(tc.tool_name, tc.server_name, tc.title),
+        toolName,
+        doneLabel: internalToolDoneLabel(tc.tool_name, tc.server_name, tc.arguments) ?? toolName,
         serverName: serverDisplayName(tc.server_name),
         detail: readFileDetail(tc),
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
-        status
+        status,
+        internal: isInternalServer(tc.server_name)
       };
     })
   );
+  // Built-in loopback tools render as slim thinking-style lines in the message
+  // flow; only external MCP calls keep their cards in the reasoning trace.
+  const externalSteps = $derived(tracedSteps.filter((step) => !step.internal));
+  const internalSteps = $derived(tracedSteps.filter((step) => step.internal));
+
+  // Internal steps take up a single line: while the assistant works, only the
+  // latest step shows and each new call replaces the previous one in place;
+  // once the turn completes they fold into a one-line summary that expands to
+  // the full list. A single step never folds — the summary would be no
+  // smaller than the step itself.
+  let internalStepsOpen = $state(false);
+  const internalStepsWorking = $derived(
+    toolsStillExecuting ||
+      internalSteps.some((step) => step.status === "preparing" || step.status === "running")
+  );
+  const internalStepsFailed = $derived(
+    internalSteps.some((step) => step.status === "failed" || step.status === "denied")
+  );
+  const internalStepsSummary = $derived.by(() => {
+    const servers = [...new Set(internalSteps.map((step) => step.serverName))].join(" · ");
+    return `${servers} · ${m.internal_tool_steps_count({ count: internalSteps.length })}`;
+  });
 
   function toggleToolCallExpanded(index: number) {
     if (expandedToolCalls.has(index)) {
@@ -214,14 +246,72 @@
     {/each}
   {/if}
 
-  {#if tracedSteps.length > 0 || reasoningText.trim().length > 0}
+  {#if externalSteps.length > 0 || reasoningText.trim().length > 0}
     <div class="mb-4">
       <ReasoningTrace
-        steps={tracedSteps}
+        steps={externalSteps}
         reasoning={reasoningText}
         working={toolsStillExecuting}
         loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
       />
+    </div>
+  {/if}
+
+  {#if internalSteps.length > 0}
+    {#snippet internalStepLines()}
+      {#each internalSteps as step, i (step.toolCallId ?? i)}
+        <InternalToolStep
+          runningLabel={step.toolName}
+          doneLabel={step.doneLabel}
+          serverName={step.serverName}
+          detail={step.detail}
+          args={step.args}
+          toolCallId={step.toolCallId}
+          status={step.status}
+          onLoadResult={step.toolCallId
+            ? () => chat.getToolCallResult(step.toolCallId!)
+            : undefined}
+        />
+      {/each}
+    {/snippet}
+    <div class="mb-4 flex flex-col gap-0.5">
+      {#if internalStepsWorking}
+        {@const currentStep = internalSteps[internalSteps.length - 1]}
+        <InternalToolStep
+          runningLabel={currentStep.toolName}
+          doneLabel={currentStep.doneLabel}
+          serverName={currentStep.serverName}
+          detail={currentStep.detail}
+          args={currentStep.args}
+          toolCallId={currentStep.toolCallId}
+          status={currentStep.status}
+          onLoadResult={currentStep.toolCallId
+            ? () => chat.getToolCallResult(currentStep.toolCallId!)
+            : undefined}
+        />
+      {:else if internalSteps.length > 1}
+        <button
+          type="button"
+          class="text-muted hover:text-secondary flex w-fit max-w-full items-center gap-1.5 text-sm leading-tight transition-colors"
+          onclick={() => (internalStepsOpen = !internalStepsOpen)}
+          aria-expanded={internalStepsOpen}
+        >
+          <ChevronRight
+            class="h-3.5 w-3.5 shrink-0 transition-transform {internalStepsOpen ? 'rotate-90' : ''}"
+          />
+          {#if internalStepsFailed}
+            <X class="text-negative-default h-3.5 w-3.5 shrink-0" />
+          {/if}
+          <span class="truncate font-medium">{internalStepsSummary}</span>
+        </button>
+        {#if internalStepsOpen}
+          <div class="flex flex-col gap-0.5 pl-7">
+            {@render internalStepLines()}
+          </div>
+        {/if}
+      {:else}
+        {@render internalStepLines()}
+      {/if}
     </div>
   {/if}
 
