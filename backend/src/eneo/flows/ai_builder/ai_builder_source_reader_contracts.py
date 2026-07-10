@@ -471,7 +471,9 @@ def _add_runtime_source_file_id_field(
             ),
             *item_fields[insert_index:],
         ]
-        updated_fields.append(field.model_copy(update={"item_fields": updated_item_fields}))
+        updated_fields.append(
+            field.model_copy(update={"item_fields": updated_item_fields})
+        )
     return updated_fields
 
 

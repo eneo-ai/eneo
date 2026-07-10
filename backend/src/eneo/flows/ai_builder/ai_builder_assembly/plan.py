@@ -402,7 +402,9 @@ def _structured_field_paths(
             f"{parent_path}.{field.name}" if parent_path is not None else field.name
         )
         paths.append((field_path, field.name))
-        nested_fields = field.fields if field.field_type == "object" else field.item_fields
+        nested_fields = (
+            field.fields if field.field_type == "object" else field.item_fields
+        )
         if nested_fields:
             paths.extend(_structured_field_paths(nested_fields, parent_path=field_path))
     return tuple(paths)
@@ -416,9 +418,8 @@ def _validate_per_source_reader_contracts(steps: tuple[PlannedStep, ...]) -> Non
     for step in steps:
         if step.runtime_input_execution_mode != "per_source":
             continue
-        if (
-            len(step.output_fields) == 1
-            and structured_fields_have_document_items(step.output_fields)
+        if len(step.output_fields) == 1 and structured_fields_have_document_items(
+            step.output_fields
         ):
             continue
         raise ValueError(

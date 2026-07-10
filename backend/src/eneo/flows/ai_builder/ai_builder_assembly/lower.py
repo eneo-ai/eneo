@@ -252,13 +252,17 @@ def _compose_report_title_question(
     ui_language: str | None,
 ) -> str:
     if overview_step is not None:
-        return f"# {{{{ {overview_step.plan_step_ref}.output.structured.report_title }}}}"
+        return (
+            f"# {{{{ {overview_step.plan_step_ref}.output.structured.report_title }}}}"
+        )
     return "# Source report" if ui_language == "en" else "# Rapport per källa"
 
 
 def _compose_section_item_template(ui_language: str | None) -> str:
     source_label = "Source" if ui_language == "en" else "Källa"
-    return f"## {{section_title}}\n\n{{section_body}}\n\n{source_label}: {{source_label}}"
+    return (
+        f"## {{section_title}}\n\n{{section_body}}\n\n{source_label}: {{source_label}}"
+    )
 
 
 def _compose_overview_label(ui_language: str | None) -> str:

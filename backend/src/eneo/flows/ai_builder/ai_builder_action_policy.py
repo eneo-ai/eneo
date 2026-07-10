@@ -248,7 +248,8 @@ def _report_disposition_is_required(session_state: PlanningState) -> bool:
     docx_output_mode = session_state.resolved_slots.get("docx_output_mode")
     return (
         primary_runtime_input is not None
-        and primary_runtime_input.value in {"document", "documents", "text_and_documents"}
+        and primary_runtime_input.value
+        in {"document", "documents", "text_and_documents"}
         and terminal_output is not None
         and terminal_output.value in {"pdf_document", "docx_document"}
         and not (

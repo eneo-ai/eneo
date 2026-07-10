@@ -98,9 +98,9 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     assert context is not None
     assert context.final_output_type == OutputType.DOCX
     assert context.terminal_output_schema is None
-    assert [hint.variable_name for hint in context.template_placeholder_field_hints] == [
-        "kundnamn"
-    ]
+    assert [
+        hint.variable_name for hint in context.template_placeholder_field_hints
+    ] == ["kundnamn"]
 
 
 def test_compile_context_requires_only_summary_source_reader_obligation() -> None:
