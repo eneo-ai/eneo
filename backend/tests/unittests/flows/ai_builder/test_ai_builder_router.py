@@ -888,7 +888,7 @@ class TestGetSessionEndpoint:
             container=container,
         )
 
-        assert result == {
+        assert result.model_dump(mode="json") == {
             "session_id": str(session.id),
             "classifier_slot_rows": [
                 {

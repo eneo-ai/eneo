@@ -10,6 +10,7 @@ from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerRequest,
     RequirementsConfirmationMetadata,
+    SlotClassificationSlotMetadata,
     StructuredQuestionAnswerMetadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -205,6 +206,17 @@ class AIBuilderConversationMessage(BaseModel):
     requirements_summary: RequirementsSummaryPayload | None = None
     question_answer: StructuredQuestionAnswerMetadata | None = None
     requirements_confirmation: RequirementsConfirmationMetadata | None = None
+
+
+class AIBuilderClassifierSlotDiagnostic(SlotClassificationSlotMetadata):
+    message_id: str
+
+
+class AIBuilderClassifierSlotDiagnosticsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    classifier_slot_rows: list[AIBuilderClassifierSlotDiagnostic]
 
 
 class CreateSessionRequest(BaseModel):

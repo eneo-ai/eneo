@@ -21,6 +21,8 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_api_models import (
+    AIBuilderClassifierSlotDiagnostic,
+    AIBuilderClassifierSlotDiagnosticsResponse,
     AIBuilderConversationMessage,
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -369,23 +371,23 @@ def _to_public_conversation(
 
 def _classifier_slot_diagnostic_rows(
     conversation: list[ConversationMessage],
-) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
+) -> list[AIBuilderClassifierSlotDiagnostic]:
+    rows: list[AIBuilderClassifierSlotDiagnostic] = []
     for message in conversation:
         classification = slot_classification_from_metadata(message.metadata)
         if classification is None:
             continue
         for slot in classification.slots:
             rows.append(
-                {
-                    "message_id": message.message_id,
-                    "slot_name": slot.slot_name,
-                    "value": slot.value,
-                    "confidence": slot.confidence,
-                    "reason": slot.reason,
-                    "evidence": list(slot.evidence),
-                    "evidence_level": slot.evidence_level,
-                }
+                AIBuilderClassifierSlotDiagnostic(
+                    message_id=message.message_id,
+                    slot_name=slot.slot_name,
+                    value=slot.value,
+                    confidence=slot.confidence,
+                    reason=slot.reason,
+                    evidence=list(slot.evidence),
+                    evidence_level=slot.evidence_level,
+                )
             )
     return rows
 
@@ -979,6 +981,22 @@ async def get_session(
 
 @router.get(
     "/sessions/{session_id}/_diagnostics/classifier-slots",
+    response_model=AIBuilderClassifierSlotDiagnosticsResponse,
+    description="Return persisted classifier slot evidence for creator-only internal evaluation.",
+    responses={
+        200: {"description": "Persisted classifier slot diagnostics."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        ),
+    },
     include_in_schema=False,
 )
 async def get_session_classifier_slot_diagnostics(
@@ -988,7 +1006,7 @@ async def get_session_classifier_slot_diagnostics(
         Path(description="Identifier of the AI Builder session to inspect."),
     ],
     container: ContainerWithUserDep,
-) -> dict[str, object]:
+) -> AIBuilderClassifierSlotDiagnosticsResponse:
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
     await _authorize_ai_builder_request(
@@ -999,10 +1017,10 @@ async def get_session_classifier_slot_diagnostics(
         session=session,
         require_creator=True,
     )
-    return {
-        "session_id": str(session.id),
-        "classifier_slot_rows": _classifier_slot_diagnostic_rows(session.conversation),
-    }
+    return AIBuilderClassifierSlotDiagnosticsResponse(
+        session_id=session.id,
+        classifier_slot_rows=_classifier_slot_diagnostic_rows(session.conversation),
+    )
 
 
 @router.delete(
