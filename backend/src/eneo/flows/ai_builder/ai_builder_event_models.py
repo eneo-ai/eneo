@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Final, Literal, TypeAlias, cast
 from uuid import UUID
 
@@ -12,6 +13,12 @@ from eneo.flows.ai_builder.ai_builder_telemetry_models import (
 )
 
 JsonScalar: TypeAlias = str | int | float | bool | None
+
+
+class AIBuilderStatus(StrEnum):
+    ARCHITECTURE_COMMITTED = "architecture_committed"
+    ARCHITECTURE_REVISED = "architecture_revised"
+    REPAIRING = "repairing"
 
 
 class StructuredQuestionOptionPayload(BaseModel):
@@ -35,7 +42,7 @@ class AIBuilderTextEventData(BaseModel):
 
 
 class AIBuilderStatusEventData(BaseModel):
-    status: str
+    status: AIBuilderStatus
 
 
 class KeyDecisionPayload(BaseModel):
@@ -200,6 +207,7 @@ __all__ = [
     "AIBuilderPlanEvent",
     "AIBuilderQuestionEvent",
     "AIBuilderRequirementsSummaryEvent",
+    "AIBuilderStatus",
     "AIBuilderStatusEventData",
     "AIBuilderStatusEvent",
     "AIBuilderStreamEvent",

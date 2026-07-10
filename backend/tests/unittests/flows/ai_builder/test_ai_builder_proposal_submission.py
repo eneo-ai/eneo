@@ -15,7 +15,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorPhase
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatus,
+    AIBuilderStreamEvent,
+)
 from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     encode_ai_builder_stream_event,
@@ -204,7 +207,7 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
     )
 
     async def _repair_events(_request):
-        yield build_status_event("repairing")
+        yield build_status_event(AIBuilderStatus.REPAIRING)
 
     with (
         patch(
@@ -341,7 +344,7 @@ async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair()
         assert request.failure_codes == frozenset(
             {"assembly_explicit_refs_not_supported"}
         )
-        yield build_status_event("repairing")
+        yield build_status_event(AIBuilderStatus.REPAIRING)
 
     with (
         patch(
@@ -457,7 +460,10 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
         },
         tool_call_id="call-create-events",
     )
-    expected_events = (build_status_event("one"), _plan_stream_event())
+    expected_events = (
+        build_status_event(AIBuilderStatus.REPAIRING),
+        _plan_stream_event(),
+    )
     expected_wire_events = _wire_events(expected_events)
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(events=expected_events)
@@ -487,7 +493,10 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
         {"plan_rationale": "Edit", "operations": []},
         tool_call_id="call-edit-events",
     )
-    expected_events = (build_status_event("one"), _plan_stream_event())
+    expected_events = (
+        build_status_event(AIBuilderStatus.REPAIRING),
+        _plan_stream_event(),
+    )
     expected_wire_events = _wire_events(expected_events)
     process_edit = AsyncMock(
         return_value=ToolProcessingResult(compiled_proposal=compiled)
@@ -529,7 +538,7 @@ async def test_edit_propose_flow_user_message_routes_to_self_correction() -> Non
     )
 
     async def _repair_events(_request):
-        yield build_status_event("repairing")
+        yield build_status_event(AIBuilderStatus.REPAIRING)
 
     with (
         patch(
@@ -633,7 +642,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
     )
 
     async def _events():
-        yield build_status_event("repairing")
+        yield build_status_event(AIBuilderStatus.REPAIRING)
 
     with (
         patch(
@@ -1129,7 +1138,7 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
     ctx = _make_context(flow=MagicMock(steps=[MagicMock(step_order=1)]))
 
     async def _events():
-        yield build_status_event("repairing")
+        yield build_status_event(AIBuilderStatus.REPAIRING)
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",

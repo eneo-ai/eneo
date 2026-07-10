@@ -715,7 +715,7 @@ async def list_sessions(
                     "schema": ai_builder_stream_event_schema(),
                     "example": (
                         "event: status\n"
-                        'data: {"status":"thinking"}\n\n'
+                        'data: {"status":"repairing"}\n\n'
                         "event: text\n"
                         'data: {"text":"I need one more detail."}\n\n'
                         "event: done\n"

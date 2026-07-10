@@ -15,7 +15,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderQuestionEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderQuestionEvent,
+    AIBuilderStatus,
+)
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionTelemetry,
@@ -279,7 +282,7 @@ async def test_architecture_revision_persists_revised_commit_and_status() -> Non
         "status",
         "requirements_summary",
     ]
-    assert result.events[0].data.status == "architecture_revised"
+    assert result.events[0].data.status == AIBuilderStatus.ARCHITECTURE_REVISED
     first_commit = repo.commit_turn.await_args_list[0].kwargs
     persisted_commit = first_commit["architecture_commit"]
     assert isinstance(persisted_commit, ArchitectureCommit)
@@ -312,7 +315,7 @@ async def test_confirmed_architecture_revision_returns_proposal_continuation() -
 
     assert result.action_kind == "revise_architecture"
     assert [event.event for event in result.events] == ["status"]
-    assert result.events[0].data.status == "architecture_revised"
+    assert result.events[0].data.status == AIBuilderStatus.ARCHITECTURE_REVISED
     assert result.new_planning_state_version == 5
     assert result.proposal_continuation is not None
     assert result.proposal_continuation.planning_state is state

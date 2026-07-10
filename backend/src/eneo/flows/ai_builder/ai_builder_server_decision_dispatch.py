@@ -22,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatus,
     AIBuilderStreamEvent,
     RequirementsSummaryPayload,
 )
@@ -116,14 +117,14 @@ async def dispatch_server_decision(
                 request,
                 decision,
                 action_kind="commit_architecture",
-                status="architecture_committed",
+                status=AIBuilderStatus.ARCHITECTURE_COMMITTED,
             )
         case ReviseArchitecture():
             return await _dispatch_architecture_commit(
                 request,
                 decision,
                 action_kind="revise_architecture",
-                status="architecture_revised",
+                status=AIBuilderStatus.ARCHITECTURE_REVISED,
             )
         case ConfirmRequirements():
             return await _dispatch_requirements_confirmation(request, decision)
@@ -202,7 +203,7 @@ async def _dispatch_architecture_commit(
     decision: CommitArchitecture | ReviseArchitecture,
     *,
     action_kind: ServerDecisionKind,
-    status: Literal["architecture_committed", "architecture_revised"],
+    status: AIBuilderStatus,
 ) -> ServerDecisionDispatchResult:
     new_version = await request.repo.commit_turn(
         turn=request.turn,

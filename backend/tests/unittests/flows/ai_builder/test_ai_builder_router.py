@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderNotFoundException,
     AIBuilderUnauthorizedException,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStatus
 from eneo.flows.ai_builder.ai_builder_events import (
     build_done_event,
     build_plan_event,
@@ -1888,7 +1889,7 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def broken_events(*args, **kwargs):
-            yield build_status_event("thinking")
+            yield build_status_event(AIBuilderStatus.REPAIRING)
             raise RuntimeError("planner stream exploded")
 
         service.send_message.return_value = broken_events()

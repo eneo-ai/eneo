@@ -23,7 +23,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     JsonScalar,
     build_ai_builder_error_event,
 )
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatus,
+    AIBuilderStreamEvent,
+)
 from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     build_text_event,
@@ -506,7 +509,7 @@ async def _request_self_correction_events(
 ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
     ctx = request.ctx
     retry_config = request.retry_config
-    yield build_status_event("repairing")
+    yield build_status_event(AIBuilderStatus.REPAIRING)
     correction_messages = build_tool_retry_messages(
         llm_messages=ctx.llm_messages,
         tool_call=request.tool_call,

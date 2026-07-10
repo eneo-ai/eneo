@@ -33,6 +33,7 @@ REQUIRED_SCHEMAS = {
     "AIBuilderPlanEvent",
     "AIBuilderQuestionEvent",
     "AIBuilderRequirementsSummaryEvent",
+    "AIBuilderStatus",
     "AIBuilderStatusEvent",
     "AIBuilderTextEvent",
     "AIBuilderUsageEvent",
@@ -255,6 +256,23 @@ def test_openapi_ai_builder_sse_stream_uses_only_event_wrappers(
         "#/components/schemas/RequirementsSummaryPayload",
         "#/components/schemas/AIBuilderPublicError",
     }.intersection(_direct_one_of_refs(schema))
+
+
+def test_openapi_ai_builder_status_event_exposes_status_enum(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    status = schemas["AIBuilderStatus"]
+    status_data = schemas["AIBuilderStatusEventData"]
+
+    assert status_data["properties"]["status"] == {
+        "$ref": "#/components/schemas/AIBuilderStatus"
+    }
+    assert set(status["enum"]) == {
+        "architecture_committed",
+        "architecture_revised",
+        "repairing",
+    }
 
 
 def test_openapi_ai_builder_stream_response_does_not_advertise_json(

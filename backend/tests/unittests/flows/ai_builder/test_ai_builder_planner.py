@@ -25,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatus,
     AIBuilderStreamEvent,
     KeyDecisionPayload,
     RequirementsSummaryPayload,
@@ -1396,7 +1397,7 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
         assert isinstance(request.decision, ReviseArchitecture)
         return ServerDecisionDispatchResult(
             action_kind="revise_architecture",
-            events=(build_status_event("architecture_revised"),),
+            events=(build_status_event(AIBuilderStatus.ARCHITECTURE_REVISED),),
             new_planning_state_version=9,
             proposal_continuation=ServerDecisionProposalContinuation(
                 planning_state=continuation_state

@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderPlanEventData,
     AIBuilderQuestionEvent,
     AIBuilderRequirementsSummaryEvent,
+    AIBuilderStatus,
     AIBuilderStatusEvent,
     AIBuilderStatusEventData,
     AIBuilderStreamEvent,
@@ -46,7 +47,7 @@ def build_text_event(text: str) -> AIBuilderTextEvent:
     return AIBuilderTextEvent(data=AIBuilderTextEventData(text=text))
 
 
-def build_status_event(status: str) -> AIBuilderStatusEvent:
+def build_status_event(status: AIBuilderStatus) -> AIBuilderStatusEvent:
     return AIBuilderStatusEvent(data=AIBuilderStatusEventData(status=status))
 
 

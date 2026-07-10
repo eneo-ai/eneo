@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStatus
 from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     encode_ai_builder_stream_event,
@@ -572,7 +573,9 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
     truncated_response.choices[0].message.tool_calls = ()
     processor.litellm_client.acompletion.return_value = truncated_response
     forced_retry = AsyncMock(
-        return_value=ForcedToolRetryOutcome(events=(build_status_event("repairing"),))
+        return_value=ForcedToolRetryOutcome(
+            events=(build_status_event(AIBuilderStatus.REPAIRING),)
+        )
     )
 
     with (
