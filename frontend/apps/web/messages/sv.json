@@ -824,6 +824,7 @@
   "tool_read_file": "Läser bifogad fil",
   "internal_files_server": "Bilagor",
   "mcp_internal_server_hint": "Inbyggt Eneo-verktyg, alltid aktivt",
+  "mcp_internal_tools_always_active": "Alltid aktiva",
   "knowledge_mode_tool_hint": "Assistenten söker i dessa källor när frågan kräver det.",
   "knowledge_mode_inject_hint": "Innehåll från dessa källor infogas i varje meddelande.",
   "models": "Modeller",

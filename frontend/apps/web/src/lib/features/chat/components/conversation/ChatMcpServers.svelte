@@ -112,37 +112,35 @@
       </div>
     </div>
 
+    {#if internalServers.length > 0}
+      <div
+        class="flex items-center gap-2 border-b px-3 py-2"
+        role="group"
+        aria-label={m.mcp_internal_server_hint()}
+      >
+        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          {#each internalServers as server (server.name)}
+            {@const Icon = INTERNAL_SERVER_ICONS[server.name] ?? Plug}
+            <span
+              class="bg-muted text-foreground flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+              title={m.mcp_internal_server_hint()}
+            >
+              <Icon class="text-muted-foreground size-3.5" aria-hidden="true" />
+              {serverDisplayName(server.name)}
+            </span>
+          {/each}
+        </div>
+        <span class="text-muted-foreground shrink-0 text-xs"
+          >{m.mcp_internal_tools_always_active()}</span
+        >
+      </div>
+    {/if}
+
     <div
       class="flex max-h-64 flex-col overflow-y-auto p-1"
       role="group"
       aria-label={m.mcp_servers()}
     >
-      {#each internalServers as server (server.name)}
-        {@const Icon = INTERNAL_SERVER_ICONS[server.name] ?? Plug}
-        {@const label = serverDisplayName(server.name)}
-        <div class="flex items-center gap-2.5 rounded-md px-2 py-2">
-          <span
-            class="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center rounded-md"
-            aria-hidden="true"
-          >
-            <Icon class="size-4" />
-          </span>
-          <span class="min-w-0 flex-1">
-            <span class="text-foreground block truncate text-sm font-medium">{label}</span>
-            <span
-              id="mcp-internal-desc-{server.name}"
-              class="text-muted-foreground block truncate text-xs"
-              >{m.mcp_internal_server_hint()}</span
-            >
-          </span>
-          <Switch
-            checked
-            disabled
-            aria-label={label}
-            aria-describedby="mcp-internal-desc-{server.name}"
-          />
-        </div>
-      {/each}
       {#each servers as server (server.id)}
         {@const on = !disabledServerIds.has(server.id)}
         {@const descId = server.description ? `mcp-desc-${server.id}` : undefined}
