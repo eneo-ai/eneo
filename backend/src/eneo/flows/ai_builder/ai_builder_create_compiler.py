@@ -537,7 +537,7 @@ def _template_placeholder_field_hints_from_planning_state(
         return ()
 
     raw_required = evidence.json_schema.get("required")
-    required_names = (
+    required_names: set[str] = (
         {item for item in raw_required if isinstance(item, str)}
         if isinstance(raw_required, list)
         else set()
@@ -545,8 +545,6 @@ def _template_placeholder_field_hints_from_planning_state(
     hints: list[RuntimeInputFieldHint] = []
     seen: set[str] = set()
     for raw_placeholder in raw_properties:
-        if not isinstance(raw_placeholder, str):
-            continue
         field_name = _template_placeholder_form_field_name(raw_placeholder)
         if field_name is None or field_name in seen:
             continue
