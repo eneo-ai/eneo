@@ -30,7 +30,7 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 
 | Contract                                                 | Type        | Source                                | Forbidden                                                                                                                            | Ignored edges                                                           |
 | -------------------------------------------------------- | ----------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `Flows engine must not import AI Builder`                | `forbidden` | 79 Flow engine root entries           | `eneo.flows.ai_builder`                                                                                                              | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
+| `Flows engine must not import AI Builder`                | `forbidden` | 80 Flow engine root entries           | `eneo.flows.ai_builder`                                                                                                              | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
 | `FCM must not import AI Builder`                         | `forbidden` | `eneo.flows.flow_capability_manifest` | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
 | `Flow package application must not import AI Builder`    | `forbidden` | `eneo.flow_packages.application`      | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
 | `Flow package domain must not import AI Builder`         | `forbidden` | `eneo.flow_packages.domain`           | `eneo.flows.ai_builder`                                                                                                              | none                                                                    |
@@ -147,56 +147,57 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 </details>
 
 <details>
-<summary><code>domain</code> (46 entries)</summary>
+<summary><code>domain</code> (47 entries)</summary>
 
-| Entry                               | Kind     | Owns / start here                                                   |
-| ----------------------------------- | -------- | ------------------------------------------------------------------- |
-| `assistant_authoring_snapshot`      | `module` | Assistant authoring snapshot is a typed published-definition value. |
-| `citation_sidecar`                  | `module` | Citation sidecar is a typed Flow data contract.                     |
-| `enums`                             | `module` | Shared Flow vocabularies belong with domain contracts.              |
-| `flow_authoring_name`               | `module` | Authoring name normalization is a domain value rule.                |
-| `flow_authoring_runtime_input`      | `module` | Runtime-input authoring rules are Flow contract rules.              |
-| `flow_authoring_spec`               | `module` | Authoring spec is a domain contract.                                |
-| `flow_authoring_transcription`      | `module` | Transcription authoring config is a domain contract.                |
-| `flow_authoring_variable_rewriting` | `module` | Variable rewrite rules are authoring-domain rules.                  |
-| `flow_capability_manifest`          | `module` | Capability vocabulary is a Flow domain contract.                    |
-| `flow_care_data_policy`             | `module` | Care data policy is a domain policy.                                |
-| `flow_document_limits`              | `module` | Document limits are Flow policy values.                             |
-| `flow_evidence_policy`              | `module` | Evidence policy is a Flow domain policy.                            |
-| `flow_input_limits`                 | `module` | Runtime input limits are Flow policy values.                        |
-| `flow_metadata`                     | `module` | Flow metadata is a domain contract.                                 |
-| `flow_resource_bindings`            | `module` | Resource bindings are Flow domain relationships.                    |
-| `flow_retention_policy`             | `module` | Retention policy is a data/domain policy.                           |
-| `flow_retention_tombstone`          | `module` | Retention tombstones are domain audit records.                      |
-| `flow_review_expiry_policy`         | `module` | Review expiry rules are Flow domain policy.                         |
-| `flow_review_policy`                | `module` | Review requirements are Flow domain policy.                         |
-| `flow_run_error`                    | `module` | Run error payloads are Flow domain contracts.                       |
-| `flow_run_input_envelope`           | `module` | Run input envelope is a typed Flow contract.                        |
-| `flow_run_input_payload`            | `module` | Run input payload is a typed Flow contract.                         |
-| `flow_run_payload_validation`       | `module` | Payload validation enforces Flow contract invariants.               |
-| `flow_run_provenance`               | `module` | Provenance is Flow run domain metadata.                             |
-| `flow_run_redaction`                | `module` | Redaction policy belongs with privacy/domain rules.                 |
-| `flow_run_rerun_graph`              | `module` | Rerun graph rules are domain lifecycle rules.                       |
-| `flow_run_step_input_file`          | `module` | Step input file references are domain contracts.                    |
-| `flow_run_step_result_file`         | `module` | Step result file references are domain contracts.                   |
-| `flow_runtime_policy`               | `module` | Runtime policy is a Flow domain policy.                             |
-| `flow_security_classification`      | `module` | Security classification is a domain policy value.                   |
-| `flow_settings`                     | `module` | Flow settings are typed domain configuration.                       |
-| `flow_validators`                   | `module` | Cross-field validators enforce domain contracts.                    |
-| `flow_validators_form`              | `module` | Form validators enforce domain contracts.                           |
-| `flow_validators_http`              | `module` | HTTP-step validators enforce domain contracts.                      |
-| `flow_validators_template`          | `module` | Template validators enforce domain contracts.                       |
-| `flow_variable_definitions`         | `module` | Variable definitions are Flow domain contracts.                     |
-| `input_binding_contract_rules`      | `module` | Input binding rules are contract invariants.                        |
-| `output_modes`                      | `module` | Output modes are Flow domain vocabulary.                            |
-| `principal`                         | `module` | Flow principal identity is a domain contract.                       |
-| `published_definition`              | `module` | Published definition parsing owns snapshot invariants.              |
-| `source_display`                    | `module` | Source display values are Flow domain presentation.                 |
-| `step_chain_rules`                  | `module` | Step chain rules are domain invariants.                             |
-| `step_lineage`                      | `module` | Step lineage is domain metadata.                                    |
-| `template_reference_analyzer`       | `module` | Template reference analysis enforces domain contracts.              |
-| `transcription_config`              | `module` | Transcription config is a domain contract.                          |
-| `type_policies`                     | `module` | Type policy is a domain contract.                                   |
+| Entry                               | Kind     | Owns / start here                                                             |
+| ----------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| `assistant_authoring_snapshot`      | `module` | Assistant authoring snapshot is a typed published-definition value.           |
+| `citation_sidecar`                  | `module` | Citation sidecar is a typed Flow data contract.                               |
+| `enums`                             | `module` | Shared Flow vocabularies belong with domain contracts.                        |
+| `flow_authoring_name`               | `module` | Authoring name normalization is a domain value rule.                          |
+| `flow_authoring_runtime_input`      | `module` | Runtime-input authoring rules are Flow contract rules.                        |
+| `flow_authoring_spec`               | `module` | Authoring spec is a domain contract.                                          |
+| `flow_authoring_transcription`      | `module` | Transcription authoring config is a domain contract.                          |
+| `flow_authoring_variable_rewriting` | `module` | Variable rewrite rules are authoring-domain rules.                            |
+| `flow_capability_manifest`          | `module` | Capability vocabulary is a Flow domain contract.                              |
+| `flow_document_limits`              | `module` | Document limits are Flow policy values.                                       |
+| `flow_evidence_policy`              | `module` | Evidence policy is a Flow domain policy.                                      |
+| `flow_input_limits`                 | `module` | Runtime input limits are Flow policy values.                                  |
+| `flow_metadata`                     | `module` | Flow metadata is a domain contract.                                           |
+| `flow_resource_bindings`            | `module` | Resource bindings are Flow domain relationships.                              |
+| `flow_retention_policy`             | `module` | Retention policy is a data/domain policy.                                     |
+| `flow_retention_tombstone`          | `module` | Retention tombstones are domain audit records.                                |
+| `flow_review_expiry_policy`         | `module` | Review expiry rules are Flow domain policy.                                   |
+| `flow_review_policy`                | `module` | Review requirements are Flow domain policy.                                   |
+| `flow_run_error`                    | `module` | Run error payloads are Flow domain contracts.                                 |
+| `flow_run_input_envelope`           | `module` | Run input envelope is a typed Flow contract.                                  |
+| `flow_run_input_payload`            | `module` | Run input payload is a typed Flow contract.                                   |
+| `flow_run_payload_validation`       | `module` | Payload validation enforces Flow contract invariants.                         |
+| `flow_run_provenance`               | `module` | Provenance is Flow run domain metadata.                                       |
+| `flow_run_redaction`                | `module` | Redaction policy belongs with privacy/domain rules.                           |
+| `flow_run_rerun_graph`              | `module` | Rerun graph rules are domain lifecycle rules.                                 |
+| `flow_run_step_input_file`          | `module` | Step input file references are domain contracts.                              |
+| `flow_run_step_result_file`         | `module` | Step result file references are domain contracts.                             |
+| `flow_runtime_policy`               | `module` | Runtime policy is a Flow domain policy.                                       |
+| `flow_security_classification`      | `module` | Security classification is a domain policy value.                             |
+| `flow_settings`                     | `module` | Flow settings are typed domain configuration.                                 |
+| `flow_validators`                   | `module` | Cross-field validators enforce domain contracts.                              |
+| `flow_validators_form`              | `module` | Form validators enforce domain contracts.                                     |
+| `flow_validators_http`              | `module` | HTTP-step validators enforce domain contracts.                                |
+| `flow_validators_template`          | `module` | Template validators enforce domain contracts.                                 |
+| `flow_variable_definitions`         | `module` | Variable definitions are Flow domain contracts.                               |
+| `input_binding_contract_rules`      | `module` | Input binding rules are contract invariants.                                  |
+| `output_modes`                      | `module` | Output modes are Flow domain vocabulary.                                      |
+| `principal`                         | `module` | Flow principal identity is a domain contract.                                 |
+| `published_definition`              | `module` | Published definition parsing owns snapshot invariants.                        |
+| `source_display`                    | `module` | Source display values are Flow domain presentation.                           |
+| `source_identity`                   | `module` | Runtime source identity fields and schema projection are Flow contract rules. |
+| `step_chain_rules`                  | `module` | Step chain rules are domain invariants.                                       |
+| `step_item_map`                     | `module` | Item-map configuration and validation are Flow step contract rules.           |
+| `step_lineage`                      | `module` | Step lineage is domain metadata.                                              |
+| `template_reference_analyzer`       | `module` | Template reference analysis enforces domain contracts.                        |
+| `transcription_config`              | `module` | Transcription config is a domain contract.                                    |
+| `type_policies`                     | `module` | Type policy is a domain contract.                                             |
 
 </details>
 

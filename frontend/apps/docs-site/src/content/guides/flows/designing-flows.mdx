@@ -52,25 +52,6 @@ Reserved `input_payload_json` keys stay owned by the backend; do not create form
 }
 ```
 
-### Large files, many files, and context windows
-
-File count is not the main limit. Token volume per model call is. One hundred short files can be safe, while one long PDF can exceed the selected model's context window.
-
-Design large-input flows by first choosing the right pattern:
-
-| Need | Use | Why |
-| ---- | --- | --- |
-| Read every uploaded file and write a report, table, or extraction for each source | Runtime file input plus a document-reader map shape | Each source can be read in its own model call before later steps compose the typed results. |
-| Answer questions over a large library where only some passages matter | Knowledge retrieval / RAG | Retrieval searches indexed chunks and sends only relevant context to the model. |
-| Collect caller choices such as report style, jurisdiction, or date range | Form fields in `input_payload_json` | Form fields are runtime parameters, not a place to paste uploaded document contents. |
-| Pass bounded facts from one step to another | Typed JSON outputs and targeted step references | Step references keep downstream prompts smaller and preserve field names. |
-
-This is the same split used by common workflow systems: iteration or map-reduce for exhaustive per-item work, and retrieval for selective question answering. Dify documents both [Iteration](https://docs.dify.ai/en/cloud/use-dify/nodes/iteration) and [Knowledge Retrieval](https://docs.dify.ai/en/cloud/use-dify/nodes/knowledge-retrieval); LangChain and LangGraph document [retrieval](https://docs.langchain.com/oss/python/langchain/retrieval), [map-reduce document combining](https://reference.langchain.com/python/langchain-classic/chains/combine_documents/map_reduce/MapReduceDocumentsChain), and [map-reduce graph patterns](https://docs.langchain.com/oss/python/langgraph/graph-api). Eneo follows the same product rule: exhaustive reading should be mapped into smaller calls, while corpus search should use retrieval.
-
-Do not design a flow that stuffs all uploaded document text into the first step and asks later steps to recover structure from prose. That shape hides which source failed, spends tokens repeatedly, and can carry one early hallucination through the rest of the run.
-
-Current constraint: a single oversized document can still exceed the selected model's usable context window. Use a larger-context model, split the document before upload, or model the case as retrieval when the task only needs relevant passages.
-
 ### Design from the published contract
 
 Before building a UI, inspect the runtime paths and run contract for the published flow version.

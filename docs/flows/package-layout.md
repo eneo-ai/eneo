@@ -43,7 +43,6 @@ Allowed target homes:
 | flow_authoring_transcription | module | domain | Transcription authoring config is a domain contract. |
 | flow_authoring_variable_rewriting | module | domain | Variable rewrite rules are authoring-domain rules. |
 | flow_capability_manifest | module | domain | Capability vocabulary is a Flow domain contract. |
-| flow_care_data_policy | module | domain | Care data policy is a domain policy. |
 | flow_document_limits | module | domain | Document limits are Flow policy values. |
 | flow_evidence_policy | module | domain | Evidence policy is a Flow domain policy. |
 | flow_factory | module | remove-merge-later | Pass-through ORM/domain mapping should be deleted or folded into persistence. |
@@ -94,7 +93,9 @@ Allowed target homes:
 | published_runtime | module | runtime | Published runtime parsing feeds execution. |
 | runtime_input | module | runtime | Runtime input resolution feeds execution. |
 | source_display | module | domain | Source display values are Flow domain presentation. |
+| source_identity | module | domain | Runtime source identity fields and schema projection are Flow contract rules. |
 | step_chain_rules | module | domain | Step chain rules are domain invariants. |
+| step_item_map | module | domain | Item-map configuration and validation are Flow step contract rules. |
 | step_lineage | module | domain | Step lineage is domain metadata. |
 | template_reference_analyzer | module | domain | Template reference analysis enforces domain contracts. |
 | transcription_config | module | domain | Transcription config is a domain contract. |
