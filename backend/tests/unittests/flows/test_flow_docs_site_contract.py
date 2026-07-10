@@ -28,6 +28,7 @@ from eneo.flows.api.flow_api_error_metadata import (
 )
 from eneo.flows.api.flow_models import (
     FLOW_RUN_PUBLIC_EXAMPLE,
+    FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
@@ -1649,6 +1650,13 @@ def test_flow_developer_docs_run_lifecycle_is_generated_from_lifecycle_sources()
         page
     )
     assert "mark_running_if_claimable" in page
+    assert "Flow dispatch coordinator" in page
+    assert "application/flow_dispatch.py" in page
+    assert "publish revisioned task" in page
+    assert "Broker delivery remains at-least-once" in page
+    assert "bounded recovery clock stays armed" in page
+    assert "runtime/flow_runtime_health.py" in page
+    assert "without lifecycle writes" in page
     assert "FlowReviewExpiryReconciler" in page
     assert "flows.reconcile_review_expiry" in page
     assert "flow_runtime_uploaded_files" in page
@@ -3175,6 +3183,14 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     assert FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED.value in page
     assert "no single-step GET" in page
     assert "filter the list by `step_id`" in page
+    assert generator.FLOW_RUN_AWAITING_REVIEW_RESPONSE_EXAMPLE == {
+        **FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
+        "revision": 2,
+        "status": "awaiting_review",
+        "dispatch_next_attempt_at": None,
+        "started_at": "2026-03-17T10:05:02Z",
+        "updated_at": "2026-03-17T10:05:30Z",
+    }
     for stale_text in ("Review draft answer", "Draft answer.", "Edited answer."):
         assert stale_text not in page
 

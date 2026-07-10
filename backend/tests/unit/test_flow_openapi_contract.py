@@ -11,6 +11,10 @@ from referencing.jsonschema import DRAFT202012
 from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
 )
+from eneo.flows.api.flow_models import (
+    FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE,
+    FlowRunRedispatchResponse,
+)
 from eneo.flows.api.flow_run_status_capability_models import (
     flow_run_status_capabilities_public,
 )
@@ -1931,6 +1935,21 @@ def test_openapi_flow_run_public_exposes_strict_dispatch_lifecycle(
     assert error_properties["schema_version"].get("const") == 1
     assert error_properties["message"].get("maxLength") == 512
     assert "never a raw broker" in error_properties["message"].get("description", "")
+
+    redispatch_schema = schemas.get("FlowRunRedispatchResponse", {})
+    redispatch_example = FlowRunRedispatchResponse.model_validate(
+        FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE
+    )
+    assert redispatch_schema.get("example") == redispatch_example.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    redispatch_run = FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE["run"]
+    assert redispatch_run["status"] == "queued"
+    assert redispatch_run["dispatch_attempt_count"] == 1
+    assert redispatch_run["dispatch_last_attempt_at"] is not None
+    assert redispatch_run["dispatched_at"] is not None
+    assert redispatch_run["dispatch_next_attempt_at"] is not None
 
 
 def test_openapi_flow_run_public_does_not_expose_legacy_user_mirror(

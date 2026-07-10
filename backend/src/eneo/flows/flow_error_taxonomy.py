@@ -297,7 +297,10 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Run lifecycle",
         surfaced_through="Run error payload",
         cause="The worker stopped updating an active run within the recovery window.",
-        consumer_action="Redispatch only if capabilities allow it, then escalate recurring stalls.",
+        consumer_action=(
+            "Inspect worker and run health, then use the capability-gated rerun path "
+            "or create a new run; escalate recurring stalls."
+        ),
         user_action="Retry or contact support with the run ID.",
     ),
     FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID: _entry(

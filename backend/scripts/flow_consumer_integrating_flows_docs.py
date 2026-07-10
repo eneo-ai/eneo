@@ -32,6 +32,7 @@ from eneo.files.file_models import (
 from eneo.flows.api.flow_models import (
     FLOW_RUN_CREATE_REQUEST_EXAMPLE,
     FLOW_RUN_PUBLIC_EXAMPLE,
+    FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_APPROVED_RESPONSE_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE,
@@ -417,9 +418,12 @@ ENDPOINT_SEQUENCE_INTROS: dict[str, str] = {
 }
 
 FLOW_RUN_AWAITING_REVIEW_RESPONSE_EXAMPLE: dict[str, object] = {
-    **FLOW_RUN_PUBLIC_EXAMPLE,
+    **FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
     "revision": 2,
     "status": "awaiting_review",
+    "dispatch_next_attempt_at": None,
+    "started_at": "2026-03-17T10:05:02Z",
+    "updated_at": "2026-03-17T10:05:30Z",
 }
 
 SIGNED_URL_REQUEST_EXAMPLE: dict[str, object] = {

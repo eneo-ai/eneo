@@ -16485,7 +16485,7 @@ export interface components {
       dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
       /**
        * Dispatch Next Attempt At
-       * @description Sole dispatch eligibility clock. Null means no retry is currently due.
+       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
        */
       dispatch_next_attempt_at?: string | null;
       /**
@@ -16537,9 +16537,11 @@ export interface components {
      *       "redispatched_count": 1,
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
-     *         "dispatch_attempt_count": 0,
-     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 1,
+     *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *         "dispatched_at": "2026-03-17T10:05:01Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
      *         "flow_version": 3,
      *         "id": "00000000-0000-0000-0000-000000000301",
@@ -16552,7 +16554,7 @@ export interface components {
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
-     *         "updated_at": "2026-03-17T10:05:00Z"
+     *         "updated_at": "2026-03-17T10:05:01Z"
      *       }
      *     }
      */

@@ -190,6 +190,15 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T10:05:00Z",
 }
 
+FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE: dict[str, object] = {
+    **FLOW_RUN_PUBLIC_EXAMPLE,
+    "dispatch_attempt_count": 1,
+    "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+    "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
+    "dispatched_at": "2026-03-17T10:05:01Z",
+    "updated_at": "2026-03-17T10:05:01Z",
+}
+
 FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000501",
     "flow_run_id": "00000000-0000-0000-0000-000000000301",
@@ -230,7 +239,7 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
 }
 
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
-    "run": FLOW_RUN_PUBLIC_EXAMPLE,
+    "run": FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
     "redispatched_count": 1,
 }
 
@@ -721,7 +730,9 @@ class FlowRunPublic(BaseModel):
     dispatch_next_attempt_at: datetime | None = Field(
         default=None,
         description=(
-            "Sole dispatch eligibility clock. Null means no retry is currently due."
+            "Sole dispatch eligibility clock. It remains set while a queued broker "
+            "delivery awaits worker claim or bounded recovery, and becomes null "
+            "after claim, exhaustion, or another lifecycle transition."
         ),
     )
     dispatched_at: datetime | None = Field(
