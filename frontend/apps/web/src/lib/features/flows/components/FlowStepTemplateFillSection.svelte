@@ -184,13 +184,15 @@
                     </Badge>
                     {#if selectedTemplateAsset.last_updated_by_name}
                       <span class="text-muted">
-                        Senast uppdaterad av {selectedTemplateAsset.last_updated_by_name}
+                        {m.flow_template_last_updated_by({
+                          name: selectedTemplateAsset.last_updated_by_name
+                        })}
                       </span>
                     {/if}
                   </div>
                 {/if}
                 {#if templateFillConfig.template_checksum}
-                  <p class="text-muted mt-2 text-[11px] leading-relaxed">
+                  <p class="text-muted mt-2 text-xs leading-relaxed">
                     {templateFillConfig.template_checksum}
                   </p>
                 {/if}
@@ -340,7 +342,8 @@
               <p class="text-muted text-xs leading-relaxed">
                 {m.flow_template_fill_placeholder_guidance_prefix()}
                 <span class="font-mono">{"{{nuläge}}"}</span>,
-                <span class="font-mono">{"{{mål}}"}</span> eller
+                <span class="font-mono">{"{{mål}}"}</span>
+                {m.or()}
                 <span class="font-mono">{"{{bedömning}}"}</span>
                 {m.flow_template_fill_placeholder_guidance_suffix()}
               </p>

@@ -368,7 +368,7 @@
   <div
     class="border-default bg-secondary/30 flex items-center justify-between border-b px-3 py-1.5"
   >
-    <span class="text-muted text-[11px]">{label}</span>
+    <span class="text-muted text-xs">{label}</span>
     <div class="flex items-center gap-1">
       {#if toolbar}
         {@render toolbar()}
@@ -415,7 +415,7 @@
     <!-- Textarea layer (on top, transparent text, visible caret) -->
     <textarea
       bind:this={textareaEl}
-      class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-base leading-relaxed text-transparent caret-gray-900 focus:outline-none dark:caret-gray-100 sm:text-sm"
+      class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-base leading-relaxed text-transparent caret-foreground focus:outline-none sm:text-sm"
       style={`min-height: ${minHeight}px`}
       oninput={handleInput}
       onkeydown={handleKeydown}
@@ -453,9 +453,9 @@
           >
             <span class={getChipClasses(suggestion.category)}>{suggestion.label}</span>
             {#if suggestion.displayToken}
-              <span class="text-muted font-mono text-[10px]">{`{{${suggestion.token}}}`}</span>
+              <span class="text-muted font-mono text-xs">{`{{${suggestion.token}}}`}</span>
             {/if}
-            <span class="text-muted text-[10px]">{suggestion.description}</span>
+            <span class="text-muted text-xs">{suggestion.description}</span>
           </button>
         {/each}
       </div>

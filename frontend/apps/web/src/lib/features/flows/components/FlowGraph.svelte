@@ -453,7 +453,11 @@
       const payload = buildPayloadPreview(sourceStep, targetStep, sourceLevel, targetLevel);
       const allowInsert = edge.kind !== "all_previous_steps" && edge.target !== "output";
 
-      const markerColor = isViolation ? "#dc2626" : isEscalation ? "#d97706" : undefined;
+      const markerColor = isViolation
+        ? "var(--negative-default)"
+        : isEscalation
+          ? "var(--warning-default)"
+          : undefined;
       resultEdges.push({
         id: `e-${edge.source}-${edge.target}-${edge.kind}-${laneIndex}`,
         type: "interactive",
@@ -559,7 +563,7 @@
       <Controls position="top-left" />
       <Panel position="top-right">
         <button
-          class="bg-primary/90 text-secondary hover:bg-hover-dimmer flex items-center gap-1.5 rounded px-2 py-1 text-[10px] backdrop-blur-sm transition-colors"
+          class="bg-primary/90 text-secondary hover:bg-hover-dimmer flex items-center gap-1.5 rounded px-2 py-1 text-xs backdrop-blur-sm transition-colors"
           onclick={exportPng}
           disabled={isExporting}
           aria-label={m.flow_graph_download_png()}
@@ -570,7 +574,7 @@
       </Panel>
       <Panel position="bottom-left">
         <div
-          class="bg-primary/90 text-secondary flex items-center gap-3 rounded px-2.5 py-1.5 text-[10px] backdrop-blur-sm"
+          class="bg-primary/90 text-secondary flex items-center gap-3 rounded px-2.5 py-1.5 text-xs backdrop-blur-sm"
         >
           <span class="flex items-center gap-1.5">
             <svg width="20" height="2"
@@ -635,16 +639,16 @@
     --xy-node-border-default: 1px solid var(--border-color-default);
     --xy-node-border-radius-default: 8px;
     --xy-node-boxshadow-default:
-      0px 3px 4px 0px rgba(0, 0, 0, 0.04), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
-    --xy-node-boxshadow-hover-default: 0 2px 8px rgba(0, 0, 0, 0.12);
+      0px 3px 4px 0px var(--shadow-default), 0px 1px 2px 0px var(--shadow-stronger);
+    --xy-node-boxshadow-hover-default: 0 2px 8px var(--shadow-stronger);
     --xy-node-boxshadow-selected-default: 0 0 0 2px var(--color-accent-default);
     --xy-edge-label-background-color-default: transparent;
-    --xy-edge-stroke-default: #b1b1b7;
+    --xy-edge-stroke-default: var(--border-stronger);
     --xy-edge-stroke-width-default: 2;
     --xy-edge-stroke-selected-default: var(--color-accent-default);
     --xy-background-pattern-dot-color-default: var(--border-color-dimmer);
     --xy-handle-background-color-default: var(--background-color-primary);
-    --xy-handle-border-color-default: #b1b1b7;
+    --xy-handle-border-color-default: var(--border-stronger);
     --xy-minimap-background-color-default: var(--background-color-secondary);
     --xy-controls-button-background-color-default: var(--background-color-primary);
     --xy-controls-button-background-color-hover-default: var(--background-color-secondary);
@@ -665,12 +669,5 @@
     transition:
       stroke 160ms ease-in-out,
       stroke-width 160ms ease-in-out;
-  }
-
-  :global(.dark) .flow-graph :global(.svelte-flow) {
-    --xy-edge-stroke-default: #6b6b73;
-    --xy-handle-border-color-default: #6b6b73;
-    --xy-node-boxshadow-default:
-      0px 3px 4px 0px rgba(0, 0, 0, 0.2), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
   }
 </style>

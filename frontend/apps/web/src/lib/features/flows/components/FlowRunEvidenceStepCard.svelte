@@ -178,7 +178,9 @@
 
             {#if result.output_payload_json.structured}
               <div class="mt-1">
-                <Badge class="bg-accent-dimmer text-accent-stronger mb-1">JSON</Badge>
+                <Badge class="bg-accent-dimmer text-accent-stronger mb-1">
+                  {m.flow_run_structured_json_badge()}
+                </Badge>
                 <FlowJsonViewer value={result.output_payload_json.structured} className="mt-0" />
               </div>
             {/if}
@@ -247,18 +249,20 @@
           <Card.Root size="sm" class="bg-hover-dimmer">
             <Card.Content class="p-3">
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_runtime_input_label()}</h4>
-              <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+              <div class="text-secondary mt-2 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">
                   {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
                 </Badge>
                 {#if runtimeInput.inputFormat}
                   <Badge variant="outline">
-                    Format: {runtimeInput.inputFormat}
+                    {m.flow_run_input_format_badge({ format: runtimeInput.inputFormat })}
                   </Badge>
                 {/if}
                 {#if runtimeInput.extractedTextLength != null}
                   <Badge variant="outline">
-                    Extraherad text: {runtimeInput.extractedTextLength} tecken
+                    {m.flow_run_extracted_text_badge({
+                      count: String(runtimeInput.extractedTextLength)
+                    })}
                   </Badge>
                 {/if}
               </div>
@@ -270,7 +274,7 @@
           <Card.Root size="sm" class="bg-hover-dimmer">
             <Card.Content class="p-3">
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_transcription_label()}</h4>
-              <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+              <div class="text-secondary mt-2 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">
                   {m.flow_run_transcription_model({ model: transcription.model ?? "\u2014" })}
                 </Badge>
@@ -323,26 +327,28 @@
               <h4 class="text-muted text-xs font-semibold">
                 {m.flow_run_template_provenance_label()}
               </h4>
-              <div class="text-secondary mt-2 flex flex-col gap-2 text-[11px]">
+              <div class="text-secondary mt-2 flex flex-col gap-2 text-xs">
                 <div class="flex flex-wrap gap-2">
                   <Badge variant="outline">
                     {templateProvenance.templateName}
                   </Badge>
                   {#if templateProvenance.publishedFlowVersion != null}
                     <Badge variant="outline">
-                      v{templateProvenance.publishedFlowVersion}
+                      {m.flow_run_template_version_badge({
+                        version: String(templateProvenance.publishedFlowVersion)
+                      })}
                     </Badge>
                   {/if}
                 </div>
                 <div class="flex flex-wrap gap-2">
                   {#if templateProvenance.templateAssetId}
                     <Badge variant="outline">
-                      Asset: {templateProvenance.templateAssetId}
+                      {m.flow_run_template_asset_badge({ id: templateProvenance.templateAssetId })}
                     </Badge>
                   {/if}
                   {#if templateProvenance.templateFileId}
                     <Badge variant="outline">
-                      Fil: {templateProvenance.templateFileId}
+                      {m.flow_run_template_file_badge({ id: templateProvenance.templateFileId })}
                     </Badge>
                   {/if}
                   {#if templateProvenance.checksum}

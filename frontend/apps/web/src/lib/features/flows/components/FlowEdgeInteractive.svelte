@@ -127,7 +127,7 @@
   {#if isEscalation || isViolation}
     <EdgeLabel x={labelX} y={labelY + labelOffsetY - 14}>
       <span
-        class="edge-actions text-[11px]"
+        class="edge-actions text-xs"
         title={isViolation
           ? m.flow_graph_classification_violation()
           : m.flow_graph_classification_escalation()}
@@ -143,7 +143,7 @@
     >
       {#if data?.dataType && getDataTypeLabel(data.dataType)}
         <button
-          class="hover:bg-foreground/5 dark:hover:bg-foreground/10 rounded px-1.5 py-0.5 text-[10px] font-medium"
+          class="hover:bg-hover-dimmer rounded px-1.5 py-0.5 text-xs font-medium"
           onclick={(event) => {
             event.stopPropagation();
             inspectEdge();
@@ -156,7 +156,7 @@
 
       {#if !data?.readOnly && data?.allowInsert !== false}
         <button
-          class="hover:bg-foreground/5 dark:hover:bg-foreground/10 rounded p-0.5"
+          class="hover:bg-hover-dimmer rounded p-0.5"
           onclick={(event) => {
             event.stopPropagation();
             insertStep();
@@ -193,12 +193,8 @@
   }
 
   :global(.flow-dot) {
-    fill: #b1b1b7;
+    fill: var(--border-stronger);
     opacity: 0.8;
-  }
-
-  :global(.dark .flow-dot) {
-    fill: #6b6b73;
   }
 
   @media (prefers-reduced-motion: reduce) {

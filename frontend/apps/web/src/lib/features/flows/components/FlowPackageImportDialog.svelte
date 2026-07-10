@@ -434,7 +434,7 @@
 
                 <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
                   <div>
-                    <dt class="text-muted text-[11px] font-medium tracking-wide uppercase">
+                    <dt class="text-muted text-xs font-medium tracking-wide uppercase">
                       {m.flow_package_package_version()}
                     </dt>
                     <dd class="text-primary mt-1 font-medium tabular-nums">
@@ -442,7 +442,7 @@
                     </dd>
                   </div>
                   <div>
-                    <dt class="text-muted text-[11px] font-medium tracking-wide uppercase">
+                    <dt class="text-muted text-xs font-medium tracking-wide uppercase">
                       {m.flow_package_requirements_label()}
                     </dt>
                     <dd class="text-primary mt-1 font-medium tabular-nums">
@@ -457,7 +457,7 @@
                       count: String(plan.package_summary.steps_count)
                     })}
                   </Badge>
-                  <Badge variant="outline" class="text-muted h-5 font-mono text-[11px]">
+                  <Badge variant="outline" class="text-muted h-5 font-mono text-xs">
                     {plan.package_id}
                   </Badge>
                 </div>
@@ -503,7 +503,7 @@
                   </Alert.Root>
                 {:else}
                   <div
-                    class="border-positive-default/30 bg-positive-dimmer/40 dark:bg-positive-dimmer/20 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                    class="border-positive-default/30 bg-positive-dimmer/40 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
                     aria-live="polite"
                   >
                     <div class="flex items-center gap-2 text-sm">
@@ -555,7 +555,7 @@
                           </Badge>
                           {#if resolution.selection_required_for_install}
                             <span
-                              class="border-warning-default/40 bg-warning-dimmer/50 text-warning-stronger dark:bg-warning-dimmer/30 inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[11px] font-medium"
+                              class="border-warning-default/40 bg-warning-dimmer/50 text-warning-stronger inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-xs font-medium"
                             >
                               <span
                                 aria-hidden="true"
@@ -565,13 +565,13 @@
                             </span>
                           {:else if resolution.required}
                             <span
-                              class="border-default/70 text-muted inline-flex h-5 items-center rounded-full border px-1.5 text-[11px] font-medium"
+                              class="border-default/70 text-muted inline-flex h-5 items-center rounded-full border px-1.5 text-xs font-medium"
                             >
                               {m.flow_package_recommended_setup()}
                             </span>
                           {:else}
                             <span
-                              class="border-default/70 text-muted inline-flex h-5 items-center rounded-full border px-1.5 text-[11px] font-medium"
+                              class="border-default/70 text-muted inline-flex h-5 items-center rounded-full border px-1.5 text-xs font-medium"
                             >
                               {m.flow_package_optional()}
                             </span>
