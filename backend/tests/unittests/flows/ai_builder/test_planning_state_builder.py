@@ -160,7 +160,7 @@ class TestPersistedNone:
     def test_is_noop_when_persisted_is_none(self) -> None:
         rebuilt = _state()
 
-        carry_forward_persisted_planner_state(rebuilt, None)
+        carry_forward_persisted_planner_state(rebuilt, None, attached_file_ids=set())
 
         assert rebuilt.architecture_commit is None
 
@@ -171,7 +171,9 @@ class TestArchitectureCommitPreservation:
         rebuilt = _state()
         persisted = _state(architecture_commit=persisted_commit)
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
 
         assert rebuilt.architecture_commit is persisted_commit
 
@@ -181,7 +183,9 @@ class TestArchitectureCommitPreservation:
         rebuilt = _state(architecture_commit=explicit)
         persisted = _state(architecture_commit=persisted_commit)
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
 
         assert rebuilt.architecture_commit is explicit
 
@@ -189,7 +193,9 @@ class TestArchitectureCommitPreservation:
         rebuilt = _state()
         persisted = _state()
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
 
         assert rebuilt.architecture_commit is None
 
@@ -209,7 +215,11 @@ class TestFileRoleEvidencePreservation:
         persisted = _state()
         persisted.file_roles = [persisted_role]
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={persisted_role.file_id},
+        )
 
         assert rebuilt.file_roles == [persisted_role]
 
@@ -244,7 +254,11 @@ class TestFileRoleEvidencePreservation:
         persisted = _state()
         persisted.file_roles = [stale_role]
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={current_role.file_id},
+        )
 
         assert rebuilt.file_roles == [current_role]
 
@@ -278,7 +292,9 @@ class TestOutputSchemaEvidencePreservation:
         persisted = _state()
         persisted.output_schema_evidence = persisted_evidence
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
 
         assert rebuilt.output_schema_evidence is persisted_evidence
 
@@ -298,7 +314,11 @@ class TestOutputSchemaEvidencePreservation:
         persisted = _state()
         persisted.output_schema_evidence = stale
 
-        carry_forward_persisted_planner_state(rebuilt, persisted)
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids=set(),
+        )
 
         assert rebuilt.output_schema_evidence is current
 
@@ -648,7 +668,9 @@ class TestReturnValue:
         rebuilt = _state()
         persisted = _state(architecture_commit=_commit())
 
-        result = carry_forward_persisted_planner_state(rebuilt, persisted)
+        result = carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
 
         assert result is None
         assert rebuilt.architecture_commit is not None

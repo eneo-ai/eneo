@@ -287,7 +287,7 @@ def carry_forward_persisted_planner_state(
     rebuilt: PlanningState,
     persisted: PlanningState | None,
     *,
-    attached_file_ids: Collection[UUID] | None = None,
+    attached_file_ids: Collection[UUID],
 ) -> None:
     """Carry forward planner-owned fields from the previously persisted
     state onto a freshly rebuilt state — mutation-only, no return.
@@ -299,6 +299,9 @@ def carry_forward_persisted_planner_state(
     by overwrite. The caller still owns explicit replacement: if the current
     turn sets this field on `rebuilt` before calling this helper, the
     persisted value is not copied over it.
+
+    `attached_file_ids` is the current session membership. Requiring it keeps
+    persisted file-derived evidence from outliving a detached attachment.
     """
     if persisted is None:
         return
@@ -317,7 +320,7 @@ def carry_forward_persisted_planner_state(
         )
     current_file_ids = {item.file_id for item in rebuilt.file_roles}
     for file_role in persisted.file_roles:
-        if attached_file_ids is not None and file_role.file_id not in attached_file_ids:
+        if file_role.file_id not in attached_file_ids:
             continue
         if file_role.file_id not in current_file_ids:
             rebuilt.file_roles.append(file_role)
@@ -327,9 +330,9 @@ def carry_forward_persisted_planner_state(
 def _carryable_output_schema_evidence(
     evidence: OutputSchemaEvidence,
     *,
-    attached_file_ids: Collection[UUID] | None,
+    attached_file_ids: Collection[UUID],
 ) -> OutputSchemaEvidence | None:
-    if attached_file_ids is None or evidence.source != "template_placeholders":
+    if evidence.source != "template_placeholders":
         return evidence
 
     attached = set(attached_file_ids)
