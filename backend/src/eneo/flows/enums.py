@@ -265,6 +265,7 @@ def is_cancellable_flow_run_status(status: FlowRunStatus | str) -> bool:
 class FlowRunLifecycleSource(str, Enum):
     EXECUTOR_COMPLETED = "executor_completed"
     EXECUTOR_FAILED = "executor_failed"
+    DISPATCH_FAILURE = "dispatch_failure"
     FLOW_DELETED = "flow_deleted"
     DEFINITION_CHECKSUM_MISMATCH = "definition_checksum_mismatch"
     INVALID_FLOW_DEFINITION = "invalid_flow_definition"

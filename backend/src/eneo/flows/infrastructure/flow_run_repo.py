@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -22,6 +22,12 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileType
+from eneo.flows.application.flow_run_recovery_policy import (
+    FLOW_DISPATCH_MAX_ATTEMPTS,
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+    flow_dispatch_retry_delay_seconds,
+    start_flow_dispatch_epoch,
+)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -44,7 +50,12 @@ from eneo.flows.enums import (
     TERMINAL_FLOW_RUN_STATUSES,
 )
 from eneo.flows.flow_factory import FlowFactory
-from eneo.flows.flow_run_error import FlowRunError, dump_flow_run_error
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunError,
+    dump_flow_run_dispatch_error,
+    dump_flow_run_error,
+)
 from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
 )
@@ -132,6 +143,7 @@ class FlowRunRepository:
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
     ) -> FlowRun:
+        now_utc = datetime.now(timezone.utc)
         principal = FlowPrincipal(
             principal_type=PrincipalType(principal_type),
             principal_user_id=principal_user_id,
@@ -157,6 +169,7 @@ class FlowRunRepository:
                 idempotency_key=idempotency_key,
                 request_fingerprint=request_fingerprint,
                 status=FlowRunStatus.QUEUED.value,
+                **start_flow_dispatch_epoch(now_utc),
                 input_payload_json=input_payload_json,
             )
             .returning(FlowRuns)
@@ -336,11 +349,11 @@ class FlowRunRepository:
             )
         return usage_by_run_id
 
-    async def list_stale_queued_runs(
+    async def list_dispatchable_queued_runs(
         self,
         *,
         tenant_id: UUID,
-        stale_before: datetime,
+        due_at: datetime,
         flow_id: UUID | None = None,
         run_id: UUID | None = None,
         limit: int = 25,
@@ -349,8 +362,12 @@ class FlowRunRepository:
             sa.select(FlowRuns)
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
-            .where(FlowRuns.updated_at <= stale_before)
-            .order_by(FlowRuns.updated_at.asc())
+            .where(FlowRuns.dispatch_next_attempt_at <= due_at)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .order_by(
+                FlowRuns.dispatch_next_attempt_at.asc(),
+                FlowRuns.id.asc(),
+            )
             .limit(limit)
         )
         if flow_id is not None:
@@ -389,12 +406,13 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self.factory.from_flow_run_db(row) for row in rows]
 
-    async def claim_stale_queued_run_for_redispatch(
+    async def claim_queued_run_for_dispatch(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-        stale_before: datetime,
+        expected_revision: int,
+        now: datetime,
         flow_id: UUID | None = None,
     ) -> FlowRun | None:
         stmt = (
@@ -402,17 +420,122 @@ class FlowRunRepository:
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
-            .where(FlowRuns.updated_at <= stale_before)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_next_attempt_at <= now)
+            .where(FlowRuns.dispatch_attempt_count < FLOW_DISPATCH_MAX_ATTEMPTS)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
 
         claimed = await self.session.scalar(
-            stmt.values(updated_at=datetime.now(timezone.utc)).returning(FlowRuns)
+            stmt.values(
+                dispatch_attempt_count=FlowRuns.dispatch_attempt_count + 1,
+                dispatch_last_attempt_at=now,
+                dispatch_next_attempt_at=now
+                + timedelta(seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS),
+                updated_at=FlowRuns.updated_at,
+            ).returning(FlowRuns)
         )
         if claimed is None:
             return None
         return self.factory.from_flow_run_db(claimed)
+
+    async def mark_dispatch_exhausted_if_due(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        now: datetime,
+    ) -> FlowRun | None:
+        exhausted = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_next_attempt_at <= now)
+            .where(FlowRuns.dispatch_attempt_count >= FLOW_DISPATCH_MAX_ATTEMPTS)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(
+                dispatch_next_attempt_at=None,
+                dispatch_exhausted_at=now,
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if exhausted is None:
+            return None
+        return self.factory.from_flow_run_db(exhausted)
+
+    async def record_dispatch_accepted(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_attempt_count: int,
+        now: datetime,
+    ) -> FlowRun | None:
+        accepted = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(
+                dispatched_at=now,
+                dispatch_next_attempt_at=None,
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if accepted is None:
+            return None
+        return self.factory.from_flow_run_db(accepted)
+
+    async def record_dispatch_failure(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_attempt_count: int,
+        error: FlowRunDispatchError,
+        now: datetime,
+    ) -> FlowRun | None:
+        exhausted = (
+            not error.retryable or expected_attempt_count >= FLOW_DISPATCH_MAX_ATTEMPTS
+        )
+        next_attempt_at = None
+        if not exhausted:
+            next_attempt_at = now + timedelta(
+                seconds=flow_dispatch_retry_delay_seconds(
+                    attempt_no=expected_attempt_count
+                )
+            )
+        failed = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(
+                dispatch_last_error=dump_flow_run_dispatch_error(error),
+                dispatch_next_attempt_at=next_attempt_at,
+                dispatch_exhausted_at=now if exhausted else None,
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if failed is None:
+            return None
+        return self.factory.from_flow_run_db(failed)
 
     async def terminalize_run_status(
         self,
@@ -812,16 +935,25 @@ class FlowRunRepository:
         result_file_row, file_row = row
         return _result_file_from_rows(result_file_row, file_row)
 
-    async def mark_running_if_claimable(self, *, run_id: UUID, tenant_id: UUID) -> bool:
+    async def mark_running_if_claimable(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+    ) -> bool:
         now_utc = datetime.now(timezone.utc)
         result = await self.session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
             .values(
                 status=FlowRunStatus.RUNNING.value,
                 started_at=sa.func.coalesce(FlowRuns.started_at, now_utc),
+                dispatched_at=sa.func.coalesce(FlowRuns.dispatched_at, now_utc),
+                dispatch_next_attempt_at=None,
             )
         )
         return bool(getattr(result, "rowcount", 0))

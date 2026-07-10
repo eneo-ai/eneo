@@ -29,6 +29,7 @@ from eneo.flows.flow_api_error_code import (
     FlowApiErrorCode,
 )
 from eneo.flows.flow_metadata import FlowFormFieldType
+from eneo.flows.flow_run_error import FlowRunDispatchErrorKind
 from eneo.main.exceptions import ErrorCodes
 from eneo.server.main import get_application
 from eneo.settings.setting_service import FLOW_SETTINGS_INVALID_PAYLOAD_CODE
@@ -1870,6 +1871,66 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert details_schema.get("title") == "FlowRunErrorDetails"
     assert details_schema.get("additionalProperties") is False
     assert set(details_schema.get("properties", {})) == {"step_description"}
+
+
+def test_openapi_flow_run_public_exposes_strict_dispatch_lifecycle(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    run_schema = schemas.get("FlowRunPublic", {})
+    run_properties = run_schema.get("properties", {})
+    dispatch_fields = {
+        "dispatch_pending_since",
+        "dispatch_attempt_count",
+        "dispatch_last_attempt_at",
+        "dispatch_last_error",
+        "dispatch_next_attempt_at",
+        "dispatched_at",
+        "dispatch_exhausted_at",
+    }
+
+    assert dispatch_fields.issubset(set(run_properties))
+    assert "dispatch_attempt_count" in set(run_schema.get("required", []))
+    assert not (dispatch_fields - {"dispatch_attempt_count"}).intersection(
+        set(run_schema.get("required", []))
+    )
+    assert run_properties["dispatch_attempt_count"].get("type") == "integer"
+    assert run_properties["dispatch_attempt_count"].get("minimum") == 0
+    for field_name in dispatch_fields - {"dispatch_attempt_count"}:
+        options = (
+            run_properties[field_name].get("anyOf")
+            or run_properties[field_name].get("oneOf")
+            or []
+        )
+        assert any(option.get("type") == "null" for option in options)
+
+    error_options = (
+        run_properties["dispatch_last_error"].get("anyOf")
+        or run_properties["dispatch_last_error"].get("oneOf")
+        or []
+    )
+    error_ref = next(option for option in error_options if "$ref" in option)
+    error_schema = _resolve_component_ref(openapi_spec, error_ref)
+    error_properties = error_schema.get("properties", {})
+
+    assert error_schema.get("title") == "FlowRunDispatchError"
+    assert error_schema.get("additionalProperties") is False
+    assert set(error_schema.get("required", [])) == {
+        "kind",
+        "code",
+        "retryable",
+        "message",
+    }
+    assert _extract_enum_values(openapi_spec, error_properties["kind"]) == {
+        kind.value for kind in FlowRunDispatchErrorKind
+    }
+    assert _extract_enum_values(openapi_spec, error_properties["code"]) == {
+        FlowApiErrorCode.RUN_DISPATCH_FAILED.value,
+        FlowApiErrorCode.RUN_MISSING_PRINCIPAL.value,
+    }
+    assert error_properties["schema_version"].get("const") == 1
+    assert error_properties["message"].get("maxLength") == 512
+    assert "never a raw broker" in error_properties["message"].get("description", "")
 
 
 def test_openapi_flow_run_public_does_not_expose_legacy_user_mirror(

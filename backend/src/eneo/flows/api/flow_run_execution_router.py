@@ -64,18 +64,16 @@ from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
 from eneo.flows.application.flow_dispatch import (
+    FlowRunDispatchAccepted,
+    FlowRunDispatchFailed,
     dispatch_flow_run_recoverably_after_commit,
 )
-from eneo.flows.application.stale_queued_redispatch import (
-    StaleQueuedRedispatchDispatchError,
-)
-from eneo.flows.domain.flow import FlowRunReviewCheckpoint, FlowRunStatus
+from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_dispatch_request import FlowRunDispatchRequest
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
+from eneo.main.exceptions import ErrorCodes, InternalServerException
 from eneo.main.models import OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
@@ -136,7 +134,8 @@ Important semantics:
 - `is_terminal` is true for `completed`, `failed`, and `cancelled`.
 - `is_cancellable` tells clients when the cancel endpoint is a valid action.
 - `can_request_redispatch` is true for `queued`, but redispatch remains server-gated by
-  staleness; a queued run that is not stale returns `redispatched_count: 0`.
+  `dispatch_next_attempt_at`; a queued run that is not due returns
+  `redispatched_count: 0`.
 - `filter_order` is the recommended status filter order for run-history UIs.
 
 The table is flow-agnostic and stable across tenants. Fetch it once at application startup
@@ -720,7 +719,7 @@ async def create_flow_run(
     ),
 ) -> FlowRunPublic:
     assembler = FlowAssembler()
-    dispatch_request: FlowRunDispatchRequest | None = None
+    dispatch_run: FlowRun | None = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -760,12 +759,14 @@ async def create_flow_run(
                 description=f"Created flow run for flow {id}",
                 metadata=AuditMetadata.standard(actor=user, target=run),
             )
-            dispatch_request = run_service.build_dispatch_request(run)
+            dispatch_run = run
 
-    if dispatch_request is not None:
+    if dispatch_run is not None:
         background_tasks.add_task(
             dispatch_flow_run_recoverably_after_commit,
-            request=dispatch_request,
+            run_id=dispatch_run.id,
+            tenant_id=dispatch_run.tenant_id,
+            expected_revision=dispatch_run.revision,
         )
     return assembler.to_run_public(run)
 
@@ -1259,7 +1260,7 @@ async def resume_flow_run_review_checkpoint(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
-    dispatch_request = None
+    dispatch_run = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -1277,16 +1278,17 @@ async def resume_flow_run_review_checkpoint(
             idempotency_key=idempotency_key,
         )
         if result.accepted:
-            run_service = container.flow_run_service()
-            dispatch_request = run_service.build_dispatch_request(result.run)
+            dispatch_run = result.run
         checkpoint = await _present_review_checkpoint(
             container=container,
             checkpoint=result.checkpoint,
         )
-    if dispatch_request is not None:
+    if dispatch_run is not None:
         background_tasks.add_task(
             dispatch_flow_run_recoverably_after_commit,
-            request=dispatch_request,
+            run_id=dispatch_run.id,
+            tenant_id=dispatch_run.tenant_id,
+            expected_revision=dispatch_run.revision,
         )
     return FlowRunReviewCheckpointResumeResponse(
         checkpoint=checkpoint,
@@ -1407,7 +1409,7 @@ async def rerun_flow_run_step(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
-    dispatch_request = None
+    dispatch_run = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -1418,7 +1420,6 @@ async def rerun_flow_run_step(
         )
         user = container.user()
         actor_kwargs = audit_actor_kwargs(user)
-        run_service = container.flow_run_service()
         rerun_service = container.flow_run_rerun_service()
         result = await rerun_service.rerun_step(
             flow_id=id,
@@ -1461,11 +1462,13 @@ async def rerun_flow_run_step(
             ),
         )
         if result.created:
-            dispatch_request = run_service.build_dispatch_request(result.run)
-    if dispatch_request is not None:
+            dispatch_run = result.run
+    if dispatch_run is not None:
         background_tasks.add_task(
             dispatch_flow_run_recoverably_after_commit,
-            request=dispatch_request,
+            run_id=dispatch_run.id,
+            tenant_id=dispatch_run.tenant_id,
+            expected_revision=dispatch_run.revision,
         )
     return FlowAssembler().to_rerun_response(
         operation=result.operation,
@@ -1479,9 +1482,9 @@ async def rerun_flow_run_step(
     response_model=FlowRunRedispatchResponse,
     status_code=status.HTTP_200_OK,
     operation_id="redispatch_flow_run",
-    summary="Redispatch stale queued run",
+    summary="Redispatch due queued run",
     description="""
-    Attempt to redispatch a stale queued run.
+    Attempt to dispatch a queued run whose durable next-at clock is due.
 
     Returns the refreshed run payload together with `redispatched_count`, which indicates
     whether dispatch was re-triggered for this request.
@@ -1510,7 +1513,7 @@ async def redispatch_flow_run(
     ],
     run_id: Annotated[
         UUID,
-        Path(description="Identifier of the run to redispatch if it is still queued."),
+        Path(description="Identifier of the queued run to dispatch if it is due."),
     ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
@@ -1525,14 +1528,14 @@ async def redispatch_flow_run(
     user = container.user()
     actor_kwargs = audit_actor_kwargs(user)
     run_service = container.flow_run_service()
-    try:
-        result = await run_service.redispatch_run(
-            flow_id=id,
-            run_id=run_id,
-            execution_backend=container.flow_execution_backend(),
-        )
-    except StaleQueuedRedispatchDispatchError as exc:
-        failed_run = exc.run
+    run = await run_service.get_run(run_id=run_id, flow_id=id)
+    dispatch_result = await dispatch_flow_run_recoverably_after_commit(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        expected_revision=run.revision,
+    )
+    if isinstance(dispatch_result, FlowRunDispatchFailed):
+        failed_run = dispatch_result.run
         await container.audit_service().log_async(
             tenant_id=user.tenant_id,
             actor_id=actor_kwargs["actor_id"],
@@ -1544,10 +1547,14 @@ async def redispatch_flow_run(
             description=f"Redispatch failed for flow run {failed_run.id}",
             metadata=AuditMetadata.standard(actor=user, target=failed_run),
             outcome=Outcome.FAILURE,
-            error_message=str(exc)[:MAX_ERROR_MESSAGE_LENGTH],
+            error_message=("Flow run dispatch failed; retry state was recorded.")[
+                :MAX_ERROR_MESSAGE_LENGTH
+            ],
         )
-        raise
+        raise InternalServerException from None
 
+    run = dispatch_result.run
+    redispatched_count = int(isinstance(dispatch_result, FlowRunDispatchAccepted))
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
         actor_id=actor_kwargs["actor_id"],
@@ -1555,13 +1562,13 @@ async def redispatch_flow_run(
         actor_api_key_id=actor_kwargs["actor_api_key_id"],
         action=ActionType.FLOW_RUN_REDISPATCHED,
         entity_type=EntityType.FLOW_RUN,
-        entity_id=result.run.id,
-        description=f"Redispatch requested for flow run {result.run.id} (dispatch_count={result.redispatched_count})",
-        metadata=AuditMetadata.standard(actor=user, target=result.run),
+        entity_id=run.id,
+        description=f"Redispatch requested for flow run {run.id} (dispatch_count={redispatched_count})",
+        metadata=AuditMetadata.standard(actor=user, target=run),
     )
     return FlowRunRedispatchResponse(
-        run=FlowAssembler().to_run_public(result.run),
-        redispatched_count=result.redispatched_count,
+        run=FlowAssembler().to_run_public(run),
+        redispatched_count=redispatched_count,
     )
 
 

@@ -57,6 +57,7 @@ class _RuntimeWorkerContext:
     run_id: UUID
     flow_id: UUID
     tenant_id: UUID
+    run_revision: int
 
 
 class _ModelKwargs:
@@ -283,6 +284,7 @@ async def _create_runtime_worker_context(
         run_id=run.id,
         flow_id=flow.id,
         tenant_id=admin_user.tenant_id,
+        run_revision=run.revision,
     )
 
 
@@ -454,6 +456,7 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
             celery_task_id=f"late-output-{target_status.value}",
             retry_count=0,
         )
@@ -596,6 +599,7 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             run_id=str(context.run_id),
             flow_id=str(context.flow_id),
             tenant_id=str(context.tenant_id),
+            run_revision=context.run_revision,
             principal_type="user",
             principal_user_id=str(admin_user.id),
             task_id="runtime-timeout-terminalization",
@@ -774,6 +778,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             run_id=run.id,
             flow_id=flow.id,
             tenant_id=admin_user.tenant_id,
+            run_revision=run.revision,
             celery_task_id=run_correlation_id,
             retry_count=0,
         )
@@ -863,6 +868,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             run_id=run.id,
             flow_id=flow.id,
             tenant_id=admin_user.tenant_id,
+            run_revision=rerun_result.run.revision,
             celery_task_id=f"{run_correlation_id}-rerun",
             retry_count=0,
         )
@@ -1008,6 +1014,7 @@ async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
             celery_task_id=f"runtime-generic-failure-{uuid4()}",
             retry_count=0,
         )
@@ -1086,6 +1093,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
             celery_task_id=f"runtime-typed-failure-{uuid4()}",
             retry_count=0,
         )
@@ -1160,6 +1168,7 @@ async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
             celery_task_id=f"runtime-attempt-start-failure-{uuid4()}",
             retry_count=0,
         )
@@ -1228,6 +1237,7 @@ async def test_webhook_output_enqueues_delivery_for_fresh_sessions(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
             celery_task_id=f"runtime-webhook-success-{uuid4()}",
             retry_count=0,
         )

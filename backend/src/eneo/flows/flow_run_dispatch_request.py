@@ -13,6 +13,7 @@ class FlowRunDispatchSource(Protocol):
     id: UUID
     flow_id: UUID
     tenant_id: UUID
+    revision: int
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class FlowRunUserDispatchRequest:
     run_id: UUID
     flow_id: UUID
     tenant_id: UUID
+    run_revision: int
     principal_user_id: UUID
 
 
@@ -28,6 +30,7 @@ class FlowRunServiceKeyDispatchRequest:
     run_id: UUID
     flow_id: UUID
     tenant_id: UUID
+    run_revision: int
     principal_service_id: UUID
     principal_user_id: UUID | None = None
 
@@ -41,6 +44,7 @@ class FlowRunDispatchTaskKwargs(TypedDict):
     run_id: str
     flow_id: str
     tenant_id: str
+    run_revision: int
     principal_type: Literal["user", "service_key"]
     principal_user_id: str | None
     principal_service_id: str | None
@@ -50,15 +54,10 @@ class FlowRunDispatchMalformedReason(StrEnum):
     INVALID_RUN_ID = "invalid_run_id"
     INVALID_FLOW_ID = "invalid_flow_id"
     INVALID_TENANT_ID = "invalid_tenant_id"
+    INVALID_RUN_REVISION = "invalid_run_revision"
     INVALID_PRINCIPAL_TYPE = "invalid_principal_type"
     INVALID_PRINCIPAL_USER_ID = "invalid_principal_user_id"
     INVALID_PRINCIPAL_SERVICE_ID = "invalid_principal_service_id"
-
-
-@dataclass(frozen=True)
-class FlowRunDispatchMissingPrincipal:
-    run_id: UUID
-    tenant_id: UUID
 
 
 @dataclass(frozen=True)
@@ -67,9 +66,7 @@ class FlowRunDispatchMalformedPayload:
 
 
 FlowRunDispatchParseResult: TypeAlias = (
-    FlowRunDispatchRequest
-    | FlowRunDispatchMissingPrincipal
-    | FlowRunDispatchMalformedPayload
+    FlowRunDispatchRequest | FlowRunDispatchMalformedPayload
 )
 
 
@@ -84,6 +81,7 @@ def build_flow_run_dispatch_request(
             run_id=run.id,
             flow_id=run.flow_id,
             tenant_id=run.tenant_id,
+            run_revision=run.revision,
             principal_user_id=principal.principal_user_id,
         )
     if principal.principal_type == PrincipalType.SERVICE_KEY:
@@ -93,6 +91,7 @@ def build_flow_run_dispatch_request(
             run_id=run.id,
             flow_id=run.flow_id,
             tenant_id=run.tenant_id,
+            run_revision=run.revision,
             principal_user_id=principal.principal_user_id,
             principal_service_id=principal.principal_service_id,
         )
@@ -108,6 +107,7 @@ def flow_run_dispatch_task_kwargs(
                 "run_id": str(request.run_id),
                 "flow_id": str(request.flow_id),
                 "tenant_id": str(request.tenant_id),
+                "run_revision": request.run_revision,
                 "principal_type": PrincipalType.USER.value,
                 "principal_user_id": str(request.principal_user_id),
                 "principal_service_id": None,
@@ -117,6 +117,7 @@ def flow_run_dispatch_task_kwargs(
                 "run_id": str(request.run_id),
                 "flow_id": str(request.flow_id),
                 "tenant_id": str(request.tenant_id),
+                "run_revision": request.run_revision,
                 "principal_type": PrincipalType.SERVICE_KEY.value,
                 "principal_user_id": (
                     str(request.principal_user_id)
@@ -134,6 +135,7 @@ def parse_flow_run_dispatch_task_kwargs(
     run_id: str,
     flow_id: str,
     tenant_id: str,
+    run_revision: object,
     principal_type: str | None = None,
     principal_user_id: str | None = None,
     principal_service_id: str | None = None,
@@ -150,6 +152,12 @@ def parse_flow_run_dispatch_task_kwargs(
             reason=FlowRunDispatchMalformedReason.INVALID_TENANT_ID
         )
 
+    parsed_run_revision = _parse_dispatch_revision(run_revision)
+    if parsed_run_revision is None:
+        return FlowRunDispatchMalformedPayload(
+            reason=FlowRunDispatchMalformedReason.INVALID_RUN_REVISION
+        )
+
     parsed_flow_id = _parse_dispatch_uuid(flow_id)
     if parsed_flow_id is None:
         return FlowRunDispatchMalformedPayload(
@@ -157,9 +165,8 @@ def parse_flow_run_dispatch_task_kwargs(
         )
 
     if principal_type is None:
-        return FlowRunDispatchMissingPrincipal(
-            run_id=parsed_run_id,
-            tenant_id=parsed_tenant_id,
+        return FlowRunDispatchMalformedPayload(
+            reason=FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_TYPE
         )
 
     try:
@@ -171,9 +178,8 @@ def parse_flow_run_dispatch_task_kwargs(
 
     if parsed_principal_type == PrincipalType.USER:
         if principal_user_id is None:
-            return FlowRunDispatchMissingPrincipal(
-                run_id=parsed_run_id,
-                tenant_id=parsed_tenant_id,
+            return FlowRunDispatchMalformedPayload(
+                reason=FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_USER_ID
             )
         parsed_user_id = _parse_dispatch_uuid(principal_user_id)
         if parsed_user_id is None:
@@ -184,14 +190,14 @@ def parse_flow_run_dispatch_task_kwargs(
             run_id=parsed_run_id,
             flow_id=parsed_flow_id,
             tenant_id=parsed_tenant_id,
+            run_revision=parsed_run_revision,
             principal_user_id=parsed_user_id,
         )
 
     if parsed_principal_type == PrincipalType.SERVICE_KEY:
         if principal_service_id is None:
-            return FlowRunDispatchMissingPrincipal(
-                run_id=parsed_run_id,
-                tenant_id=parsed_tenant_id,
+            return FlowRunDispatchMalformedPayload(
+                reason=FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_SERVICE_ID
             )
         parsed_service_id = _parse_dispatch_uuid(principal_service_id)
         if parsed_service_id is None:
@@ -209,6 +215,7 @@ def parse_flow_run_dispatch_task_kwargs(
             run_id=parsed_run_id,
             flow_id=parsed_flow_id,
             tenant_id=parsed_tenant_id,
+            run_revision=parsed_run_revision,
             principal_user_id=parsed_user_id,
             principal_service_id=parsed_service_id,
         )
@@ -223,3 +230,9 @@ def _parse_dispatch_uuid(
         return UUID(value)
     except ValueError:
         return None
+
+
+def _parse_dispatch_revision(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value

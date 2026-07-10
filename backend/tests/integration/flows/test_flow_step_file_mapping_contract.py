@@ -212,6 +212,7 @@ async def _create_running_step_file_flow(
     assert await run_repo.mark_running_if_claimable(
         run_id=run.id,
         tenant_id=admin_user.tenant_id,
+        expected_revision=run.revision,
     )
     claimed = await run_repo.claim_step_result(
         run_id=run.id,

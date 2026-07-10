@@ -37,7 +37,12 @@ from eneo.flows.enums import (
     RerunDependencyKind,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from eneo.flows.flow_run_error import FlowRunError, parse_flow_run_error
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunError,
+    parse_flow_run_dispatch_error,
+    parse_flow_run_error,
+)
 
 # Flow domain models load persisted JSONB rows before each writer path has a
 # strict serializer boundary. Tighten fields one by one at those chokepoints.
@@ -192,6 +197,13 @@ class FlowRun(BaseModel):
     trace_id: UUID
     revision: int = 1
     status: FlowRunStatus
+    dispatch_pending_since: Optional[datetime] = None
+    dispatch_attempt_count: int = Field(default=0, ge=0)
+    dispatch_last_attempt_at: Optional[datetime] = None
+    dispatch_last_error: FlowRunDispatchError | None = None
+    dispatch_next_attempt_at: Optional[datetime] = None
+    dispatched_at: Optional[datetime] = None
+    dispatch_exhausted_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -209,6 +221,13 @@ class FlowRun(BaseModel):
     @classmethod
     def _parse_persisted_error(cls, value: object) -> FlowRunError | None:
         return parse_flow_run_error(value)
+
+    @field_validator("dispatch_last_error", mode="before")
+    @classmethod
+    def _parse_persisted_dispatch_error(
+        cls, value: object
+    ) -> FlowRunDispatchError | None:
+        return parse_flow_run_dispatch_error(value)
 
 
 class FlowRunTokenUsage(BaseModel):

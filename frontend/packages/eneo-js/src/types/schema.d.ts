@@ -4402,7 +4402,8 @@ export interface paths {
      *     - `is_terminal` is true for `completed`, `failed`, and `cancelled`.
      *     - `is_cancellable` tells clients when the cancel endpoint is a valid action.
      *     - `can_request_redispatch` is true for `queued`, but redispatch remains server-gated by
-     *       staleness; a queued run that is not stale returns `redispatched_count: 0`.
+     *       `dispatch_next_attempt_at`; a queued run that is not due returns
+     *       `redispatched_count: 0`.
      *     - `filter_order` is the recommended status filter order for run-history UIs.
      *
      *     The table is flow-agnostic and stable across tenants. Fetch it once at application startup
@@ -4751,8 +4752,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Redispatch stale queued run
-     * @description Attempt to redispatch a stale queued run.
+     * Redispatch due queued run
+     * @description Attempt to dispatch a queued run whose durable next-at clock is due.
      *
      *         Returns the refreshed run payload together with `redispatched_count`, which indicates
      *         whether dispatch was re-triggered for this request.
@@ -15440,6 +15441,37 @@ export interface components {
       attempts?: components["schemas"]["FlowRunDebugAttempt"][];
     };
     /**
+     * FlowRunDispatchError
+     * @description Small secret-free diagnosis for the current dispatch epoch.
+     */
+    FlowRunDispatchError: {
+      /**
+       * Schema Version
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+      kind: components["schemas"]["FlowRunDispatchErrorKind"];
+      /**
+       * Code
+       * @enum {string}
+       */
+      code: "flow_dispatch_failed" | "flow_missing_principal";
+      /** Retryable */
+      retryable: boolean;
+      /**
+       * Message
+       * @description Fixed safe diagnosis selected by `kind`; never a raw broker or provider exception.
+       */
+      message: string;
+    };
+    /**
+     * FlowRunDispatchErrorKind
+     * @enum {string}
+     */
+    FlowRunDispatchErrorKind:
+      "invalid_request" | "execution_backend_failure" | "invalid_persisted_error";
+    /**
      * FlowRunError
      * @description Structured terminal run error. Clients should branch on `code`, not on the human-readable message.
      */
@@ -15670,6 +15702,9 @@ export interface components {
      *         ],
      *         "run": {
      *           "created_at": "2026-03-17T10:05:00Z",
+     *           "dispatch_attempt_count": 0,
+     *           "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *           "dispatch_pending_since": "2026-03-17T10:05:00Z",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "flow_version": 3,
      *           "id": "00000000-0000-0000-0000-000000000301",
@@ -16270,6 +16305,9 @@ export interface components {
      *       ],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 0,
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
      *         "flow_version": 3,
      *         "id": "00000000-0000-0000-0000-000000000301",
@@ -16356,6 +16394,7 @@ export interface components {
     FlowRunLifecycleSource:
       | "executor_completed"
       | "executor_failed"
+      | "dispatch_failure"
       | "flow_deleted"
       | "definition_checksum_mismatch"
       | "invalid_flow_definition"
@@ -16379,6 +16418,9 @@ export interface components {
      * FlowRunPublic
      * @example {
      *       "created_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_attempt_count": 0,
+     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
@@ -16424,6 +16466,38 @@ export interface components {
        */
       revision: number;
       status: components["schemas"]["FlowRunStatus"];
+      /**
+       * Dispatch Pending Since
+       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
+       */
+      dispatch_pending_since?: string | null;
+      /**
+       * Dispatch Attempt Count
+       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
+       */
+      dispatch_attempt_count: number;
+      /**
+       * Dispatch Last Attempt At
+       * @description Timestamp of the latest claimed broker dispatch attempt.
+       */
+      dispatch_last_attempt_at?: string | null;
+      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
+      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
+      /**
+       * Dispatch Next Attempt At
+       * @description Sole dispatch eligibility clock. Null means no retry is currently due.
+       */
+      dispatch_next_attempt_at?: string | null;
+      /**
+       * Dispatched At
+       * @description Timestamp when the broker last accepted this dispatch epoch.
+       */
+      dispatched_at?: string | null;
+      /**
+       * Dispatch Exhausted At
+       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
+       */
+      dispatch_exhausted_at?: string | null;
       /** Cancelled At */
       cancelled_at?: string | null;
       /** Started At */
@@ -16463,6 +16537,9 @@ export interface components {
      *       "redispatched_count": 1,
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 0,
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
      *         "flow_version": 3,
      *         "id": "00000000-0000-0000-0000-000000000301",
@@ -17128,6 +17205,9 @@ export interface components {
      *       },
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 0,
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
      *         "flow_version": 3,
      *         "id": "00000000-0000-0000-0000-000000000301",
@@ -17529,6 +17609,9 @@ export interface components {
      *       "rerun_step_id": "00000000-0000-0000-0000-000000000101",
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 0,
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
      *         "flow_version": 3,
      *         "id": "00000000-0000-0000-0000-000000000301",
@@ -43421,6 +43504,9 @@ export interface operations {
            *           "trace_id": "00000000-0000-0000-0000-000000000302",
            *           "revision": 1,
            *           "status": "queued",
+           *           "dispatch_pending_since": "2026-03-17T10:05:00Z",
+           *           "dispatch_attempt_count": 0,
+           *           "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *           "input_payload_json": {
            *             "employee_name": "Alex Example"
            *           },
@@ -44172,6 +44258,9 @@ export interface operations {
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
            *         "revision": 2,
            *         "status": "queued",
+           *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+           *         "dispatch_attempt_count": 0,
+           *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "input_payload_json": {
            *           "employee_name": "Alex Example"
            *         },
@@ -44400,7 +44489,7 @@ export interface operations {
       path: {
         /** @description Identifier of the flow that owns the stale queued run. */
         id: string;
-        /** @description Identifier of the run to redispatch if it is still queued. */
+        /** @description Identifier of the queued run to dispatch if it is due. */
         run_id: string;
       };
       cookie?: never;

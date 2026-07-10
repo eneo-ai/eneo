@@ -12,11 +12,15 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.application.flow_dispatch import (
+    FlowRunDispatchAccepted,
+    FlowRunDispatchFailed,
+    FlowRunDispatchNotClaimed,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_run_dispatch_request import (
     FlowRunDispatchMalformedPayload,
     FlowRunDispatchMalformedReason,
-    FlowRunDispatchMissingPrincipal,
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
     flow_run_dispatch_task_kwargs,
@@ -64,6 +68,7 @@ def test_flow_run_dispatch_parser_round_trips_user_task_kwargs():
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
+        run_revision=3,
         principal_user_id=uuid4(),
     )
     kwargs = flow_run_dispatch_task_kwargs(request)
@@ -72,6 +77,7 @@ def test_flow_run_dispatch_parser_round_trips_user_task_kwargs():
         run_id=str(kwargs["run_id"]),
         flow_id=str(kwargs["flow_id"]),
         tenant_id=str(kwargs["tenant_id"]),
+        run_revision=kwargs["run_revision"],
         principal_type=kwargs["principal_type"],
         principal_user_id=kwargs["principal_user_id"],
         principal_service_id=kwargs["principal_service_id"],
@@ -85,6 +91,7 @@ def test_flow_run_dispatch_parser_round_trips_service_key_task_kwargs():
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
+        run_revision=4,
         principal_service_id=uuid4(),
     )
     kwargs = flow_run_dispatch_task_kwargs(request)
@@ -93,6 +100,7 @@ def test_flow_run_dispatch_parser_round_trips_service_key_task_kwargs():
         run_id=str(kwargs["run_id"]),
         flow_id=str(kwargs["flow_id"]),
         tenant_id=str(kwargs["tenant_id"]),
+        run_revision=kwargs["run_revision"],
         principal_type=kwargs["principal_type"],
         principal_user_id=kwargs["principal_user_id"],
         principal_service_id=kwargs["principal_service_id"],
@@ -101,37 +109,31 @@ def test_flow_run_dispatch_parser_round_trips_service_key_task_kwargs():
     assert result == request
 
 
-def test_flow_run_dispatch_parser_reports_missing_user_principal():
-    run_id = uuid4()
-    tenant_id = uuid4()
-
+def test_flow_run_dispatch_parser_rejects_missing_user_principal():
     result = parse_flow_run_dispatch_task_kwargs(
-        run_id=str(run_id),
+        run_id=str(uuid4()),
         flow_id=str(uuid4()),
-        tenant_id=str(tenant_id),
+        tenant_id=str(uuid4()),
+        run_revision=1,
         principal_type="user",
     )
 
-    assert result == FlowRunDispatchMissingPrincipal(
-        run_id=run_id,
-        tenant_id=tenant_id,
+    assert result == FlowRunDispatchMalformedPayload(
+        reason=FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_USER_ID
     )
 
 
-def test_flow_run_dispatch_parser_reports_missing_service_key_principal():
-    run_id = uuid4()
-    tenant_id = uuid4()
-
+def test_flow_run_dispatch_parser_rejects_missing_service_key_principal():
     result = parse_flow_run_dispatch_task_kwargs(
-        run_id=str(run_id),
+        run_id=str(uuid4()),
         flow_id=str(uuid4()),
-        tenant_id=str(tenant_id),
+        tenant_id=str(uuid4()),
+        run_revision=1,
         principal_type="service_key",
     )
 
-    assert result == FlowRunDispatchMissingPrincipal(
-        run_id=run_id,
-        tenant_id=tenant_id,
+    assert result == FlowRunDispatchMalformedPayload(
+        reason=FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_SERVICE_ID
     )
 
 
@@ -145,6 +147,10 @@ def test_flow_run_dispatch_parser_reports_missing_service_key_principal():
         (
             {"tenant_id": "not-a-uuid"},
             FlowRunDispatchMalformedReason.INVALID_TENANT_ID,
+        ),
+        (
+            {"run_revision": 0},
+            FlowRunDispatchMalformedReason.INVALID_RUN_REVISION,
         ),
         (
             {"flow_id": "not-a-uuid"},
@@ -172,6 +178,7 @@ def test_flow_run_dispatch_parser_reports_malformed_reason(payload, expected_rea
         "run_id": str(uuid4()),
         "flow_id": str(uuid4()),
         "tenant_id": str(uuid4()),
+        "run_revision": 1,
         "principal_type": "user",
         "principal_user_id": str(uuid4()),
         "principal_service_id": None,
@@ -188,6 +195,7 @@ def test_flow_run_dispatch_parser_reports_first_malformed_field():
         run_id="not-a-run-id",
         flow_id="not-a-flow-id",
         tenant_id="not-a-tenant-id",
+        run_revision=0,
         principal_type="robot",
         principal_user_id="not-a-user-id",
         principal_service_id="not-a-service-id",
@@ -226,6 +234,7 @@ async def test_celery_execution_backend_dispatches_task(monkeypatch):
             run_id=run_id,
             flow_id=flow_id,
             tenant_id=tenant_id,
+            run_revision=5,
             principal_user_id=user_id,
         ),
     )
@@ -236,6 +245,7 @@ async def test_celery_execution_backend_dispatches_task(monkeypatch):
             "run_id": str(run_id),
             "flow_id": str(flow_id),
             "tenant_id": str(tenant_id),
+            "run_revision": 5,
             "principal_type": "user",
             "principal_user_id": str(user_id),
             "principal_service_id": None,
@@ -268,6 +278,7 @@ async def test_celery_execution_backend_dispatches_service_key_principal(monkeyp
             run_id=run_id,
             flow_id=flow_id,
             tenant_id=tenant_id,
+            run_revision=6,
             principal_service_id=service_principal_id,
         ),
     )
@@ -278,6 +289,7 @@ async def test_celery_execution_backend_dispatches_service_key_principal(monkeyp
             "run_id": str(run_id),
             "flow_id": str(flow_id),
             "tenant_id": str(tenant_id),
+            "run_revision": 6,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_service_id": str(service_principal_id),
@@ -307,6 +319,7 @@ async def test_celery_execution_backend_uses_default_queue(monkeypatch):
             run_id=uuid4(),
             flow_id=uuid4(),
             tenant_id=uuid4(),
+            run_revision=1,
             principal_user_id=uuid4(),
         ),
     )
@@ -331,6 +344,7 @@ async def test_celery_execution_backend_dispatch_propagates_send_task_failure():
                 run_id=uuid4(),
                 flow_id=uuid4(),
                 tenant_id=uuid4(),
+                run_revision=1,
                 principal_user_id=uuid4(),
             ),
         )
@@ -506,7 +520,7 @@ def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
     ]
 
 
-def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
+def test_execute_flow_run_rejects_missing_user_id_without_terminalizing(monkeypatch):
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     monkeypatch.setattr(
@@ -514,42 +528,21 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
         "terminalize_flow_run_failure",
         terminalize_failure,
     )
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
-
-    class _Future:
-        def result(self, timeout=None):
-            return None
-
-    def _run_coroutine_threadsafe(coroutine, _loop):
-        asyncio.run(coroutine)
-        return _Future()
-
-    monkeypatch.setattr(
-        tasks_module.asyncio,
-        "run_coroutine_threadsafe",
-        _run_coroutine_threadsafe,
-    )
     result = tasks_module._execute_flow_run_task(
         run_id=str(uuid4()),
         flow_id=str(uuid4()),
         tenant_id=str(uuid4()),
+        run_revision=1,
+        principal_type="user",
         task_id="task-1",
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "reason": "missing_principal"}
-    assert terminalize_failure.await_count == 1
-    assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunLifecycleSource.MISSING_PRINCIPAL
-    )
-    error = terminalize_failure.await_args.kwargs["error"]
-    assert error.code == ("flow_missing_principal")
-    assert error.message == (
-        "flow_missing_principal: Flow run execution skipped because run has no execution principal."
-    )
+    assert result == {"status": "failed", "reason": "invalid_dispatch_payload"}
+    terminalize_failure.assert_not_awaited()
 
 
-def test_execute_flow_run_marks_failed_when_service_key_id_is_missing(monkeypatch):
+def test_execute_flow_run_rejects_missing_service_id_without_terminalizing(monkeypatch):
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     terminalize_failure = AsyncMock()
     monkeypatch.setattr(
@@ -557,41 +550,18 @@ def test_execute_flow_run_marks_failed_when_service_key_id_is_missing(monkeypatc
         "terminalize_flow_run_failure",
         terminalize_failure,
     )
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
-
-    class _Future:
-        def result(self, timeout=None):
-            return None
-
-    def _run_coroutine_threadsafe(coroutine, _loop):
-        asyncio.run(coroutine)
-        return _Future()
-
-    monkeypatch.setattr(
-        tasks_module.asyncio,
-        "run_coroutine_threadsafe",
-        _run_coroutine_threadsafe,
-    )
-
     result = tasks_module._execute_flow_run_task(
         run_id=str(uuid4()),
         flow_id=str(uuid4()),
         tenant_id=str(uuid4()),
+        run_revision=1,
         principal_type="service_key",
         task_id="task-1",
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "reason": "missing_principal"}
-    assert terminalize_failure.await_count == 1
-    assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunLifecycleSource.MISSING_PRINCIPAL
-    )
-    error = terminalize_failure.await_args.kwargs["error"]
-    assert error.code == "flow_missing_principal"
-    assert error.message == (
-        "flow_missing_principal: Flow run execution skipped because run has no execution principal."
-    )
+    assert result == {"status": "failed", "reason": "invalid_dispatch_payload"}
+    terminalize_failure.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -631,6 +601,7 @@ def test_execute_flow_run_rejects_malformed_dispatch_payload_without_runtime(
         "run_id": str(uuid4()),
         "flow_id": str(uuid4()),
         "tenant_id": str(uuid4()),
+        "run_revision": 1,
         "principal_type": "user",
         "principal_user_id": str(uuid4()),
         "principal_service_id": None,
@@ -725,6 +696,7 @@ def test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminaliza
             run_id=str(uuid4()),
             flow_id=str(uuid4()),
             tenant_id=str(uuid4()),
+            run_revision=1,
             principal_type="user",
             principal_user_id=str(uuid4()),
             task_id="task-1",
@@ -804,6 +776,7 @@ def test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalizati
             run_id=str(uuid4()),
             flow_id=str(uuid4()),
             tenant_id=str(uuid4()),
+            run_revision=1,
             principal_type="user",
             principal_user_id=str(uuid4()),
             task_id="task-1",
@@ -894,12 +867,6 @@ def test_flow_maintenance_task_wrappers_cancel_future_on_timeout(
     ("payload", "scheduled_exceptions", "expected_result", "expected_source"),
     [
         (
-            {},
-            [RuntimeError("terminalizer unavailable")],
-            {"status": "failed", "reason": "missing_principal"},
-            FlowRunLifecycleSource.MISSING_PRINCIPAL,
-        ),
-        (
             {"principal_type": "user", "principal_user_id": str(uuid4())},
             [
                 concurrent.futures.TimeoutError(),
@@ -969,6 +936,7 @@ def test_execute_flow_run_returns_failed_when_task_terminalization_fails(
         "run_id": str(uuid4()),
         "flow_id": str(uuid4()),
         "tenant_id": str(uuid4()),
+        "run_revision": 1,
         "task_id": "task-1",
         "retry_count": 0,
     }
@@ -1022,6 +990,7 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
         run_id=str(uuid4()),
         flow_id=str(uuid4()),
         tenant_id=str(uuid4()),
+        run_revision=1,
         principal_type="user",
         principal_user_id=str(uuid4()),
         task_id="task-1",
@@ -1246,58 +1215,44 @@ def test_reconcile_review_expiry_task_processes_all_tenants(monkeypatch):
 
 
 def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
-    """Beat-driven redispatch claims stuck QUEUED runs and dispatches them.
-
-    Without this safety net, a run whose post-response BackgroundTask
-    dispatch silently fails (FastAPI process restart, OOM, autoreload)
-    sits in QUEUED forever with no error_code and no retry. The beat
-    task is the only automatic recovery — `cancel_run` only flips DB
-    status, and `reconcile-stale-running` handles RUNNING, not QUEUED.
-    """
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant_one = SimpleNamespace(id=uuid4())
     tenant_two = SimpleNamespace(id=uuid4())
-    user_run_user_id = uuid4()
-    service_principal_id = uuid4()
     user_run = SimpleNamespace(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant_one.id,
-        principal_type="user",
-        principal_user_id=user_run_user_id,
+        revision=2,
     )
     service_run = SimpleNamespace(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant_two.id,
-        principal_type="service_key",
-        principal_user_id=None,
-        principal_service_id=service_principal_id,
+        revision=4,
     )
     repo = MagicMock()
-    repo.list_stale_queued_runs = AsyncMock(side_effect=[[user_run], [service_run]])
-    repo.claim_stale_queued_run_for_redispatch = AsyncMock(
-        side_effect=[user_run, service_run]
+    repo.list_dispatchable_queued_runs = AsyncMock(
+        side_effect=[[user_run], [service_run]]
     )
     tenant_repo = MagicMock()
     tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant_one, tenant_two])
-    backend = MagicMock()
-    backend.dispatch = AsyncMock()
+    dispatch = AsyncMock(
+        side_effect=[
+            FlowRunDispatchAccepted(run=user_run),
+            FlowRunDispatchAccepted(run=service_run),
+        ]
+    )
 
     class _Container:
         def __init__(self, session=None):
             self._repo = repo
             self._tenant_repo = tenant_repo
-            self._backend = backend
 
         def flow_run_repo(self):
             return self._repo
 
         def tenant_repo(self):
             return self._tenant_repo
-
-        def flow_execution_backend(self):
-            return self._backend
 
     fake_session = _fake_flow_task_session()
 
@@ -1309,6 +1264,11 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
             return False
 
     monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
     monkeypatch.setattr(
         tasks_module.sessionmanager, "session", lambda: _SessionContext()
     )
@@ -1317,61 +1277,43 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
 
     assert result["status"] == "ok"
     assert result["redispatched"] == 2
-    assert backend.dispatch.await_count == 2
-    user_request = backend.dispatch.await_args_list[0].kwargs["request"]
-    assert user_request == FlowRunUserDispatchRequest(
-        run_id=user_run.id,
-        flow_id=user_run.flow_id,
-        tenant_id=tenant_one.id,
-        principal_user_id=user_run_user_id,
-    )
-    service_request = backend.dispatch.await_args_list[1].kwargs["request"]
-    assert service_request == FlowRunServiceKeyDispatchRequest(
-        run_id=service_run.id,
-        flow_id=service_run.flow_id,
-        tenant_id=tenant_two.id,
-        principal_service_id=service_principal_id,
-    )
+    assert dispatch.await_args_list[0].kwargs == {
+        "run_id": user_run.id,
+        "tenant_id": tenant_one.id,
+        "expected_revision": 2,
+    }
+    assert dispatch.await_args_list[1].kwargs == {
+        "run_id": service_run.id,
+        "tenant_id": tenant_two.id,
+        "expected_revision": 4,
+    }
 
 
 def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch):
-    """If `claim_stale_queued_run_for_redispatch` returns None, skip dispatch.
-
-    A concurrent dispatch path or a recently-RUNNING-transitioned run
-    must not be redispatched twice; the atomic claim is the
-    cross-process serialization point.
-    """
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     stale_run = SimpleNamespace(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant.id,
-        principal_type="user",
-        principal_user_id=uuid4(),
+        revision=1,
     )
     repo = MagicMock()
-    repo.list_stale_queued_runs = AsyncMock(return_value=[stale_run])
-    repo.claim_stale_queued_run_for_redispatch = AsyncMock(return_value=None)
+    repo.list_dispatchable_queued_runs = AsyncMock(return_value=[stale_run])
     tenant_repo = MagicMock()
     tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant])
-    backend = MagicMock()
-    backend.dispatch = AsyncMock()
+    dispatch = AsyncMock(return_value=FlowRunDispatchNotClaimed(run=stale_run))
 
     class _Container:
         def __init__(self, session=None):
             self._repo = repo
             self._tenant_repo = tenant_repo
-            self._backend = backend
 
         def flow_run_repo(self):
             return self._repo
 
         def tenant_repo(self):
             return self._tenant_repo
-
-        def flow_execution_backend(self):
-            return self._backend
 
     fake_session = _fake_flow_task_session()
 
@@ -1384,13 +1326,18 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
 
     monkeypatch.setattr(tasks_module, "Container", _Container)
     monkeypatch.setattr(
+        tasks_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+    monkeypatch.setattr(
         tasks_module.sessionmanager, "session", lambda: _SessionContext()
     )
 
     result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
 
     assert result["redispatched"] == 0
-    assert backend.dispatch.await_count == 0
+    dispatch.assert_awaited_once()
 
 
 def test_redispatch_stale_queued_continues_after_dispatch_error(monkeypatch):
@@ -1400,40 +1347,37 @@ def test_redispatch_stale_queued_continues_after_dispatch_error(monkeypatch):
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant.id,
-        principal_type="user",
-        principal_user_id=uuid4(),
+        revision=1,
     )
     successful_run = SimpleNamespace(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant.id,
-        principal_type="user",
-        principal_user_id=uuid4(),
+        revision=2,
     )
     repo = MagicMock()
-    repo.list_stale_queued_runs = AsyncMock(return_value=[failed_run, successful_run])
-    repo.claim_stale_queued_run_for_redispatch = AsyncMock(
-        side_effect=[failed_run, successful_run]
+    repo.list_dispatchable_queued_runs = AsyncMock(
+        return_value=[failed_run, successful_run]
     )
     tenant_repo = MagicMock()
     tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant])
-    backend = MagicMock()
-    backend.dispatch = AsyncMock(side_effect=[RuntimeError("broker down"), None])
+    dispatch = AsyncMock(
+        side_effect=[
+            FlowRunDispatchFailed(run=failed_run),
+            FlowRunDispatchAccepted(run=successful_run),
+        ]
+    )
 
     class _Container:
         def __init__(self, session=None):
             self._repo = repo
             self._tenant_repo = tenant_repo
-            self._backend = backend
 
         def flow_run_repo(self):
             return self._repo
 
         def tenant_repo(self):
             return self._tenant_repo
-
-        def flow_execution_backend(self):
-            return self._backend
 
     fake_session = _fake_flow_task_session()
 
@@ -1446,13 +1390,18 @@ def test_redispatch_stale_queued_continues_after_dispatch_error(monkeypatch):
 
     monkeypatch.setattr(tasks_module, "Container", _Container)
     monkeypatch.setattr(
+        tasks_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+    monkeypatch.setattr(
         tasks_module.sessionmanager, "session", lambda: _SessionContext()
     )
 
     result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
 
     assert result == {"status": "ok", "redispatched": 1}
-    assert backend.dispatch.await_count == 2
+    assert dispatch.await_count == 2
 
 
 def test_flow_worker_process_init_initializes_observability_db_and_http_client(
@@ -1533,36 +1482,25 @@ def test_flow_run_logging_context_sets_flow_trace_attributes_and_clears():
     assert request_context_module.get_request_context() == {}
 
 
-def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):
-    """The atomic UPDATE must commit before the celery dispatch fires.
-
-    With `autobegin=False` on the sessionmaker the beat task must enable
-    autobegin for the session and wrap the claim in `session.begin()`.
-    Otherwise the claim either raises (no transaction is open) or is
-    not yet visible to the worker that picks up the dispatched run.
-    """
+def test_redispatch_due_list_transaction_closes_before_dispatch_coordinator(
+    monkeypatch,
+):
     tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
     tenant = SimpleNamespace(id=uuid4())
     stale_run = SimpleNamespace(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant.id,
-        principal_type="user",
-        principal_user_id=uuid4(),
+        revision=3,
     )
     events: list[str] = []
     repo = MagicMock()
 
-    async def list_stale(**_kwargs):
-        events.append("list_stale")
+    async def list_due(**_kwargs):
+        events.append("list_due")
         return [stale_run]
 
-    async def claim(**_kwargs):
-        events.append("claim")
-        return stale_run
-
-    repo.list_stale_queued_runs = list_stale
-    repo.claim_stale_queued_run_for_redispatch = claim
+    repo.list_dispatchable_queued_runs = list_due
     tenant_repo = MagicMock()
 
     async def get_all_tenants():
@@ -1570,27 +1508,21 @@ def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):
         return [tenant]
 
     tenant_repo.get_all_tenants = get_all_tenants
-    backend = MagicMock()
 
     async def dispatch(**_kwargs):
         events.append("dispatch")
-
-    backend.dispatch = dispatch
+        return FlowRunDispatchAccepted(run=stale_run)
 
     class _Container:
         def __init__(self, session=None):
             self._repo = repo
             self._tenant_repo = tenant_repo
-            self._backend = backend
 
         def flow_run_repo(self):
             return self._repo
 
         def tenant_repo(self):
             return self._tenant_repo
-
-        def flow_execution_backend(self):
-            return self._backend
 
     class _BeginContext:
         async def __aenter__(self):
@@ -1616,25 +1548,21 @@ def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):
 
     monkeypatch.setattr(tasks_module, "Container", _Container)
     monkeypatch.setattr(
+        tasks_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+    monkeypatch.setattr(
         tasks_module.sessionmanager, "session", lambda: _SessionContext()
     )
 
     result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
 
     assert result == {"status": "ok", "redispatched": 1}
-    assert sync_session.autobegin is True, (
-        "Beat task must enable autobegin so the claim UPDATE opens a "
-        "transaction; with autobegin=False it raises InvalidRequestError."
-    )
-    claim_idx = events.index("claim")
+    assert sync_session.autobegin is True
+    list_idx = events.index("list_due")
     dispatch_idx = events.index("dispatch")
     commits_between = [
-        i
-        for i, e in enumerate(events)
-        if e == "commit" and claim_idx < i < dispatch_idx
+        i for i, e in enumerate(events) if e == "commit" and list_idx < i < dispatch_idx
     ]
-    assert commits_between, (
-        f"Expected claim→commit→dispatch ordering; got {events}. "
-        "Without a commit between claim and dispatch, the worker may "
-        "pick up the run before the QUEUED-claim is visible."
-    )
+    assert commits_between, events

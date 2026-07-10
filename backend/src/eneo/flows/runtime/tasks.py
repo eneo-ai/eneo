@@ -17,23 +17,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
+from eneo.flows.application.flow_dispatch import (
+    FlowRunDispatchAccepted,
+    dispatch_flow_run_recoverably_after_commit,
+)
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
 )
 from eneo.flows.application.flow_run_recovery_policy import (
-    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     flow_stale_running_reconcile_after_seconds,
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
-)
-from eneo.flows.application.stale_queued_redispatch import (
-    StaleQueuedRedispatchDispatched,
-    StaleQueuedRedispatchDispatchFailed,
-    StaleQueuedRedispatchInvalidRequest,
-    StaleQueuedRedispatchNotClaimed,
-    redispatch_stale_queued_run,
 )
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.enums import FlowRunLifecycleSource
@@ -45,8 +41,6 @@ from eneo.flows.flow_input_limits import (
 )
 from eneo.flows.flow_run_dispatch_request import (
     FlowRunDispatchMalformedPayload,
-    FlowRunDispatchMissingPrincipal,
-    FlowRunDispatchSource,
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
     parse_flow_run_dispatch_task_kwargs,
@@ -207,6 +201,7 @@ async def _execute_flow_run_async(
     run_id: UUID,
     flow_id: UUID,
     tenant_id: UUID,
+    run_revision: int,
     principal_type: PrincipalType,
     principal_user_id: UUID | None,
     principal_service_id: UUID | None,
@@ -224,6 +219,7 @@ async def _execute_flow_run_async(
             run_id=run_id,
             flow_id=flow_id,
             tenant_id=tenant_id,
+            run_revision=run_revision,
             principal_type=principal_type,
             principal_user_id=principal_user_id,
             principal_service_id=principal_service_id,
@@ -238,6 +234,7 @@ async def _execute_flow_run_async_traced(
     run_id: UUID,
     flow_id: UUID,
     tenant_id: UUID,
+    run_revision: int,
     principal_type: PrincipalType,
     principal_user_id: UUID | None,
     principal_service_id: UUID | None,
@@ -272,6 +269,25 @@ async def _execute_flow_run_async_traced(
             run_trace_id=run.trace_id,
             celery_task_id=celery_task_id,
         ):
+            can_run = await flow_run_repo.mark_running_if_claimable(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                expected_revision=run_revision,
+            )
+            await session.commit()
+            if not can_run:
+                latest = await flow_run_repo.get(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    flow_id=flow_id,
+                )
+                result = {
+                    "status": "skipped",
+                    "reason": f"run_{latest.status.value}_or_revision_changed",
+                }
+                flow_span.set_result_from_mapping(result)
+                return result
+
             try:
                 run_actor = await _resolve_flow_run_actor(
                     container=runtime_container,
@@ -338,7 +354,7 @@ async def _execute_flow_run_async_traced(
                     runtime_policy=runtime_policy,
                 ),
             )
-            result = await executor.execute(
+            result = await executor.execute_claimed(
                 run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=tenant_id,
@@ -498,6 +514,7 @@ def execute_flow_run(
     run_id: str,
     flow_id: str,
     tenant_id: str,
+    run_revision: int,
     principal_type: str | None = None,
     principal_user_id: str | None = None,
     principal_service_id: str | None = None,
@@ -506,6 +523,7 @@ def execute_flow_run(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
+        run_revision=run_revision,
         principal_type=principal_type,
         principal_user_id=principal_user_id,
         principal_service_id=principal_service_id,
@@ -519,6 +537,7 @@ def _execute_flow_run_task(
     run_id: str,
     flow_id: str,
     tenant_id: str,
+    run_revision: int,
     principal_type: str | None = None,
     principal_user_id: str | None = None,
     principal_service_id: str | None = None,
@@ -543,6 +562,7 @@ def _execute_flow_run_task(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
+        run_revision=run_revision,
         principal_type=principal_type,
         principal_user_id=principal_user_id,
         principal_service_id=principal_service_id,
@@ -552,6 +572,7 @@ def _execute_flow_run_task(
             run_id_uuid = user_dispatch.run_id
             flow_id_uuid = user_dispatch.flow_id
             tenant_id_uuid = user_dispatch.tenant_id
+            expected_run_revision = user_dispatch.run_revision
             resolved_principal_type = PrincipalType.USER
             resolved_principal_user_id = user_dispatch.principal_user_id
             resolved_principal_service_id = None
@@ -559,33 +580,10 @@ def _execute_flow_run_task(
             run_id_uuid = service_dispatch.run_id
             flow_id_uuid = service_dispatch.flow_id
             tenant_id_uuid = service_dispatch.tenant_id
+            expected_run_revision = service_dispatch.run_revision
             resolved_principal_type = PrincipalType.SERVICE_KEY
             resolved_principal_user_id = service_dispatch.principal_user_id
             resolved_principal_service_id = service_dispatch.principal_service_id
-        case FlowRunDispatchMissingPrincipal() as missing_principal:
-            run_id_uuid = missing_principal.run_id
-            tenant_id_uuid = missing_principal.tenant_id
-            loop = _get_flow_task_loop()
-            _terminalize_flow_run_failure_from_task(
-                loop=loop,
-                run_id=run_id_uuid,
-                tenant_id=tenant_id_uuid,
-                task_id=task_id,
-                source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                    code=FlowApiErrorCode.RUN_MISSING_PRINCIPAL,
-                    message=(
-                        "flow_missing_principal: "
-                        "Flow run execution skipped because run has no execution principal."
-                    ),
-                ),
-            )
-            logger.error(
-                "Flow run execution skipped because run has no execution principal",
-                extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
-            )
-            return {"status": "failed", "reason": "missing_principal"}
         case FlowRunDispatchMalformedPayload(reason=reason):
             logger.error(
                 "Flow run execution task has malformed dispatch payload",
@@ -616,6 +614,7 @@ def _execute_flow_run_task(
             run_id=run_id_uuid,
             flow_id=flow_id_uuid,
             tenant_id=tenant_id_uuid,
+            run_revision=expected_run_revision,
             principal_type=resolved_principal_type,
             principal_user_id=resolved_principal_user_id,
             principal_service_id=resolved_principal_service_id,
@@ -750,63 +749,32 @@ async def _reconcile_expired_review_checkpoints_all_tenants(
 async def _redispatch_stale_queued_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
-    """Re-dispatch QUEUED runs whose initial dispatch was lost.
+    """Dispatch queued epochs whose durable next-at clock is due."""
 
-    Flow run dispatch starts as a FastAPI BackgroundTask after the response
-    is sent; if the API process exits before the task fires (autoreload, OOM,
-    deploy), the run sits in QUEUED with no error_code. This beat task is the
-    safety net.
-
-    The atomic `claim_stale_queued_run_for_redispatch` is the
-    cross-process serialization point — two beat workers cannot
-    redispatch the same run.
-    """
-    stale_before = datetime.now(timezone.utc) - timedelta(
-        seconds=max(1, FLOW_QUEUED_REDISPATCH_AFTER_SECONDS)
-    )
+    due_at = datetime.now(timezone.utc)
     redispatched = 0
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
         run_repo = container.flow_run_repo()
-        backend = container.flow_execution_backend()
         tenant_repo = container.tenant_repo()
         async with session.begin():
             tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
             async with session.begin():
-                stale_runs = await run_repo.list_stale_queued_runs(
+                due_runs = await run_repo.list_dispatchable_queued_runs(
                     tenant_id=tenant.id,
-                    stale_before=stale_before,
+                    due_at=due_at,
                     limit=limit,
                 )
-            for run in stale_runs:
-
-                async def claim_run() -> FlowRunDispatchSource | None:
-                    # The worker that picks up the dispatched run reads in a
-                    # fresh session, so the claim must commit before dispatch.
-                    async with session.begin():
-                        return await run_repo.claim_stale_queued_run_for_redispatch(
-                            run_id=run.id,
-                            tenant_id=run.tenant_id,
-                            stale_before=stale_before,
-                        )
-
-                result = await redispatch_stale_queued_run(
-                    claim_run=claim_run,
-                    backend=backend,
+            for run in due_runs:
+                result = await dispatch_flow_run_recoverably_after_commit(
+                    run_id=run.id,
+                    tenant_id=run.tenant_id,
+                    expected_revision=run.revision,
                 )
-                match result:
-                    case StaleQueuedRedispatchDispatched():
-                        redispatched += 1
-                    case StaleQueuedRedispatchNotClaimed():
-                        continue
-                    case StaleQueuedRedispatchInvalidRequest():
-                        continue
-                    case StaleQueuedRedispatchDispatchFailed():
-                        continue
-                    case _:
-                        assert_never(result)
+                if isinstance(result, FlowRunDispatchAccepted):
+                    redispatched += 1
     return {"status": "ok", "redispatched": redispatched}
 
 

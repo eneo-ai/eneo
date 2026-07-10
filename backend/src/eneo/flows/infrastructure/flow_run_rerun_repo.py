@@ -23,6 +23,9 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
+from eneo.flows.application.flow_run_recovery_policy import (
+    start_flow_dispatch_epoch,
+)
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
@@ -380,6 +383,7 @@ class FlowRunRerunRepository:
             .where(FlowStepResults.step_id.in_(invalidated_step_ids))
             .values(**_RERUN_STEP_RESULT_RESET_VALUES)
         )
+        now_utc = datetime.now(timezone.utc)
         updated_run_row = await self.session.scalar(
             sa.update(FlowRuns)
             .where(FlowRuns.id == flow_run_id)
@@ -388,6 +392,7 @@ class FlowRunRerunRepository:
             .values(
                 status=FlowRunStatus.QUEUED.value,
                 revision=run_row.revision + 1,
+                **start_flow_dispatch_epoch(now_utc),
                 input_payload_json=execution_input_payload,
                 output_payload_json=None,
                 error_json=None,

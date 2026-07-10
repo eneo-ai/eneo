@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Sequence, assert_never
+from datetime import datetime, timezone
+from typing import Sequence
 from uuid import UUID
 
 from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
@@ -14,18 +14,7 @@ from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
-    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
-)
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from eneo.flows.application.stale_queued_redispatch import (
-    StaleQueuedRedispatchDispatched,
-    StaleQueuedRedispatchDispatchError,
-    StaleQueuedRedispatchDispatchFailed,
-    StaleQueuedRedispatchInvalidRequest,
-    StaleQueuedRedispatchNotClaimed,
-    redispatch_stale_queued_run,
-)
 from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
@@ -39,16 +28,11 @@ from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
 from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
-from eneo.flows.execution_backend import FlowExecutionBackend
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
-)
-from eneo.flows.flow_run_dispatch_request import (
-    FlowRunDispatchRequest,
-    build_flow_run_dispatch_request,
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
@@ -98,12 +82,6 @@ class FlowRunStepResultWithFiles:
 class CreateRunResult:
     run: FlowRun
     created: bool
-
-
-@dataclass(frozen=True, slots=True)
-class FlowRunRedispatchResult:
-    run: FlowRun
-    redispatched_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +163,6 @@ class FlowRunService:
         access_policy: FlowRunAccessPolicy,
         settings_service: SettingService | None = None,
         max_concurrent_runs: int | None = None,
-        queued_redispatch_after_seconds: int | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -201,11 +178,6 @@ class FlowRunService:
             if max_concurrent_runs is not None
             else get_settings().flow_max_concurrent_runs_per_tenant
         )
-        self.queued_redispatch_after_seconds = (
-            queued_redispatch_after_seconds
-            if queued_redispatch_after_seconds is not None
-            else FLOW_QUEUED_REDISPATCH_AFTER_SECONDS
-        )
 
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -219,65 +191,6 @@ class FlowRunService:
         key = getattr(self.user, "active_api_key", None)
         assert key is not None, "service-key Flow principal requires active_api_key"
         return resolve_effective_resource_permission(key, "flows")
-
-    def build_dispatch_request(self, run: FlowRun) -> FlowRunDispatchRequest:
-        return build_flow_run_dispatch_request(run)
-
-    async def claim_stale_queued_run_for_redispatch(
-        self,
-        *,
-        flow_id: UUID,
-        run_id: UUID,
-    ) -> FlowRun | None:
-        run = await self.get_run(run_id=run_id, flow_id=flow_id)
-        stale_before = datetime.now(timezone.utc) - timedelta(
-            seconds=max(1, self.queued_redispatch_after_seconds)
-        )
-        return await self.flow_run_repo.claim_stale_queued_run_for_redispatch(
-            run_id=run.id,
-            tenant_id=self.user.tenant_id,
-            stale_before=stale_before,
-            flow_id=flow_id,
-        )
-
-    async def redispatch_run(
-        self,
-        *,
-        flow_id: UUID,
-        run_id: UUID,
-        execution_backend: FlowExecutionBackend,
-    ) -> FlowRunRedispatchResult:
-        async def claim_run() -> FlowRun | None:
-            return await self.claim_stale_queued_run_for_redispatch(
-                flow_id=flow_id,
-                run_id=run_id,
-            )
-
-        redispatched_count = 0
-        result = await redispatch_stale_queued_run(
-            claim_run=claim_run,
-            backend=execution_backend,
-        )
-        match result:
-            case StaleQueuedRedispatchDispatched():
-                redispatched_count = 1
-            case StaleQueuedRedispatchNotClaimed():
-                pass
-            case StaleQueuedRedispatchInvalidRequest():
-                pass
-            case StaleQueuedRedispatchDispatchFailed(run=failed_run, error=error):
-                raise StaleQueuedRedispatchDispatchError(
-                    run=failed_run,
-                    cause=error,
-                ) from error
-            case _:
-                assert_never(result)
-
-        refreshed = await self.get_run(run_id=run_id, flow_id=flow_id)
-        return FlowRunRedispatchResult(
-            run=refreshed,
-            redispatched_count=redispatched_count,
-        )
 
     def _validate_idempotency_key(self, idempotency_key: str | None) -> str | None:
         if idempotency_key is None:

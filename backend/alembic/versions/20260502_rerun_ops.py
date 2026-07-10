@@ -25,8 +25,9 @@ def upgrade() -> None:
             nullable=False,
             server_default="1",
             comment=(
-                "Monotonic lifecycle token for rerun/resume compare-and-swap; "
-                "updated_at is display metadata."
+                "Monotonic lifecycle compare-and-swap token; its value on entry "
+                "to queued identifies the dispatch epoch. updated_at is display "
+                "metadata."
             ),
         ),
     )

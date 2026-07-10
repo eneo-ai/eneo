@@ -53,7 +53,6 @@ from eneo.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
-    is_terminal_flow_run_status,
 )
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -572,6 +571,36 @@ class FlowRunExecutor:
         run_id: UUID,
         flow_id: UUID,
         tenant_id: UUID,
+        run_revision: int,
+        celery_task_id: str | None,
+        retry_count: int,
+    ) -> dict[str, object]:
+        can_run = await self.flow_run_repo.mark_running_if_claimable(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            expected_revision=run_revision,
+        )
+        await self._commit()
+        if not can_run:
+            latest = await self.flow_run_repo.get(
+                run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
+            )
+            return {"status": "skipped", "reason": f"run_{latest.status.value}"}
+
+        return await self.execute_claimed(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            celery_task_id=celery_task_id,
+            retry_count=retry_count,
+        )
+
+    async def execute_claimed(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
         celery_task_id: str | None,
         retry_count: int,
     ) -> dict[str, Any]:
@@ -585,24 +614,13 @@ class FlowRunExecutor:
         run = await self.flow_run_repo.get(
             run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
         )
-        if is_terminal_flow_run_status(run.status):
+        if run.status != FlowRunStatus.RUNNING:
             logger.info(
-                "flow_executor.skip run_id=%s reason=run_terminal status=%s",
+                "flow_executor.skip run_id=%s reason=run_not_claimed status=%s",
                 run_id,
                 run.status,
             )
-            return {"status": "skipped", "reason": "run_terminal"}
-
-        can_run = await self.flow_run_repo.mark_running_if_claimable(
-            run_id=run_id,
-            tenant_id=tenant_id,
-        )
-        await self._commit()
-        if not can_run:
-            latest = await self.flow_run_repo.get(
-                run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
-            )
-            return {"status": "skipped", "reason": f"run_{latest.status.value}"}
+            return {"status": "skipped", "reason": f"run_{run.status.value}"}
 
         if not await self._flow_is_active(flow_id=flow_id, tenant_id=tenant_id):
             reason = "Flow was deleted before execution started."

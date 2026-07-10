@@ -29,7 +29,6 @@ from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
 from eneo.flows.domain.flow import FlowRunStatus
-from eneo.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
 from tests.unittests.flows.test_flow_router import (
     _disable_flow_scope_filter,
     _enable_explicit_transaction,
@@ -77,15 +76,6 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     )
     events: list[str] = []
 
-    def _build_dispatch_request(_run):
-        events.append("build_dispatch_request")
-        return FlowRunUserDispatchRequest(
-            run_id=run.id,
-            flow_id=flow_id,
-            tenant_id=user.tenant_id,
-            principal_user_id=user.id,
-        )
-
     run_service = AsyncMock()
     review_service = AsyncMock()
     review_service.resume_review_checkpoint.return_value = SimpleNamespace(
@@ -93,7 +83,6 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
         run=run,
         accepted=True,
     )
-    run_service.build_dispatch_request = MagicMock(side_effect=_build_dispatch_request)
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
@@ -127,7 +116,6 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     assert response.checkpoint.id == checkpoint.id
     assert events == [
         "transaction_enter",
-        "build_dispatch_request",
         "present_review_checkpoint",
         "transaction_exit",
         "add_task",
@@ -136,12 +124,9 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     scheduled = background_tasks.tasks[0]
     assert scheduled.func is dispatch_flow_run_recoverably_after_commit
     assert scheduled.kwargs == {
-        "request": FlowRunUserDispatchRequest(
-            run_id=run.id,
-            flow_id=flow_id,
-            tenant_id=user.tenant_id,
-            principal_user_id=user.id,
-        )
+        "run_id": run.id,
+        "tenant_id": user.tenant_id,
+        "expected_revision": run.revision,
     }
 
 

@@ -799,12 +799,7 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
         assistant_id=assistant_id,
     )
 
-    async def _get_run(*args, **kwargs):
-        if flow_run_repo.get.await_count == 1:
-            return queued_run
-        return running_run
-
-    flow_run_repo.get = AsyncMock(side_effect=_get_run)
+    flow_run_repo.get = AsyncMock(return_value=running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -870,6 +865,7 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -915,7 +911,7 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     lifecycle_events: list[str] = []
@@ -991,6 +987,7 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1040,7 +1037,7 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
         assistant_id=second_assistant_id,
     ).model_copy(update={"step_order": 2})
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(
         side_effect=[first_claimed, second_claimed]
@@ -1129,6 +1126,7 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1164,7 +1162,7 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=running_step)
@@ -1195,6 +1193,7 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1208,7 +1207,7 @@ async def test_execute_skips_when_run_claim_fails(user):
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=False)
     executor._execute_step = AsyncMock()
 
@@ -1216,6 +1215,7 @@ async def test_execute_skips_when_run_claim_fails(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1225,24 +1225,29 @@ async def test_execute_skips_when_run_claim_fails(user):
 
 
 @pytest.mark.asyncio
-async def test_execute_short_circuits_terminal_run_without_lifecycle_writes(user):
+async def test_execute_terminal_task_loses_worker_cas_without_lifecycle_writes(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
     completed_run = _run(status=FlowRunStatus.COMPLETED, user=user)
 
     flow_run_repo.get = AsyncMock(return_value=completed_run)
-    flow_run_repo.mark_running_if_claimable = AsyncMock()
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=False)
     flow_run_repo.claim_step_result = AsyncMock()
 
     result = await executor.execute(
         run_id=completed_run.id,
         flow_id=completed_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=completed_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
 
-    assert result == {"status": "skipped", "reason": "run_terminal"}
-    flow_run_repo.mark_running_if_claimable.assert_not_awaited()
+    assert result == {"status": "skipped", "reason": "run_completed"}
+    flow_run_repo.mark_running_if_claimable.assert_awaited_once_with(
+        run_id=completed_run.id,
+        tenant_id=user.tenant_id,
+        expected_revision=completed_run.revision,
+    )
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
@@ -1251,8 +1256,9 @@ async def test_execute_short_circuits_terminal_run_without_lifecycle_writes(user
 async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(return_value=running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     executor._flow_is_active = AsyncMock(return_value=False)
 
@@ -1260,6 +1266,7 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1287,7 +1294,7 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -1319,6 +1326,7 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1353,7 +1361,7 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
@@ -1387,6 +1395,7 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1415,6 +1424,7 @@ async def test_execute_terminalizes_multiple_active_rerun_operations(
     executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
     flow_run_rerun_repo = executor.flow_run_rerun_repo
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
     failed_run = queued_run.model_copy(
         update={
             "status": FlowRunStatus.FAILED,
@@ -1428,7 +1438,7 @@ async def test_execute_terminalizes_multiple_active_rerun_operations(
     step_id = uuid4()
     assistant_id = uuid4()
 
-    flow_run_repo.get = _run_get_mock(queued_run, failed_run)
+    flow_run_repo.get = _run_get_mock(running_run, failed_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(
@@ -1462,6 +1472,7 @@ async def test_execute_terminalizes_multiple_active_rerun_operations(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,
             tenant_id=user.tenant_id,
+            run_revision=queued_run.revision,
             celery_task_id="task-1",
             retry_count=0,
         )
@@ -1512,7 +1523,7 @@ async def test_rerun_lineage_conflict_uses_specific_run_error_after_claim(user):
         prior_attempt_id=uuid4(),
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(
@@ -1554,6 +1565,7 @@ async def test_rerun_lineage_conflict_uses_specific_run_error_after_claim(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1594,7 +1606,7 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -1642,6 +1654,7 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1678,7 +1691,7 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -1716,6 +1729,7 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -1989,7 +2003,7 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -2026,6 +2040,7 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2129,7 +2144,7 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
         deep=True,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
@@ -2161,6 +2176,7 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2197,7 +2213,7 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
         deep=True,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
@@ -2229,6 +2245,7 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2265,7 +2282,7 @@ async def test_execute_returns_run_in_progress_when_pending_results_exist(user):
         deep=True,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
@@ -2297,6 +2314,7 @@ async def test_execute_returns_run_in_progress_when_pending_results_exist(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2327,7 +2345,7 @@ async def test_execute_uses_persisted_next_attempt_no_for_attempt_lifecycle(user
         deep=True,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=7)
@@ -2378,6 +2396,7 @@ async def test_execute_uses_persisted_next_attempt_no_for_attempt_lifecycle(user
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=2,
     )
@@ -2408,7 +2427,7 @@ async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancel
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, cancelled_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run, cancelled_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -2464,6 +2483,7 @@ async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancel
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2490,7 +2510,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     )
 
     flow_run_repo.get = AsyncMock(
-        side_effect=[queued_run, running_run, cancelled_run, cancelled_run]
+        side_effect=[running_run, running_run, cancelled_run, cancelled_run]
     )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
@@ -2541,6 +2561,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2587,7 +2608,7 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
     )
 
     flow_run_repo.get = AsyncMock(
-        side_effect=[queued_run, running_run, running_run, failed_run]
+        side_effect=[running_run, running_run, running_run, failed_run]
     )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
@@ -2645,6 +2666,7 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,
             tenant_id=user.tenant_id,
+            run_revision=queued_run.revision,
             celery_task_id="task-1",
             retry_count=0,
         )
@@ -2717,7 +2739,7 @@ async def test_execute_terminalizes_review_open_invariant_errors(
         deep=True,
     )
     flow_run_repo.get = AsyncMock(
-        side_effect=[queued_run, running_run, running_run, failed_run]
+        side_effect=[running_run, running_run, running_run, failed_run]
     )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
@@ -2774,6 +2796,7 @@ async def test_execute_terminalizes_review_open_invariant_errors(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,
             tenant_id=user.tenant_id,
+            run_revision=queued_run.revision,
             celery_task_id="task-1",
             retry_count=0,
         )
@@ -2837,7 +2860,7 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
         deep=True,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(side_effect=[None, claimed_second])
     flow_run_repo.get_step_result = AsyncMock(return_value=existing_completed)
@@ -2895,6 +2918,7 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -2930,7 +2954,7 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed_first)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -2986,6 +3010,7 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -3210,7 +3235,7 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
     step_id = uuid4()
     assistant_id = uuid4()
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=None)
@@ -3241,6 +3266,7 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -3263,7 +3289,9 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     definition_json = {
         "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -3298,6 +3326,7 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -3326,7 +3355,9 @@ async def test_execute_terminalizes_definition_without_executable_steps(user):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     definition_json = {
         "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -3353,6 +3384,7 @@ async def test_execute_terminalizes_definition_without_executable_steps(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -3383,7 +3415,9 @@ async def test_execute_rejects_question_binding_input_contract_before_step_execu
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
@@ -3431,6 +3465,7 @@ async def test_execute_rejects_question_binding_input_contract_before_step_execu
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -4473,7 +4508,7 @@ async def test_prior_results_bootstrap_once(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(side_effect=[claimed_1, claimed_2])
     flow_run_repo.finish_attempt = AsyncMock()
@@ -4551,6 +4586,7 @@ async def test_prior_results_bootstrap_once(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -4582,7 +4618,9 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
     assert snapshot is not None
     step_id = uuid4()
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_repo.claim_step_result = AsyncMock()
@@ -4615,6 +4653,7 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -4643,7 +4682,9 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(
     step_id = uuid4()
     assistant_id = uuid4()
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock()
     flow_run_repo.claim_step_result = AsyncMock()
@@ -4680,6 +4721,7 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -4701,7 +4743,9 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
     step_id = uuid4()
     assistant_id = uuid4()
 
-    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_repo.claim_step_result = AsyncMock()
@@ -4734,6 +4778,7 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -4838,7 +4883,7 @@ async def test_execute_audits_completed_run_terminal_state(user):
         deep=True,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -4888,6 +4933,7 @@ async def test_execute_audits_completed_run_terminal_state(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )
@@ -4916,7 +4962,7 @@ async def test_execute_audits_failed_run_terminal_state(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -4948,6 +4994,7 @@ async def test_execute_audits_failed_run_terminal_state(user):
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
         celery_task_id="task-1",
         retry_count=0,
     )

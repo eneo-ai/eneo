@@ -39,6 +39,7 @@ REVIEW_CHECKPOINT_EXPIRY_INDEX_PREDICATE = "state IN ('awaiting_review', 'edited
 OLD_FLOW_RUN_LIFECYCLE_SOURCES = (
     "executor_completed",
     "executor_failed",
+    "dispatch_failure",
     "flow_deleted",
     "definition_checksum_mismatch",
     "invalid_flow_definition",
@@ -60,6 +61,7 @@ OLD_FLOW_RUN_LIFECYCLE_SOURCES = (
 FLOW_RUN_LIFECYCLE_SOURCES = (
     "executor_completed",
     "executor_failed",
+    "dispatch_failure",
     "flow_deleted",
     "definition_checksum_mismatch",
     "invalid_flow_definition",

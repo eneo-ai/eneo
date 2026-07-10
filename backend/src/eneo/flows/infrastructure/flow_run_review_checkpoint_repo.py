@@ -24,6 +24,9 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowStepResults,
 )
+from eneo.flows.application.flow_run_recovery_policy import (
+    start_flow_dispatch_epoch,
+)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -608,6 +611,7 @@ class FlowRunReviewCheckpointRepository:
             principal=principal,
             values={"resume_idempotency_key": resume_idempotency_key},
         )
+        now_utc = datetime.now(timezone.utc)
         updated_run_row = await self.session.scalar(
             sa.update(FlowRuns)
             .where(FlowRuns.id == flow_run_id)
@@ -617,6 +621,7 @@ class FlowRunReviewCheckpointRepository:
             .values(
                 status=FlowRunStatus.QUEUED.value,
                 revision=FlowRuns.revision + 1,
+                **start_flow_dispatch_epoch(now_utc),
             )
             .returning(FlowRuns)
         )

@@ -517,6 +517,7 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-open-terminalized-{target_status.value}",
             retry_count=0,
         )
@@ -630,6 +631,7 @@ async def test_review_checkpoint_open_invariant_terminalizes_failed_run(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id="review-open-invariant",
             retry_count=0,
         )
@@ -708,6 +710,7 @@ async def test_executor_pauses_after_review_policy_step_and_duplicate_delivery_s
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-pause-{uuid4()}",
             retry_count=0,
         )
@@ -715,6 +718,7 @@ async def test_executor_pauses_after_review_policy_step_and_duplicate_delivery_s
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-pause-duplicate-{uuid4()}",
             retry_count=1,
         )
@@ -860,6 +864,7 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-pause-json-{uuid4()}",
             retry_count=0,
         )
@@ -956,6 +961,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-contract-pause-{uuid4()}",
             retry_count=0,
         )
@@ -1107,6 +1113,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-pause-{uuid4()}",
             retry_count=0,
         )
@@ -1136,14 +1143,24 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             expected_checkpoint_revision=approved.revision,
             idempotency_key=f"resume-{uuid4()}",
         )
+        stale_epoch_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
+            celery_task_id=f"review-stale-epoch-{uuid4()}",
+            retry_count=0,
+        )
         completed_result = await context.executor.execute(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=resumed.run.revision,
             celery_task_id=f"review-resume-{uuid4()}",
             retry_count=0,
         )
 
+        assert stale_epoch_result == {"status": "skipped", "reason": "run_queued"}
         run_row = await session.scalar(
             sa.select(FlowRuns).where(FlowRuns.id == context.run_id)
         )
@@ -1260,6 +1277,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
             celery_task_id=f"review-last-step-pause-{uuid4()}",
             retry_count=0,
         )
@@ -1293,6 +1311,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             run_id=context.run_id,
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
+            run_revision=resumed.run.revision,
             celery_task_id=f"review-last-step-resume-{uuid4()}",
             retry_count=0,
         )

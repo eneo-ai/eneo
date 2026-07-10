@@ -38,6 +38,7 @@ FLOW_RUN_AUDIT_TARGET_STATUSES = tuple(
 FLOW_RUN_LIFECYCLE_SOURCES = (
     "executor_completed",
     "executor_failed",
+    "dispatch_failure",
     "flow_deleted",
     "definition_checksum_mismatch",
     "invalid_flow_definition",
@@ -59,6 +60,7 @@ FLOW_RUN_LIFECYCLE_SOURCES = (
 OLD_FLOW_RUN_LIFECYCLE_SOURCES = (
     "executor_completed",
     "executor_failed",
+    "dispatch_failure",
     "flow_deleted",
     "definition_checksum_mismatch",
     "invalid_flow_definition",

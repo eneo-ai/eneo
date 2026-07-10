@@ -263,7 +263,6 @@ async def test_rerun_flow_run_step_permission_matrix_allows_service_key_principa
         step_inputs=None,
     )
     container.audit_service.return_value.log_async.assert_awaited_once()
-    container.flow_run_service.return_value.build_dispatch_request.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -484,7 +483,7 @@ async def test_flow_run_control_endpoints_reject_scope_mismatch(monkeypatch):
     )
 
     run_service.cancel_run.assert_not_awaited()
-    run_service.redispatch_run.assert_not_awaited()
+    run_service.get_run.assert_not_awaited()
     run_service.get_redacted_evidence_bundle.assert_not_awaited()
 
 

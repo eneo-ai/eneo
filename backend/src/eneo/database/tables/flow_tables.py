@@ -737,8 +737,8 @@ class FlowRuns(BasePublic):
         nullable=False,
         server_default="1",
         comment=(
-            "Monotonic lifecycle token for rerun/resume compare-and-swap; "
-            "updated_at remains the staleness and recovery fencing clock."
+            "Monotonic lifecycle compare-and-swap token; its value on entry to "
+            "queued identifies the dispatch epoch."
         ),
     )
     status: Mapped[str] = mapped_column(
@@ -746,6 +746,28 @@ class FlowRuns(BasePublic):
         nullable=False,
         server_default="queued",
         index=True,
+    )
+    dispatch_pending_since: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatch_attempt_count: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
+    dispatch_last_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatch_last_error: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    dispatch_next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatch_exhausted_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
     )
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
     started_at: Mapped[Optional[datetime]] = mapped_column(
@@ -789,6 +811,15 @@ class FlowRuns(BasePublic):
             f"status IN ({_check_values(FLOW_RUN_STATUS_VALUES)})",
             name="ck_flow_runs_status",
         ),
+        CheckConstraint(
+            "dispatch_attempt_count >= 0",
+            name="ck_flow_runs_dispatch_attempt_count_nonnegative",
+        ),
+        CheckConstraint(
+            "dispatch_last_error IS NULL "
+            "OR jsonb_typeof(dispatch_last_error) = 'object'",
+            name="ck_flow_runs_dispatch_last_error_object",
+        ),
         ForeignKeyConstraint(
             ["flow_id", "tenant_id"],
             ["flows.id", "flows.tenant_id"],
@@ -805,6 +836,17 @@ class FlowRuns(BasePublic):
         UniqueConstraint("id", "flow_id", name="uq_flow_runs_id_flow_id"),
         Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
         Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
+        Index(
+            "ix_flow_runs_queued_dispatch_due",
+            "tenant_id",
+            "dispatch_next_attempt_at",
+            "id",
+            postgresql_where=sa.text(
+                "status = 'queued' "
+                "AND dispatch_next_attempt_at IS NOT NULL "
+                "AND dispatch_exhausted_at IS NULL"
+            ),
+        ),
         Index(
             "uq_flow_runs_idempotency_user_key",
             "tenant_id",

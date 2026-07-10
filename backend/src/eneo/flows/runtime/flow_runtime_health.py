@@ -87,7 +87,7 @@ class FlowRuntimeHealthSnapshot:
     awaiting_review_count: int = 0
     stale_queued_count: int = 0
     stale_running_count: int = 0
-    oldest_stale_queued_updated_at: datetime | None = None
+    oldest_stale_queued_pending_since: datetime | None = None
     oldest_stale_running_updated_at: datetime | None = None
     expired_review_checkpoint_count: int = 0
     oldest_expired_review_checkpoint_expires_at: datetime | None = None
@@ -265,21 +265,21 @@ async def load_flow_runtime_health_snapshot(
         awaiting_review_count=status_counts.get(FlowRunStatus.AWAITING_REVIEW.value, 0),
         stale_queued_count=stale_queued.count,
         stale_running_count=stale_running.count,
-        oldest_stale_queued_updated_at=stale_queued.oldest_updated_at,
-        oldest_stale_running_updated_at=stale_running.oldest_updated_at,
+        oldest_stale_queued_pending_since=stale_queued.oldest_anchor_at,
+        oldest_stale_running_updated_at=stale_running.oldest_anchor_at,
         expired_review_checkpoint_count=expired_review_checkpoints.count,
         oldest_expired_review_checkpoint_expires_at=(
             expired_review_checkpoints.oldest_expires_at
         ),
         terminal_runs_with_open_attempts_count=terminal_open_attempts.count,
         oldest_terminal_run_with_open_attempts_updated_at=(
-            terminal_open_attempts.oldest_updated_at
+            terminal_open_attempts.oldest_anchor_at
         ),
         terminal_runs_with_active_step_results_count=(
             terminal_active_step_results.count
         ),
         oldest_terminal_run_with_active_step_results_updated_at=(
-            terminal_active_step_results.oldest_updated_at
+            terminal_active_step_results.oldest_anchor_at
         ),
         audit_outbox_pending_count=audit_outbox.pending_count,
         audit_outbox_delivery_backlog_count=audit_outbox.delivery_backlog_count,
@@ -309,7 +309,7 @@ def classify_flow_runtime_health(
     policy: FlowRuntimeHealthPolicy,
     probe: FlowRuntimeProbe,
 ) -> FlowRuntimeHealthResponse:
-    stale_queued_age = _age_seconds(now, snapshot.oldest_stale_queued_updated_at)
+    stale_queued_age = _age_seconds(now, snapshot.oldest_stale_queued_pending_since)
     stale_running_age = _age_seconds(now, snapshot.oldest_stale_running_updated_at)
     expired_review_checkpoint_age = _age_seconds(
         now,
@@ -442,7 +442,7 @@ def flow_runtime_health_probe_failure_response(
 @dataclass(frozen=True, slots=True)
 class _RunSummary:
     count: int
-    oldest_updated_at: datetime | None
+    oldest_anchor_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,17 +497,22 @@ async def _load_stale_run_summary(
     status: FlowRunStatus,
     stale_before: datetime,
 ) -> _RunSummary:
-    count, oldest_updated_at = (
+    age_anchor = (
+        FlowRuns.dispatch_pending_since
+        if status == FlowRunStatus.QUEUED
+        else FlowRuns.updated_at
+    )
+    count, oldest_anchor_at = (
         await session.execute(
-            sa.select(sa.func.count(), sa.func.min(FlowRuns.updated_at))
+            sa.select(sa.func.count(), sa.func.min(age_anchor))
             .select_from(FlowRuns)
             .where(FlowRuns.status == status.value)
-            .where(FlowRuns.updated_at <= stale_before)
+            .where(age_anchor <= stale_before)
         )
     ).one()
     return _RunSummary(
         count=int(count or 0),
-        oldest_updated_at=_normalize_datetime(oldest_updated_at),
+        oldest_anchor_at=_normalize_datetime(oldest_anchor_at),
     )
 
 
@@ -531,7 +536,7 @@ async def _load_terminal_runs_with_open_attempts_summary(
     ).one()
     return _RunSummary(
         count=int(count or 0),
-        oldest_updated_at=_normalize_datetime(oldest_updated_at),
+        oldest_anchor_at=_normalize_datetime(oldest_updated_at),
     )
 
 
@@ -588,7 +593,7 @@ async def _load_terminal_runs_with_active_step_results_summary(
     ).one()
     return _RunSummary(
         count=int(count or 0),
-        oldest_updated_at=_normalize_datetime(oldest_updated_at),
+        oldest_anchor_at=_normalize_datetime(oldest_updated_at),
     )
 
 

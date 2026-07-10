@@ -55,6 +55,7 @@ def upgrade() -> None:
             "source IN ("
             "'executor_completed',"
             "'executor_failed',"
+            "'dispatch_failure',"
             "'flow_deleted',"
             "'definition_checksum_mismatch',"
             "'invalid_flow_definition',"

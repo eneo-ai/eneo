@@ -44,7 +44,12 @@ from eneo.flows.enums import (
     RerunDependencyKind,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunDispatchErrorKind,
+    FlowRunError,
+    dump_flow_run_dispatch_error,
+)
 from eneo.flows.flow_run_evidence_bundle import (
     build_evidence_bundle,
     redact_evidence_bundle,
@@ -811,6 +816,24 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
             sa.select(FlowRuns).where(FlowRuns.id == scenario.flow_run_id)
         )
         assert run_before is not None
+        old_dispatch_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(
+                dispatch_pending_since=old_dispatch_at,
+                dispatch_attempt_count=3,
+                dispatch_last_attempt_at=old_dispatch_at,
+                dispatch_last_error=dump_flow_run_dispatch_error(
+                    FlowRunDispatchError.from_kind(
+                        FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+                    )
+                ),
+                dispatch_next_attempt_at=old_dispatch_at,
+                dispatched_at=old_dispatch_at,
+                dispatch_exhausted_at=old_dispatch_at,
+            )
+        )
 
         requested_file_order = tuple(
             sorted(
@@ -853,6 +876,15 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         assert accepted.operation.root_attempt_id is None
         assert accepted.run.status == FlowRunStatus.QUEUED
         assert accepted.run.revision == 2
+        assert accepted.run.dispatch_pending_since is not None
+        assert (
+            accepted.run.dispatch_next_attempt_at == accepted.run.dispatch_pending_since
+        )
+        assert accepted.run.dispatch_attempt_count == 0
+        assert accepted.run.dispatch_last_attempt_at is None
+        assert accepted.run.dispatch_last_error is None
+        assert accepted.run.dispatched_at is None
+        assert accepted.run.dispatch_exhausted_at is None
         assert accepted.run.trace_id == run_before.trace_id
         assert accepted.run.input_payload_json == {"case_id": "case-456"}
         assert replayed.run.revision == 2
@@ -1387,6 +1419,7 @@ async def test_rerun_attempt_start_and_success_records_lineage(
         assert await run_repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=accepted.run.revision,
         )
         claimed = await run_repo.claim_step_result(
             run_id=scenario.flow_run_id,
@@ -1700,6 +1733,7 @@ async def test_rerun_invalidated_step_link_conflict_raises_typed_error(
         assert await run_repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=accepted.run.revision,
         )
         claimed = await run_repo.claim_step_result(
             run_id=scenario.flow_run_id,

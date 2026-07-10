@@ -59,7 +59,11 @@ from eneo.flows.flow_run_contract_models import (
 from eneo.flows.flow_run_contract_models import (
     FormFieldPublic as FormFieldPublic,
 )
-from eneo.flows.flow_run_error import FlowRunError, NullablePublicTerminalErrorCode
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunError,
+    NullablePublicTerminalErrorCode,
+)
 from eneo.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from eneo.flows.flow_run_evidence_export_summary import EvidenceExportSummary
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -166,6 +170,13 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
     "status": "queued",
+    "dispatch_pending_since": "2026-03-17T10:05:00Z",
+    "dispatch_attempt_count": 0,
+    "dispatch_last_attempt_at": None,
+    "dispatch_last_error": None,
+    "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+    "dispatched_at": None,
+    "dispatch_exhausted_at": None,
     "cancelled_at": None,
     "started_at": None,
     "finished_at": None,
@@ -682,6 +693,47 @@ class FlowRunPublic(BaseModel):
         ),
     )
     status: FlowRunStatus
+    dispatch_pending_since: datetime | None = Field(
+        default=None,
+        description=(
+            "Stable timestamp when the most recent queue-entry dispatch epoch "
+            "began. It does not move when dispatch is retried."
+        ),
+    )
+    dispatch_attempt_count: int = Field(
+        ge=0,
+        description=(
+            "Broker dispatch attempts claimed in the most recent queue-entry "
+            "dispatch epoch."
+        ),
+    )
+    dispatch_last_attempt_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of the latest claimed broker dispatch attempt.",
+    )
+    dispatch_last_error: FlowRunDispatchError | None = Field(
+        default=None,
+        description=(
+            "Last bounded, secret-free diagnosis for the most recent dispatch "
+            "epoch. A later successful dispatch preserves this diagnostic."
+        ),
+    )
+    dispatch_next_attempt_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Sole dispatch eligibility clock. Null means no retry is currently due."
+        ),
+    )
+    dispatched_at: datetime | None = Field(
+        default=None,
+        description="Timestamp when the broker last accepted this dispatch epoch.",
+    )
+    dispatch_exhausted_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Timestamp when bounded attempts were exhausted for this dispatch epoch."
+        ),
+    )
     cancelled_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None

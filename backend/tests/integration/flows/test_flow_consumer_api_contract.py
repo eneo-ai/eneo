@@ -16,7 +16,6 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows.api import flow_run_execution_router
 from eneo.flows.enums import FlowRunReviewCheckpointState
-from eneo.flows.flow_run_dispatch_request import FlowRunDispatchRequest
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
@@ -24,9 +23,9 @@ from eneo.roles.permissions import Permission
 
 
 async def _noop_dispatch_flow_run_recoverably_after_commit(
-    *, request: FlowRunDispatchRequest
+    *, run_id: UUID, tenant_id: UUID, expected_revision: int
 ) -> None:
-    _ = request
+    _ = (run_id, tenant_id, expected_revision)
 
 
 async def _flow_run_first_page_count(client, *, flow_id: str, token: str) -> int:
@@ -629,10 +628,12 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     admin_token,
     monkeypatch,
 ):
-    dispatch_requests: list[FlowRunDispatchRequest] = []
+    dispatch_requests: list[tuple[UUID, UUID, int]] = []
 
-    async def _record_dispatch(*, request: FlowRunDispatchRequest) -> None:
-        dispatch_requests.append(request)
+    async def _record_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
         flow_run_execution_router,
@@ -689,7 +690,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert first_run_response.status_code == 201, first_run_response.text
     first_run = first_run_response.json()
     assert first_run["input_payload_json"] == {"text": "hello"}
-    assert [request.run_id for request in dispatch_requests] == [UUID(first_run["id"])]
+    assert [request[0] for request in dispatch_requests] == [UUID(first_run["id"])]
 
     immediate_poll_response = await client.get(
         published_payload["runtime_paths"]["get_run_template"].replace(
@@ -712,7 +713,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     )
     assert replay_response.status_code == 201, replay_response.text
     assert replay_response.json()["id"] == first_run["id"]
-    assert [request.run_id for request in dispatch_requests] == [UUID(first_run["id"])]
+    assert [request[0] for request in dispatch_requests] == [UUID(first_run["id"])]
 
     conflict_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
@@ -738,7 +739,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     )
     assert second_run_response.status_code == 201, second_run_response.text
     second_run = second_run_response.json()
-    assert [request.run_id for request in dispatch_requests] == [
+    assert [request[0] for request in dispatch_requests] == [
         UUID(first_run["id"]),
         UUID(second_run["id"]),
     ]
@@ -933,8 +934,10 @@ async def test_flow_run_create_rejects_runtime_transcription_cache_key(
 ):
     dispatch_requests: list[object] = []
 
-    async def _record_dispatch(*, request: object) -> None:
-        dispatch_requests.append(request)
+    async def _record_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
         flow_run_execution_router,
@@ -972,8 +975,10 @@ async def test_flow_run_create_rejects_unknown_fields_before_dispatch(
 ):
     dispatch_requests: list[object] = []
 
-    async def _record_dispatch(*, request: object) -> None:
-        dispatch_requests.append(request)
+    async def _record_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
         flow_run_execution_router,

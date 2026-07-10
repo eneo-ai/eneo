@@ -48,7 +48,7 @@ def test_stale_queued_runs_degrade_health() -> None:
         FlowRuntimeHealthSnapshot(
             queued_count=2,
             stale_queued_count=1,
-            oldest_stale_queued_updated_at=datetime(
+            oldest_stale_queued_pending_since=datetime(
                 2026, 5, 2, 11, 59, tzinfo=timezone.utc
             ),
         )

@@ -47,7 +47,12 @@ from eneo.flows.enums import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_review_policy import FlowStepReviewMode
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunDispatchErrorKind,
+    FlowRunError,
+    parse_flow_run_dispatch_error,
+)
 from eneo.main.exceptions import BadRequestException
 
 _MISSING = object()
@@ -584,6 +589,7 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                 "trace_id": str(uuid4()),
                 "status": "completed",
                 "revision": 1,
+                "dispatch_attempt_count": 0,
                 "created_at": "2026-03-20T12:00:00Z",
                 "updated_at": "2026-03-20T12:05:00Z",
             },
@@ -1042,6 +1048,15 @@ def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:
             "trace_id": trace_id,
             "revision": 1,
             "status": "failed",
+            "dispatch_pending_since": now,
+            "dispatch_attempt_count": 2,
+            "dispatch_last_attempt_at": now,
+            "dispatch_last_error": FlowRunDispatchError.from_kind(
+                FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+            ),
+            "dispatch_next_attempt_at": None,
+            "dispatched_at": now,
+            "dispatch_exhausted_at": None,
             "cancelled_at": None,
             "started_at": now,
             "finished_at": now,
@@ -1071,3 +1086,28 @@ def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:
         details={"step_description": "Analysera bakgrund"},
     )
     assert not hasattr(run, "error_message")
+
+
+def test_flow_run_public_dispatch_error_is_strict_and_corruption_is_safe() -> None:
+    raw_secret = "postgresql://credential@broker"
+
+    invalid = parse_flow_run_dispatch_error(
+        {
+            "schema_version": 1,
+            "kind": "execution_backend_failure",
+            "code": "flow_dispatch_failed",
+            "retryable": True,
+            "message": raw_secret,
+        }
+    )
+
+    assert invalid is not None
+    assert invalid.kind == FlowRunDispatchErrorKind.INVALID_PERSISTED_ERROR
+    assert raw_secret not in invalid.message
+    with pytest.raises(ValidationError):
+        FlowRunDispatchError.model_validate(
+            {
+                **invalid.model_dump(mode="json"),
+                "unexpected": "compatibility is not accepted",
+            }
+        )

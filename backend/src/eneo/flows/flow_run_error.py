@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal, TypeAlias, cast
 from uuid import UUID
 
@@ -11,6 +12,7 @@ from pydantic import (
     Field,
     ValidationError,
     WithJsonSchema,
+    model_validator,
 )
 
 from eneo.flows.enums import FlowRunLifecycleSource
@@ -20,15 +22,94 @@ from eneo.flows.flow_api_error_code import (
 )
 
 FlowRunErrorJson: TypeAlias = dict[str, object]
+FlowRunDispatchErrorJson: TypeAlias = dict[str, object]
 
 _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
 _MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 _INVALID_PERSISTED_ERROR_MESSAGE = "Persisted flow run error payload is invalid."
+_INVALID_PERSISTED_DISPATCH_ERROR_MESSAGE = (
+    "Persisted Flow run dispatch error payload is invalid."
+)
 _CODE_DESCRIPTION = "Stable machine-readable run error code."
 _TERMINAL_ERROR_CODE_VALUES = tuple(
     sorted(code.value for code in FLOW_RUN_TERMINAL_ERROR_CODES)
 )
+
+
+class FlowRunDispatchErrorKind(StrEnum):
+    INVALID_REQUEST = "invalid_request"
+    EXECUTION_BACKEND_FAILURE = "execution_backend_failure"
+    INVALID_PERSISTED_ERROR = "invalid_persisted_error"
+
+
+FlowRunDispatchErrorCode: TypeAlias = Literal[
+    FlowApiErrorCode.RUN_DISPATCH_FAILED,
+    FlowApiErrorCode.RUN_MISSING_PRINCIPAL,
+]
+
+_DISPATCH_ERROR_SHAPES: dict[
+    FlowRunDispatchErrorKind,
+    tuple[FlowRunDispatchErrorCode, bool, str],
+] = {
+    FlowRunDispatchErrorKind.INVALID_REQUEST: (
+        FlowApiErrorCode.RUN_MISSING_PRINCIPAL,
+        False,
+        "Flow run dispatch requires a valid execution principal.",
+    ),
+    FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE: (
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        True,
+        "The execution backend did not accept the Flow run dispatch attempt.",
+    ),
+    FlowRunDispatchErrorKind.INVALID_PERSISTED_ERROR: (
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        False,
+        _INVALID_PERSISTED_DISPATCH_ERROR_MESSAGE,
+    ),
+}
+
+
+class FlowRunDispatchError(BaseModel):
+    """Small secret-free diagnosis for the current dispatch epoch."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal[1] = 1
+    kind: FlowRunDispatchErrorKind
+    code: FlowRunDispatchErrorCode
+    retryable: bool
+    message: str = Field(
+        min_length=1,
+        max_length=512,
+        description=(
+            "Fixed safe diagnosis selected by `kind`; never a raw broker or "
+            "provider exception."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_canonical_shape(self) -> FlowRunDispatchError:
+        expected_code, expected_retryable, expected_message = _DISPATCH_ERROR_SHAPES[
+            self.kind
+        ]
+        if (
+            self.code != expected_code
+            or self.retryable is not expected_retryable
+            or self.message != expected_message
+        ):
+            raise ValueError("Flow run dispatch error fields do not match its kind.")
+        return self
+
+    @classmethod
+    def from_kind(cls, kind: FlowRunDispatchErrorKind) -> FlowRunDispatchError:
+        code, retryable, message = _DISPATCH_ERROR_SHAPES[kind]
+        return cls(
+            kind=kind,
+            code=code,
+            retryable=retryable,
+            message=message,
+        )
 
 
 def _ensure_terminal_run_error_code(code: FlowApiErrorCode) -> FlowApiErrorCode:
@@ -197,6 +278,30 @@ def parse_flow_run_error(value: object) -> FlowRunError | None:
         return FlowRunError(
             code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID,
             message=_INVALID_PERSISTED_ERROR_MESSAGE,
+        )
+
+
+def dump_flow_run_dispatch_error(
+    error: FlowRunDispatchError | None,
+) -> FlowRunDispatchErrorJson | None:
+    if error is None:
+        return None
+    return cast(
+        FlowRunDispatchErrorJson,
+        error.model_dump(mode="json", exclude_none=True),
+    )
+
+
+def parse_flow_run_dispatch_error(value: object) -> FlowRunDispatchError | None:
+    if value is None:
+        return None
+    if isinstance(value, FlowRunDispatchError):
+        return value
+    try:
+        return FlowRunDispatchError.model_validate(value)
+    except ValidationError:
+        return FlowRunDispatchError.from_kind(
+            FlowRunDispatchErrorKind.INVALID_PERSISTED_ERROR
         )
 
 

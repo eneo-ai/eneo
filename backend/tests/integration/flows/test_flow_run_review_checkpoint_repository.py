@@ -56,7 +56,12 @@ from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunDispatchErrorKind,
+    FlowRunError,
+    dump_flow_run_dispatch_error,
+)
 from eneo.flows.flow_run_input_envelope import RerunInputOverride
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
@@ -649,6 +654,7 @@ async def test_review_checkpoint_transition_uses_revision_cas(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -836,6 +842,7 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(
             session=session,
@@ -915,6 +922,7 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
 
@@ -977,6 +985,7 @@ async def test_review_checkpoint_custom_expiry_is_not_extended_by_edit(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
 
@@ -1031,6 +1040,7 @@ async def test_edit_review_checkpoint_updates_projection_without_execution_hash(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         await session.execute(
@@ -1138,6 +1148,7 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -1159,6 +1170,24 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
             flow_run_id=scenario.flow_run_id,
             expected_revision=opened.checkpoint.revision,
             principal=FlowPrincipal.from_user(admin_user),
+        )
+        old_dispatch_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(
+                dispatch_pending_since=old_dispatch_at,
+                dispatch_attempt_count=3,
+                dispatch_last_attempt_at=old_dispatch_at,
+                dispatch_last_error=dump_flow_run_dispatch_error(
+                    FlowRunDispatchError.from_kind(
+                        FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+                    )
+                ),
+                dispatch_next_attempt_at=old_dispatch_at,
+                dispatched_at=old_dispatch_at,
+                dispatch_exhausted_at=old_dispatch_at,
+            )
         )
 
         resumed = await checkpoint_repo.resume_review_checkpoint(
@@ -1207,6 +1236,13 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
     assert resumed.checkpoint.resume_idempotency_key == "resume-key"
     assert resumed.run.status == FlowRunStatus.QUEUED
     assert resumed.run.revision == opened.run.revision + 1
+    assert resumed.run.dispatch_pending_since is not None
+    assert resumed.run.dispatch_next_attempt_at == resumed.run.dispatch_pending_since
+    assert resumed.run.dispatch_attempt_count == 0
+    assert resumed.run.dispatch_last_attempt_at is None
+    assert resumed.run.dispatch_last_error is None
+    assert resumed.run.dispatched_at is None
+    assert resumed.run.dispatch_exhausted_at is None
     assert replayed.accepted is False
     assert replayed.checkpoint.id == resumed.checkpoint.id
     assert replayed.run.status == FlowRunStatus.QUEUED
@@ -1240,6 +1276,7 @@ async def test_resume_review_checkpoint_rolls_back_checkpoint_and_run_together(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -1363,6 +1400,7 @@ async def test_review_checkpoint_mutation_rejects_non_awaiting_run(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -1419,6 +1457,7 @@ async def test_review_checkpoint_mutation_rejects_inactive_checkpoint_state(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -1479,6 +1518,7 @@ async def test_resume_review_checkpoint_rejects_unapproved_and_rejected_states(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -1553,6 +1593,7 @@ async def test_edit_review_checkpoint_missing_projection_raises_typed_error(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -1624,6 +1665,7 @@ async def test_open_review_checkpoint_requires_running_run_and_completed_step(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         with pytest.raises(
             FlowReviewCheckpointStepResultIncompleteError
@@ -1711,6 +1753,7 @@ async def test_open_review_checkpoint_late_run_state_race_has_no_fake_status(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
 
@@ -1865,6 +1908,7 @@ async def test_mark_running_preserves_original_started_at_on_resume_claim(
         first_claim = await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         first_started_at = await session.scalar(
             sa.select(FlowRuns.started_at).where(FlowRuns.id == scenario.flow_run_id)
@@ -1877,6 +1921,7 @@ async def test_mark_running_preserves_original_started_at_on_resume_claim(
         second_claim = await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         second_started_at = await session.scalar(
             sa.select(FlowRuns.started_at).where(FlowRuns.id == scenario.flow_run_id)
@@ -1911,6 +1956,7 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2005,6 +2051,7 @@ async def test_failed_running_run_cancels_active_checkpoint_by_terminalizer(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         checkpoint = await _create_checkpoint(
             checkpoint_repo=checkpoint_repo,
@@ -2083,6 +2130,7 @@ async def test_reconcile_expired_review_checkpoint_cancels_run_with_audit_trail(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2207,6 +2255,7 @@ async def test_review_expiry_task_commits_checkpoint_and_run_from_fresh_session(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2289,6 +2338,7 @@ async def test_reconcile_expired_review_checkpoint_ignores_approved_checkpoint(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2354,6 +2404,7 @@ async def test_expire_review_checkpoint_ignores_late_approved_checkpoint(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2431,6 +2482,7 @@ async def test_approved_review_checkpoint_can_resume_after_expiry_time(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2496,6 +2548,7 @@ async def test_review_checkpoint_edit_after_expiry_returns_expired_error(
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
@@ -2555,6 +2608,7 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
         )
         await _complete_reviewed_step_result(session=session, scenario=scenario)
         opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(

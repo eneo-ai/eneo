@@ -16,6 +16,7 @@ function run(id: string): FlowRun {
     trace_id: `trace-${id}`,
     revision: 1,
     status: "running",
+    dispatch_attempt_count: 1,
     created_at: "2026-05-07T12:00:00.000Z",
     updated_at: "2026-05-07T12:00:00.000Z"
   };

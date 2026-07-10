@@ -269,10 +269,12 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
         assert await run_repo.mark_running_if_claimable(
             run_id=stale_running.id,
             tenant_id=admin_user.tenant_id,
+            expected_revision=stale_running.revision,
         )
         assert await run_repo.mark_running_if_claimable(
             run_id=terminal_with_open_attempt.id,
             tenant_id=admin_user.tenant_id,
+            expected_revision=terminal_with_open_attempt.revision,
         )
         claimed = await run_repo.claim_step_result(
             run_id=terminal_with_open_attempt.id,
@@ -294,8 +296,9 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             sa.update(FlowRuns)
             .where(FlowRuns.id == stale_queued.id)
             .values(
-                updated_at=now
-                - timedelta(seconds=policy.stale_queued_after_seconds + 5)
+                dispatch_pending_since=now
+                - timedelta(seconds=policy.stale_queued_after_seconds + 5),
+                updated_at=now,
             )
         )
         await session.execute(
@@ -370,6 +373,9 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
     assert response.runs.running_count == 1
     assert response.runs.awaiting_review_count == 1
     assert response.runs.stale_queued_count == 1
+    assert response.runs.oldest_stale_queued_age_seconds == (
+        policy.stale_queued_after_seconds + 5
+    )
     assert response.runs.stale_running_count == 1
     assert response.status_flags == [
         FlowRuntimeHealthFlag.STALE_QUEUED_RUNS,

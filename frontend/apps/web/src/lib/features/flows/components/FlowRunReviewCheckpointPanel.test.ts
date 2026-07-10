@@ -72,6 +72,7 @@ function buildRun(status: FlowRun["status"]): FlowRun {
     trace_id: "trace-1",
     revision: 2,
     status,
+    dispatch_attempt_count: 1,
     result_files: [],
     created_at: "2026-03-17T10:05:00Z",
     updated_at: "2026-03-17T10:05:00Z"

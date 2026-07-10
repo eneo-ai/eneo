@@ -377,6 +377,22 @@ def upgrade() -> None:
         sa.Column("idempotency_key", sa.String(length=255), nullable=True),
         sa.Column("request_fingerprint", sa.String(length=64), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="queued"),
+        sa.Column("dispatch_pending_since", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column(
+            "dispatch_attempt_count",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "dispatch_last_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True
+        ),
+        sa.Column("dispatch_last_error", postgresql.JSONB(), nullable=True),
+        sa.Column(
+            "dispatch_next_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True
+        ),
+        sa.Column("dispatched_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("dispatch_exhausted_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("cancelled_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("input_payload_json", postgresql.JSONB(), nullable=True),
         sa.Column("output_payload_json", postgresql.JSONB(), nullable=True),
@@ -394,6 +410,15 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "status IN ('queued','running','completed','failed','cancelled')",
             name="ck_flow_runs_status",
+        ),
+        sa.CheckConstraint(
+            "dispatch_attempt_count >= 0",
+            name="ck_flow_runs_dispatch_attempt_count_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "dispatch_last_error IS NULL "
+            "OR jsonb_typeof(dispatch_last_error) = 'object'",
+            name="ck_flow_runs_dispatch_last_error_object",
         ),
         sa.CheckConstraint(
             """
@@ -448,6 +473,17 @@ def upgrade() -> None:
         ["status", "updated_at"],
         unique=False,
         postgresql_where=sa.text("status = 'running'"),
+    )
+    op.create_index(
+        "ix_flow_runs_queued_dispatch_due",
+        "flow_runs",
+        ["tenant_id", "dispatch_next_attempt_at", "id"],
+        unique=False,
+        postgresql_where=sa.text(
+            "status = 'queued' "
+            "AND dispatch_next_attempt_at IS NOT NULL "
+            "AND dispatch_exhausted_at IS NULL"
+        ),
     )
     op.create_index(
         "uq_flow_runs_idempotency_user_key",
@@ -880,6 +916,7 @@ def downgrade() -> None:
     op.drop_index("ix_flow_step_results_flow_run_id", table_name="flow_step_results")
     op.drop_table("flow_step_results")
 
+    op.drop_index("ix_flow_runs_queued_dispatch_due", table_name="flow_runs")
     op.drop_index("ix_flow_runs_running_updated_at", table_name="flow_runs")
     op.drop_index("ix_flow_runs_tenant_created_at", table_name="flow_runs")
     op.drop_index("ix_flow_runs_flow_id_status", table_name="flow_runs")

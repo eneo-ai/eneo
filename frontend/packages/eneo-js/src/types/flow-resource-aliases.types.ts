@@ -143,6 +143,7 @@ const validFlowRun = {
   trace_id: "00000000-0000-0000-0000-000000000302",
   revision: 1,
   status: "completed",
+  dispatch_attempt_count: 1,
   input_payload_json: { case_id: "CASE-1" },
   output_payload_json: {
     text: "Decision support generated."

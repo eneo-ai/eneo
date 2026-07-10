@@ -19,9 +19,13 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows.application.flow_run_recovery_policy import (
+    FLOW_DISPATCH_MAX_ATTEMPTS,
+)
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     Flow,
+    FlowRun,
     FlowRunStatus,
     FlowStep,
     FlowStepAttemptStatus,
@@ -30,7 +34,11 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunDispatchErrorKind,
+    FlowRunError,
+)
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
@@ -1225,6 +1233,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         claimed = await run_repo.mark_running_if_claimable(
             run_id=running_run.id,
             tenant_id=admin_user.tenant_id,
+            expected_revision=running_run.revision,
         )
         assert claimed is True
         await session.execute(
@@ -1880,10 +1889,12 @@ async def test_mark_running_if_claimable_is_single_winner(
         first = await run_repo.mark_running_if_claimable(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
+            expected_revision=run.revision,
         )
         second = await run_repo.mark_running_if_claimable(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
+            expected_revision=run.revision,
         )
 
         assert first is True
@@ -1953,6 +1964,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
         )
         run_id = run.id
         tenant_id = admin_user.tenant_id
+        run_revision = run.revision
 
     async def _claim_run() -> bool:
         async with sessionmanager.session() as session, session.begin():
@@ -1960,6 +1972,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
             return await repo.mark_running_if_claimable(
                 run_id=run_id,
                 tenant_id=tenant_id,
+                expected_revision=run_revision,
             )
 
     claim_results = await asyncio.gather(*[_claim_run() for _ in range(6)])
@@ -1970,6 +1983,99 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
         row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run_id))
         assert row is not None
         assert row.status == FlowRunStatus.RUNNING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_dispatch_claim_has_one_winner_under_concurrency(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session,
+            "Flows concurrent dispatch-claim space",
+            [model.id],
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow concurrent dispatch-claim assistant",
+            model.id,
+            space_id=space.id,
+        )
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await FlowRunRepository(
+            session=session,
+            factory=FlowFactory(),
+        ).create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "concurrent-dispatch-claim"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        run_id = run.id
+        tenant_id = run.tenant_id
+        run_revision = run.revision
+        pending_since = run.dispatch_pending_since
+
+    claim_at = datetime.now(timezone.utc)
+
+    async def _claim_dispatch() -> FlowRun | None:
+        async with sessionmanager.session() as session, session.begin():
+            return await FlowRunRepository(
+                session=session,
+                factory=FlowFactory(),
+            ).claim_queued_run_for_dispatch(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                expected_revision=run_revision,
+                now=claim_at,
+            )
+
+    claims = await asyncio.gather(*[_claim_dispatch() for _ in range(6)])
+
+    assert sum(claim is not None for claim in claims) == 1
+    async with sessionmanager.session() as session, session.begin():
+        row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run_id))
+        assert row is not None
+        assert row.dispatch_attempt_count == 1
+        assert row.dispatch_pending_since == pending_since
+        assert row.dispatch_next_attempt_at == claim_at + timedelta(seconds=30)
 
 
 @pytest.mark.asyncio
@@ -2037,6 +2143,7 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
         claimed = await run_repo.mark_running_if_claimable(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
+            expected_revision=run.revision,
         )
         assert claimed is True
 
@@ -2651,7 +2758,7 @@ async def test_finish_attempt_is_idempotent(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_cooldown(
+async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
     db_container,
     completion_model_factory,
     space_factory,
@@ -2661,10 +2768,14 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows stale-run scope space", [model.id])
+        space = await space_factory(
+            session,
+            "Flows dispatch lifecycle space",
+            [model.id],
+        )
         assistant = await assistant_factory(
             session,
-            "Flow stale-run assistant",
+            "Flow dispatch lifecycle assistant",
             model.id,
             space_id=space.id,
         )
@@ -2686,138 +2797,226 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
                 space_id=space.id,
                 user_id=admin_user.id,
                 assistant_id=assistant.id,
-            ).model_copy(update={"name": "Second stale flow"}),
+            ).model_copy(update={"name": "Second dispatch flow"}),
             tenant_id=admin_user.tenant_id,
         )
-
-        await version_repo.create(
-            flow_id=first_flow.id,
-            version=1,
-            definition_json={
-                "steps": [
-                    {
-                        "step_id": str(first_flow.steps[0].id),
-                        "assistant_id": str(first_flow.steps[0].assistant_id),
-                        "step_order": 1,
-                    }
-                ]
-            },
-            tenant_id=admin_user.tenant_id,
-        )
-        await version_repo.create(
-            flow_id=second_flow.id,
-            version=1,
-            definition_json={
-                "steps": [
-                    {
-                        "step_id": str(second_flow.steps[0].id),
-                        "assistant_id": str(second_flow.steps[0].assistant_id),
-                        "step_order": 1,
-                    }
-                ]
-            },
-            tenant_id=admin_user.tenant_id,
-        )
+        for flow in (first_flow, second_flow):
+            await version_repo.create(
+                flow_id=flow.id,
+                version=1,
+                definition_json={
+                    "steps": [
+                        {
+                            "step_id": str(flow.steps[0].id),
+                            "assistant_id": str(flow.steps[0].assistant_id),
+                            "step_order": 1,
+                        }
+                    ]
+                },
+                tenant_id=admin_user.tenant_id,
+            )
 
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        stale_first_flow = await run_repo.create(
-            flow_id=first_flow.id,
-            flow_version=1,
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            input_payload_json={"case": "stale-first"},
-            preseed_steps=[
-                {
-                    "step_id": first_flow.steps[0].id,
-                    "assistant_id": first_flow.steps[0].assistant_id,
-                    "step_order": 1,
-                }
-            ],
-        )
-        fresh_first_flow = await run_repo.create(
-            flow_id=first_flow.id,
-            flow_version=1,
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            input_payload_json={"case": "fresh-first"},
-            preseed_steps=[
-                {
-                    "step_id": first_flow.steps[0].id,
-                    "assistant_id": first_flow.steps[0].assistant_id,
-                    "step_order": 1,
-                }
-            ],
-        )
-        stale_second_flow = await run_repo.create(
-            flow_id=second_flow.id,
-            flow_version=1,
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            input_payload_json={"case": "stale-second"},
-            preseed_steps=[
-                {
-                    "step_id": second_flow.steps[0].id,
-                    "assistant_id": second_flow.steps[0].assistant_id,
-                    "step_order": 1,
-                }
-            ],
-        )
+
+        async def _create_run(*, flow: Flow, case: str) -> FlowRun:
+            return await run_repo.create(
+                flow_id=flow.id,
+                flow_version=1,
+                principal_user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                input_payload_json={"case": case},
+                preseed_steps=[
+                    {
+                        "step_id": flow.steps[0].id,
+                        "assistant_id": flow.steps[0].assistant_id,
+                        "step_order": 1,
+                    }
+                ],
+            )
+
+        due_first = await _create_run(flow=first_flow, case="due-first")
+        not_due = await _create_run(flow=first_flow, case="not-due")
+        due_second = await _create_run(flow=second_flow, case="due-second")
+
+        for run in (due_first, not_due, due_second):
+            assert run.status == FlowRunStatus.QUEUED
+            assert run.dispatch_pending_since is not None
+            assert run.dispatch_next_attempt_at == run.dispatch_pending_since
+            assert run.dispatch_attempt_count == 0
+            assert run.dispatch_last_attempt_at is None
+            assert run.dispatch_last_error is None
+            assert run.dispatched_at is None
+            assert run.dispatch_exhausted_at is None
 
         now = datetime.now(timezone.utc)
-        stale_before = now - timedelta(minutes=5)
+        first_pending_since = now - timedelta(minutes=20)
+        first_stable_updated_at = now
         await session.execute(
             sa.update(FlowRuns)
-            .where(FlowRuns.id == stale_first_flow.id)
-            .values(updated_at=now - timedelta(minutes=10))
+            .where(FlowRuns.id == due_first.id)
+            .values(
+                dispatch_pending_since=first_pending_since,
+                dispatch_next_attempt_at=now - timedelta(minutes=5),
+                updated_at=first_stable_updated_at,
+            )
         )
         await session.execute(
             sa.update(FlowRuns)
-            .where(FlowRuns.id == fresh_first_flow.id)
-            .values(updated_at=now - timedelta(minutes=1))
+            .where(FlowRuns.id == not_due.id)
+            .values(
+                dispatch_pending_since=now - timedelta(minutes=30),
+                dispatch_next_attempt_at=now + timedelta(minutes=5),
+                updated_at=now - timedelta(days=1),
+            )
         )
         await session.execute(
             sa.update(FlowRuns)
-            .where(FlowRuns.id == stale_second_flow.id)
-            .values(updated_at=now - timedelta(minutes=15))
+            .where(FlowRuns.id == due_second.id)
+            .values(
+                dispatch_pending_since=now - timedelta(minutes=25),
+                dispatch_next_attempt_at=now - timedelta(minutes=10),
+                updated_at=now,
+            )
         )
         await session.flush()
 
-        first_flow_stale = await run_repo.list_stale_queued_runs(
+        first_flow_due = await run_repo.list_dispatchable_queued_runs(
             tenant_id=admin_user.tenant_id,
             flow_id=first_flow.id,
-            stale_before=stale_before,
+            due_at=now,
             limit=10,
         )
-        oldest_only = await run_repo.list_stale_queued_runs(
+        oldest_only = await run_repo.list_dispatchable_queued_runs(
             tenant_id=admin_user.tenant_id,
-            stale_before=stale_before,
+            due_at=now,
             limit=1,
         )
-        run_scoped = await run_repo.list_stale_queued_runs(
+        run_scoped = await run_repo.list_dispatchable_queued_runs(
             tenant_id=admin_user.tenant_id,
             flow_id=first_flow.id,
-            run_id=stale_first_flow.id,
-            stale_before=stale_before,
+            run_id=due_first.id,
+            due_at=now,
             limit=10,
         )
 
-        assert [item.id for item in first_flow_stale] == [stale_first_flow.id]
-        assert [item.id for item in oldest_only] == [stale_second_flow.id]
-        assert [item.id for item in run_scoped] == [stale_first_flow.id]
+        assert [item.id for item in first_flow_due] == [due_first.id]
+        assert [item.id for item in oldest_only] == [due_second.id]
+        assert [item.id for item in run_scoped] == [due_first.id]
 
-        claimed = await run_repo.claim_stale_queued_run_for_redispatch(
-            run_id=stale_first_flow.id,
+        wrong_revision_claim = await run_repo.claim_queued_run_for_dispatch(
+            run_id=due_first.id,
             tenant_id=admin_user.tenant_id,
-            stale_before=stale_before,
+            expected_revision=due_first.revision + 1,
+            now=now,
             flow_id=first_flow.id,
         )
-        second_claim = await run_repo.claim_stale_queued_run_for_redispatch(
-            run_id=stale_first_flow.id,
+        claimed = await run_repo.claim_queued_run_for_dispatch(
+            run_id=due_first.id,
             tenant_id=admin_user.tenant_id,
-            stale_before=stale_before,
+            expected_revision=due_first.revision,
+            now=now,
+            flow_id=first_flow.id,
+        )
+        duplicate_claim = await run_repo.claim_queued_run_for_dispatch(
+            run_id=due_first.id,
+            tenant_id=admin_user.tenant_id,
+            expected_revision=due_first.revision,
+            now=now,
             flow_id=first_flow.id,
         )
 
+        assert wrong_revision_claim is None
         assert claimed is not None
-        assert claimed.id == stale_first_flow.id
-        assert second_claim is None
+        assert duplicate_claim is None
+        assert claimed.dispatch_attempt_count == 1
+        assert claimed.dispatch_last_attempt_at == now
+        assert claimed.dispatch_next_attempt_at == now + timedelta(seconds=30)
+        assert claimed.dispatch_pending_since == first_pending_since
+        assert claimed.updated_at == first_stable_updated_at
+
+        safe_error = FlowRunDispatchError.from_kind(
+            FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+        )
+        failure_at = now + timedelta(seconds=1)
+        failed = await run_repo.record_dispatch_failure(
+            run_id=claimed.id,
+            tenant_id=claimed.tenant_id,
+            expected_revision=claimed.revision,
+            expected_attempt_count=claimed.dispatch_attempt_count,
+            error=safe_error,
+            now=failure_at,
+        )
+        assert failed is not None
+        assert failed.dispatch_attempt_count == 1
+        assert failed.dispatch_last_error == safe_error
+        assert failed.dispatch_next_attempt_at == failure_at + timedelta(seconds=30)
+        assert failed.dispatch_exhausted_at is None
+        assert failed.dispatch_pending_since == first_pending_since
+        assert failed.updated_at == first_stable_updated_at
+
+        second_attempt_at = failure_at + timedelta(seconds=31)
+        second_attempt = await run_repo.claim_queued_run_for_dispatch(
+            run_id=failed.id,
+            tenant_id=failed.tenant_id,
+            expected_revision=failed.revision,
+            now=second_attempt_at,
+        )
+        assert second_attempt is not None
+        accepted_at = second_attempt_at + timedelta(seconds=1)
+        accepted = await run_repo.record_dispatch_accepted(
+            run_id=second_attempt.id,
+            tenant_id=second_attempt.tenant_id,
+            expected_revision=second_attempt.revision,
+            expected_attempt_count=second_attempt.dispatch_attempt_count,
+            now=accepted_at,
+        )
+        assert accepted is not None
+        assert accepted.dispatch_attempt_count == 2
+        assert accepted.dispatch_last_attempt_at == second_attempt_at
+        assert accepted.dispatch_last_error == safe_error
+        assert accepted.dispatch_next_attempt_at is None
+        assert accepted.dispatched_at == accepted_at
+        assert accepted.dispatch_pending_since == first_pending_since
+        assert accepted.updated_at == first_stable_updated_at
+
+        unknown_outcome_claim = await run_repo.claim_queued_run_for_dispatch(
+            run_id=due_second.id,
+            tenant_id=due_second.tenant_id,
+            expected_revision=due_second.revision,
+            now=now,
+        )
+        assert unknown_outcome_claim is not None
+        assert not await run_repo.mark_running_if_claimable(
+            run_id=due_second.id,
+            tenant_id=due_second.tenant_id,
+            expected_revision=due_second.revision + 1,
+        )
+        assert await run_repo.mark_running_if_claimable(
+            run_id=due_second.id,
+            tenant_id=due_second.tenant_id,
+            expected_revision=due_second.revision,
+        )
+        assert not await run_repo.mark_running_if_claimable(
+            run_id=due_second.id,
+            tenant_id=due_second.tenant_id,
+            expected_revision=due_second.revision,
+        )
+
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == not_due.id)
+            .values(
+                dispatch_attempt_count=FLOW_DISPATCH_MAX_ATTEMPTS,
+                dispatch_next_attempt_at=now,
+            )
+        )
+        exhausted = await run_repo.mark_dispatch_exhausted_if_due(
+            run_id=not_due.id,
+            tenant_id=not_due.tenant_id,
+            expected_revision=not_due.revision,
+            now=now,
+        )
+        assert exhausted is not None
+        assert exhausted.dispatch_attempt_count == FLOW_DISPATCH_MAX_ATTEMPTS
+        assert exhausted.dispatch_next_attempt_at is None
+        assert exhausted.dispatch_exhausted_at == now
