@@ -248,6 +248,28 @@ class TestFileRoleEvidencePreservation:
 
         assert rebuilt.file_roles == [current_role]
 
+    def test_drops_persisted_file_role_for_detached_file(self) -> None:
+        persisted_role = FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+        )
+        rebuilt = _state()
+        persisted = _state()
+        persisted.file_roles = [persisted_role]
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.file_roles == []
+
 
 class TestOutputSchemaEvidencePreservation:
     def test_carries_forward_persisted_output_schema_evidence(self) -> None:
@@ -279,6 +301,83 @@ class TestOutputSchemaEvidencePreservation:
         carry_forward_persisted_planner_state(rebuilt, persisted)
 
         assert rebuilt.output_schema_evidence is current
+
+    def test_filters_template_output_schema_evidence_to_attached_files(self) -> None:
+        active_file_id = UUID("00000000-0000-0000-0000-000000000701")
+        detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
+        persisted = _state()
+        persisted.output_schema_evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {
+                    "kundnamn": {"type": "string"},
+                    "arkivnummer": {"type": "string"},
+                },
+                "required": ["kundnamn", "arkivnummer"],
+                "additionalProperties": False,
+            },
+            source="template_placeholders",
+            confidence="high",
+            evidence=[
+                f"file:{active_file_id}:content:template_placeholder:kundnamn",
+                f"file:{detached_file_id}:content:template_placeholder:arkivnummer",
+            ],
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={active_file_id},
+        )
+
+        evidence = rebuilt.output_schema_evidence
+        assert evidence is not None
+        assert evidence.evidence == [
+            f"file:{active_file_id}:content:template_placeholder:kundnamn"
+        ]
+        assert evidence.json_schema == {
+            "type": "object",
+            "properties": {"kundnamn": {"type": "string"}},
+            "required": ["kundnamn"],
+            "additionalProperties": False,
+        }
+
+    def test_drops_template_output_schema_evidence_for_detached_file(self) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000701")
+        persisted = _state()
+        persisted.output_schema_evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {"kundnamn": {"type": "string"}},
+            },
+            source="template_placeholders",
+            confidence="high",
+            evidence=[f"file:{file_id}:content:template_placeholder:kundnamn"],
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.output_schema_evidence is None
+
+    def test_keeps_freeform_output_schema_evidence_without_attached_file(self) -> None:
+        persisted_evidence = _output_schema_evidence()
+        persisted = _state()
+        persisted.output_schema_evidence = persisted_evidence
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.output_schema_evidence is persisted_evidence
 
 
 class TestOutputSchemaEvidenceDerivation:

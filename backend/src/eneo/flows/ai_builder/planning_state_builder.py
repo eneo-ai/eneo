@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Literal, cast
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_option_id,
@@ -285,6 +286,8 @@ _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
 def carry_forward_persisted_planner_state(
     rebuilt: PlanningState,
     persisted: PlanningState | None,
+    *,
+    attached_file_ids: Collection[UUID] | None = None,
 ) -> None:
     """Carry forward planner-owned fields from the previously persisted
     state onto a freshly rebuilt state — mutation-only, no return.
@@ -308,12 +311,90 @@ def carry_forward_persisted_planner_state(
         rebuilt.output_schema_evidence is None
         and persisted.output_schema_evidence is not None
     ):
-        rebuilt.output_schema_evidence = persisted.output_schema_evidence
+        rebuilt.output_schema_evidence = _carryable_output_schema_evidence(
+            persisted.output_schema_evidence,
+            attached_file_ids=attached_file_ids,
+        )
     current_file_ids = {item.file_id for item in rebuilt.file_roles}
     for file_role in persisted.file_roles:
+        if attached_file_ids is not None and file_role.file_id not in attached_file_ids:
+            continue
         if file_role.file_id not in current_file_ids:
             rebuilt.file_roles.append(file_role)
             current_file_ids.add(file_role.file_id)
+
+
+def _carryable_output_schema_evidence(
+    evidence: OutputSchemaEvidence,
+    *,
+    attached_file_ids: Collection[UUID] | None,
+) -> OutputSchemaEvidence | None:
+    if attached_file_ids is None or evidence.source != "template_placeholders":
+        return evidence
+
+    attached = set(attached_file_ids)
+    retained = [
+        (marker, parsed)
+        for marker in evidence.evidence
+        if (parsed := _template_placeholder_marker(marker)) is not None
+        and parsed[0] in attached
+    ]
+    if not retained:
+        return None
+
+    retained_placeholders = {placeholder for _, (_, placeholder) in retained}
+    return OutputSchemaEvidence(
+        json_schema=_filter_template_placeholder_schema(
+            evidence.json_schema,
+            retained_placeholders=retained_placeholders,
+        ),
+        source=evidence.source,
+        confidence=evidence.confidence,
+        evidence=[marker for marker, _ in retained],
+    )
+
+
+def _template_placeholder_marker(marker: str) -> tuple[UUID, str] | None:
+    prefix = "file:"
+    placeholder_separator = ":content:template_placeholder:"
+    if not marker.startswith(prefix) or placeholder_separator not in marker:
+        return None
+    raw_file_id, placeholder = marker.removeprefix(prefix).split(
+        placeholder_separator, 1
+    )
+    if not placeholder:
+        return None
+    try:
+        file_id = UUID(raw_file_id)
+    except ValueError:
+        return None
+    return file_id, placeholder
+
+
+def _filter_template_placeholder_schema(
+    schema: JsonObject,
+    *,
+    retained_placeholders: set[str],
+) -> JsonObject:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return schema
+
+    filtered = dict(schema)
+    filtered_properties = {
+        key: value for key, value in properties.items() if key in retained_placeholders
+    }
+    filtered["properties"] = filtered_properties
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        filtered["required"] = [
+            item
+            for item in required
+            if isinstance(item, str) and item in filtered_properties
+        ]
+
+    return filtered
 
 
 def _derive_output_schema_evidence(

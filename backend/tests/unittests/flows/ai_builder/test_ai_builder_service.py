@@ -2164,7 +2164,6 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
         message_file_ids=[file_id],
     )
 
-    repo.attach_session_files.assert_not_awaited()
     assert len(context.attachment_files) == 1
     assert context.attachment_files[0].name == "reference.txt"
 
@@ -2217,7 +2216,6 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
         message_file_ids=[file_id],
     )
 
-    repo.attach_session_files.assert_not_awaited()
     file_service.get_files_by_ids.assert_awaited_once_with([file_id])
     assert len(context.attachment_files) == 1
     assert context.attachment_files[0].id == file_id

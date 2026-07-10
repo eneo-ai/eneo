@@ -1477,51 +1477,6 @@ async def test_ai_builder_repo_create_plan_rejects_cross_tenant_session_referenc
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_ai_builder_repo_attach_session_files_rejects_cross_tenant_session_reference(
-    client,
-    bearer_token,
-    completion_model_factory,
-    db_container,
-):
-    space_id = await _create_space_with_planner_model(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        space_name="AI Builder Cross Tenant Attach",
-    )
-    file_id = await _upload_reference_file(
-        client=client,
-        bearer_token=bearer_token,
-        filename="cross-tenant.txt",
-        content=b"reference material",
-    )
-    other_tenant_id = await _create_extra_tenant(
-        db_container=db_container,
-        name=f"other-tenant-{uuid4()}",
-    )
-
-    async with db_container() as container:
-        repo = AIBuilderRepository(container.session())
-        user = container.user()
-        session = await repo.create_session(
-            tenant_id=user.tenant_id,
-            space_id=UUID(space_id),
-            actor_user_id=user.id,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-        )
-
-        with pytest.raises(IntegrityError):
-            await repo.attach_session_files(
-                session_id=session.id,
-                tenant_id=other_tenant_id,
-                file_ids=[UUID(file_id)],
-            )
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_ai_builder_repo_create_session_rejects_cross_tenant_flow_reference(
     client,
     bearer_token,

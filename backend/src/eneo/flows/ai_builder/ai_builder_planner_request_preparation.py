@@ -194,6 +194,7 @@ async def prepare_planner_request(
     carry_forward_persisted_planner_state(
         rebuilt_planning_state,
         request.persisted_planning_state,
+        attached_file_ids={file.id for file in request.attachment_files},
     )
     turn_control = resolve_turn_control(
         session_state=rebuilt_planning_state,

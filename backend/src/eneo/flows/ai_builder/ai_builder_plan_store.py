@@ -128,14 +128,23 @@ async def store_plan_and_update_conversation(
             conversation=conversation,
             start_index=new_messages_start,
         )
+        attached_file_ids = await repo.list_session_file_ids(
+            session_id=turn.session_id,
+            tenant_id=turn.tenant_id,
+        )
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
         # Current-turn overlay must run before prior state: carry-forward only
         # fills missing planner-owned fields, so the current upload role wins.
         carry_forward_persisted_planner_state(
             planning_state,
             planning_state_overlay,
+            attached_file_ids=attached_file_ids,
         )
-        carry_forward_persisted_planner_state(planning_state, prior_state)
+        carry_forward_persisted_planner_state(
+            planning_state,
+            prior_state,
+            attached_file_ids=attached_file_ids,
+        )
         prior_commit = prior_state.architecture_commit if prior_state else None
         assert_architecture_commit_draft_matches_pinned(
             before=prior_commit,

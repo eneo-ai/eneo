@@ -49,6 +49,7 @@ from eneo.flows.ai_builder.ai_builder_validation_common import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     FileRoleEvidence,
+    OutputSchemaEvidence,
     PlanningState,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -255,6 +256,7 @@ def _make_repo_mock() -> AsyncMock:
     repo.append_session_messages = AsyncMock(return_value=[])
     repo.create_plan = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     repo.load_planning_state = AsyncMock(return_value=None)
+    repo.list_session_file_ids = AsyncMock(return_value=[])
     return repo
 
 
@@ -440,6 +442,9 @@ async def test_store_plan_persists_prepared_file_roles() -> None:
             confidence="medium",
         )
     ]
+    repo.list_session_file_ids.return_value = [
+        prepared_state.file_roles[0].file_id,
+    ]
 
     await store_plan_and_update_conversation(
         repo=repo,
@@ -493,6 +498,7 @@ async def test_store_plan_prefers_current_file_role_over_prior_same_file() -> No
         )
     ]
     repo.load_planning_state.return_value = prior_state
+    repo.list_session_file_ids.return_value = [prepared_state.file_roles[0].file_id]
 
     await store_plan_and_update_conversation(
         repo=repo,
@@ -509,6 +515,54 @@ async def test_store_plan_prefers_current_file_role_over_prior_same_file() -> No
 
     saved_state = repo.save_planning_state.await_args.kwargs["state"]
     assert saved_state.file_roles == prepared_state.file_roles
+
+
+@pytest.mark.asyncio
+async def test_store_plan_drops_prior_file_evidence_when_file_is_detached() -> None:
+    repo = _make_repo_mock()
+    file_id = "00000000-0000-0000-0000-000000000701"
+    prior_state = PlanningState.empty()
+    prior_state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="avtalsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            role="template",
+            source="heuristic",
+            confidence="high",
+        )
+    ]
+    prior_state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"kundnamn": {"type": "string"}},
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=[f"file:{file_id}:content:template_placeholder:kundnamn"],
+    )
+    repo.load_planning_state.return_value = prior_state
+    repo.list_session_file_ids.return_value = []
+
+    await store_plan_and_update_conversation(
+        repo=repo,
+        turn=_make_turn(base_version=7),
+        conversation=[],
+        new_messages_start=0,
+        assistant_content="plan ready",
+        tool_call_id="call-unit-1",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={},
+        compiled=_compiled_proposal(),
+    )
+
+    saved_state = repo.save_planning_state.await_args.kwargs["state"]
+    assert saved_state.file_roles == []
+    assert saved_state.output_schema_evidence is None
 
 
 @pytest.mark.asyncio

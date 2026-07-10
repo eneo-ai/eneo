@@ -333,29 +333,6 @@ class AIBuilderRepository:
                 )
             return _session_from_row(row)
 
-    async def attach_session_files(
-        self,
-        *,
-        session_id: UUID,
-        tenant_id: UUID,
-        file_ids: list[UUID],
-    ) -> None:
-        if not file_ids:
-            return
-
-        async with self._transaction():
-            rows = [
-                {
-                    "session_id": session_id,
-                    "file_id": file_id,
-                    "tenant_id": tenant_id,
-                }
-                for file_id in dict.fromkeys(file_ids)
-            ]
-            stmt = pg_insert(BuilderSessionFiles).values(rows)
-            stmt = stmt.on_conflict_do_nothing(index_elements=["session_id", "file_id"])
-            await self.session.execute(stmt)
-
     async def list_session_file_ids(
         self,
         *,
@@ -1146,13 +1123,25 @@ class AIBuilderRepository:
                 conversation=new_messages,
                 lease=turn.lease,
             )
+            attached_file_ids = await self.list_session_file_ids(
+                session_id=turn.session_id,
+                tenant_id=turn.tenant_id,
+            )
             state = build_planning_state_from_conversation(persisted, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
             # Current-turn overlay must run before prior state: carry-forward only
             # fills missing planner-owned fields, so the current upload role wins.
-            carry_forward_persisted_planner_state(state, planning_state_overlay)
-            carry_forward_persisted_planner_state(state, prior_state)
+            carry_forward_persisted_planner_state(
+                state,
+                planning_state_overlay,
+                attached_file_ids=attached_file_ids,
+            )
+            carry_forward_persisted_planner_state(
+                state,
+                prior_state,
+                attached_file_ids=attached_file_ids,
+            )
             return await self.save_planning_state(
                 session_id=turn.session_id,
                 tenant_id=turn.tenant_id,
