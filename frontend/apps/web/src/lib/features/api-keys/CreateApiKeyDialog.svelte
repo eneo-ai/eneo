@@ -1389,7 +1389,7 @@
                   <div
                     class="relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all duration-200
                     {isActive
-                      ? 'border-accent-default bg-accent-default text-on-fill shadow-accent-default/40 step-bounce shadow-lg'
+                      ? 'border-accent-default bg-accent-default text-on-fill shadow-accent-default/40 step-scale-in shadow-lg'
                       : ''}
                     {isCompleted
                       ? 'border-positive-default bg-positive-default/10 text-positive-stronger'
@@ -2313,19 +2313,19 @@
 </Dialog.Root>
 
 <style>
-  /* Step indicator bounce animation */
-  @keyframes step-bounce {
-    0%,
-    100% {
-      transform: scale(1);
+  /* Step indicator emphasis: one-directional ease-out scale, no overshoot
+     (bounce/elastic easing is banned by the motion standard). */
+  @keyframes step-scale-in {
+    from {
+      transform: scale(0.94);
     }
-    50% {
-      transform: scale(1.08);
+    to {
+      transform: scale(1);
     }
   }
 
-  :global(.step-bounce) {
-    animation: step-bounce 0.3s ease-out;
+  :global(.step-scale-in) {
+    animation: step-scale-in 0.2s ease-out;
   }
 
   /* Staggered entrance for fine-grained permission cards */
@@ -2390,5 +2390,14 @@
 
   :global(.secret-ring-pulse) {
     animation: ring-pulse 1.8s ease-out 0.3s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.step-scale-in),
+    :global(.permission-card-enter),
+    :global(.submit-pulse),
+    :global(.secret-ring-pulse) {
+      animation: none;
+    }
   }
 </style>

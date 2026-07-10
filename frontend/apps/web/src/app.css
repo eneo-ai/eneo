@@ -178,6 +178,19 @@
   /* `text-tertiary` utility, which is mapped to it below.             */
   --text-color-muted: var(--text-secondary);
   --text-color-tertiary: var(--text-muted);
+
+  /* ---------------------------------------------------------------- */
+  /* 12px readability floor for `text-xs`                              */
+  /* ---------------------------------------------------------------- */
+  /* The app root is 15px (density choice, see the `html` rule below), */
+  /* which makes Tailwind's default `text-xs` (.75rem) compute to      */
+  /* 11.25px — under the 12px floor the WCAG/EN 301 549 work targets   */
+  /* for this audience. 0.8rem lands `text-xs` at exactly 12px without */
+  /* reflowing any other step of the type scale. The line-height       */
+  /* mirrors Tailwind's default ratio so the computed line box stays   */
+  /* 1rem.                                                             */
+  --text-xs: 0.8rem;
+  --text-xs--line-height: calc(1 / 0.8);
 }
 
 @font-face {
@@ -229,6 +242,8 @@
 }
 
 html {
+  /* Deliberate density choice; `--text-xs` in the @theme block above is
+     raised to 0.8rem to keep the smallest utility at the 12px floor. */
   font-size: 15px;
   color: var(--text-color-primary);
   /* Prevent browser dark mode from interfering with app theme */
