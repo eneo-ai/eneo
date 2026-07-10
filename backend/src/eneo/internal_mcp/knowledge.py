@@ -197,7 +197,12 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
         return [
             TextContent(
                 type="text",
-                text=f"No results for '{query}' in this assistant's knowledge.",
+                text=(
+                    f"No results for '{query}' in this assistant's knowledge. "
+                    "Retry once with different wording; if still nothing, the "
+                    "sources do not cover this: say so, or use another "
+                    "suitable tool if one clearly applies."
+                ),
             )
         ]
 

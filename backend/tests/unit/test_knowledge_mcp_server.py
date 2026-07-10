@@ -169,6 +169,7 @@ class TestSearchResultContent:
         assert len(content) == 1
         assert content[0].type == "text"
         assert "No results" in content[0].text
+        assert "Retry once with different wording" in content[0].text
 
     def test_max_results_is_clamped_to_ceiling(self):
         assert _clamp_max_results(500) == MAX_RESULTS_CEILING
