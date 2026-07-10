@@ -560,6 +560,59 @@ def test_model_sectioned_form_intake_signal_requires_form_fields() -> None:
     assert "sectioned_form_intake_requires_form_fields" in issue_ids
 
 
+def test_model_sectioned_form_intake_signal_suppresses_section_writer_rule() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Formulär till rapport",
+        flow_description="",
+        form_fields=[
+            FormFieldSpec(name="bakgrund", type="text", label="Bakgrund"),
+            FormFieldSpec(name="bedomning", type="text", label="Bedömning"),
+            FormFieldSpec(name="risker", type="text", label="Risker"),
+            FormFieldSpec(name="beslut", type="text", label="Beslut"),
+        ],
+        steps=[
+            _step(
+                "step_a",
+                "Sammanställ rapport",
+                "Sammanställ användarens svar.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+    planning_state = PlanningState(
+        fcm_version=FCM_VERSION,
+        planner_contract_version=PLANNER_CONTRACT_VERSION,
+        builder_schema_version=BUILDER_SCHEMA_VERSION,
+        signals=[
+            PlanningSignal(
+                question_id="form_intake_pattern",
+                value="sectioned_form_intake",
+                confidence="high",
+                source="model",
+                provenance=["quote:fritext under varje rubrik"],
+            )
+        ],
+    )
+    context = build_conversation_critic_context(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Skapa ett dokument med rubrikerna Bakgrund, Bedömning, "
+                    "Risker och Beslut."
+                ),
+            }
+        ],
+        spec,
+        planning_state=planning_state,
+    )
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+    assert "requested_output_sections_require_section_writers" not in issue_ids
+
+
 def _pdf_mismatch_context() -> "CriticContext":
     conversation = [
         {

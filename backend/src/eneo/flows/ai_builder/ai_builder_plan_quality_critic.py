@@ -90,11 +90,12 @@ def build_conversation_critic_context(
         requirements_state.latest_summary
     )
     signal_text = "\n".join(part for part in (text, requirements_text) if part)
+    model_form_intake_signals = form_intake_signal_values_from_planning_state(
+        planning_state
+    )
     planner_patterns = detect_planner_pattern_signals(
         signal_text,
-        model_form_intake_signals=form_intake_signal_values_from_planning_state(
-            planning_state
-        ),
+        model_form_intake_signals=model_form_intake_signals,
     )
     output_intent = resolve_output_intent(text, answer_signals)
     input_intent = resolve_input_intent(text, answer_signals, flow=flow)
@@ -112,7 +113,10 @@ def build_conversation_critic_context(
         primary_runtime_input=input_intent.primary_runtime_input,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
-        requested_output_sections=extract_requested_output_sections(signal_text),
+        requested_output_sections=extract_requested_output_sections(
+            signal_text,
+            model_form_intake_signals=model_form_intake_signals,
+        ),
     )
 
 
