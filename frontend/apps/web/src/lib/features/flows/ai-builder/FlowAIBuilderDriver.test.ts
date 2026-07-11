@@ -683,6 +683,149 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.isRecoveringLatestTurn).toBe(false);
   });
 
+  it("keeps late stream callbacks and finalization owned by their original session", async () => {
+    const oldSession = makeSession({ session_id: "session-old" });
+    const newSession = makeSession({ session_id: "session-new" });
+    const streamHandlers: Parameters<AIBuilderClientTransport["stream"]>[2][] = [];
+    const streamControllers: AbortController[] = [];
+    const finishStreams: Array<() => void> = [];
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        return newSession;
+      }
+      if (path.endsWith("/models")) {
+        return { models: [], default_model_id: null };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      throw new Error(`Unexpected fetch: ${path}`);
+    });
+    const { driver, stream } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(
+        (
+          _path,
+          _init,
+          handlers: Parameters<AIBuilderClientTransport["stream"]>[2],
+          abortController?: AbortController
+        ) =>
+          new Promise<void>((resolve) => {
+            streamHandlers.push(handlers);
+            if (abortController) {
+              streamControllers.push(abortController);
+            }
+            finishStreams.push(resolve);
+          })
+      )
+    });
+    driver.seedState({ session: oldSession });
+
+    const oldSend = driver.sendMessage("Old session request");
+    await driver.resumeSession(newSession.session_id);
+    const currentSend = driver.sendMessage("Current session request");
+    const oldStreamHandlers = streamHandlers[0];
+    const oldStreamController = streamControllers[0];
+    const currentStreamHandlers = streamHandlers[1];
+    const currentStreamController = streamControllers[1];
+    if (
+      !oldStreamHandlers?.onMessage ||
+      !oldStreamHandlers.onClose ||
+      !oldStreamController ||
+      !currentStreamHandlers ||
+      !currentStreamController
+    ) {
+      throw new Error("Expected controlled old and current stream operations");
+    }
+
+    oldStreamHandlers.onMessage(
+      {
+        id: "old-text",
+        event: "text",
+        data: JSON.stringify({ text: "Late old-session text" })
+      },
+      oldStreamController
+    );
+    oldStreamHandlers.onMessage(
+      {
+        id: "old-plan",
+        event: "plan",
+        data: JSON.stringify(makePlan({ plan_id: "plan-old" }))
+      },
+      oldStreamController
+    );
+    oldStreamHandlers.onMessage(
+      {
+        id: "old-usage",
+        event: "usage",
+        data: JSON.stringify({ total_tokens_total: 999 })
+      },
+      oldStreamController
+    );
+    oldStreamHandlers.onMessage(
+      {
+        id: "old-error",
+        event: "error",
+        data: JSON.stringify({
+          schema_version: 2,
+          code: "planner_stream_failed",
+          category: "internal",
+          message: "Late old-session error",
+          phase: "router",
+          request_id: "old-request",
+          eneo_error_code: 9024
+        })
+      },
+      oldStreamController
+    );
+    oldStreamHandlers.onMessage(
+      {
+        id: "old-status",
+        event: "status",
+        data: JSON.stringify({ status: "architecture_committed" })
+      },
+      oldStreamController
+    );
+    oldStreamHandlers.onClose();
+    finishStreams[0]?.();
+    await oldSend;
+
+    const stateAfterOldStream = {
+      sessionId: driver.state.session?.session_id,
+      messages: driver.state.messages.map(({ role, content }) => ({ role, content })),
+      planId: driver.state.currentPlan?.plan_id ?? null,
+      statusMessage: driver.state.statusMessage,
+      errorCode: driver.state.error?.code ?? null,
+      totalTokens: driver.state.session?.telemetry?.total_tokens_total ?? null,
+      isStreaming: driver.state.isStreaming,
+      currentControllerAborted: currentStreamController.signal.aborted
+    };
+
+    const thirdSend = driver.sendMessage("Must stay blocked while session B streams");
+    const streamCallsWhileCurrentSendIsActive = stream.mock.calls.length;
+
+    if (streamHandlers[2]) {
+      completeStream(streamHandlers[2]);
+      finishStreams[2]?.();
+    }
+    await thirdSend;
+    completeStream(currentStreamHandlers);
+    finishStreams[1]?.();
+    await currentSend;
+
+    expect(stateAfterOldStream).toEqual({
+      sessionId: "session-new",
+      messages: [{ role: "user", content: "Current session request" }],
+      planId: null,
+      statusMessage: null,
+      errorCode: null,
+      totalTokens: null,
+      isStreaming: true,
+      currentControllerAborted: false
+    });
+    expect(streamCallsWhileCurrentSendIsActive).toBe(2);
+  });
+
   it("ignores a delayed refresh response after the session is replaced", async () => {
     const oldSession = makeRecoverableSession("failed_before_provider");
     const newSession = makeSession({ session_id: "session-2" });
@@ -703,6 +846,36 @@ describe("FlowAIBuilderDriver", () => {
     expect(await oldRefresh).toBe(false);
     expect(driver.state.session?.session_id).toBe(newSession.session_id);
     expect(driver.latestTurnState).toBeNull();
+  });
+
+  it("ignores a delayed plan response after the session is replaced", async () => {
+    const oldSession = makeSession({
+      session_id: "session-old",
+      latest_plan_id: "plan-old"
+    });
+    const newSession = makeSession({ session_id: "session-new", latest_plan_id: null });
+    const delayedOldPlan = Promise.withResolvers<ProposedPlan>();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(oldSession)
+      .mockReturnValueOnce(delayedOldPlan.promise)
+      .mockResolvedValueOnce(newSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({ session: oldSession });
+
+    const oldRefresh = driver.refreshSession();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await driver.resumeSession(newSession.session_id);
+    delayedOldPlan.resolve(makePlan({ plan_id: "plan-old" }));
+
+    expect(await oldRefresh).toBe(false);
+    expect(driver.state.session?.session_id).toBe(newSession.session_id);
+    expect(driver.state.currentPlan).toBeNull();
   });
 
   it("uses a new turn ID only for a distinct logical send", async () => {
@@ -1686,7 +1859,11 @@ describe("FlowAIBuilderDriver", () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(
-        makeSession({ latest_plan_id: "plan-77", status: "awaiting_approval" })
+        makeSession({
+          session_id: "session-9",
+          latest_plan_id: "plan-77",
+          status: "awaiting_approval"
+        })
       )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-77", status: "approved" }));
     const { driver } = makeDriver({ fetchImpl: fetch });

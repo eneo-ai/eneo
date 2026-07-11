@@ -93,6 +93,12 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
 
 type FlowAIBuilderListener = (state: Readonly<FlowAIBuilderState>) => void;
 
+interface SessionOperationOwner {
+  sessionId: string;
+  sessionGeneration: number;
+  abortController: AbortController | null;
+}
+
 function extractQuestionAnswer(
   metadata: ChatMessage["metadata"] | undefined
 ): PersistedStructuredQuestionAnswerMetadata | null {
@@ -330,8 +336,13 @@ export class FlowAIBuilderDriver {
     this.#state.session = result;
     this.#hydrateMessagesFromConversation(result.conversation ?? []);
     this.#notify();
+    const owner: SessionOperationOwner = {
+      sessionId: result.session_id,
+      sessionGeneration: this.#sessionGeneration,
+      abortController: this.#abortController
+    };
     await this.#fetchModels();
-    await this.#syncPlanFromSession();
+    await this.#syncPlanFromSession(owner);
     await this.loadDraftSessions();
   }
 
@@ -358,8 +369,15 @@ export class FlowAIBuilderDriver {
 
   async refreshSession(): Promise<boolean> {
     if (!this.#state.session) return false;
-    const sessionId = this.#state.session.session_id;
-    const sessionGeneration = this.#sessionGeneration;
+    return this.#refreshSession({
+      sessionId: this.#state.session.session_id,
+      sessionGeneration: this.#sessionGeneration,
+      abortController: this.#abortController
+    });
+  }
+
+  async #refreshSession(owner: SessionOperationOwner): Promise<boolean> {
+    if (!this.#ownsSession(owner)) return false;
     const latestTurnState = this.latestTurnState;
     const refreshIsRequired =
       this.#requiresAuthoritativeRefresh ||
@@ -368,14 +386,9 @@ export class FlowAIBuilderDriver {
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
         method: "get",
-        params: { path: { session_id: sessionId } }
+        params: { path: { session_id: owner.sessionId } }
       })) as AIBuilderSession;
-      if (
-        this.#sessionGeneration !== sessionGeneration ||
-        this.#state.session?.session_id !== sessionId
-      ) {
-        return false;
-      }
+      if (!this.#ownsSession(owner)) return false;
       this.#requiresAuthoritativeRefresh = false;
       if (this.#authoritativeRefreshError) {
         this.#state.error = null;
@@ -384,15 +397,9 @@ export class FlowAIBuilderDriver {
       this.#state.session = result;
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
       this.#notify();
-      await this.#syncPlanFromSession();
-      return true;
+      return this.#syncPlanFromSession(owner);
     } catch (error) {
-      if (
-        this.#sessionGeneration !== sessionGeneration ||
-        this.#state.session?.session_id !== sessionId
-      ) {
-        return false;
-      }
+      if (!this.#ownsSession(owner)) return false;
       this.#requiresAuthoritativeRefresh = refreshIsRequired;
       if (refreshIsRequired && this.#state.error === null) {
         this.#authoritativeRefreshError = true;
@@ -513,6 +520,12 @@ export class FlowAIBuilderDriver {
     this.#state.isStreaming = true;
     this.#abortController = new AbortController();
     const abortController = this.#abortController;
+    const owner: SessionOperationOwner = {
+      sessionId: session.session_id,
+      sessionGeneration: this.#sessionGeneration,
+      abortController
+    };
+    const ownsCurrentStream = () => this.#ownsSession(owner);
 
     if (optimisticUserMessage) {
       this.#state.messages = [...this.#state.messages, optimisticUserMessage];
@@ -541,6 +554,7 @@ export class FlowAIBuilderDriver {
         },
         {
           onMessage: (rawEvent: AIBuilderStreamEvent) => {
+            if (!ownsCurrentStream()) return;
             const event = parseAIBuilderStreamEvent(rawEvent);
             switch (event.event) {
               case "text": {
@@ -617,12 +631,15 @@ export class FlowAIBuilderDriver {
             assertNever(event);
           },
           onClose: () => {
-            this.#notify();
+            if (ownsCurrentStream()) {
+              this.#notify();
+            }
           }
         },
         abortController
       );
 
+      if (!ownsCurrentStream()) return;
       if ((!receivedDone || receivedStreamError) && !abortController.signal.aborted) {
         this.#requiresAuthoritativeRefresh = true;
       }
@@ -635,10 +652,10 @@ export class FlowAIBuilderDriver {
         (requestBody.question_answer?.kind === "structured_question_answer" &&
           (!receivedDurableStreamEvent || receivedStaleQuestionEvent));
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
-        await this.refreshSession();
+        await this.#refreshSession(owner);
       }
     } catch (e) {
-      if (!abortController.signal.aborted) {
+      if (!abortController.signal.aborted && ownsCurrentStream()) {
         this.#requiresAuthoritativeRefresh = true;
         this.#state.error = parseAIBuilderError({
           transport: "apply",
@@ -646,14 +663,14 @@ export class FlowAIBuilderDriver {
           fallbackMessage: "The AI Builder stream failed. Please try again."
         });
         this.#notify();
-        await this.refreshSession();
+        await this.#refreshSession(owner);
       }
     } finally {
-      this.#state.isStreaming = false;
-      if (this.#abortController === abortController) {
+      if (ownsCurrentStream()) {
+        this.#state.isStreaming = false;
         this.#abortController = null;
+        this.#notify();
       }
-      this.#notify();
     }
   }
 
@@ -941,6 +958,15 @@ export class FlowAIBuilderDriver {
     this.#onChange?.(this.#state);
   }
 
+  #ownsSession(owner: SessionOperationOwner): boolean {
+    return (
+      this.#sessionGeneration === owner.sessionGeneration &&
+      this.#state.session?.session_id === owner.sessionId &&
+      this.#abortController === owner.abortController &&
+      owner.abortController?.signal.aborted !== true
+    );
+  }
+
   #getLatestRequirementsSummary(): RequirementsSummary | null {
     for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
       const summary = this.#state.messages[index]?.requirementsSummary;
@@ -1221,12 +1247,13 @@ export class FlowAIBuilderDriver {
     };
   }
 
-  async #syncPlanFromSession(): Promise<void> {
+  async #syncPlanFromSession(owner: SessionOperationOwner): Promise<boolean> {
+    if (!this.#ownsSession(owner)) return false;
     const latestPlanId = this.#state.session?.latest_plan_id;
     if (!latestPlanId) {
       this.#state.currentPlan = null;
       this.#notify();
-      return;
+      return true;
     }
 
     try {
@@ -1234,10 +1261,15 @@ export class FlowAIBuilderDriver {
         method: "get",
         params: { path: { plan_id: latestPlanId } }
       })) as ProposedPlan;
+      if (!this.#ownsSession(owner) || this.#state.session?.latest_plan_id !== latestPlanId) {
+        return false;
+      }
       this.#state.currentPlan = this.#normalizePlan(result);
       this.#notify();
+      return true;
     } catch {
       // Leave the current plan as-is if recovery fails.
+      return this.#ownsSession(owner);
     }
   }
 
