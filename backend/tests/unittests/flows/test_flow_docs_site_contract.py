@@ -1795,6 +1795,40 @@ def test_flow_error_taxonomy_covers_error_catalog_and_frontend_messages() -> Non
             assert code in FLOW_RUN_TERMINAL_ERROR_CODES
 
 
+def test_published_definition_parser_errors_document_request_and_run_surfaces() -> None:
+    dual_surface_codes = {
+        FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
+        FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING,
+        FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_UNSUPPORTED,
+        FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID,
+        FlowApiErrorCode.DEFINITION_STEPS_INVALID,
+        FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE,
+        FlowApiErrorCode.REVIEW_POLICY_INVALID,
+    }
+    consumer_rows = {
+        FlowApiErrorCode(row.code): row
+        for row in _load_flow_consumer_error_catalog_docs_generator().flow_consumer_error_catalog_rows()
+    }
+
+    for code in dual_surface_codes:
+        entry = FLOW_ERROR_TAXONOMY[code]
+        assert entry.surfaced_through == "API response and run error payload"
+        assert entry.handling_phase == "Request path or run execution"
+        assert consumer_rows[code].handling_phase == "Request path or run execution"
+
+    request_only = FLOW_ERROR_TAXONOMY[FlowApiErrorCode.PUBLISHED_FORM_SCHEMA_INVALID]
+    assert request_only.surfaced_through == "API error response"
+    assert request_only.handling_phase == "Request path"
+
+    for code in (
+        FlowApiErrorCode.DEFINITION_INVALID,
+        FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS,
+    ):
+        run_only = FLOW_ERROR_TAXONOMY[code]
+        assert run_only.surfaced_through == "Run error payload"
+        assert run_only.handling_phase == "Run execution"
+
+
 def test_flow_error_taxonomy_handling_phase_is_derived_from_surface() -> None:
     cases: dict[FlowErrorSurface, str] = {
         "API error response": "Request path",

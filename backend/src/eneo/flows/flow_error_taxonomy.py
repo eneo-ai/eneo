@@ -359,31 +359,48 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING: _entry(
         category="Published definition",
-        surfaced_through="Run error payload",
+        surfaced_through="API response and run error payload",
         cause="The published definition is missing its schema version.",
-        consumer_action="Require republish through the current editor before retrying.",
-        user_action="Ask a flow editor to republish the flow.",
+        consumer_action=(
+            "Require republish through the current editor, then start a new run "
+            "against the new version."
+        ),
+        user_action="Ask a flow editor to republish the flow, then start a new run.",
     ),
     FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_UNSUPPORTED: _entry(
         category="Published definition",
-        surfaced_through="Run error payload",
+        surfaced_through="API response and run error payload",
         cause="The published definition uses a schema version this runtime cannot execute.",
-        consumer_action="Republish with the current editor or upgrade the runtime before retrying.",
-        user_action="Ask a flow editor to republish with the current editor.",
+        consumer_action=(
+            "Republish with the current editor or upgrade runtime support, then "
+            "start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to republish with the current editor, then start "
+            "a new run."
+        ),
     ),
     FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID: _entry(
         category="Published definition",
-        surfaced_through="Run error payload",
+        surfaced_through="API response and run error payload",
         cause="The published snapshot references an invalid flow id.",
-        consumer_action="Treat the publication as corrupt and require republish before running.",
-        user_action="Ask a flow editor to republish the flow.",
+        consumer_action=(
+            "Treat the publication as corrupt, republish a valid version, then "
+            "start a new run."
+        ),
+        user_action="Ask a flow editor to republish the flow, then start a new run.",
     ),
     FlowApiErrorCode.DEFINITION_STEPS_INVALID: _entry(
         category="Published definition",
-        surfaced_through="Run error payload",
+        surfaced_through="API response and run error payload",
         cause="The published snapshot has invalid step definitions.",
-        consumer_action="Block execution and show the editor that the flow must be republished.",
-        user_action="Ask a flow editor to fix the steps and republish.",
+        consumer_action=(
+            "Block the pinned version, fix and republish the steps, then start a "
+            "new run."
+        ),
+        user_action=(
+            "Ask a flow editor to fix and republish the steps, then start a new run."
+        ),
     ),
     FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS: _entry(
         category="Published definition",
@@ -401,10 +418,16 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE: _entry(
         category="Published definition",
-        surfaced_through="Run error payload",
+        surfaced_through="API response and run error payload",
         cause="A step input contract conflicts with its authored question binding.",
-        consumer_action="Remove the conflicting contract or question binding, then republish.",
-        user_action="Ask a flow editor to fix the step input settings.",
+        consumer_action=(
+            "Remove the conflicting contract or question binding, republish the "
+            "flow, then start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to fix the step input settings, republish, and "
+            "start a new run."
+        ),
     ),
     FlowApiErrorCode.STEP_MISSING: _entry(
         category="Step runtime",
@@ -772,10 +795,15 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.REVIEW_POLICY_INVALID: _entry(
         category="Review checkpoint",
-        surfaced_through="Run error payload",
+        surfaced_through="API response and run error payload",
         cause="A reviewed step has an invalid review policy.",
-        consumer_action="Fix the review policy on an executable step and republish.",
-        user_action="Ask a flow editor to fix review settings.",
+        consumer_action=(
+            "Fix the review policy on the executable step, republish the flow, "
+            "then start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to fix review settings, republish, and start a new run."
+        ),
     ),
     FlowApiErrorCode.REVIEW_STALE_REVISION: _entry(
         category="Review checkpoint",
