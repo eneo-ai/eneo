@@ -98,6 +98,28 @@ def test_flow_jsonb_owner_registry_has_no_deferred_inventory_escape_hatch() -> N
         assert "deferred_inventory" not in {item.value for item in enum_type}
 
 
+def test_published_definition_has_verified_functional_and_forensic_owners() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[("flow_versions", "definition_json")]
+
+    assert owner.owner_module == "eneo.flows.published_definition"
+    assert owner.envelope_name == "PublishedFlowDefinition"
+    assert owner.owner_symbols == (
+        "PublishedFlowDefinition",
+        "build_published_definition_json",
+        "parse_verified_published_definition",
+        "inspect_published_definition_integrity",
+    )
+    assert owner.storage_category is FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT
+    assert (
+        owner.schema_version_policy is FlowJsonbSchemaVersionPolicy.CHECKSUMMED_SNAPSHOT
+    )
+    assert (
+        owner.corruption_behavior is FlowJsonbCorruptionBehavior.KEEP_AUDITABLE_FAILURE
+    )
+    assert "Functional reads fail closed" in owner.rationale
+    assert "authorized evidence" in owner.rationale
+
+
 def test_builder_plan_proposal_json_has_typed_owner() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("builder_plans", "proposal_json")]
 

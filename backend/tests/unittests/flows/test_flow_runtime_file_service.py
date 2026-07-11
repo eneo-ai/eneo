@@ -20,7 +20,10 @@ from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_contract_service import FlowRunContractService
 from eneo.flows.flow_runtime_file_service import FlowRuntimeFileService
-from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.published_definition import (
+    FLOW_DEFINITION_SCHEMA_VERSION,
+    published_definition_checksum,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
@@ -163,9 +166,11 @@ def _definition_json(flow: Flow, step: FlowStep) -> dict[str, object]:
 
 def _version_repo(flow: Flow, published_step: FlowStep | None = None) -> AsyncMock:
     repo = AsyncMock()
+    definition_json = _definition_json(flow, published_step or flow.steps[0])
     repo.get.return_value = SimpleNamespace(
         version=flow.published_version,
-        definition_json=_definition_json(flow, published_step or flow.steps[0]),
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
     )
     return repo
 
@@ -1096,25 +1101,27 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
         update={"published_version": 1, "steps": [runtime_step]}
     )
     flow_service.get_flow.return_value = flow
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": [
+            {
+                "step_id": str(runtime_step.id),
+                "step_order": 1,
+                "assistant_id": str(runtime_step.assistant_id),
+                "input_source": "flow_input",
+                "input_type": "text",
+                "input_config": runtime_step.input_config,
+                "output_mode": "pass_through",
+                "output_type": "json",
+                "mcp_policy": "inherit",
+            }
+        ],
+    }
     flow_version_repo.get.return_value = SimpleNamespace(
         version=flow.published_version,
-        definition_json={
-            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
-            "flow_id": str(flow.id),
-            "steps": [
-                {
-                    "step_id": str(runtime_step.id),
-                    "step_order": 1,
-                    "assistant_id": str(runtime_step.assistant_id),
-                    "input_source": "flow_input",
-                    "input_type": "text",
-                    "input_config": runtime_step.input_config,
-                    "output_mode": "pass_through",
-                    "output_type": "json",
-                    "mcp_policy": "inherit",
-                }
-            ],
-        },
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
     )
 
     session = _Session()
@@ -1194,13 +1201,15 @@ async def test_upload_runtime_file_rejects_published_snapshot_without_executable
         update={"published_version": 3, "steps": [runtime_step]}
     )
     flow_service.get_flow.return_value = flow
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": [],
+    }
     flow_version_repo.get.return_value = SimpleNamespace(
         version=flow.published_version,
-        definition_json={
-            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
-            "flow_id": str(flow.id),
-            "steps": [],
-        },
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
     )
     service = _service(
         flow_service=flow_service,

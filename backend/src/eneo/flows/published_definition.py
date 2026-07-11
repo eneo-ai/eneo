@@ -7,6 +7,8 @@ from enum import Enum, StrEnum
 from typing import Mapping, TypeGuard, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.flows.assistant_execution_snapshot import stable_hash
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime_invariant_exceptions import (
@@ -545,59 +547,71 @@ class PublishedFlowDefinition:
     steps: list[FlowPersistedJsonObject]
     step_identities: list[PublishedStepIdentity]
     definition_json: FlowPersistedJsonObject
+    _metadata: FlowMetadata
+    _runtime_steps: tuple[RuntimeStep, ...]
+    _has_required_runtime_input: bool
 
     def metadata(self) -> FlowMetadata:
-        raw_metadata: object = self.definition_json.get("metadata_json")
-        metadata_json: Mapping[str, object] | None = (
-            raw_metadata if _is_json_object(raw_metadata) else None
-        )
-        try:
-            metadata = parse_flow_metadata(
-                metadata_json,
-                mode=FlowMetadataParseMode.PERSISTED_READ,
-            )
-        except BadRequestException as exc:
-            raise BadRequestException(
-                "Published flow form schema is invalid.",
-                code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
-                context=exc.context,
-            ) from exc
-        if (
-            metadata_json is not None
-            and metadata_json.get("form_schema") is not None
-            and metadata.form_schema is None
-        ):
-            raise BadRequestException(
-                "Published flow form schema is invalid.",
-                code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
-            )
-        return metadata
+        return self._metadata.model_copy(deep=True)
 
     def runtime_steps(self) -> list[RuntimeStep]:
-        try:
-            return parse_runtime_steps(self.definition_json)
-        except BadRequestException as exc:
-            if exc.code is not None:
-                raise
-            raise BadRequestException(
-                str(exc),
-                code=FLOW_DEFINITION_STEPS_INVALID,
-                context=exc.context,
-            ) from exc
+        return list(self._runtime_steps)
 
     def has_required_runtime_input(self) -> bool:
-        for step in self.steps:
-            raw_input_config: object = step.get("input_config")
-            if raw_input_config is None:
-                input_config = None
-            elif _is_json_object(raw_input_config):
-                input_config = raw_input_config
-            else:
-                raise BadRequestException("Step input_config must be an object.")
-            runtime_input = build_runtime_input_config(input_config)
-            if runtime_input.enabled and runtime_input.required:
-                return True
-        return False
+        return self._has_required_runtime_input
+
+
+def _parse_published_metadata(
+    definition_json: Mapping[str, object],
+) -> FlowMetadata:
+    raw_metadata: object = definition_json.get("metadata_json")
+    metadata_json: Mapping[str, object] | None = (
+        raw_metadata if _is_json_object(raw_metadata) else None
+    )
+    try:
+        metadata = parse_flow_metadata(
+            metadata_json,
+            mode=FlowMetadataParseMode.PERSISTED_READ,
+        )
+    except (BadRequestException, ValidationError) as exc:
+        raise BadRequestException(
+            "Published flow form schema is invalid.",
+            code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+            context=(exc.context if isinstance(exc, BadRequestException) else None),
+        ) from exc
+    if (
+        metadata_json is not None
+        and metadata_json.get("form_schema") is not None
+        and metadata.form_schema is None
+    ):
+        raise BadRequestException(
+            "Published flow form schema is invalid.",
+            code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+        )
+    return metadata
+
+
+def _parse_published_runtime_steps(
+    definition_json: Mapping[str, object],
+) -> tuple[RuntimeStep, ...]:
+    try:
+        return tuple(parse_runtime_steps(definition_json))
+    except BadRequestException as exc:
+        if exc.code is not None:
+            raise
+        raise BadRequestException(
+            str(exc),
+            code=FLOW_DEFINITION_STEPS_INVALID,
+            context=exc.context,
+        ) from exc
+
+
+def _has_required_runtime_input(runtime_steps: Iterable[RuntimeStep]) -> bool:
+    for step in runtime_steps:
+        runtime_input = build_runtime_input_config(step.input_config)
+        if runtime_input.enabled and runtime_input.required:
+            return True
+    return False
 
 
 def build_published_definition_json(
@@ -628,8 +642,10 @@ def parse_published_definition(
 ) -> PublishedFlowDefinition:
     """Parse and validate a published snapshot.
 
-    A successful return guarantees that the envelope is well-formed and all step
-    identities are valid and non-empty.
+    A successful return guarantees that the envelope, persisted metadata, and
+    every runtime step configuration, binding, output contract, order, and chain
+    are valid. The returned value retains those typed validation results so
+    functional consumers do not parse the immutable snapshot again.
     """
     schema_version = definition_json.get("schema_version")
     if not isinstance(schema_version, int):
@@ -678,6 +694,8 @@ def parse_published_definition(
             flow_id=flow_id,
             flow_version=flow_version,
         )
+    metadata = _parse_published_metadata(definition_json)
+    runtime_steps = _parse_published_runtime_steps(definition_json)
     return PublishedFlowDefinition(
         schema_version=schema_version,
         flow_id=flow_id,
@@ -686,6 +704,9 @@ def parse_published_definition(
         steps=steps,
         step_identities=step_identities,
         definition_json=dict(definition_json),
+        _metadata=metadata,
+        _runtime_steps=runtime_steps,
+        _has_required_runtime_input=_has_required_runtime_input(runtime_steps),
     )
 
 

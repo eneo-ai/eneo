@@ -213,14 +213,17 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         owner_symbols=(
             "PublishedFlowDefinition",
             "build_published_definition_json",
-            "parse_published_definition",
+            "parse_verified_published_definition",
+            "inspect_published_definition_integrity",
         ),
         storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
         schema_version_policy=FlowJsonbSchemaVersionPolicy.CHECKSUMMED_SNAPSHOT,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.KEEP_AUDITABLE_FAILURE,
         rationale=(
             "Published definitions are immutable, checksummed snapshots of the "
-            "runtime contract and should be loaded as one versioned document."
+            "runtime contract. Functional reads fail closed through the verified "
+            "parser, while authorized evidence retains the raw snapshot as an "
+            "auditable invalid artifact."
         ),
     ),
     _owner(
@@ -323,6 +326,25 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "Terminal error details are a public diagnostic envelope with an "
             "embedded schema version; invalid stored payloads read as one "
             "sanitized typed run error."
+        ),
+    ),
+    _owner(
+        "flow_runs",
+        "dispatch_last_error",
+        owner_module="eneo.flows.flow_run_error",
+        envelope_name="FlowRunDispatchError",
+        owner_symbols=(
+            "FlowRunDispatchError",
+            "dump_flow_run_dispatch_error",
+            "parse_flow_run_dispatch_error",
+        ),
+        storage_category=FlowJsonbStorageCategory.RUNTIME_PAYLOAD,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.KEEP_AUDITABLE_FAILURE,
+        rationale=(
+            "The current dispatch epoch stores one bounded, secret-free typed "
+            "diagnosis. Invalid persisted payloads read as the canonical "
+            "non-retryable invalid-error diagnosis."
         ),
     ),
     _owner(
@@ -542,6 +564,34 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         rationale=(
             "Builder planning state is a full-snapshot PlanningState document "
             "with embedded FCM, planner-contract, and builder schema versions."
+        ),
+    ),
+    _owner(
+        "builder_sessions",
+        "latest_turn_request_jsonb",
+        owner_module="eneo.flows.ai_builder.ai_builder_api_models",
+        envelope_name="SendMessageRequest",
+        owner_symbols=("SendMessageRequest", "SendMessageRequest.retry_snapshot"),
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
+        rationale=(
+            "The latest accepted Builder turn retains one bounded strict request "
+            "snapshot for same-key replay and explicit outcome-unknown recovery."
+        ),
+    ),
+    _owner(
+        "builder_sessions",
+        "latest_turn_error_jsonb",
+        owner_module="eneo.flows.ai_builder.ai_builder_error_contract",
+        envelope_name="AIBuilderPublicError",
+        owner_symbols=("AIBuilderPublicError",),
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
+        rationale=(
+            "A committed Builder turn may retain one typed public error for exact "
+            "same-key replay; invalid stored errors fail session hydration."
         ),
     ),
     _owner(

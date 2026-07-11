@@ -71,6 +71,7 @@ from eneo.flows.infrastructure.flow_run_rerun_repo import (
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
+    FLOW_DEFINITION_STEPS_INVALID,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     build_published_definition_json,
     published_definition_checksum,
@@ -173,7 +174,7 @@ def _step(step_order: int = 1) -> FlowStep:
         assistant_id=uuid4(),
         step_order=step_order,
         user_description="Step",
-        input_source="flow_input",
+        input_source="flow_input" if step_order == 1 else "previous_step",
         input_type="text",
         output_mode="pass_through",
         output_type="json",
@@ -369,16 +370,12 @@ def _version(user, flow: Flow, version: int = 1) -> FlowVersionModel:
         version=version,
         tenant_id=user.tenant_id,
         definition_checksum=None,
-        definition_json=_published_definition_json(
-            flow,
-            [
-                {
-                    "step_id": str(step.id),
-                    "step_order": step.step_order,
-                    "assistant_id": str(step.assistant_id),
-                }
-                for step in flow.steps
-            ],
+        definition_json=build_published_definition_json(
+            flow_id=flow.id,
+            name=flow.name,
+            description=flow.description,
+            metadata_json=flow.metadata_json,
+            steps=[_published_runtime_step(step) for step in flow.steps],
         ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -2820,6 +2817,55 @@ async def test_get_run_versioned_view_rejects_checksum_drift_before_results(user
 
 
 @pytest.mark.asyncio
+async def test_get_run_versioned_view_rejects_matching_checksum_invalid_runtime_step_before_results(
+    user,
+) -> None:
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    assert flow.id is not None
+    run = _run(user=user, flow_id=flow.id)
+    invalid_definition = build_published_definition_json(
+        flow_id=flow.id,
+        name=flow.name,
+        description=flow.description,
+        metadata_json=flow.metadata_json,
+        steps=[
+            {
+                **_published_runtime_step(step),
+                "output_mode": "invalid_mode" if index == 0 else "pass_through",
+            }
+            for index, step in enumerate(flow.steps)
+        ],
+    )
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = _published_flow_version(
+        flow_id=flow.id,
+        version=run.flow_version,
+        tenant_id=user.tenant_id,
+        definition_checksum=None,
+        definition_json=invalid_definition,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.get_run_versioned_view(flow_id=flow.id, run_id=run.id)
+
+    assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
+    flow_run_repo.list_step_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -3239,6 +3285,56 @@ async def test_create_run_rejects_checksum_drift_before_creation_work(user) -> N
         "expected_checksum": "stored-checksum-does-not-match",
         "current_checksum": published_definition_checksum(version.definition_json),
     }
+    flow_run_repo.acquire_tenant_run_creation_lock.assert_not_awaited()
+    flow_run_repo.count_active_runs.assert_not_awaited()
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_matching_checksum_invalid_runtime_step_before_creation_work(
+    user,
+) -> None:
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    invalid_definition = build_published_definition_json(
+        flow_id=flow.id,
+        name=flow.name,
+        description=flow.description,
+        metadata_json=flow.metadata_json,
+        steps=[
+            {
+                **_published_runtime_step(step),
+                "output_mode": "invalid_mode" if index == 0 else "pass_through",
+            }
+            for index, step in enumerate(flow.steps)
+        ],
+    )
+    flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = _published_flow_version(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum=None,
+        definition_json=invalid_definition,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
     flow_run_repo.acquire_tenant_run_creation_lock.assert_not_awaited()
     flow_run_repo.count_active_runs.assert_not_awaited()
     flow_run_repo.create.assert_not_awaited()

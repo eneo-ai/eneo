@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -265,6 +266,14 @@ def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
             {"form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}},
             None,
         ),
+        (
+            {
+                "form_schema": {
+                    "fields": [{"name": "case_id", "type": "text", "label": 7}]
+                }
+            },
+            None,
+        ),
         ({"form_schema": {"fields": [{"type": "text"}]}}, {"field_index": 0}),
     ],
 )
@@ -411,12 +420,11 @@ def test_published_definition_rejects_non_object_input_config() -> None:
         metadata_json=None,
         steps=[{**_step(order=1), "input_config": "not-an-object"}],
     )
-    published_definition = parse_published_definition(definition, flow_version=7)
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_published_definition(definition, flow_version=7)
 
-    with pytest.raises(
-        BadRequestException, match="Step input_config must be an object"
-    ):
-        published_definition.has_required_runtime_input()
+    assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
+    assert str(exc_info.value) == "Step 1: input_config must be an object."
 
 
 def test_published_definition_detects_required_runtime_input_after_optional_step() -> (
@@ -542,3 +550,89 @@ def test_verified_parser_rejects_checksum_mismatch_with_typed_context() -> None:
         "expected_checksum": expected_checksum,
         "current_checksum": published_definition_checksum(definition),
     }
+
+
+def test_verified_parser_rejects_matching_checksum_invalid_runtime_step() -> None:
+    invalid_step = _step(order=1)
+    invalid_step["output_mode"] = "invalid_mode"
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[invalid_step],
+    )
+
+    integrity = published_definition_module.inspect_published_definition_integrity(
+        definition,
+        expected_checksum=published_definition_checksum(definition),
+        flow_version=7,
+    )
+
+    assert (
+        integrity.status
+        is published_definition_module.PublishedDefinitionIntegrityStatus.INVALID
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        published_definition_module.parse_verified_published_definition(
+            definition,
+            expected_checksum=published_definition_checksum(definition),
+            flow_version=7,
+        )
+
+    assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
+
+
+def test_verified_parser_reuses_one_full_validation_result(monkeypatch) -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                **_step(order=1),
+                "input_config": {"runtime_input": {"enabled": True, "required": True}},
+            }
+        ],
+    )
+    checksum_spy = MagicMock(
+        wraps=published_definition_module.published_definition_checksum
+    )
+    metadata_spy = MagicMock(wraps=published_definition_module.parse_flow_metadata)
+    runtime_steps_spy = MagicMock(wraps=published_definition_module.parse_runtime_steps)
+    monkeypatch.setattr(
+        published_definition_module,
+        "published_definition_checksum",
+        checksum_spy,
+    )
+    monkeypatch.setattr(
+        published_definition_module,
+        "parse_flow_metadata",
+        metadata_spy,
+    )
+    monkeypatch.setattr(
+        published_definition_module,
+        "parse_runtime_steps",
+        runtime_steps_spy,
+    )
+
+    parsed = published_definition_module.parse_verified_published_definition(
+        definition,
+        expected_checksum=published_definition_checksum(definition),
+        flow_version=7,
+    )
+    first_metadata = parsed.metadata()
+    second_metadata = parsed.metadata()
+    first_steps = parsed.runtime_steps()
+    second_steps = parsed.runtime_steps()
+
+    assert first_metadata == second_metadata
+    assert first_metadata is not second_metadata
+    assert first_steps == second_steps
+    assert first_steps is not second_steps
+    assert parsed.has_required_runtime_input() is True
+    assert checksum_spy.call_count == 1
+    assert metadata_spy.call_count == 1
+    assert runtime_steps_spy.call_count == 1

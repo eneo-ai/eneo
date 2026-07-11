@@ -223,6 +223,49 @@ def test_evidence_marks_matching_checksum_malformed_snapshot_invalid() -> None:
     }
 
 
+def test_evidence_marks_matching_checksum_invalid_runtime_step_invalid() -> None:
+    run, version = _evidence_run_and_version()
+    invalid_definition = build_published_definition_json(
+        flow_id=run.flow_id,
+        name="Invalid evidence flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                "step_id": str(uuid4()),
+                "step_order": 1,
+                "assistant_id": str(uuid4()),
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_mode": "invalid_mode",
+                "output_type": "text",
+                "mcp_policy": "inherit",
+            }
+        ],
+    )
+    checksum = published_definition_checksum(invalid_definition)
+    invalid_version = version.model_copy(
+        update={
+            "definition_checksum": checksum,
+            "definition_json": invalid_definition,
+        }
+    )
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=invalid_version,
+        step_results=[],
+        step_attempts=[],
+    ).to_dict()
+
+    assert evidence["definition_snapshot"] == invalid_definition
+    assert evidence["definition_integrity"] == {
+        "status": "invalid",
+        "expected_checksum": checksum,
+        "current_checksum": checksum,
+    }
+
+
 def _attempt_with_provenance(
     run: FlowRun, provenance_json: dict[str, Any] | None
 ) -> FlowStepAttempt:
