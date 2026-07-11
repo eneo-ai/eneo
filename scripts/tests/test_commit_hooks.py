@@ -149,6 +149,44 @@ class CommitHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("High-confidence secret", result.stderr)
 
+    def test_commit_preflight_flags_eneo_service_key_pattern(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").write_text("", encoding="utf-8")
+        target = root / "backend" / "src" / "eneo" / "service_key_pattern_demo.py"
+        generated_hex_length = 64 * 2
+        candidate = "".join(("s", "k", "_", "a" * generated_hex_length))
+        target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
+        subprocess.run(
+            ["git", "add", str(target.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("High-confidence secret", result.stderr)
+
+    def test_commit_preflight_allows_short_eneo_service_key_placeholder(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").write_text("", encoding="utf-8")
+        target = root / "backend" / "src" / "eneo" / "service_key_placeholder.py"
+        placeholder = "".join(("s", "k", "_", "test"))
+        target.write_text(f'value = "{placeholder}"\n', encoding="utf-8")
+        subprocess.run(
+            ["git", "add", str(target.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_pre_push_check_blocks_protected_branch_without_override(self) -> None:
         root = self.make_repo(branch="develop")
         target = root / "README.md"

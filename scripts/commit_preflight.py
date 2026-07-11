@@ -19,6 +19,8 @@ SECRET_PATTERNS = [
     re.compile(r"^\+.*ghp_[A-Za-z0-9]{20,}", re.MULTILINE),
     re.compile(r"^\+.*sk-ant-api\d+-[A-Za-z0-9_\-]{30,}", re.MULTILINE),
     re.compile(r"^\+.*sk-[A-Za-z0-9]{20,}", re.MULTILINE),
+    # API_KEY_LENGTH=64 bytes; token_hex emits 128 lowercase hex characters.
+    re.compile(r"^\+.*\bsk_[0-9a-f]{128,}\b", re.MULTILINE),
     re.compile(r"^\+.*AIza[0-9A-Za-z\-_]{20,}", re.MULTILINE),
     re.compile(r"^\+.*AKIA[0-9A-Z]{16}", re.MULTILINE),
 ]
