@@ -906,6 +906,43 @@ describe("FlowAIBuilderDriver", () => {
     expect(fetch).toHaveBeenCalledTimes(4);
   });
 
+  it("settles a failed resume quietly after a replacement session takes ownership", async () => {
+    const oldSession = makeSession({ session_id: "session-old" });
+    const replacementSession = makeSession({ session_id: "session-replacement" });
+    const delayedOldResume = Promise.withResolvers<AIBuilderSession>();
+    const delayedReplacementResume = Promise.withResolvers<AIBuilderSession>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedOldResume.promise)
+      .mockReturnValueOnce(delayedReplacementResume.promise)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    const oldResume = driver.resumeSession(oldSession.session_id);
+    const staleResumeSettlement = expect(oldResume).resolves.toBeUndefined();
+    const replacementResume = driver.resumeSession(replacementSession.session_id);
+    delayedReplacementResume.resolve(replacementSession);
+    await replacementResume;
+    delayedOldResume.reject(new Error("obsolete session unavailable"));
+
+    await staleResumeSettlement;
+    expect(driver.state.session).toEqual(replacementSession);
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("keeps a current resume failure explicit to its caller", async () => {
+    const fetchError = new Error("current session unavailable");
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockRejectedValueOnce(fetchError)
+    });
+
+    await expect(driver.resumeSession("session-current")).rejects.toBe(fetchError);
+
+    expect(driver.state.session).toBeNull();
+    expect(driver.state.error).toBeNull();
+  });
+
   it("does not let a delayed create replace a subsequently resumed session", async () => {
     const createdSession = makeSession({ session_id: "session-created" });
     const resumedSession = makeSession({ session_id: "session-resumed" });
@@ -1134,7 +1171,7 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).toBeNull();
   });
 
-  it("does not clear a newly resumed same-id session after delayed cancellation", async () => {
+  it("reconciles a successful delayed cancellation of the resumed same session", async () => {
     const sessionId = "session-shared";
     const resumedSession = makeSession({ session_id: sessionId });
     const resumedDraft = makeDraft({ session_id: sessionId });
@@ -1144,7 +1181,8 @@ describe("FlowAIBuilderDriver", () => {
       .mockReturnValueOnce(delayedCancellation.promise)
       .mockResolvedValueOnce(resumedSession)
       .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce({ sessions: [resumedDraft] });
+      .mockResolvedValueOnce({ sessions: [resumedDraft] })
+      .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
       session: makeSession({ session_id: sessionId }),
@@ -1156,8 +1194,36 @@ describe("FlowAIBuilderDriver", () => {
     delayedCancellation.resolve();
     await cancellation;
 
-    expect(driver.state.session).toEqual(resumedSession);
-    expect(driver.state.draftSessions).toEqual([resumedDraft]);
+    expect(driver.state.session).toBeNull();
+    expect(driver.state.draftSessions).toEqual([]);
+  });
+
+  it("preserves a different replacement session after delayed cancellation", async () => {
+    const cancelledSessionId = "session-cancelled";
+    const replacementSession = makeSession({ session_id: "session-replacement" });
+    const cancelledDraft = makeDraft({ session_id: cancelledSessionId });
+    const replacementDraft = makeDraft({ session_id: replacementSession.session_id });
+    const delayedCancellation = Promise.withResolvers<void>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedCancellation.promise)
+      .mockResolvedValueOnce(replacementSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [cancelledDraft, replacementDraft] })
+      .mockResolvedValueOnce({ sessions: [replacementDraft] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: cancelledSessionId }),
+      draftSessions: [cancelledDraft]
+    });
+
+    const cancellation = driver.discardSession(cancelledSessionId);
+    await driver.resumeSession(replacementSession.session_id);
+    delayedCancellation.resolve();
+    await cancellation;
+
+    expect(driver.state.session).toEqual(replacementSession);
+    expect(driver.state.draftSessions).toEqual([replacementDraft]);
   });
 
   it("uses a new turn ID only for a distinct logical send", async () => {

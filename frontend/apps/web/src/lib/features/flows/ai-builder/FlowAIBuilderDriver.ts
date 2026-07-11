@@ -376,10 +376,16 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#notify();
 
-    const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
-      method: "get",
-      params: { path: { session_id: sessionId } }
-    })) as AIBuilderSession;
+    let result: AIBuilderSession;
+    try {
+      result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
+        method: "get",
+        params: { path: { session_id: sessionId } }
+      })) as AIBuilderSession;
+    } catch (error) {
+      if (sessionGeneration !== this.#sessionGeneration) return;
+      throw error;
+    }
     if (sessionGeneration !== this.#sessionGeneration) return;
     this.#state.session = result;
     this.#applyCommittedTurnOutcome(result);
@@ -396,20 +402,15 @@ export class FlowAIBuilderDriver {
   }
 
   async discardSession(sessionId: string): Promise<void> {
-    const sessionGeneration = this.#sessionGeneration;
-    const owner =
-      this.#state.session?.session_id === sessionId ? this.#currentSessionOwner() : null;
     await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionCancel, {
       method: "post",
       params: { path: { session_id: sessionId } }
     });
-    if (sessionGeneration !== this.#sessionGeneration) return;
-    if (owner && !this.#ownsSession(owner)) return;
 
     const remainingDrafts = this.#state.draftSessions.filter(
       (session) => session.session_id !== sessionId
     );
-    if (owner) {
+    if (this.#state.session?.session_id === sessionId) {
       this.abort();
       this.#resetFlowState();
     }
