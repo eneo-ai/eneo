@@ -115,8 +115,6 @@ configure_litellm_runtime(litellm)
 
 def _sanitize_ai_builder_litellm_kwargs(
     litellm_kwargs: dict[str, object],
-    *,
-    use_provider_default_sampling: bool = False,
 ) -> dict[str, object]:
     """Keep provider credentials separate from AI Builder tool-call control.
 
@@ -126,31 +124,11 @@ def _sanitize_ai_builder_litellm_kwargs(
     tool-call keys here prevents accidental provider/MCP tool execution during
     planner turns and avoids duplicate keyword conflicts in proposal calls.
     """
-    sanitized = {
+    return {
         key: value
         for key, value in litellm_kwargs.items()
         if key not in _AI_BUILDER_CONTROLLED_TOOL_KEYS
     }
-    if not use_provider_default_sampling:
-        return sanitized
-
-    configured_drop_params = sanitized.get("additional_drop_params")
-    if configured_drop_params is None:
-        drop_params: list[str] = []
-    elif isinstance(configured_drop_params, list):
-        drop_params = []
-        for param in cast(list[object], configured_drop_params):
-            if not isinstance(param, str):
-                raise TypeError(
-                    "LiteLLM additional_drop_params must be a list of strings"
-                )
-            drop_params.append(param)
-    else:
-        raise TypeError("LiteLLM additional_drop_params must be a list of strings")
-    if "temperature" not in drop_params:
-        drop_params.append("temperature")
-    sanitized["additional_drop_params"] = drop_params
-    return sanitized
 
 
 class _CredentialResolverProtocol(Protocol):
@@ -368,10 +346,7 @@ class AIBuilderService:
                 litellm_model = resolved_tuple[0]
                 litellm_kwargs = cast(dict[str, object], resolved_tuple[1])
                 return litellm_model, _sanitize_ai_builder_litellm_kwargs(
-                    litellm_kwargs,
-                    use_provider_default_sampling=(
-                        getattr(model, "reasoning", False) is True
-                    ),
+                    litellm_kwargs
                 )
 
         adapter = cast(
@@ -396,8 +371,7 @@ class AIBuilderService:
                 litellm_kwargs[key] = value
 
         return adapter.litellm_model, _sanitize_ai_builder_litellm_kwargs(
-            litellm_kwargs,
-            use_provider_default_sampling=(getattr(model, "reasoning", False) is True),
+            litellm_kwargs
         )
 
     async def prepare_message_context(

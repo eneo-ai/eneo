@@ -1149,6 +1149,11 @@ async def get_session_classifier_diagnostics(
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
+        409: _ai_builder_error_response(
+            description="Attachment detachment is blocked while an active send owns the session.",
+            message="An active send is currently in progress for this session.",
+            code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
+        ),
     },
 )
 async def detach_session_attachment(

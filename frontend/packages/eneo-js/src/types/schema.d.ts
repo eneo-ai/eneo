@@ -45499,6 +45499,32 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
+      /** @description Attachment detachment is blocked while an active send owns the session. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "session_send_in_progress",
+           *       "category": "conflict",
+           *       "message": "An active send is currently in progress for this session.",
+           *       "phase": "router",
+           *       "eneo_error_code": 9007,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "session_send_in_progress",
+           *         "error_category": "conflict",
+           *         "error_phase": "router"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {

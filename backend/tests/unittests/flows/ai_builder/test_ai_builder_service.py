@@ -1252,12 +1252,20 @@ class TestPlannerContextPreparation:
         completion_service._get_adapter.assert_not_awaited()
 
     @pytest.mark.anyio
-    async def test_resolve_planner_params_uses_provider_default_sampling_for_reasoning_model(
+    async def test_resolve_planner_params_preserves_reasoning_model_sampling_configuration(
         self,
     ):
         completion_service = MagicMock()
         completion_service.resolve_litellm_params = MagicMock(
-            return_value=("openai/gpt-reasoning", {"api_key": "sk-sync"})
+            return_value=(
+                "openai/gpt-reasoning",
+                {
+                    "api_key": "sk-sync",
+                    "temperature": 0.7,
+                    "additional_drop_params": ["top_p"],
+                    "tools": [{"type": "function"}],
+                },
+            )
         )
         completion_service._get_adapter = AsyncMock()
 
@@ -1270,7 +1278,8 @@ class TestPlannerContextPreparation:
         assert litellm_model == "openai/gpt-reasoning"
         assert litellm_kwargs == {
             "api_key": "sk-sync",
-            "additional_drop_params": ["temperature"],
+            "temperature": 0.7,
+            "additional_drop_params": ["top_p"],
         }
         completion_service.resolve_litellm_params.assert_called_once_with(model)
         completion_service._get_adapter.assert_not_awaited()
@@ -2467,39 +2476,6 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
             tenant_flow_settings=None,
             message_file_ids=[uuid4()],
         )
-
-
-@pytest.mark.asyncio
-async def test_cancel_session_delegates_atomic_cleanup_to_repository() -> None:
-    user = _make_user()
-    repo = AsyncMock()
-    session = _make_session(actor_user_id=user.id)
-    repo.get_session.return_value = session
-    service = _make_service(user=user, repo=repo)
-
-    await service.cancel_session(session.id)
-
-    repo.detach_session_files_for_sessions.assert_not_awaited()
-    repo.cancel_session.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_create_session_force_new_relies_on_repo_cancellation_cleanup() -> None:
-    user = _make_user()
-    repo = AsyncMock()
-    cancelled_session_id = uuid4()
-    repo.cancel_matching_active_sessions.return_value = [cancelled_session_id]
-    created_session = _make_session(actor_user_id=user.id)
-    repo.create_session.return_value = created_session
-    service = _make_service(user=user, repo=repo)
-
-    await service.create_session(
-        space_id=created_session.space_id,
-        target_kind=TargetKind.CREATE,
-        force_new=True,
-    )
-
-    repo.detach_session_files_for_sessions.assert_not_awaited()
 
 
 @pytest.mark.asyncio

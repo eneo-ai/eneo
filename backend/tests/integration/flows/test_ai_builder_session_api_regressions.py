@@ -2239,6 +2239,171 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mark_processing", "expected_state"),
+    [
+        (False, "failed_before_provider"),
+        (True, "provider_outcome_unknown"),
+    ],
+    ids=["open", "processing"],
+)
+async def test_ai_builder_detach_attachment_reconciles_expired_turn(
+    client,
+    bearer_token,
+    db_container,
+    mark_processing: bool,
+    expected_state: str,
+):
+    space_id = await _create_space_via_api(
+        client=client,
+        bearer_token=bearer_token,
+        name="AI Builder Expired Detach",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    file_id = await _upload_reference_file(
+        client=client,
+        bearer_token=bearer_token,
+        filename=f"expired-{expected_state}.txt",
+    )
+
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        await session.execute(
+            insert(BuilderSessionFiles).values(
+                session_id=UUID(session_id),
+                file_id=UUID(file_id),
+                tenant_id=user.tenant_id,
+            )
+        )
+        turn = await _claim_session_send_turn(
+            repo=AIBuilderRepository(session),
+            session_id=UUID(session_id),
+            tenant_id=user.tenant_id,
+            lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=5),
+        )
+        if mark_processing:
+            await AIBuilderRepository(session).mark_session_turn_processing(turn=turn)
+
+    response = await client.delete(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}/attachments/{file_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 204, response.text
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        membership = await session.scalar(
+            select(BuilderSessionFiles.file_id).where(
+                BuilderSessionFiles.session_id == UUID(session_id),
+                BuilderSessionFiles.file_id == UUID(file_id),
+                BuilderSessionFiles.tenant_id == user.tenant_id,
+            )
+        )
+        row = (
+            await session.execute(
+                select(
+                    BuilderSessions.active_request_id,
+                    BuilderSessions.lock_token,
+                    BuilderSessions.locked_at,
+                    BuilderSessions.lock_expires_at,
+                    BuilderSessions.latest_turn_state,
+                ).where(
+                    BuilderSessions.id == UUID(session_id),
+                    BuilderSessions.tenant_id == user.tenant_id,
+                )
+            )
+        ).one()
+
+    assert membership is None
+    assert tuple(row) == (None, None, None, None, expected_state)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_detach_attachment_rejects_live_turn_and_preserves_membership(
+    client,
+    bearer_token,
+    db_container,
+):
+    space_id = await _create_space_via_api(
+        client=client,
+        bearer_token=bearer_token,
+        name="AI Builder Live Detach",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    file_id = await _upload_reference_file(
+        client=client,
+        bearer_token=bearer_token,
+        filename="live-turn.txt",
+    )
+
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        await session.execute(
+            insert(BuilderSessionFiles).values(
+                session_id=UUID(session_id),
+                file_id=UUID(file_id),
+                tenant_id=user.tenant_id,
+            )
+        )
+        turn = await _claim_session_send_turn(
+            repo=AIBuilderRepository(session),
+            session_id=UUID(session_id),
+            tenant_id=user.tenant_id,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+
+    response = await client.delete(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}/attachments/{file_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "session_send_in_progress"
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        repo = AIBuilderRepository(session)
+        membership = await session.scalar(
+            select(BuilderSessionFiles.file_id).where(
+                BuilderSessionFiles.session_id == UUID(session_id),
+                BuilderSessionFiles.file_id == UUID(file_id),
+                BuilderSessionFiles.tenant_id == user.tenant_id,
+            )
+        )
+        lock = await _load_session_send_lock(
+            repo,
+            session_id=UUID(session_id),
+            tenant_id=user.tenant_id,
+        )
+        state = await session.scalar(
+            select(BuilderSessions.latest_turn_state).where(
+                BuilderSessions.id == UUID(session_id),
+                BuilderSessions.tenant_id == user.tenant_id,
+            )
+        )
+
+    assert membership == UUID(file_id)
+    assert lock[0] == turn.lease.request_id
+    assert lock[1] == turn.lease.lock_token
+    assert lock[2] is not None
+    assert lock[3] is not None
+    assert state == "open"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_cancel_session_clears_send_lock_fields(
     client,
     bearer_token,

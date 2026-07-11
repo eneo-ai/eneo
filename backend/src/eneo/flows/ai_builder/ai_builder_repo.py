@@ -428,29 +428,32 @@ class AIBuilderRepository:
                     code=AIBuilderErrorCode.NOT_FOUND,
                 )
             if session_row.active_request_id is not None:
-                raise AIBuilderBadRequestException(
-                    "An active send is currently in progress for this session.",
-                    code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
+                reconciled_session_id = await self.session.scalar(
+                    update(BuilderSessions)
+                    .where(
+                        BuilderSessions.id == session_id,
+                        BuilderSessions.tenant_id == tenant_id,
+                        _session_send_lock_available_clause(),
+                    )
+                    .values(
+                        active_request_id=None,
+                        lock_token=None,
+                        locked_at=None,
+                        lock_expires_at=None,
+                        latest_turn_state=_terminal_turn_state_after_lock_clear(),
+                        updated_at=sa.func.clock_timestamp(),
+                    )
+                    .returning(BuilderSessions.id)
                 )
+                if reconciled_session_id is None:
+                    raise AIBuilderBadRequestException(
+                        "An active send is currently in progress for this session.",
+                        code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
+                    )
             stmt = sa.delete(BuilderSessionFiles).where(
                 BuilderSessionFiles.session_id == session_id,
                 BuilderSessionFiles.tenant_id == tenant_id,
                 BuilderSessionFiles.file_id == file_id,
-            )
-            await self.session.execute(stmt)
-
-    async def detach_session_files_for_sessions(
-        self,
-        *,
-        session_ids: list[UUID],
-        tenant_id: UUID,
-    ) -> None:
-        if not session_ids:
-            return
-        async with self._transaction():
-            stmt = sa.delete(BuilderSessionFiles).where(
-                BuilderSessionFiles.session_id.in_(session_ids),
-                BuilderSessionFiles.tenant_id == tenant_id,
             )
             await self.session.execute(stmt)
 

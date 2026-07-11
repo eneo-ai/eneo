@@ -366,6 +366,20 @@ def test_openapi_ai_builder_turn_retry_errors_and_recovery_are_documented(
     )
 
 
+def test_openapi_attachment_detach_declares_active_send_conflict(
+    openapi_spec: dict,
+) -> None:
+    operation = openapi_spec["paths"][
+        "/api/v1/flows/ai-builder/sessions/{session_id}/attachments/{file_id}"
+    ]["delete"]
+    conflict_response = operation["responses"]["409"]
+    content = conflict_response["content"]["application/json"]
+
+    assert "active send" in conflict_response["description"]
+    assert content["schema"] == {"$ref": "#/components/schemas/AIBuilderPublicError"}
+    assert content["example"]["code"] == "session_send_in_progress"
+
+
 def test_openapi_session_conversation_uses_public_projection(
     openapi_spec: dict,
 ) -> None:
