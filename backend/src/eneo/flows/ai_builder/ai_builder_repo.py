@@ -219,9 +219,25 @@ class AIBuilderRepository:
         limit: int = 20,
     ) -> list[tuple[BuilderSession, str | None]]:
         async with self._transaction():
-            draft_title_label = BuilderPlans.proposal_json["content"]["spec"][
+            plan_flow_name = BuilderPlans.proposal_json["content"]["spec"][
                 _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY
-            ].astext.label("draft_title")
+            ].astext
+            # Before a plan exists (the "Kartlägger behov" phase) the only
+            # human-meaningful handle is the user's opening message — without
+            # it every draft renders as "Namnlöst utkast" and the recovery
+            # page becomes an indistinguishable pile.
+            first_message = BuilderSessions.conversation[0]
+            first_user_message = sa.case(
+                (
+                    first_message["role"].astext == "user",
+                    sa.func.left(first_message["content"].astext, 120),
+                ),
+                else_=sa.null(),
+            )
+            draft_title_label = sa.func.coalesce(
+                plan_flow_name,
+                first_user_message,
+            ).label("draft_title")
             stmt = (
                 select(
                     BuilderSessions,

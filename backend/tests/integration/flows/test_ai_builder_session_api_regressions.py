@@ -1042,18 +1042,41 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
             space_id=space_id,
         )
     )
+    planless_session_id = UUID(
+        await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+    )
 
     async with db_container() as container:
         now = datetime.now(timezone.utc)
         await container.session().execute(
             update(BuilderSessions)
             .where(BuilderSessions.id == session_id)
-            .values(updated_at=now - timedelta(minutes=1))
+            .values(updated_at=now - timedelta(minutes=2))
         )
         await container.session().execute(
             update(BuilderSessions)
             .where(BuilderSessions.id == empty_session_id)
             .values(updated_at=now)
+        )
+        # A drafting session that never reached a plan: the user's opening
+        # message is the only human-meaningful title.
+        await container.session().execute(
+            update(BuilderSessions)
+            .where(BuilderSessions.id == planless_session_id)
+            .values(
+                updated_at=now - timedelta(minutes=1),
+                conversation=[
+                    {
+                        "message_id": "msg-title-fallback",
+                        "role": "user",
+                        "content": "Sammanfatta veckans inkomna rapporter",
+                    }
+                ],
+            )
         )
 
         repo = AIBuilderRepository(container.session())
@@ -1064,6 +1087,7 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
 
     assert [(session.id, title) for session, title in sessions] == [
         (empty_session_id, None),
+        (planless_session_id, "Sammanfatta veckans inkomna rapporter"),
         (session_id, "Testplan"),
     ]
 
