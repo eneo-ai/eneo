@@ -117,6 +117,7 @@ class _DataRetentionService:
         self.blocked_now_values.append(now)
         return FlowRunHistoryPurgeBlockedCounts(
             skipped_undelivered_audit=31,
+            skipped_unresolved_webhook=41,
             skipped_active_rerun=37,
         )
 
@@ -145,6 +146,7 @@ class _Container:
 @pytest.mark.asyncio
 async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     session = _Session()
 
@@ -181,8 +183,10 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
         result["deleted"]["flow_template_assets_skipped_undetermined_reference"] == 43
     )
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 31
+    assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 41
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 37
     assert result["deleted"]["total"] == 225
+    assert "flow_runs_skipped_unresolved_webhook: 41" in caplog.text
     assert session.transaction_count == expected_independent_cleanup_transactions
     assert container.session.reset_count == 1
     assert service.purge_limits == [RETENTION_BATCH_SIZE] * 3
@@ -237,6 +241,7 @@ async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_late
     assert result["deleted"]["flow_template_asset_files_deleted"] == 31
     assert result["deleted"]["builder_sessions"] == 13
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 0
+    assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 0
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 0
     assert result["deleted"]["flow_debug_rows"] == 7
     assert result["deleted"]["flow_attempt_provenance"] == 11

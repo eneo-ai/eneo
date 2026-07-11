@@ -83,3 +83,8 @@ async def test_flow_run_history_purge_batch_orders_by_retention_anchor_then_run_
         "ORDER BY coalesce(flow_runs.finished_at, flow_runs.created_at), "
         "flow_runs.id" in compiled
     )
+    assert "flow_run_webhook_deliveries.flow_run_id = flow_runs.id" in compiled
+    assert "flow_run_webhook_deliveries.delivery_status = 'pending'" in compiled
+    assert "flow_run_webhook_deliveries.claim_token" not in compiled
+    assert "flow_run_webhook_deliveries.claimed_at" not in compiled
+    assert "flow_run_webhook_deliveries.claim_expires_at" not in compiled

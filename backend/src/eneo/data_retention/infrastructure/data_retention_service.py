@@ -25,6 +25,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunRerunOperations,
     FlowRuns,
+    FlowRunWebhookDeliveries,
     Flows,
     FlowStepAttempts,
     FlowStepResults,
@@ -100,6 +101,7 @@ class FlowRuntimeCleanupCounts(TypedDict):
     flow_template_assets_skipped_published_reference: int
     flow_template_assets_skipped_undetermined_reference: int
     flow_runs_skipped_undelivered_audit: int
+    flow_runs_skipped_unresolved_webhook: int
     flow_runs_skipped_active_rerun: int
 
 
@@ -117,6 +119,7 @@ def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
         "flow_template_assets_skipped_published_reference": 0,
         "flow_template_assets_skipped_undetermined_reference": 0,
         "flow_runs_skipped_undelivered_audit": 0,
+        "flow_runs_skipped_unresolved_webhook": 0,
         "flow_runs_skipped_active_rerun": 0,
     }
 
@@ -134,6 +137,7 @@ class _FlowRuntimeRetentionAction:
 @dataclass(frozen=True, slots=True)
 class FlowRunHistoryPurgeBlockedCounts:
     skipped_undelivered_audit: int = 0
+    skipped_unresolved_webhook: int = 0
     skipped_active_rerun: int = 0
 
 
@@ -189,16 +193,21 @@ class DataRetentionService:
         counts["flow_runs_skipped_undelivered_audit"] += (
             blocked_counts.skipped_undelivered_audit
         )
+        counts["flow_runs_skipped_unresolved_webhook"] += (
+            blocked_counts.skipped_unresolved_webhook
+        )
         counts["flow_runs_skipped_active_rerun"] += blocked_counts.skipped_active_rerun
 
         if (
             blocked_counts.skipped_undelivered_audit > 0
+            or blocked_counts.skipped_unresolved_webhook > 0
             or blocked_counts.skipped_active_rerun > 0
         ):
             logger.info(
                 "Skipped Flow run-history purge candidates "
-                "(undelivered_audit=%s, active_rerun=%s)",
+                "(undelivered_audit=%s, unresolved_webhook=%s, active_rerun=%s)",
                 blocked_counts.skipped_undelivered_audit,
+                blocked_counts.skipped_unresolved_webhook,
                 blocked_counts.skipped_active_rerun,
             )
 
@@ -626,23 +635,30 @@ class DataRetentionService:
         due_runs = self._build_due_flow_run_history_purge_query(now=now).subquery()
         run_id_col = due_runs.c.run_id
         undelivered_audit_exists = self._undelivered_flow_audit_exists(run_id_col)
+        unresolved_webhook_exists = self._unresolved_flow_webhook_exists(run_id_col)
         active_rerun_exists = self._active_flow_rerun_exists(run_id_col)
 
-        undelivered_audit_count = await self.session.scalar(
-            sa.select(sa.func.count())
-            .select_from(due_runs)
-            .where(undelivered_audit_exists)
-        )
-        active_rerun_count = await self.session.scalar(
-            sa.select(sa.func.count())
-            .select_from(due_runs)
-            .where(sa.not_(undelivered_audit_exists))
-            .where(active_rerun_exists)
-        )
+        undelivered_audit_count, unresolved_webhook_count, active_rerun_count = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().filter(undelivered_audit_exists),
+                    sa.func.count().filter(
+                        sa.not_(undelivered_audit_exists),
+                        unresolved_webhook_exists,
+                    ),
+                    sa.func.count().filter(
+                        sa.not_(undelivered_audit_exists),
+                        sa.not_(unresolved_webhook_exists),
+                        active_rerun_exists,
+                    ),
+                ).select_from(due_runs)
+            )
+        ).one()
 
         return FlowRunHistoryPurgeBlockedCounts(
-            skipped_undelivered_audit=undelivered_audit_count or 0,
-            skipped_active_rerun=active_rerun_count or 0,
+            skipped_undelivered_audit=undelivered_audit_count,
+            skipped_unresolved_webhook=unresolved_webhook_count,
+            skipped_active_rerun=active_rerun_count,
         )
 
     async def _select_flow_run_history_purge_batch(
@@ -652,6 +668,7 @@ class DataRetentionService:
         stmt = (
             self._build_due_flow_run_history_purge_query(now=now)
             .where(sa.not_(self._undelivered_flow_audit_exists(FlowRuns.id)))
+            .where(sa.not_(self._unresolved_flow_webhook_exists(FlowRuns.id)))
             .where(sa.not_(self._active_flow_rerun_exists(FlowRuns.id)))
             .order_by(retention_anchor, FlowRuns.id)
             .limit(limit)
@@ -710,6 +727,18 @@ class DataRetentionService:
             .where(
                 FlowRunAuditOutbox.delivery_status
                 != FlowOutboxDeliveryStatus.DELIVERED.value
+            )
+            .exists()
+        )
+
+    def _unresolved_flow_webhook_exists(self, run_id_col: object) -> sa.Exists:
+        return (
+            sa.select(sa.literal(1))
+            .select_from(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.flow_run_id == run_id_col)
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
             )
             .exists()
         )

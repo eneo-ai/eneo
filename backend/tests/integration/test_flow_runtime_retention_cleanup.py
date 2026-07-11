@@ -52,6 +52,9 @@ from eneo.flows.flow_retention_tombstone import (
     RunDebugAttemptRetentionCounts,
     extract_retention_tombstones,
 )
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 
 
 @dataclass(frozen=True)
@@ -264,7 +267,7 @@ async def _create_flow_runtime_fixture(
             user_description="Generate artifact",
             input_source="flow_input",
             input_type="text",
-            output_mode="pass_through",
+            output_mode="render_verbatim",
             output_type="docx",
             mcp_policy="inherit",
             created_at=created_at,
@@ -747,6 +750,34 @@ async def _add_active_rerun_operation(
     return operation.id
 
 
+async def _set_webhook_delivery_pending(
+    async_session: AsyncSession,
+    *,
+    delivery_id: UUID,
+    now: datetime,
+    claim_expires_at: datetime | None,
+) -> UUID | None:
+    claim_token = uuid4() if claim_expires_at is not None else None
+    await async_session.execute(
+        update(FlowRunWebhookDeliveries)
+        .where(FlowRunWebhookDeliveries.id == delivery_id)
+        .values(
+            delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+            delivery_attempts=0,
+            next_delivery_at=now,
+            claim_token=claim_token,
+            claimed_at=(
+                now - timedelta(minutes=1) if claim_token is not None else None
+            ),
+            claim_expires_at=claim_expires_at,
+            delivered_at=None,
+            dead_lettered_at=None,
+            delivery_last_error=None,
+        )
+    )
+    return claim_token
+
+
 async def _assign_space_classification_retention_policy(
     async_session: AsyncSession,
     *,
@@ -994,6 +1025,7 @@ async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_pre
     assert counts["flow_audit_outbox_rows_deleted"] == 1
     assert counts["flow_review_checkpoints_deleted"] == 1
     assert counts["flow_runs_skipped_undelivered_audit"] == 0
+    assert counts["flow_runs_skipped_unresolved_webhook"] == 0
     assert counts["flow_runs_skipped_active_rerun"] == 0
     assert counts["debug_step_results"] == 0
     assert counts["debug_step_attempts"] == 0
@@ -1055,6 +1087,112 @@ async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_pre
     assert second_counts["flow_webhook_deliveries_deleted"] == 0
     assert second_counts["flow_audit_outbox_rows_deleted"] == 0
     assert second_counts["flow_review_checkpoints_deleted"] == 0
+
+
+@pytest.mark.parametrize(
+    "claim_expiry_offset_seconds",
+    [None, 120, -1],
+    ids=["unclaimed", "active-claim", "expired-claim"],
+)
+@pytest.mark.asyncio
+async def test_cleanup_old_flow_runtime_data_keeps_run_with_pending_webhook(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+    claim_expiry_offset_seconds: int | None,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    now = datetime.now(timezone.utc)
+    original_claim_token = await _set_webhook_delivery_pending(
+        async_session,
+        delivery_id=fixture.webhook_delivery.id,
+        now=now,
+        claim_expires_at=(
+            now + timedelta(seconds=claim_expiry_offset_seconds)
+            if claim_expiry_offset_seconds is not None
+            else None
+        ),
+    )
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["flow_runs_purged"] == 0
+    assert counts["flow_runs_skipped_unresolved_webhook"] == 1
+    assert await async_session.get(FlowRuns, fixture.run.id)
+    assert await async_session.get(
+        FlowRunWebhookDeliveries,
+        fixture.webhook_delivery.id,
+    )
+
+    if claim_expiry_offset_seconds is not None:
+        claimed = await FlowRunWebhookDeliveryRepository(
+            session=async_session
+        ).claim_due_delivery_rows(
+            now=now,
+            limit=10,
+            claim_ttl_seconds=120,
+        )
+        if claim_expiry_offset_seconds > 0:
+            assert claimed == []
+        else:
+            assert [row.id for row in claimed] == [fixture.webhook_delivery.id]
+            assert claimed[0].claim_token != original_claim_token
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_flow_runtime_data_purges_run_with_dead_lettered_webhook(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    await async_session.execute(
+        update(FlowRunWebhookDeliveries)
+        .where(FlowRunWebhookDeliveries.id == fixture.webhook_delivery.id)
+        .values(
+            delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+            delivered_at=None,
+            dead_lettered_at=datetime.now(timezone.utc),
+            delivery_last_error="terminal delivery failure",
+        )
+    )
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["flow_runs_purged"] == 1
+    assert counts["flow_runs_skipped_unresolved_webhook"] == 0
+    assert await async_session.get(FlowRuns, fixture.run.id) is None
+    assert (
+        await async_session.get(
+            FlowRunWebhookDeliveries,
+            fixture.webhook_delivery.id,
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -1700,6 +1838,65 @@ async def test_cleanup_old_flow_runtime_data_skips_terminal_runs_with_active_rer
     assert counts["flow_runs_purged"] == 0
     assert counts["flow_runs_skipped_active_rerun"] == 1
     assert await async_session.get(FlowRuns, fixture.run.id)
+
+
+@pytest.mark.asyncio
+async def test_flow_run_history_blocked_counts_use_audit_webhook_rerun_precedence(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    audit_blocked = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    webhook_blocked = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    now = datetime.now(timezone.utc)
+    for fixture in (audit_blocked, webhook_blocked):
+        await _set_webhook_delivery_pending(
+            async_session,
+            delivery_id=fixture.webhook_delivery.id,
+            now=now,
+            claim_expires_at=None,
+        )
+        await _add_active_rerun_operation(
+            async_session,
+            fixture=fixture,
+            user_id=admin_user.id,
+        )
+    await _add_flow_audit_outbox_row(
+        async_session,
+        run=audit_blocked.run,
+        user_id=admin_user.id,
+        delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+        with_audit_log=False,
+    )
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["flow_runs_purged"] == 0
+    assert counts["flow_runs_skipped_undelivered_audit"] == 1
+    assert counts["flow_runs_skipped_unresolved_webhook"] == 1
+    assert counts["flow_runs_skipped_active_rerun"] == 0
+    assert await async_session.get(FlowRuns, audit_blocked.run.id)
+    assert await async_session.get(FlowRuns, webhook_blocked.run.id)
 
 
 @pytest.mark.asyncio

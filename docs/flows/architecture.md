@@ -255,8 +255,16 @@ HTTP post is durable outbox work:
    `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:360`.
 5. The data model enforces one delivery per `(flow_run_id, step_id, attempt_no)`
    and uses the shared outbox delivery status vocabulary. See
-   `backend/src/eneo/database/tables/flow_tables.py:1609` and
-   `backend/src/eneo/database/tables/flow_tables.py:1664`.
+   `backend/src/eneo/database/tables/flow_tables.py:1982` and
+   `backend/src/eneo/database/tables/flow_tables.py:2026`.
+6. `DataRetentionService` excludes a run from history purge while any delivery
+   remains `pending`. An unclaimed, actively claimed, or expired-claim row is
+   still unresolved; claim expiry only makes it recoverable by the existing
+   delivery claimant. `delivered` and `dead_lettered` rows are terminal and do
+   not block purge. See
+   `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:668`
+   and
+   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:76`.
 
 ## Runtime Step Identity
 
@@ -307,9 +315,13 @@ Runtime file ownership is principal-aware:
    evidence or generated artifacts are purged. See
    `backend/src/eneo/flows/flow_retention_tombstone.py:50`.
 
-Retention remains an open product/data decision. The code has tombstone and export
-support, but the board still blocks full retention policy and service-key identity
-decisions. Do not fill those gaps with compatibility code.
+Run-history retention is implemented incrementally. Purge eligibility is owned
+by `DataRetentionService`, while outbox claims, retries, delivery, and
+dead-letter transitions remain owned by the webhook repository and service.
+Pending terminal-webhook intent is purge-protected regardless of claim timing;
+terminal delivery state is purge-permitted at the run-history horizon. Safe
+candidate locking and final file/reference cleanup remain separate retention
+work. Do not fill those gaps with compatibility code.
 
 ## Review, Rerun, And Service-Key Decisions
 
@@ -416,7 +428,7 @@ Run these when changing the named surface:
 | Change rerun behavior | `FlowRunRerunService` and rerun routes | rerun service/repository/API tests |
 | Change service-key Flow permissions | `flow_access_policy.py`, `flow_api_common.py`, affected routers | service-key permission tests, API contract/OpenAPI tests |
 | Change evidence export | `FlowRunEvidenceService`, `flow_run_evidence.py`, `flow_run_export_json.py` | evidence service/API/export tests |
-| Change retention/tombstone semantics | `flow_retention_tombstone.py`, retention policy/worker files | retention tests plus product/data decision receipt |
+| Change retention/tombstone semantics | `DataRetentionService`, `flow_retention_tombstone.py`, retention policy/worker files | retention tests plus product/data decision receipt |
 | Change frontend draft step order | `FlowEditor.ts` | `FlowEditor.test.ts` |
 | Change frontend run launch payload | `flowRunContract.ts` | `flowRunContract.test.ts`, `flowRunWizard.test.ts`, relevant component tests |
 | Change recording retry/lifecycle | `RecordingSession` | `recordingSession.test.ts` |
@@ -426,7 +438,7 @@ Run these when changing the named surface:
 
 | Item | Current owner | Status | Deletion or decision trigger |
 | --- | --- | --- | --- |
-| Runtime retention policy | Retention policy files, tombstone schema, evidence export | Blocked by product/data decisions in the goal board. | Owner decides retention windows, purge behavior, and export guarantees. Then implement through a dedicated Worker with data/schema preflight. |
+| Remaining runtime-retention implementation | `DataRetentionService`, retention policy files, tombstone schema, evidence export | Launch policy is recorded. Pending terminal-webhook intent already blocks run-history purge; delivered and dead-lettered intent is purge-permitted at the horizon. | Complete safe candidate locking, whole-run/file finalization, and the recorded retention horizons through focused changes with data/schema preflight. |
 | Service-key identity for review/rerun | `flow_access_policy.py`, `FlowRunReviewCheckpointService`, `FlowRunRerunService`, rerun table constraints | Review/resume supports service-key own-run paths. Rerun is still human-user-only. | Product decides whether machine clients may rerun and how audit attribution should work. With no production Flow users, prefer a clean typed model over compatibility. |
 | Form-schema dirty local edit conflict behavior | `flowFormSchema`, `FlowEditor`, `FlowFormSchemaEditor` | Blocked by product/UX decision. | Decide whether local dirty edits merge, overwrite, warn, or discard when persisted metadata changes. Then deepen or delete the local buffering path. |
 | Browser upload/audio side-effect ownership | `FlowRunDialog`, `FlowRunFileInputState`, `flowRunRecordingSession`, `RecordingSession` | Current split is source-backed: `RecordingSession` is lifecycle/retry only, while persistence/upload remains in the dialog and recording ledger helpers. Moving side effects needs a design gate. | Approve a single browser-side owner with behavior tests, then move behavior rather than copying it. |
