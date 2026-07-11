@@ -22,6 +22,7 @@ from eneo.flows.flow_run_contract_service import FlowRunContractService
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+    published_definition_checksum,
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 
@@ -57,6 +58,18 @@ def _limits() -> FlowInputLimits:
         file_max_size_bytes=12_000_000,
         audio_max_size_bytes=25_000_000,
         max_files_per_run=5,
+    )
+
+
+def _published_version(
+    *,
+    version: int | None,
+    definition_json: dict[str, object],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        version=version,
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
     )
 
 
@@ -125,6 +138,47 @@ async def test_get_run_contract_requires_published_flow() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_run_contract_rejects_checksum_drift_before_limits() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": [
+            {
+                "step_id": str(step.id),
+                "step_order": step.step_order,
+                "assistant_id": str(step.assistant_id),
+                "input_source": step.input_source,
+                "input_type": step.input_type,
+                "output_mode": step.output_mode,
+                "output_type": step.output_type,
+                "mcp_policy": step.mcp_policy,
+            }
+        ],
+    }
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
+        definition_checksum="stored-checksum-does-not-match",
+        definition_json=definition_json,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await _service(
+            flow_service=flow_service,
+            settings_service=settings_service,
+            flow_version_repo=flow_version_repo,
+        ).get_run_contract(flow_id=flow.id)
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_run_contract_returns_published_inputs_final_output_and_templates() -> (
     None
 ):
@@ -186,7 +240,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
         name="Shared template",
         checksum="published-checksum",
     )
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -312,7 +366,7 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
         checksum=current_checksum,
     )
     template_asset_repo.get.return_value = asset_id_asset
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -364,7 +418,7 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
     flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -414,7 +468,7 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
     flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -456,7 +510,7 @@ async def test_get_run_contract_rejects_published_snapshot_without_executable_st
     step = _step(step_order=1, input_type="text")
     flow = _flow(step=step).model_copy(update={"published_version": 7, "steps": [step]})
     flow_service.get_flow.return_value = flow
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -500,7 +554,7 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
     )
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -541,7 +595,7 @@ async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() 
     flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -599,7 +653,7 @@ async def test_get_run_contract_returns_unbounded_aggregate_when_step_is_unbound
         audio_max_size_bytes=25_000_000,
         max_files_per_run=None,
     )
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -654,7 +708,7 @@ async def test_get_run_contract_returns_review_steps() -> None:
     )
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -722,7 +776,7 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
     )
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
@@ -797,7 +851,7 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     template_asset_repo.get.side_effect = NotFoundException("missing")
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _published_version(
         version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,

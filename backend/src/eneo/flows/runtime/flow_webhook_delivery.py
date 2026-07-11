@@ -21,8 +21,14 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResult
+from eneo.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
+    FlowApiErrorCode,
+)
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -31,7 +37,10 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.flows.published_definition import parse_published_runtime_steps
+from eneo.flows.published_definition import (
+    PublishedDefinitionChecksumMismatchError,
+    parse_verified_published_definition,
+)
 from eneo.flows.runtime.execution_state_builder import build_run_execution_state
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.http_audit import HttpAuditDeps
@@ -46,6 +55,7 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import BadRequestException
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user_repo import UsersRepository
@@ -144,10 +154,39 @@ class FlowRunWebhookDeliveryService:
 
             row = rows[0]
             attempted += 1
+            payload_prepared = False
             try:
                 async with self.webhook_delivery_repo.session.begin():
                     payload = await self._prepare_delivery_payload(row=row)
+                payload_prepared = True
                 await self._deliver_payload(row=row, payload=payload)
+            except (
+                BadRequestException,
+                FlowPublishedDefinitionWithoutExecutableStepsError,
+            ) as exc:
+                terminal_error = (
+                    self._terminal_error_for_definition_failure(
+                        error=exc,
+                        step_order=row.step_order,
+                    )
+                    if not payload_prepared
+                    else None
+                )
+                try:
+                    async with self.webhook_delivery_repo.session.begin():
+                        did_dead_letter = await self._record_failure(
+                            row=row,
+                            now=now,
+                            error=exc,
+                            force_dead_letter=terminal_error is not None,
+                            terminal_error=terminal_error,
+                        )
+                except WebhookDeliveryClaimLostError:
+                    continue
+                if did_dead_letter:
+                    dead_lettered += 1
+                else:
+                    retry_scheduled += 1
             except ValueError as exc:
                 try:
                     async with self.webhook_delivery_repo.session.begin():
@@ -195,6 +234,46 @@ class FlowRunWebhookDeliveryService:
             dead_lettered_count=dead_lettered,
         )
 
+    @staticmethod
+    def _terminal_error_for_definition_failure(
+        *,
+        error: BadRequestException | FlowPublishedDefinitionWithoutExecutableStepsError,
+        step_order: int,
+    ) -> FlowRunError:
+        if isinstance(error, PublishedDefinitionChecksumMismatchError):
+            return FlowRunError.from_source(
+                FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH,
+                code=FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
+                message=str(error),
+                step_order=step_order,
+            )
+        if isinstance(error, FlowPublishedDefinitionWithoutExecutableStepsError):
+            return FlowRunError.from_source(
+                FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                code=FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS,
+                message=str(error),
+                step_order=step_order,
+            )
+        try:
+            parsed_error_code = (
+                FlowApiErrorCode(error.code)
+                if error.code is not None
+                else FlowApiErrorCode.DEFINITION_INVALID
+            )
+        except ValueError:
+            parsed_error_code = FlowApiErrorCode.DEFINITION_INVALID
+        error_code = (
+            parsed_error_code
+            if parsed_error_code in FLOW_RUN_TERMINAL_ERROR_CODES
+            else FlowApiErrorCode.DEFINITION_INVALID
+        )
+        return FlowRunError.from_source(
+            FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+            code=error_code,
+            message=str(error),
+            step_order=step_order,
+        )
+
     async def _prepare_delivery_payload(
         self,
         *,
@@ -212,11 +291,12 @@ class FlowRunWebhookDeliveryService:
             version=run.flow_version,
             tenant_id=row.tenant_id,
         )
-        # Delivery does not own run terminalization for invalid definitions.
-        steps = parse_published_runtime_steps(
+        definition = parse_verified_published_definition(
             flow_version.definition_json,
+            expected_checksum=flow_version.definition_checksum,
             flow_version=flow_version.version,
         )
+        steps = definition.runtime_steps()
         step = next((item for item in steps if item.step_id == row.step_id), None)
         if step is None:
             raise ValueError(
@@ -359,6 +439,7 @@ class FlowRunWebhookDeliveryService:
         now: datetime,
         error: Exception,
         force_dead_letter: bool,
+        terminal_error: FlowRunError | None = None,
     ) -> bool:
         attempt_no = row.delivery_attempts + 1
         retry_delay = (
@@ -390,8 +471,13 @@ class FlowRunWebhookDeliveryService:
                 run_id=row.flow_run_id,
                 tenant_id=row.tenant_id,
                 target_status=FlowRunStatus.FAILED,
-                source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-                error=FlowRunError.from_source(
+                source=(
+                    terminal_error.source
+                    if terminal_error is not None and terminal_error.source is not None
+                    else FlowRunLifecycleSource.EXECUTOR_FAILED
+                ),
+                error=terminal_error
+                or FlowRunError.from_source(
                     FlowRunLifecycleSource.EXECUTOR_FAILED,
                     code=FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED,
                     message=f"Webhook delivery failed: {error_message}",

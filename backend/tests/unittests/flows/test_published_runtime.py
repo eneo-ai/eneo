@@ -12,7 +12,10 @@ from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingEr
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import FlowInputLimits
-from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.published_definition import (
+    FLOW_DEFINITION_SCHEMA_VERSION,
+    published_definition_checksum,
+)
 from eneo.flows.published_runtime import (
     FlowRuntimePublicationIntent,
     load_published_flow_runtime,
@@ -82,6 +85,14 @@ def _definition_json(*, flow: Flow, step: FlowStep) -> dict[str, object]:
     }
 
 
+def _version(*, version: int, definition_json: dict[str, object]) -> SimpleNamespace:
+    return SimpleNamespace(
+        version=version,
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
+    )
+
+
 @pytest.mark.asyncio
 async def test_load_published_flow_runtime_requires_persisted_id_first() -> None:
     flow_service = AsyncMock()
@@ -145,7 +156,7 @@ async def test_load_published_runtime_inputs_builds_published_runtime_specs() ->
     flow = _flow(step=step, published_version=5)
     assert flow.id is not None
     flow_service.get_flow.return_value = flow
-    flow_version_repo.get.return_value = SimpleNamespace(
+    flow_version_repo.get.return_value = _version(
         version=5,
         definition_json=_definition_json(flow=flow, step=step),
     )
@@ -179,6 +190,36 @@ async def test_load_published_runtime_inputs_builds_published_runtime_specs() ->
         version=5,
         tenant_id=flow.tenant_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_load_published_runtime_inputs_rejects_checksum_drift_before_limits() -> (
+    None
+):
+    flow_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    settings_service = AsyncMock()
+    step = _step(input_type="audio")
+    flow = _flow(step=step, published_version=5)
+    assert flow.id is not None
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=5,
+        definition_checksum="stored-checksum-does-not-match",
+        definition_json=_definition_json(flow=flow, step=step),
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await load_published_runtime_inputs(
+            flow_service=flow_service,
+            flow_version_repo=flow_version_repo,
+            settings_source=settings_service,
+            flow_id=flow.id,
+            intent=FlowRuntimePublicationIntent.RUNTIME_UPLOAD,
+        )
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
 
 
 def test_flow_bad_request_exception_code_serializes_to_public_string() -> None:

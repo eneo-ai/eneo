@@ -19,6 +19,7 @@ from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.published_definition import published_definition_checksum
 from eneo.main.exceptions import UnauthorizedException
 
 
@@ -63,6 +64,50 @@ async def test_get_evidence_loads_run_through_access_policy(user):
         run_id=run.id,
         tenant_id=user.tenant_id,
         flow_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(user):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = _flow_run_rerun_repo()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    run = _run(user=user, flow_id=flow.id)
+    version = _version(user=user, flow=flow, version=run.flow_version).model_copy(
+        update={"definition_checksum": "stored-checksum-does-not-match"}
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_version_repo.get.return_value = version
+    service = FlowRunEvidenceService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+    )
+
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
+
+    assert evidence["definition_snapshot"] == version.definition_json
+    assert evidence["definition_integrity"] == {
+        "status": "invalid",
+        "expected_checksum": "stored-checksum-does-not-match",
+        "current_checksum": published_definition_checksum(version.definition_json),
+    }
+    flow_version_repo.get.assert_awaited_once_with(
+        flow_id=run.flow_id,
+        version=run.flow_version,
+        tenant_id=user.tenant_id,
     )
 
 

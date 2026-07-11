@@ -58,7 +58,7 @@ from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
     PublishedFlowDefinition,
-    parse_published_definition,
+    parse_verified_published_definition,
 )
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.main.exceptions import NotFoundException
@@ -167,8 +167,9 @@ class FlowRunRerunService:
             version=run.flow_version,
             tenant_id=self.user.tenant_id,
         )
-        published_definition = parse_published_definition(
+        published_definition = parse_verified_published_definition(
             version.definition_json,
+            expected_checksum=version.definition_checksum,
             flow_version=version.version,
         )
         runtime_steps = published_definition.runtime_steps()

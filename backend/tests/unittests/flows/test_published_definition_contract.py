@@ -5,10 +5,13 @@ from uuid import uuid4
 
 import pytest
 
+import eneo.flows.published_definition as published_definition_module
 from eneo.flows.assistant_execution_snapshot import stable_hash
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_metadata import FlowFormFieldType, serialize_flow_metadata
 from eneo.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_INVALID,
@@ -515,3 +518,27 @@ def test_checksum_uses_stable_hash_contract() -> None:
     )
 
     assert published_definition_checksum(definition) == stable_hash(definition)
+
+
+def test_verified_parser_rejects_checksum_mismatch_with_typed_context() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[_step(order=1)],
+    )
+    expected_checksum = stable_hash({"different": "snapshot"})
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        published_definition_module.parse_verified_published_definition(
+            definition,
+            expected_checksum=expected_checksum,
+            flow_version=7,
+        )
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    assert exc_info.value.context == {
+        "expected_checksum": expected_checksum,
+        "current_checksum": published_definition_checksum(definition),
+    }

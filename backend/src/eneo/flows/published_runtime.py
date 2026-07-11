@@ -19,7 +19,7 @@ from eneo.flows.flow_run_step_inputs import (
 )
 from eneo.flows.published_definition import (
     PublishedFlowDefinition,
-    parse_published_definition,
+    parse_verified_published_definition,
 )
 from eneo.flows.runtime.models import RuntimeStep
 
@@ -106,8 +106,9 @@ async def load_published_runtime_inputs(
         version=published.published_version,
         tenant_id=published.flow.tenant_id,
     )
-    definition = parse_published_definition(
+    definition = parse_verified_published_definition(
         version.definition_json,
+        expected_checksum=version.definition_checksum,
         flow_version=version.version,
     )
     steps = tuple(definition.runtime_steps())

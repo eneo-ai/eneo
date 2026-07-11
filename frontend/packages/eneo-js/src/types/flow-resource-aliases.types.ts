@@ -274,6 +274,11 @@ const validFlowGraph: FlowGraph = {
 
 const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   run: validFlowRun,
+  definition_integrity: {
+    status: "verified",
+    expected_checksum: "sha256:definition",
+    current_checksum: "sha256:definition"
+  },
   definition_snapshot: { steps: [validFlowStep] },
   step_results: [validFlowRunStep],
   step_attempts: [],

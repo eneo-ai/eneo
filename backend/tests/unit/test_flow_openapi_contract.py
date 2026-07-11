@@ -34,6 +34,7 @@ from eneo.flows.flow_api_error_code import (
 )
 from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_run_error import FlowRunDispatchErrorKind
+from eneo.flows.published_definition import parse_verified_published_definition
 from eneo.main.exceptions import ErrorCodes
 from eneo.server.main import get_application
 from eneo.settings.setting_service import FLOW_SETTINGS_INVALID_PAYLOAD_CODE
@@ -2716,6 +2717,70 @@ def test_openapi_non_result_step_identity_exceptions_stay_nullable(
         assert _schema_allows_null(step_id_property)
 
 
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/api/v1/flows/{id}/runs/", "post"),
+        ("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", "post"),
+        ("/api/v1/flows/{id}/run-contract/", "get"),
+        ("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", "post"),
+        ("/api/v1/flows/{id}/graph/", "get"),
+    ],
+)
+def test_openapi_functional_definition_reads_document_checksum_mismatch(
+    openapi_spec: dict,
+    path: str,
+    method: str,
+) -> None:
+    operation = _get_operation(openapi_spec, path, method)
+    bad_request = operation.get("responses", {}).get("400", {})
+
+    assert "flow_definition_checksum_mismatch" in bad_request.get("description", "")
+
+
+def test_openapi_flow_evidence_exposes_definition_integrity(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    evidence = schemas.get("FlowRunEvidenceResponse", {})
+    integrity_property = evidence.get("properties", {}).get("definition_integrity", {})
+    integrity = _resolve_component_ref(openapi_spec, integrity_property)
+
+    assert "definition_integrity" in evidence.get("required", [])
+    assert integrity.get("additionalProperties") is False
+    assert set(integrity.get("required", [])) == {
+        "status",
+        "expected_checksum",
+        "current_checksum",
+    }
+    assert _extract_enum_values(
+        openapi_spec,
+        integrity.get("properties", {}).get("status", {}),
+    ) == {"verified", "invalid"}
+    assert "canonical published-definition parsing" in (
+        integrity.get("properties", {}).get("status", {}).get("description", "")
+    )
+
+    evidence_example = evidence.get("example", {})
+    example_integrity = evidence_example["definition_integrity"]
+    assert example_integrity["status"] == "verified"
+    assert (
+        example_integrity["current_checksum"] == example_integrity["expected_checksum"]
+    )
+    parse_verified_published_definition(
+        evidence_example["definition_snapshot"],
+        expected_checksum=example_integrity["expected_checksum"],
+        flow_version=evidence_example["run"]["flow_version"],
+    )
+
+    export_example = schemas.get("FlowRunEvidenceExportResponse", {}).get("example", {})
+    assert (
+        export_example["bundle"]["definition_snapshot"]
+        == evidence_example["definition_snapshot"]
+    )
+    assert export_example["bundle"]["definition_integrity"] == example_integrity
+
+
 def test_openapi_flow_evidence_export_documents_json_attachment(
     openapi_spec: dict,
 ) -> None:
@@ -2991,6 +3056,7 @@ def test_openapi_runtime_file_upload_error_codes_are_machine_readable(
         if isinstance(example, dict)
     }
     assert upload_400_codes == {
+        "flow_definition_checksum_mismatch",
         "flow_not_published",
         "flow_run_unknown_step_input",
         "flow_run_runtime_input_disabled",

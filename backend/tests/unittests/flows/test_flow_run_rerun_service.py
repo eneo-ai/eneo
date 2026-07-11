@@ -27,6 +27,8 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
 from eneo.flows.enums import RerunDependencyKind
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_input_envelope import (
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
     RerunInputOverride,
@@ -37,7 +39,10 @@ from eneo.flows.flow_run_rerun_request import (
 )
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
-from eneo.flows.published_definition import FLOW_PUBLISHED_FORM_SCHEMA_INVALID
+from eneo.flows.published_definition import (
+    FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+    published_definition_checksum,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -1019,6 +1024,45 @@ async def test_rerun_step_rejects_missing_published_root_step(user):
 
 
 @pytest.mark.asyncio
+async def test_rerun_step_rejects_checksum_drift_before_rerun_acceptance(user) -> None:
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"status": FlowRunStatus.COMPLETED}
+    )
+    version = _runtime_version(user=user, flow=flow)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = version.model_copy(
+        update={"definition_checksum": "stored-checksum-does-not-match"}
+    )
+    service = _rerun_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.rerun_step(
+            flow_id=flow.id,
+            run_id=run.id,
+            rerun_step_id=flow.steps[0].id,
+            expected_run_revision=run.revision,
+            reason="Refresh answer",
+        )
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    flow_run_rerun_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
+    flow_run_rerun_repo.accept_or_replay_rerun_operation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_rerun_step_rejects_published_snapshot_without_executable_steps(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -1042,9 +1086,15 @@ async def test_rerun_step_rejects_published_snapshot_without_executable_steps(us
         runtime_upload_repo=runtime_upload_repo,
     )
     flow_run_repo.get.return_value = run
+    empty_definition = {
+        "schema_version": 1,
+        "flow_id": str(flow.id),
+        "steps": [],
+    }
     flow_version_repo.get.return_value = SimpleNamespace(
         version=5,
-        definition_json={"schema_version": 1, "flow_id": str(flow.id), "steps": []},
+        definition_checksum=published_definition_checksum(empty_definition),
+        definition_json=empty_definition,
     )
 
     with pytest.raises(FlowPublishedDefinitionWithoutExecutableStepsError) as exc_info:

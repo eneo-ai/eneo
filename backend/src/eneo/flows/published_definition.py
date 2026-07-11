@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Mapping, TypeGuard, cast
 from uuid import UUID
 
@@ -11,9 +11,11 @@ from eneo.flows.assistant_execution_snapshot import stable_hash
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
+    FlowRuntimeInvariantError,
 )
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_metadata import (
     FlowMetadata,
     FlowMetadataParseMode,
@@ -41,6 +43,44 @@ FLOW_DEFINITION_STEPS_INVALID = FlowApiErrorCode.DEFINITION_STEPS_INVALID.value
 FLOW_PUBLISHED_FORM_SCHEMA_INVALID = (
     FlowApiErrorCode.PUBLISHED_FORM_SCHEMA_INVALID.value
 )
+
+
+class PublishedDefinitionIntegrityStatus(StrEnum):
+    VERIFIED = "verified"
+    INVALID = "invalid"
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedDefinitionIntegrity:
+    """Integrity state for one immutable stored published definition."""
+
+    status: PublishedDefinitionIntegrityStatus
+    expected_checksum: str
+    current_checksum: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "status": self.status.value,
+            "expected_checksum": self.expected_checksum,
+            "current_checksum": self.current_checksum,
+        }
+
+
+class PublishedDefinitionChecksumMismatchError(FlowBadRequestException):
+    __slots__ = ("integrity",)
+
+    def __init__(self, integrity: PublishedDefinitionIntegrity) -> None:
+        super().__init__(
+            "Published flow definition checksum does not match the stored snapshot. "
+            "Do not retry this pinned version. Publish a valid version and start a "
+            "new run.",
+            code=FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
+            context={
+                "expected_checksum": integrity.expected_checksum,
+                "current_checksum": integrity.current_checksum,
+            },
+        )
+        self.integrity = integrity
 
 
 class PublishedTemplateReferenceUndeterminedReason(str, Enum):
@@ -647,6 +687,86 @@ def parse_published_definition(
         step_identities=step_identities,
         definition_json=dict(definition_json),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _PublishedDefinitionInspection:
+    integrity: PublishedDefinitionIntegrity
+    definition: PublishedFlowDefinition | None
+    parse_error: BadRequestException | FlowRuntimeInvariantError | None
+
+
+def _inspect_published_definition(
+    definition_json: Mapping[str, object],
+    *,
+    expected_checksum: str,
+    flow_version: int,
+) -> _PublishedDefinitionInspection:
+    current_checksum = published_definition_checksum(definition_json)
+    integrity = PublishedDefinitionIntegrity(
+        status=PublishedDefinitionIntegrityStatus.INVALID,
+        expected_checksum=expected_checksum,
+        current_checksum=current_checksum,
+    )
+    if current_checksum != expected_checksum:
+        return _PublishedDefinitionInspection(
+            integrity=integrity,
+            definition=None,
+            parse_error=None,
+        )
+
+    try:
+        definition = parse_published_definition(
+            definition_json,
+            flow_version=flow_version,
+        )
+    except (BadRequestException, FlowRuntimeInvariantError) as exc:
+        return _PublishedDefinitionInspection(
+            integrity=integrity,
+            definition=None,
+            parse_error=exc,
+        )
+
+    return _PublishedDefinitionInspection(
+        integrity=PublishedDefinitionIntegrity(
+            status=PublishedDefinitionIntegrityStatus.VERIFIED,
+            expected_checksum=expected_checksum,
+            current_checksum=current_checksum,
+        ),
+        definition=definition,
+        parse_error=None,
+    )
+
+
+def inspect_published_definition_integrity(
+    definition_json: Mapping[str, object],
+    *,
+    expected_checksum: str,
+    flow_version: int,
+) -> PublishedDefinitionIntegrity:
+    return _inspect_published_definition(
+        definition_json,
+        expected_checksum=expected_checksum,
+        flow_version=flow_version,
+    ).integrity
+
+
+def parse_verified_published_definition(
+    definition_json: Mapping[str, object],
+    *,
+    expected_checksum: str,
+    flow_version: int,
+) -> PublishedFlowDefinition:
+    inspection = _inspect_published_definition(
+        definition_json,
+        expected_checksum=expected_checksum,
+        flow_version=flow_version,
+    )
+    if inspection.definition is not None:
+        return inspection.definition
+    if inspection.parse_error is not None:
+        raise inspection.parse_error
+    raise PublishedDefinitionChecksumMismatchError(inspection.integrity)
 
 
 def parse_published_runtime_steps(

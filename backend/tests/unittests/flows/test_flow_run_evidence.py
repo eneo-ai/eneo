@@ -12,6 +12,7 @@ import pytest
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
 from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
@@ -63,6 +64,10 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.published_definition import (
+    build_published_definition_json,
+    published_definition_checksum,
+)
 from eneo.main.config import get_settings
 
 
@@ -100,16 +105,122 @@ def _evidence_run_and_version() -> tuple[FlowRun, FlowVersion]:
         created_at=now,
         updated_at=now,
     )
+    definition_steps: list[FlowPersistedJsonObject] = [
+        {
+            "step_id": str(uuid4()),
+            "step_order": 1,
+            "assistant_id": str(uuid4()),
+            "input_source": "flow_input",
+            "input_type": "text",
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "mcp_policy": "inherit",
+        }
+    ]
+    definition_json = build_published_definition_json(
+        flow_id=run.flow_id,
+        name="Evidence flow",
+        description=None,
+        metadata_json=None,
+        steps=definition_steps,
+    )
     version = FlowVersion(
         flow_id=run.flow_id,
         version=1,
         tenant_id=run.tenant_id,
-        definition_checksum="checksum",
-        definition_json={"steps": []},
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
         created_at=now,
         updated_at=now,
     )
     return run, version
+
+
+def test_evidence_marks_canonical_snapshot_verified() -> None:
+    run, version = _evidence_run_and_version()
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[],
+    ).to_dict()
+
+    assert evidence["definition_snapshot"] == version.definition_json
+    assert evidence["definition_integrity"] == {
+        "status": "verified",
+        "expected_checksum": version.definition_checksum,
+        "current_checksum": version.definition_checksum,
+    }
+
+
+def test_evidence_integrity_uses_raw_snapshot_before_redaction() -> None:
+    run, version = _evidence_run_and_version()
+    definition_json: dict[str, object] = {
+        "steps": [],
+        "metadata_json": {"api_key": "sensitive-value"},
+    }
+    corrupt_version = version.model_copy(
+        update={
+            "definition_checksum": "stored-checksum-does-not-match",
+            "definition_json": definition_json,
+        }
+    )
+
+    bundle = build_evidence_bundle(
+        run=run,
+        version=corrupt_version,
+        step_results=[],
+        step_attempts=[],
+    )
+    raw_payload = bundle.to_dict()
+    redacted_payload = redact_evidence_bundle(bundle).to_dict()
+    expected_integrity = {
+        "status": "invalid",
+        "expected_checksum": "stored-checksum-does-not-match",
+        "current_checksum": published_definition_checksum(definition_json),
+    }
+
+    assert raw_payload["definition_snapshot"] == definition_json
+    assert redacted_payload["definition_snapshot"]["metadata_json"] == {
+        "api_key": "[REDACTED]"
+    }
+    assert raw_payload["definition_integrity"] == expected_integrity
+    assert redacted_payload["definition_integrity"] == expected_integrity
+    assert (
+        published_definition_checksum(redacted_payload["definition_snapshot"])
+        != expected_integrity["current_checksum"]
+    )
+
+
+def test_evidence_marks_matching_checksum_malformed_snapshot_invalid() -> None:
+    run, version = _evidence_run_and_version()
+    malformed_definition: dict[str, object] = {
+        "schema_version": 1,
+        "flow_id": str(run.flow_id),
+        "steps": "not-an-array",
+    }
+    checksum = published_definition_checksum(malformed_definition)
+    malformed_version = version.model_copy(
+        update={
+            "definition_checksum": checksum,
+            "definition_json": malformed_definition,
+        }
+    )
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=malformed_version,
+        step_results=[],
+        step_attempts=[],
+    ).to_dict()
+
+    assert evidence["definition_snapshot"] == malformed_definition
+    assert evidence["definition_integrity"] == {
+        "status": "invalid",
+        "expected_checksum": checksum,
+        "current_checksum": checksum,
+    }
 
 
 def _attempt_with_provenance(

@@ -91,6 +91,22 @@ _FLOW_RUNTIME_UPLOAD_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
             "context": {"flow_id": "d4f60ea3-8fb7-4ab5-9d89-73e9d9a9f818"},
         },
     },
+    FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value: {
+        "summary": "Published definition failed integrity verification.",
+        "value": {
+            "message": (
+                "Published flow definition checksum does not match the stored "
+                "snapshot. Do not retry this pinned version. Publish a valid "
+                "version and start a new run."
+            ),
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value,
+            "context": {
+                "expected_checksum": "recorded-published-checksum",
+                "current_checksum": "current-snapshot-checksum",
+            },
+        },
+    },
 }
 
 
@@ -130,7 +146,11 @@ Service-key principals may use this endpoint for published-flow runtime only.
     """,
     responses={
         400: error_response(
-            description="Flow is not published or runtime contract could not be resolved.",
+            description=(
+                "Flow is not published, the runtime contract could not be resolved, "
+                "or the published snapshot failed integrity verification with "
+                "`flow_definition_checksum_mismatch`."
+            ),
             message="Flow must be published before a run contract can be created.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
             code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
@@ -190,7 +210,11 @@ through that Flow's runtime upload endpoint.
     """,
     responses={
         400: error_response(
-            description="Runtime step input is unknown, disabled, or invalid for upload.",
+            description=(
+                "Runtime step input is unknown, disabled, or invalid for upload, "
+                "or the published snapshot failed integrity verification with "
+                "`flow_definition_checksum_mismatch`."
+            ),
             examples=_FLOW_RUNTIME_UPLOAD_BAD_REQUEST_EXAMPLES,
         ),
         403: error_response(

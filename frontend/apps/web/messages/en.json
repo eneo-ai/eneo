@@ -4095,7 +4095,7 @@
   "flow_error_flow_evidence_audit_logging_failed": "Evidence access could not be audited. Try again later.",
   "flow_error_flow_evidence_export_reason_required": "Enter a specific reason before exporting raw evidence.",
   "flow_error_flow_assistant_snapshot_drift": "The flow changed while the run was executing. Republish the flow and start a new run.",
-  "flow_error_flow_definition_checksum_mismatch": "The published flow definition changed before execution. Reload the flow contract and start a new run.",
+  "flow_error_flow_definition_checksum_mismatch": "The published flow snapshot failed integrity verification. Ask a flow editor to publish a valid version, then start a new run.",
   "flow_error_flow_definition_invalid": "This published flow definition is invalid. Ask a flow editor to fix and republish the flow.",
   "flow_error_flow_definition_schema_version_missing": "This published flow is missing its definition schema version. Ask a flow editor to republish the flow.",
   "flow_error_flow_definition_schema_version_unsupported": "This published flow uses an unsupported definition schema version. Republish the flow with the current editor before running it.",

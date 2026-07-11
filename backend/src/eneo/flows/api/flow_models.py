@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.config import JsonDict
 
 from eneo.authentication.auth_models import (
     FlowServicePrincipalActorPublic,
@@ -67,6 +68,11 @@ from eneo.flows.flow_run_error import (
 from eneo.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from eneo.flows.flow_run_evidence_export_summary import EvidenceExportSummary
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.published_definition import (
+    FLOW_DEFINITION_SCHEMA_VERSION,
+    PublishedDefinitionIntegrityStatus,
+    published_definition_checksum,
+)
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, partial_model
 
@@ -124,6 +130,28 @@ FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "created_at": "2026-03-17T09:30:00Z",
     "updated_at": "2026-03-17T09:30:00Z",
 }
+
+FLOW_PUBLISHED_DEFINITION_EXAMPLE: JsonDict = {
+    "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "name": "Employee Review Summary",
+    "description": "Transcribe a review conversation.",
+    "steps": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000101",
+            "step_order": 1,
+            "assistant_id": "00000000-0000-0000-0000-000000000201",
+            "input_source": "flow_input",
+            "input_type": "audio",
+            "output_mode": "transcribe_only",
+            "output_type": "text",
+            "mcp_policy": "inherit",
+        }
+    ],
+}
+FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM = published_definition_checksum(
+    FLOW_PUBLISHED_DEFINITION_EXAMPLE
+)
 
 FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000001",
@@ -1316,6 +1344,26 @@ class FlowRunDebugRun(BaseModel):
     summary: FlowRunDebugRunSummary | None = None
 
 
+class FlowPublishedDefinitionIntegrityPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: PublishedDefinitionIntegrityStatus = Field(
+        description=(
+            "Whether the persisted raw definition snapshot matches its recorded "
+            "checksum and passes canonical published-definition parsing."
+        )
+    )
+    expected_checksum: str = Field(
+        description="Checksum recorded when the immutable version was published."
+    )
+    current_checksum: str = Field(
+        description=(
+            "Checksum computed from the persisted raw snapshot before evidence "
+            "redaction."
+        )
+    )
+
+
 class FlowRunDebugDefinition(BaseModel):
     flow_id: str
     version: int
@@ -1383,10 +1431,10 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
     "schema_version": "eneo.flow.debug-export.v2",
     "generated_at": "2026-03-31T12:00:00Z",
     "run": {
-        "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-        "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+        "run_id": "00000000-0000-0000-0000-000000000301",
+        "flow_id": "00000000-0000-0000-0000-000000000001",
         "flow_version": 3,
-        "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
+        "trace_id": "00000000-0000-0000-0000-000000000302",
         "status": "completed",
         "summary": {
             "steps_count": 1,
@@ -1399,13 +1447,24 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
         },
     },
     "definition": {
-        "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+        "flow_id": "00000000-0000-0000-0000-000000000001",
         "version": 3,
-        "checksum": "sha256:example",
+        "checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
         "steps_count": 1,
     },
-    "definition_snapshot": {"steps": []},
-    "steps": [],
+    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
+    "steps": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000101",
+            "step_order": 1,
+            "assistant_id": "00000000-0000-0000-0000-000000000201",
+            "io_types": {"input": "audio", "output": "text"},
+            "input": {"source": "flow_input", "type": "audio"},
+            "output": {"mode": "transcribe_only", "type": "text"},
+            "mcp": {"policy": "inherit", "servers": [], "tools_enabled": []},
+            "attempts": [{"attempt_no": 1, "status": "completed"}],
+        }
+    ],
     "security": {
         "redaction_applied": True,
         "classification_field": "output_classification_override",
@@ -1689,7 +1748,12 @@ class FlowRunEvidenceResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "run": FLOW_RUN_PUBLIC_EXAMPLE,
-                "definition_snapshot": {"steps": []},
+                "definition_integrity": {
+                    "status": "verified",
+                    "expected_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+                    "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+                },
+                "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
                 "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                 "step_attempts": [],
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
@@ -1702,6 +1766,7 @@ class FlowRunEvidenceResponse(BaseModel):
     )
 
     run: FlowRunPublic
+    definition_integrity: FlowPublishedDefinitionIntegrityPublic
     definition_snapshot: dict[str, Any]
     step_results: list[FlowRunStepPublic]
     step_attempts: list[FlowStepAttemptPublic]
@@ -2077,7 +2142,12 @@ class FlowRunEvidenceExportResponse(BaseModel):
                 },
                 "bundle": {
                     "run": FLOW_RUN_PUBLIC_EXAMPLE,
-                    "definition_snapshot": {"steps": []},
+                    "definition_integrity": {
+                        "status": "verified",
+                        "expected_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+                        "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+                    },
+                    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
                     "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                     "step_attempts": [],
                     "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],

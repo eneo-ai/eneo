@@ -14785,6 +14785,21 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
     };
+    /** FlowPublishedDefinitionIntegrityPublic */
+    FlowPublishedDefinitionIntegrityPublic: {
+      /** @description Whether the persisted raw definition snapshot matches its recorded checksum and passes canonical published-definition parsing. */
+      status: components["schemas"]["PublishedDefinitionIntegrityStatus"];
+      /**
+       * Expected Checksum
+       * @description Checksum recorded when the immutable version was published.
+       */
+      expected_checksum: string;
+      /**
+       * Current Checksum
+       * @description Checksum computed from the persisted raw snapshot before evidence redaction.
+       */
+      current_checksum: string;
+    };
     /**
      * FlowRetentionPolicyPublic
      * @example {
@@ -15623,19 +15638,34 @@ export interface components {
      *       "bundle": {
      *         "debug_export": {
      *           "definition": {
-     *             "checksum": "sha256:example",
-     *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *             "checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
      *             "steps_count": 1,
      *             "version": 3
      *           },
      *           "definition_snapshot": {
-     *             "steps": []
+     *             "description": "Transcribe a review conversation.",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
+     *             "name": "Employee Review Summary",
+     *             "schema_version": 1,
+     *             "steps": [
+     *               {
+     *                 "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *                 "input_source": "flow_input",
+     *                 "input_type": "audio",
+     *                 "mcp_policy": "inherit",
+     *                 "output_mode": "transcribe_only",
+     *                 "output_type": "text",
+     *                 "step_id": "00000000-0000-0000-0000-000000000101",
+     *                 "step_order": 1
+     *               }
+     *             ]
      *           },
      *           "generated_at": "2026-03-31T12:00:00Z",
      *           "run": {
-     *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
      *             "flow_version": 3,
-     *             "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *             "run_id": "00000000-0000-0000-0000-000000000301",
      *             "status": "completed",
      *             "summary": {
      *               "artifacts_count": 0,
@@ -15648,7 +15678,7 @@ export interface components {
      *               ],
      *               "steps_count": 1
      *             },
-     *             "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *             "trace_id": "00000000-0000-0000-0000-000000000302"
      *           },
      *           "schema_version": "eneo.flow.debug-export.v2",
      *           "security": {
@@ -15657,10 +15687,59 @@ export interface components {
      *             "mcp_policy_field": "mcp_policy",
      *             "redaction_applied": true
      *           },
-     *           "steps": []
+     *           "steps": [
+     *             {
+     *               "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *               "attempts": [
+     *                 {
+     *                   "attempt_no": 1,
+     *                   "status": "completed"
+     *                 }
+     *               ],
+     *               "input": {
+     *                 "source": "flow_input",
+     *                 "type": "audio"
+     *               },
+     *               "io_types": {
+     *                 "input": "audio",
+     *                 "output": "text"
+     *               },
+     *               "mcp": {
+     *                 "policy": "inherit",
+     *                 "servers": [],
+     *                 "tools_enabled": []
+     *               },
+     *               "output": {
+     *                 "mode": "transcribe_only",
+     *                 "type": "text"
+     *               },
+     *               "step_id": "00000000-0000-0000-0000-000000000101",
+     *               "step_order": 1
+     *             }
+     *           ]
+     *         },
+     *         "definition_integrity": {
+     *           "current_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *           "expected_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *           "status": "verified"
      *         },
      *         "definition_snapshot": {
-     *           "steps": []
+     *           "description": "Transcribe a review conversation.",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "name": "Employee Review Summary",
+     *           "schema_version": 1,
+     *           "steps": [
+     *             {
+     *               "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *               "input_source": "flow_input",
+     *               "input_type": "audio",
+     *               "mcp_policy": "inherit",
+     *               "output_mode": "transcribe_only",
+     *               "output_type": "text",
+     *               "step_id": "00000000-0000-0000-0000-000000000101",
+     *               "step_order": 1
+     *             }
+     *           ]
      *         },
      *         "result_files": [
      *           {
@@ -16224,19 +16303,34 @@ export interface components {
      * @example {
      *       "debug_export": {
      *         "definition": {
-     *           "checksum": "sha256:example",
-     *           "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *           "checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "steps_count": 1,
      *           "version": 3
      *         },
      *         "definition_snapshot": {
-     *           "steps": []
+     *           "description": "Transcribe a review conversation.",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "name": "Employee Review Summary",
+     *           "schema_version": 1,
+     *           "steps": [
+     *             {
+     *               "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *               "input_source": "flow_input",
+     *               "input_type": "audio",
+     *               "mcp_policy": "inherit",
+     *               "output_mode": "transcribe_only",
+     *               "output_type": "text",
+     *               "step_id": "00000000-0000-0000-0000-000000000101",
+     *               "step_order": 1
+     *             }
+     *           ]
      *         },
      *         "generated_at": "2026-03-31T12:00:00Z",
      *         "run": {
-     *           "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "flow_version": 3,
-     *           "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *           "run_id": "00000000-0000-0000-0000-000000000301",
      *           "status": "completed",
      *           "summary": {
      *             "artifacts_count": 0,
@@ -16249,7 +16343,7 @@ export interface components {
      *             ],
      *             "steps_count": 1
      *           },
-     *           "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *           "trace_id": "00000000-0000-0000-0000-000000000302"
      *         },
      *         "schema_version": "eneo.flow.debug-export.v2",
      *         "security": {
@@ -16258,10 +16352,59 @@ export interface components {
      *           "mcp_policy_field": "mcp_policy",
      *           "redaction_applied": true
      *         },
-     *         "steps": []
+     *         "steps": [
+     *           {
+     *             "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *             "attempts": [
+     *               {
+     *                 "attempt_no": 1,
+     *                 "status": "completed"
+     *               }
+     *             ],
+     *             "input": {
+     *               "source": "flow_input",
+     *               "type": "audio"
+     *             },
+     *             "io_types": {
+     *               "input": "audio",
+     *               "output": "text"
+     *             },
+     *             "mcp": {
+     *               "policy": "inherit",
+     *               "servers": [],
+     *               "tools_enabled": []
+     *             },
+     *             "output": {
+     *               "mode": "transcribe_only",
+     *               "type": "text"
+     *             },
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1
+     *           }
+     *         ]
+     *       },
+     *       "definition_integrity": {
+     *         "current_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *         "expected_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *         "status": "verified"
      *       },
      *       "definition_snapshot": {
-     *         "steps": []
+     *         "description": "Transcribe a review conversation.",
+     *         "flow_id": "00000000-0000-0000-0000-000000000001",
+     *         "name": "Employee Review Summary",
+     *         "schema_version": 1,
+     *         "steps": [
+     *           {
+     *             "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *             "input_source": "flow_input",
+     *             "input_type": "audio",
+     *             "mcp_policy": "inherit",
+     *             "output_mode": "transcribe_only",
+     *             "output_type": "text",
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1
+     *           }
+     *         ]
      *       },
      *       "rerun_invalidated_steps": [],
      *       "rerun_operations": [],
@@ -16395,6 +16538,7 @@ export interface components {
      */
     FlowRunEvidenceResponse: {
       run: components["schemas"]["FlowRunPublic"];
+      definition_integrity: components["schemas"]["FlowPublishedDefinitionIntegrityPublic"];
       /** Definition Snapshot */
       definition_snapshot: {
         [key: string]: unknown;
@@ -22581,6 +22725,11 @@ export interface components {
        */
       email: string;
     };
+    /**
+     * PublishedDefinitionIntegrityStatus
+     * @enum {string}
+     */
+    PublishedDefinitionIntegrityStatus: "verified" | "invalid";
     /** QuestionMetadata */
     QuestionMetadata: {
       /**
@@ -43192,7 +43341,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunContractPublic"];
         };
       };
-      /** @description Flow is not published or runtime contract could not be resolved. */
+      /** @description Flow is not published, the runtime contract could not be resolved, or the published snapshot failed integrity verification with `flow_definition_checksum_mismatch`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -43281,7 +43430,7 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
-      /** @description Runtime step input is unknown, disabled, or invalid for upload. */
+      /** @description Runtime step input is unknown, disabled, or invalid for upload, or the published snapshot failed integrity verification with `flow_definition_checksum_mismatch`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -43651,7 +43800,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunPublic"];
         };
       };
-      /** @description Flow cannot be run in its current state or the request payload is invalid. Machine-readable codes include `flow_not_published`, `flow_run_top_level_file_ids_not_supported`, `flow_run_idempotency_conflict`, and `flow_run_required_step_input_missing`. Runtime step-input errors include context.step_ids so clients can highlight the missing required upload controls. */
+      /** @description Flow cannot be run in its current state or the request payload is invalid. Machine-readable codes include `flow_not_published`, `flow_definition_checksum_mismatch`, `flow_run_top_level_file_ids_not_supported`, `flow_run_idempotency_conflict`, and `flow_run_required_step_input_missing`. Runtime step-input errors include context.step_ids so clients can highlight the missing required upload controls. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -44481,7 +44630,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunStepRerunResponse"];
         };
       };
-      /** @description Rerun request is invalid. Representative machine-readable codes include `flow_run_rerun_reason_required`, `flow_run_rerun_reason_too_long`, `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_incomplete`, and `flow_run_rerun_step_inputs_invalid`. If the request includes `input_payload_json` or `step_inputs`, rerun can also return the shared run input and runtime-file validation codes used by create-run, such as `flow_run_reserved_input_payload_key`, `flow_run_input_payload_too_large`, `flow_run_file_not_bound_to_flow`, `flow_run_file_not_accessible`, `flow_run_runtime_input_disabled`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, and `flow_run_step_input_mimetype_rejected`. */
+      /** @description Rerun request is invalid. Representative machine-readable codes include `flow_run_rerun_reason_required`, `flow_run_rerun_reason_too_long`, `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_incomplete`, and `flow_run_rerun_step_inputs_invalid`. A corrupt published snapshot returns `flow_definition_checksum_mismatch`. If the request includes `input_payload_json` or `step_inputs`, rerun can also return the shared run input and runtime-file validation codes used by create-run, such as `flow_run_reserved_input_payload_key`, `flow_run_input_payload_too_large`, `flow_run_file_not_bound_to_flow`, `flow_run_file_not_accessible`, `flow_run_runtime_input_disabled`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, and `flow_run_step_input_mimetype_rejected`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -44901,6 +45050,22 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GraphResponse"];
+        };
+      };
+      /** @description The version-pinned published snapshot failed integrity verification. The machine-readable code is `flow_definition_checksum_mismatch`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Published Flow definition integrity verification failed.",
+           *       "eneo_error_code": 9007,
+           *       "code": "flow_definition_checksum_mismatch"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden: API key scope does not match flow space. */

@@ -35,7 +35,9 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepAttempt,
     FlowStepResult,
-    FlowVersion,
+)
+from eneo.flows.domain.flow import (
+    FlowVersion as FlowVersionModel,
 )
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
@@ -54,6 +56,7 @@ from eneo.flows.enums import (
     RerunDependencyKind,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
 from eneo.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
 from eneo.flows.flow_run_step_inputs import (
@@ -70,6 +73,7 @@ from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     build_published_definition_json,
+    published_definition_checksum,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -335,12 +339,36 @@ def _step_attempt_record(
     )
 
 
-def _version(user, flow: Flow, version: int = 1) -> FlowVersion:
-    return FlowVersion(
+def _published_flow_version(
+    *,
+    flow_id: UUID,
+    version: int,
+    tenant_id: UUID,
+    definition_checksum: str | None,
+    definition_json: dict[str, object],
+    created_at: datetime,
+    updated_at: datetime,
+) -> FlowVersionModel:
+    """Derive a valid fixture checksum unless a test supplies an explicit value."""
+    if definition_checksum is None:
+        definition_checksum = published_definition_checksum(definition_json)
+    return FlowVersionModel(
+        flow_id=flow_id,
+        version=version,
+        tenant_id=tenant_id,
+        definition_checksum=definition_checksum,
+        definition_json=definition_json,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+
+def _version(user, flow: Flow, version: int = 1) -> FlowVersionModel:
+    return _published_flow_version(
         flow_id=flow.id,
         version=version,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -380,12 +408,12 @@ def _published_runtime_step(step: FlowStep) -> dict[str, object]:
     }
 
 
-def _runtime_version(user, flow: Flow, version: int = 1) -> FlowVersion:
-    return FlowVersion(
+def _runtime_version(user, flow: Flow, version: int = 1) -> FlowVersionModel:
+    return _published_flow_version(
         flow_id=flow.id,
         version=version,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=build_published_definition_json(
             flow_id=flow.id,
             name=flow.name,
@@ -1467,11 +1495,11 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     file_repo.get_list_by_id_for_owner.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=2,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -1575,11 +1603,11 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
     file_repo.get_list_by_id_for_owner.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=2,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -1650,11 +1678,11 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -2763,6 +2791,35 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
 
 
 @pytest.mark.asyncio
+async def test_get_run_versioned_view_rejects_checksum_drift_before_results(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    assert flow.id is not None
+    run = _run(user=user, flow_id=flow.id)
+    version = _runtime_version(user=user, flow=flow, version=run.flow_version)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = version.model_copy(
+        update={"definition_checksum": "stored-checksum-does-not-match"}
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.get_run_versioned_view(flow_id=flow.id, run_id=run.id)
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    flow_run_repo.list_step_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -2771,11 +2828,11 @@ async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=run.flow_version,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=build_published_definition_json(
             flow_id=flow.id,
             name=flow.name,
@@ -3136,11 +3193,11 @@ async def test_create_run_rejects_invalid_published_snapshot(
     flow = _flow(user=user, published_version=1)
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=definition_json,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -3150,6 +3207,40 @@ async def test_create_run_rejects_invalid_published_snapshot(
         await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
     assert exc_info.value.code == error_code
     assert exc_info.value.context == error_context
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_checksum_drift_before_creation_work(user) -> None:
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    version = _runtime_version(user=user, flow=flow, version=1)
+    flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = version.model_copy(
+        update={"definition_checksum": "stored-checksum-does-not-match"}
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    assert exc_info.value.context == {
+        "expected_checksum": "stored-checksum-does-not-match",
+        "current_checksum": published_definition_checksum(version.definition_json),
+    }
+    flow_run_repo.acquire_tenant_run_creation_lock.assert_not_awaited()
+    flow_run_repo.count_active_runs.assert_not_awaited()
     flow_run_repo.create.assert_not_awaited()
 
 
@@ -3172,11 +3263,11 @@ async def test_create_run_rejects_published_snapshot_without_executable_steps_as
     flow = _flow(user=user, published_version=1)
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json={"schema_version": 1, "flow_id": str(flow.id), "steps": []},
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -3213,11 +3304,11 @@ async def test_create_run_rejects_loaded_published_flow_without_id_as_internal_i
     flow = _flow(user=user, published_version=1).model_copy(update={"id": None})
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=requested_flow_id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=build_published_definition_json(
             flow_id=requested_flow_id,
             name=flow.name,
@@ -3422,11 +3513,11 @@ async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_c
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             published_steps,
@@ -3464,11 +3555,11 @@ async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -3510,11 +3601,11 @@ async def test_get_evidence_redacts_sensitive_values(user):
         }
     )
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -3621,7 +3712,9 @@ async def test_get_evidence_redacts_sensitive_values(user):
     )
     assert evidence["step_attempts"][0]["error_message"] == "Bearer [REDACTED]"
     assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v2"
-    assert evidence["debug_export"]["definition"]["checksum"] == "checksum"
+    assert evidence["debug_export"]["definition"]["checksum"] == (
+        flow_version_repo.get.return_value.definition_checksum
+    )
     assert evidence["debug_export"]["run"]["status"] == "queued"
     assert evidence["debug_export"]["steps"][0]["input"]["source"] is None
     assert evidence["debug_export"]["steps"][0]["mcp"]["servers"] == []
@@ -3644,11 +3737,11 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
     run = _run(user=user, flow_id=flow.id)
     flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -3753,11 +3846,11 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
     flow = _flow(user=user, published_version=1)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -3833,11 +3926,11 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
     run = _run(user=user, flow_id=flow.id)
     flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [_published_runtime_step(flow.steps[0])],
@@ -3909,11 +4002,11 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
     flow = _flow(user=user, published_version=1)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [_published_runtime_step(flow.steps[0])],
@@ -3963,11 +4056,11 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
     flow = _flow(user=user, published_version=1)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [
@@ -4020,11 +4113,11 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
     flow = _flow(user=user, published_version=1)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = FlowVersion(
+    flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
+        definition_checksum=None,
         definition_json=_published_definition_json(
             flow,
             [

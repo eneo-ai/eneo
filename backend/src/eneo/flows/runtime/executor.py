@@ -34,7 +34,6 @@ from eneo.flows.domain.flow import (
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
-    FlowVersion,
 )
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
@@ -95,8 +94,8 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
-    parse_published_runtime_steps,
-    published_definition_checksum,
+    PublishedDefinitionChecksumMismatchError,
+    parse_verified_published_definition,
 )
 from eneo.flows.runtime.claim_resolution import resolve_step_claim
 from eneo.flows.runtime.document_rendering import DocumentRenderService
@@ -652,8 +651,13 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
         )
         try:
-            self._validate_definition_checksum(version=version, run_id=run_id)
-        except BadRequestException as exc:
+            published_definition = parse_verified_published_definition(
+                version.definition_json,
+                expected_checksum=version.definition_checksum,
+                flow_version=version.version,
+            )
+            steps = published_definition.runtime_steps()
+        except PublishedDefinitionChecksumMismatchError as exc:
             await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
@@ -670,11 +674,6 @@ class FlowRunExecutor:
                 "status": "failed",
                 "error": FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value,
             }
-        try:
-            steps = parse_published_runtime_steps(
-                version.definition_json,
-                flow_version=version.version,
-            )
         except BadRequestException as exc:
             source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
             await self._terminalize_run(
@@ -2217,24 +2216,6 @@ class FlowRunExecutor:
         step: RuntimeStep,
     ) -> tuple[str, list[UUID]]:
         return await self._apply_output_cap(text=text, run=run, step=step)
-
-    @staticmethod
-    def _validate_definition_checksum(*, version: FlowVersion, run_id: UUID) -> None:
-        current_checksum = published_definition_checksum(version.definition_json)
-        if version.definition_checksum == current_checksum:
-            return
-
-        logger.error(
-            "flow_executor.definition_checksum_mismatch run_id=%s flow_id=%s version=%s expected_checksum=%s current_checksum=%s",
-            run_id,
-            version.flow_id,
-            version.version,
-            version.definition_checksum,
-            current_checksum,
-        )
-        raise BadRequestException(
-            "Published flow definition changed after publish. Republish the flow before running it."
-        )
 
     @staticmethod
     def _requires_assistant_snapshots(definition_json: dict[str, Any]) -> bool:

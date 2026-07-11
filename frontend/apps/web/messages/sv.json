@@ -4095,7 +4095,7 @@
   "flow_error_flow_evidence_audit_logging_failed": "Åtkomst till evidens kunde inte loggas. Försök igen senare.",
   "flow_error_flow_evidence_export_reason_required": "Ange en tydlig orsak innan du exporterar rå evidens.",
   "flow_error_flow_assistant_snapshot_drift": "Flödet ändrades medan körningen pågick. Publicera flödet på nytt och starta en ny körning.",
-  "flow_error_flow_definition_checksum_mismatch": "Den publicerade flödesdefinitionen ändrades före körning. Läs om körkontraktet och starta en ny körning.",
+  "flow_error_flow_definition_checksum_mismatch": "Den publicerade flödessnapshoten klarade inte integritetskontrollen. Be en flödesredigerare publicera en giltig version och starta sedan en ny körning.",
   "flow_error_flow_definition_invalid": "Den publicerade flödesdefinitionen är ogiltig. Be en flödesredigerare rätta och publicera flödet igen.",
   "flow_error_flow_definition_schema_version_missing": "Det publicerade flödet saknar schemaversion för definitionen. Be en flödesredigerare publicera flödet igen.",
   "flow_error_flow_definition_schema_version_unsupported": "Det publicerade flödet använder en schemaversion som inte stöds. Publicera flödet igen med den aktuella redigeraren innan du kör det.",

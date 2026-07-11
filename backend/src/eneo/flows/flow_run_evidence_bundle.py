@@ -25,6 +25,10 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.published_definition import (
+    PublishedDefinitionIntegrity,
+    inspect_published_definition_integrity,
+)
 from eneo.json_types import JsonObject, JsonValue
 
 _REVIEW_CHECKPOINT_FIELDS_EXCLUDED_FROM_EXPORT = {
@@ -51,6 +55,7 @@ class RedactedEvidenceSection:
 class EvidenceBundle:
     run: FlowRun
     version: FlowVersion
+    definition_integrity: PublishedDefinitionIntegrity
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
     result_files: Sequence[FlowRunStepResultFile]
@@ -73,6 +78,7 @@ class EvidenceBundle:
         return EvidenceBundlePayload(
             payload={
                 "run": self.run.model_dump(mode="json"),
+                "definition_integrity": self.definition_integrity.to_dict(),
                 "definition_snapshot": self.version.definition_json,
                 "step_results": [
                     _dump_result_record(
@@ -117,6 +123,7 @@ class EvidenceBundle:
 @dataclass(frozen=True)
 class RedactedEvidenceBundle:
     run: dict[str, Any]
+    definition_integrity: PublishedDefinitionIntegrity
     definition_snapshot: dict[str, Any]
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
@@ -133,6 +140,7 @@ class RedactedEvidenceBundle:
         return EvidenceBundlePayload(
             payload={
                 "run": dict(self.run),
+                "definition_integrity": self.definition_integrity.to_dict(),
                 "definition_snapshot": dict(self.definition_snapshot),
                 "step_results": [dict(item) for item in self.step_results],
                 "step_attempts": [dict(item) for item in self.step_attempts],
@@ -180,9 +188,15 @@ def build_evidence_bundle(
             )
         }
     )
+    definition_integrity = inspect_published_definition_integrity(
+        version.definition_json,
+        expected_checksum=version.definition_checksum,
+        flow_version=version.version,
+    )
     return EvidenceBundle(
         run=run,
         version=version,
+        definition_integrity=definition_integrity,
         step_results=tuple(step_results),
         step_attempts=tuple(step_attempts),
         result_files=tuple(result_files),
@@ -305,6 +319,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         )
     return RedactedEvidenceBundle(
         run=cast(dict[str, Any], run_result.value),
+        definition_integrity=bundle.definition_integrity,
         definition_snapshot=cast(dict[str, Any], definition_result.value),
         step_results=step_result_section.records,
         step_attempts=step_attempt_section.records,

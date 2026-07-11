@@ -18,6 +18,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
+    FlowVersions,
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
@@ -29,8 +30,10 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResultStatus,
 )
-from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.enums import FlowRunLifecycleSource, FlowStepAttemptStatus
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_factory import FlowFactory
+from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -44,7 +47,10 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.flows.published_definition import build_published_definition_json
+from eneo.flows.published_definition import (
+    build_published_definition_json,
+    published_definition_checksum,
+)
 from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.step_execution_result import (
@@ -815,6 +821,190 @@ async def test_flow_webhook_delivery_dead_letters_cancelled_run_without_http(
     assert delivery_state.dead_lettered_at is not None
     assert "no longer running" in delivery_state.delivery_last_error
     assert run_state == FlowRunStatus.CANCELLED.value
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_dead_letters_checksum_drift_without_http(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        definition_json = await session.scalar(
+            sa.select(FlowVersions.definition_json).where(
+                FlowVersions.flow_id == flow.id,
+                FlowVersions.version == run.flow_version,
+            )
+        )
+        assert isinstance(definition_json, dict)
+        await session.execute(
+            sa.update(FlowVersions)
+            .where(
+                FlowVersions.flow_id == flow.id,
+                FlowVersions.version == run.flow_version,
+            )
+            .values(definition_json={**definition_json, "name": "Corrupt snapshot"})
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        send_http_request = AsyncMock(
+            side_effect=AssertionError("checksum drift must fail before HTTP")
+        )
+        service._send_http_request = send_http_request
+        now = datetime.now(timezone.utc)
+
+        result = await service.deliver_due(now=now)
+        second_result = await service.deliver_due(now=now)
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.dead_lettered_at,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+        run_state = (
+            await session.execute(
+                sa.select(FlowRuns.status, FlowRuns.error_json).where(
+                    FlowRuns.id == run.id
+                )
+            )
+        ).one()
+
+    assert result.attempted_count == 1
+    assert result.delivered_count == 0
+    assert result.retry_scheduled_count == 0
+    assert result.dead_lettered_count == 1
+    assert second_result.attempted_count == 0
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
+    assert delivery_state.delivery_attempts == 1
+    assert delivery_state.dead_lettered_at is not None
+    assert run_state.status == FlowRunStatus.FAILED.value
+    run_error = FlowRunError.model_validate(run_state.error_json)
+    assert run_error.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    assert run_error.source is FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_dead_letters_malformed_definition_without_http(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        definition_json = await session.scalar(
+            sa.select(FlowVersions.definition_json).where(
+                FlowVersions.flow_id == flow.id,
+                FlowVersions.version == run.flow_version,
+            )
+        )
+        assert isinstance(definition_json, dict)
+        malformed_definition = {**definition_json, "steps": "not-an-array"}
+        await session.execute(
+            sa.update(FlowVersions)
+            .where(
+                FlowVersions.flow_id == flow.id,
+                FlowVersions.version == run.flow_version,
+            )
+            .values(
+                definition_json=malformed_definition,
+                definition_checksum=published_definition_checksum(malformed_definition),
+            )
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        send_http_request = AsyncMock(
+            side_effect=AssertionError("malformed definition must fail before HTTP")
+        )
+        service._send_http_request = send_http_request
+        now = datetime.now(timezone.utc)
+
+        result = await service.deliver_due(now=now)
+        second_result = await service.deliver_due(now=now)
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.dead_lettered_at,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+        run_state = (
+            await session.execute(
+                sa.select(FlowRuns.status, FlowRuns.error_json).where(
+                    FlowRuns.id == run.id
+                )
+            )
+        ).one()
+
+    assert result.attempted_count == 1
+    assert result.delivered_count == 0
+    assert result.retry_scheduled_count == 0
+    assert result.dead_lettered_count == 1
+    assert second_result.attempted_count == 0
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
+    assert delivery_state.delivery_attempts == 1
+    assert delivery_state.dead_lettered_at is not None
+    assert run_state.status == FlowRunStatus.FAILED.value
+    run_error = FlowRunError.model_validate(run_state.error_json)
+    assert run_error.code is FlowApiErrorCode.DEFINITION_STEPS_INVALID
+    assert run_error.source is FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
     send_http_request.assert_not_awaited()
 
 

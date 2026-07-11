@@ -340,10 +340,15 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH: _entry(
         category="Published definition",
-        surfaced_through="Run error payload",
-        cause="The published definition checksum changed before execution.",
-        consumer_action="Refetch the flow contract and start a run against the current publication.",
-        user_action="Reload the flow and start a new run.",
+        surfaced_through="API response and run error payload",
+        cause="The stored published snapshot no longer matches its recorded checksum.",
+        consumer_action=(
+            "Do not retry the pinned version; publish a valid version, start a new "
+            "run, and retain the old run for evidence."
+        ),
+        user_action=(
+            "Ask a flow editor to publish a valid version, then start a new run."
+        ),
     ),
     FlowApiErrorCode.DEFINITION_INVALID: _entry(
         category="Published definition",

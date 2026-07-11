@@ -13,7 +13,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-import eneo.flows.runtime.executor as executor_module
 import eneo.flows.runtime.flow_runtime_trace as flow_runtime_trace
 from eneo.authentication.auth_models import (
     ApiKeyPermission,
@@ -164,18 +163,18 @@ def _definition_step_with_default_snapshot(step: object) -> object:
     return normalized
 
 
-def FlowVersion(
+def _published_flow_version(
     *,
-    flow_id,
-    version,
-    tenant_id,
-    definition_checksum,
-    definition_json,
-    created_at,
-    updated_at,
+    flow_id: UUID,
+    version: int,
+    tenant_id: UUID,
+    definition_checksum: str | None,
+    definition_json: dict[str, object],
+    created_at: datetime,
+    updated_at: datetime,
 ) -> FlowVersionModel:
-    """Build canonical versions unless a test intentionally passes a bad checksum."""
-    if definition_checksum == "checksum":
+    """Complete a published fixture and derive its checksum by default."""
+    if definition_checksum is None:
         if isinstance(definition_json.get("steps"), list):
             schema_version_provided = "schema_version" in definition_json
             steps = definition_json["steps"]
@@ -804,11 +803,11 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -938,11 +937,11 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
     flow_run_repo.save_step_result = AsyncMock(side_effect=_save_step_result_in_order)
     flow_run_repo.finish_attempt = AsyncMock(side_effect=_finish_attempt_in_order)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1044,11 +1043,11 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
     )
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1167,11 +1166,11 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=running_step)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1299,11 +1298,11 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1369,11 +1368,11 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
     )
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1445,11 +1444,11 @@ async def test_execute_terminalizes_multiple_active_rerun_operations(
         side_effect=FlowRunRerunMultipleActiveOperationsError(flow_run_id=queued_run.id)
     )
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1539,11 +1538,11 @@ async def test_rerun_lineage_conflict_uses_specific_run_error_after_claim(user):
     )
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1611,11 +1610,11 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -1696,11 +1695,11 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2008,11 +2007,11 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2150,11 +2149,11 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
     flow_run_repo.list_step_results = AsyncMock(return_value=[existing])
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2219,11 +2218,11 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
     flow_run_repo.list_step_results = AsyncMock(return_value=[cancelled_result])
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2288,11 +2287,11 @@ async def test_execute_returns_run_in_progress_when_pending_results_exist(user):
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
     flow_run_repo.list_step_results = AsyncMock(return_value=[pending_result])
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2352,11 +2351,11 @@ async def test_execute_uses_persisted_next_attempt_no_for_attempt_lifecycle(user
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(side_effect=[[], [completed]])
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2432,11 +2431,11 @@ async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancel
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2517,11 +2516,11 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.save_step_result = AsyncMock(return_value=None)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2620,11 +2619,11 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
     )
     flow_run_repo.save_step_result = AsyncMock(return_value=completed)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2750,11 +2749,11 @@ async def test_execute_terminalizes_review_open_invariant_errors(
     )
     flow_run_repo.save_step_result = AsyncMock(return_value=completed)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2867,11 +2866,11 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(side_effect=[[], [completed_second]])
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -2959,11 +2958,11 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed_first)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -3240,11 +3239,11 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=None)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -3310,7 +3309,7 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         ],
     }
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
@@ -3351,6 +3350,54 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
 
 
 @pytest.mark.asyncio
+async def test_execute_terminalizes_malformed_definition_envelope(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    definition_json = {
+        "flow_id": str(queued_run.flow_id),
+        "name": "Malformed flow",
+        "steps": [],
+    }
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=stable_hash(definition_json),
+            definition_json=definition_json,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING.value,
+    }
+    flow_run_repo.create_or_get_attempt_started.assert_not_awaited()
+    run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+        "error"
+    ]
+    assert run_error.code is FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING
+    assert run_error.source is FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+
+
+@pytest.mark.asyncio
 async def test_execute_terminalizes_definition_without_executable_steps(user):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
@@ -3368,7 +3415,7 @@ async def test_execute_terminalizes_definition_without_executable_steps(user):
         "steps": [],
     }
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
@@ -3420,11 +3467,11 @@ async def test_execute_rejects_question_binding_input_contract_before_step_execu
     )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -4535,11 +4582,11 @@ async def test_prior_results_bootstrap_once(user):
         ]
     )
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -4625,11 +4672,11 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_repo.claim_step_result = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -4674,9 +4721,7 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
 
 
 @pytest.mark.asyncio
-async def test_execute_fails_before_parse_when_definition_checksum_drifted(
-    user, monkeypatch
-):
+async def test_execute_terminalizes_checksum_drift_before_step_claim(user):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     step_id = uuid4()
@@ -4688,14 +4733,8 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock()
     flow_run_repo.claim_step_result = AsyncMock()
-    parse_published_runtime_steps = MagicMock()
-    monkeypatch.setattr(
-        executor_module,
-        "parse_published_runtime_steps",
-        parse_published_runtime_steps,
-    )
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
@@ -4730,7 +4769,6 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(
         "status": "failed",
         "error": FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value,
     }
-    parse_published_runtime_steps.assert_not_called()
     flow_run_repo.list_step_results.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
@@ -4751,11 +4789,11 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
     flow_run_repo.claim_step_result = AsyncMock()
     executor._load_assistant = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "schema_version": 1,
                 "steps": [
@@ -4889,11 +4927,11 @@ async def test_execute_audits_completed_run_terminal_state(user):
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(return_value=[completed_result])
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {
@@ -4967,11 +5005,11 @@ async def test_execute_audits_failed_run_terminal_state(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
-        return_value=FlowVersion(
+        return_value=_published_flow_version(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
+            definition_checksum=None,
             definition_json={
                 "steps": [
                     {

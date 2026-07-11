@@ -56,9 +56,14 @@ A flow definition lives inside a space and contains:
 
 That split is intentional. Draft editing stays human-governed, while runtime execution can safely belong to a machine principal.
 
-Published versions are schema-versioned and checksummed. When a run starts,
-Eneo verifies that the stored definition still matches the checksum created at
-publish time before it parses or claims any step work.
+Published versions are schema-versioned and checksummed. Eneo verifies that the
+stored definition still matches the checksum created at publish time before any
+functional read uses it—for example, run creation, rerun, runtime-contract and
+versioned-graph reads, webhook delivery, and worker execution. A mismatch fails
+closed with `flow_definition_checksum_mismatch`. Do not retry an operation pinned
+to that version: publish a valid version and start a new run. Keep the old run for
+authorized evidence and forensic inspection; republishing does not repair its
+immutable snapshot.
 
 ### Assistant snapshots at publish time
 
@@ -96,14 +101,14 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 
 ### Core step fields
 
-| Field                            | What it controls                                   | Common values                                                                      | Default behavior  |
-| -------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------- |
-| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post`       | Explicit per step |
-| `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `image`, `any`                        | Explicit per step |
+| Field                            | What it controls                                   | Common values                                                                                      | Default behavior  |
+| -------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------- |
+| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post`                       | Explicit per step |
+| `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `image`, `any`                                        | Explicit per step |
 | `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill` | Explicit per step |
-| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                      | Explicit per step |
-| `mcp_policy`                     | How MCP tool access is handled for the step        | `inherit`, `restricted`                                                            | Usually `inherit` |
-| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                          | No override       |
+| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                      | Explicit per step |
+| `mcp_policy`                     | How MCP tool access is handled for the step        | `inherit`, `restricted`                                                                            | Usually `inherit` |
+| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                                          | No override       |
 
 ### Step chaining
 
@@ -155,7 +160,7 @@ If a published flow exposes form fields, the client sends those values inside `i
 | `output_mode`     | What it is for                                    | Constraints                                                                          |
 | ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `pass_through`    | Standard LLM-backed generation                    | Historical name; the step still runs an LLM and returns the configured `output_type` |
-| `compose_text`    | Deterministic text assembly from resolved refs     | Requires `input_type=text`, `output_type=text`, and authored input bindings         |
+| `compose_text`    | Deterministic text assembly from resolved refs    | Requires `input_type=text`, `output_type=text`, and authored input bindings          |
 | `http_post`       | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config                                                  |
 | `transcribe_only` | Audio transcription                               | Requires `input_type=audio` and `output_type=text`                                   |
 | `render_verbatim` | Zero-LLM PDF/DOCX rendering from resolved text    | Requires `input_type=text` and `output_type=pdf` or `output_type=docx`               |
@@ -384,6 +389,12 @@ If you need the endpoint-by-endpoint version of this model, use the access matri
 ## Evidence and classification-aware export
 
 Flows use a tiered evidence model rather than a binary debug/no-debug split.
+
+Authorized evidence is the deliberate forensic exception to functional rejection.
+It preserves the stored snapshot and reports `definition_integrity.status`,
+`expected_checksum`, and `current_checksum`. An `invalid` snapshot is evidence of
+corruption, not a trusted runtime definition; consumers must not execute or silently
+normalize it.
 
 | Tier            | Purpose                                                               |
 | --------------- | --------------------------------------------------------------------- |

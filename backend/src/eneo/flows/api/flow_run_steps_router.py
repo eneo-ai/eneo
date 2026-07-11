@@ -135,6 +135,15 @@ Service-key principals may use this endpoint for published-flow runtime topology
 their own run snapshots. Authoring still requires a user principal.
     """,
     responses={
+        400: error_response(
+            description=(
+                "The version-pinned published snapshot failed integrity verification. "
+                "The machine-readable code is `flow_definition_checksum_mismatch`."
+            ),
+            message="Published Flow definition integrity verification failed.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
+        ),
         403: error_response(
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
