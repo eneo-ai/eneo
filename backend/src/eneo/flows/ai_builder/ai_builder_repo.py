@@ -22,9 +22,6 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
-from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    file_ids_from_metadata,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
@@ -41,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderNotFoundException,
     AIBuilderProviderOutcomeUnknownException,
+    AIBuilderPublicError,
 )
 from eneo.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
@@ -85,7 +83,7 @@ def _session_send_lock_available_clause() -> sa.ColumnElement[bool]:
         ),
         sa.and_(
             BuilderSessions.lock_expires_at.is_not(None),
-            BuilderSessions.lock_expires_at <= sa.func.now(),
+            BuilderSessions.lock_expires_at <= sa.func.clock_timestamp(),
         ),
     )
 
@@ -537,6 +535,7 @@ class AIBuilderRepository:
                         lock_token=None,
                         locked_at=None,
                         lock_expires_at=None,
+                        latest_turn_state=_terminal_turn_state_after_lock_clear(),
                         updated_at=now,
                     )
                 )
@@ -551,38 +550,6 @@ class AIBuilderRepository:
                     )
                 raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while updating session status.",
-                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
-                )
-
-    async def update_session_conversation(
-        self,
-        *,
-        session_id: UUID,
-        tenant_id: UUID,
-        conversation: list[ConversationMessage],
-        lease: SessionSendLease,
-    ) -> None:
-        async with self._transaction():
-            compacted = compact_ai_builder_conversation(conversation)
-            serialized = [msg.model_dump(mode="json") for msg in compacted]
-            stmt = (
-                update(BuilderSessions)
-                .where(
-                    BuilderSessions.id == session_id,
-                    BuilderSessions.tenant_id == tenant_id,
-                    *_lease_filters(lease),
-                )
-                .values(
-                    conversation=serialized,
-                    updated_at=datetime.now(timezone.utc),
-                )
-            )
-            updated_session_id = await self.session.scalar(
-                stmt.returning(BuilderSessions.id)
-            )
-            if updated_session_id is None:
-                raise AIBuilderBadRequestException(
-                    "The AI Builder session lease was lost while updating conversation state.",
                     code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
 
@@ -606,12 +573,6 @@ class AIBuilderRepository:
             return []
 
         async with self._transaction():
-            committed_file_ids: list[UUID] = []
-            for message in conversation:
-                if message.role != "user":
-                    continue
-                committed_file_ids.extend(file_ids_from_metadata(message.metadata))
-
             stmt = select(BuilderSessions).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
@@ -649,21 +610,6 @@ class AIBuilderRepository:
                     "The AI Builder session lease was lost while saving conversation messages.",
                     code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
-            if committed_file_ids:
-                rows = [
-                    {
-                        "session_id": session_id,
-                        "file_id": file_id,
-                        "tenant_id": tenant_id,
-                    }
-                    for file_id in dict.fromkeys(committed_file_ids)
-                ]
-                stmt = pg_insert(BuilderSessionFiles).values(rows)
-                stmt = stmt.on_conflict_do_nothing(
-                    index_elements=["session_id", "file_id"]
-                )
-                await self.session.execute(stmt)
-
             return compacted
 
     async def update_session_latest_plan(
@@ -710,6 +656,7 @@ class AIBuilderRepository:
                 BuilderSessions.active_request_id,
                 BuilderSessions.lock_token,
                 BuilderSessions.lock_expires_at,
+                sa.func.clock_timestamp(),
             ).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
@@ -725,6 +672,7 @@ class AIBuilderRepository:
                 active_request_id,
                 lock_token,
                 lock_expires_at,
+                database_now,
             ) = current_row
             current_status = SessionStatus(current_status_value)
             now = datetime.now(timezone.utc)
@@ -751,7 +699,9 @@ class AIBuilderRepository:
                         code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
                     )
                 lock_is_set = active_request_id is not None or lock_token is not None
-                lock_is_expired = lock_expires_at is not None and lock_expires_at <= now
+                lock_is_expired = (
+                    lock_expires_at is not None and lock_expires_at <= database_now
+                )
                 if lock_is_set and not lock_is_expired:
                     raise AIBuilderBadRequestException(
                         "An active send is currently in progress for this session.",
@@ -771,6 +721,7 @@ class AIBuilderRepository:
                     "lock_token": None,
                     "locked_at": None,
                     "lock_expires_at": None,
+                    "latest_turn_state": _terminal_turn_state_after_lock_clear(),
                     "updated_at": now,
                 }
 
@@ -981,10 +932,16 @@ class AIBuilderRepository:
                     )
                 stored_message = _latest_turn_user_message(row)
                 if effective_state is BuilderTurnState.COMMITTED:
+                    committed_error = (
+                        AIBuilderPublicError.model_validate(row.latest_turn_error_jsonb)
+                        if row.latest_turn_error_jsonb is not None
+                        else None
+                    )
                     return SessionTurnClaim(
                         disposition=SessionTurnClaimDisposition.REPLAY_COMMITTED,
                         user_message=stored_message,
                         base_planning_state_version=row.planning_state_version,
+                        committed_error=committed_error,
                     )
                 if lock_is_active:
                     raise AIBuilderBadRequestException(
@@ -1061,7 +1018,7 @@ class AIBuilderRepository:
             row.latest_turn_request_jsonb = acceptance.request
             row.latest_turn_state = BuilderTurnState.OPEN.value
             row.latest_turn_message_id = UUID(stored_message.message_id)
-            row.latest_turn_error_code = None
+            row.latest_turn_error_jsonb = None
             row.updated_at = now
             if acceptance.file_ids:
                 membership_stmt = pg_insert(BuilderSessionFiles).values(
@@ -1122,7 +1079,7 @@ class AIBuilderRepository:
         self,
         *,
         turn: SessionSendTurn,
-        error_code: AIBuilderErrorCode | None = None,
+        error: AIBuilderPublicError | None = None,
     ) -> None:
         async with self._transaction():
             stmt = (
@@ -1134,8 +1091,8 @@ class AIBuilderRepository:
                 )
                 .values(
                     latest_turn_state=BuilderTurnState.COMMITTED.value,
-                    latest_turn_error_code=(
-                        error_code.value if error_code is not None else None
+                    latest_turn_error_jsonb=(
+                        error.model_dump(mode="json") if error is not None else None
                     ),
                     updated_at=datetime.now(timezone.utc),
                 )
@@ -1615,7 +1572,7 @@ class _SessionRowData(TypedDict):
     latest_turn_request_jsonb: FlowPersistedJsonObject | None
     latest_turn_state: str | None
     latest_turn_message_id: UUID | None
-    latest_turn_error_code: str | None
+    latest_turn_error_jsonb: FlowPersistedJsonObject | None
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -1665,8 +1622,9 @@ def _session_row_data(row: Any) -> _SessionRowData:
             "latest_turn_message_id": cast(
                 UUID | None, mapping.get("latest_turn_message_id")
             ),
-            "latest_turn_error_code": cast(
-                str | None, mapping.get("latest_turn_error_code")
+            "latest_turn_error_jsonb": cast(
+                FlowPersistedJsonObject | None,
+                mapping.get("latest_turn_error_jsonb"),
             ),
             "created_at": cast(datetime | None, mapping.get("created_at")),
             "updated_at": cast(datetime | None, mapping.get("updated_at")),
@@ -1697,7 +1655,10 @@ def _session_row_data(row: Any) -> _SessionRowData:
         ),
         "latest_turn_state": cast(str | None, row.latest_turn_state),
         "latest_turn_message_id": cast(UUID | None, row.latest_turn_message_id),
-        "latest_turn_error_code": cast(str | None, row.latest_turn_error_code),
+        "latest_turn_error_jsonb": cast(
+            FlowPersistedJsonObject | None,
+            row.latest_turn_error_jsonb,
+        ),
         "created_at": cast(datetime | None, row.created_at),
         "updated_at": cast(datetime | None, row.updated_at),
     }
@@ -1777,9 +1738,9 @@ def _session_from_row(
             request=request,
             state=effective_state,
             user_message_id=message_id,
-            error_code=(
-                AIBuilderErrorCode(data["latest_turn_error_code"])
-                if data["latest_turn_error_code"] is not None
+            error=(
+                AIBuilderPublicError.model_validate(data["latest_turn_error_jsonb"])
+                if data["latest_turn_error_jsonb"] is not None
                 else None
             ),
         )

@@ -37,6 +37,7 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderTurnState,
     ConversationMessage,
     FlowBuilderEditApproval,
     FlowBuilderProposal,
@@ -52,6 +53,7 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    build_ai_builder_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -916,6 +918,88 @@ async def test_mark_plan_applied_rejects_active_send_and_rolls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mark_processing", "expected_state"),
+    [
+        (False, BuilderTurnState.FAILED_BEFORE_PROVIDER),
+        (True, BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN),
+    ],
+    ids=["open", "processing"],
+)
+async def test_mark_plan_applied_terminalizes_an_expired_send_turn(
+    db_container,
+    mark_processing: bool,
+    expected_state: BuilderTurnState,
+) -> None:
+    async with db_container() as container:
+        user = container.user()
+        space = Spaces(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            name=f"ai-builder-apply-expired-send-{uuid4().hex}",
+        )
+        container.session().add(space)
+        await container.session().flush()
+
+        repo = AIBuilderRepository(container.session())
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = await repo.create_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(
+                    spec=_make_builder_plan_spec(existing_step_ref=None)
+                )
+            ),
+        )
+        await repo.update_plan_status(
+            plan_id=plan.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.APPROVED,
+        )
+        await repo.update_session_status_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+        if mark_processing:
+            await repo.mark_session_turn_processing(turn=turn)
+
+        await repo.mark_plan_applied(
+            plan_id=plan.id,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            flow_id=None,
+        )
+        persisted = await repo.get_session(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        lock_row = await _load_session_send_lock(
+            repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert persisted.status is SessionStatus.APPLIED
+    assert persisted.latest_turn is not None
+    assert persisted.latest_turn.state is expected_state
+    assert lock_row == (None, None, None, None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_nulls_in_recency_order(
     client,
     bearer_token,
@@ -1078,11 +1162,21 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mark_processing", "expected_state"),
+    [
+        (False, BuilderTurnState.FAILED_BEFORE_PROVIDER),
+        (True, BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN),
+    ],
+    ids=["open", "processing"],
+)
 async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
+    mark_processing: bool,
+    expected_state: BuilderTurnState,
 ):
     space_id = await _create_space_with_planner_model(
         client=client,
@@ -1100,13 +1194,15 @@ async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
     stale_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        await _claim_session_send_turn(
+        turn = await _claim_session_send_turn(
             repo=repo,
             session_id=session_id,
             tenant_id=tenant_id,
             lease=stale_lease,
             lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
+        if mark_processing:
+            await repo.mark_session_turn_processing(turn=turn)
 
     response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{old_plan_id}/revise",
@@ -1138,6 +1234,8 @@ async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
 
     assert fetched.latest_plan_id == new_plan_id
     assert fetched.status == SessionStatus.AWAITING_APPROVAL
+    assert fetched.latest_turn is not None
+    assert fetched.latest_turn.state is expected_state
     assert stale_refresh is False
     assert lock_row == (None, None, None, None)
 
@@ -1261,7 +1359,7 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
                 "client_turn_id": str(client_turn_id),
                 "state": "committed",
                 "user_message_id": persisted_messages[0]["message_id"],
-                "error_code": None,
+                "error": None,
                 "requires_duplicate_provider_spend_acknowledgement": False,
                 "retry_request": {
                     "client_turn_id": str(client_turn_id),
@@ -1348,6 +1446,118 @@ async def test_ai_builder_same_turn_key_replays_without_provider_or_duplicates(
                 replayed_session.json()["latest_turn"]
                 == first_session.json()["latest_turn"]
             )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_committed_error_replays_exactly_without_provider_work(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Committed Error Replay",
+    )
+    session_id = UUID(
+        await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+    )
+    request = SendMessageRequest(
+        client_turn_id=uuid4(),
+        message="Build a report flow.",
+        ui_language="sv",
+    )
+    committed_error = build_ai_builder_error(
+        message="The proposal did not satisfy the required source contract.",
+        code=AIBuilderErrorCode.PLANNER_REJECTED,
+        request_id="committed-error-request",
+        diagnostic_context={"outcome_kind": "server_confirm_requirements"},
+        details={"quality_failure_codes": "missing_source_refs"},
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        tenant_id = container.user().tenant_id
+        request_fingerprint = request.request_fingerprint()
+        preflight = await repo.preflight_session_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            client_turn_id=request.client_turn_id,
+            request_fingerprint=request_fingerprint,
+            acknowledge_duplicate_provider_spend=False,
+        )
+        lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+        user_message = ConversationMessage(role="user", content=request.message)
+        claim = await repo.accept_session_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+            lock_lease_seconds=30,
+            acceptance=SessionTurnAcceptance(
+                client_turn_id=request.client_turn_id,
+                request_fingerprint=request_fingerprint,
+                request=request.retry_snapshot(),
+                user_message=user_message,
+                file_ids=(),
+            ),
+            preparation_baseline=preflight.baseline,
+        )
+        turn = SessionSendTurn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+            base_planning_state_version=claim.base_planning_state_version,
+        )
+        await repo.complete_session_turn(turn=turn, error=committed_error)
+        await repo.release_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+        )
+
+    before_replay = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert before_replay.status_code == 200, before_replay.text
+    assert before_replay.json()["latest_turn"]["error"] == committed_error.model_dump(
+        mode="json",
+    )
+
+    completion = AsyncMock(side_effect=AssertionError("Provider work must not replay."))
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        replay_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=str(session_id),
+            message=request.message,
+            client_turn_id=request.client_turn_id,
+        )
+
+    assert [event["event"] for event in replay_events] == ["error", "done"]
+    assert replay_events[0]["data"] == committed_error.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    completion.assert_not_awaited()
+
+    after_replay = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert after_replay.status_code == 200, after_replay.text
+    assert after_replay.json() == before_replay.json()
 
 
 @pytest.mark.integration
@@ -5030,7 +5240,7 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
                 session_id=session.id,
                 tenant_id=session.tenant_id,
             )
-            await repo.update_session_conversation(
+            await repo.append_session_messages(
                 session_id=session.id,
                 tenant_id=session.tenant_id,
                 conversation=[

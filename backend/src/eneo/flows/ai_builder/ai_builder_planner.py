@@ -21,7 +21,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorEvent,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
-from eneo.flows.ai_builder.ai_builder_events import build_done_event
+from eneo.flows.ai_builder.ai_builder_events import (
+    build_committed_turn_replay_events,
+    build_done_event,
+)
 from eneo.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -157,15 +160,11 @@ class AIBuilderPlanner:
                 before_provider_call=before_provider_call,
             )
         ]
-        error_code = next(
-            (
-                event.data.code
-                for event in events
-                if isinstance(event, AIBuilderErrorEvent)
-            ),
+        error = next(
+            (event.data for event in events if isinstance(event, AIBuilderErrorEvent)),
             None,
         )
-        await self.repo.complete_session_turn(turn=turn, error_code=error_code)
+        await self.repo.complete_session_turn(turn=turn, error=error)
         for event in events:
             yield event
 
@@ -206,7 +205,10 @@ class AIBuilderPlanner:
                 ),
             )
         if turn_preflight.replayed:
-            yield build_done_event()
+            latest_turn = turn_preflight.session.latest_turn
+            replay_error = latest_turn.error if latest_turn is not None else None
+            for event in build_committed_turn_replay_events(replay_error):
+                yield event
             return
 
         if budget_policy is None:
@@ -276,7 +278,10 @@ class AIBuilderPlanner:
             preparation_baseline=turn_preflight.baseline,
         ) as claimed_turn:
             if claimed_turn.replayed:
-                yield build_done_event()
+                for event in build_committed_turn_replay_events(
+                    claimed_turn.committed_error
+                ):
+                    yield event
                 return
 
             turn = claimed_turn.turn
@@ -483,9 +488,9 @@ class AIBuilderPlanner:
                             ]
                         )
                     else:
-                        error_code = next(
+                        error = next(
                             (
-                                event.data.code
+                                event.data
                                 for event in pending_events
                                 if isinstance(event, AIBuilderErrorEvent)
                             ),
@@ -493,7 +498,7 @@ class AIBuilderPlanner:
                         )
                         await self.repo.complete_session_turn(
                             turn=turn,
-                            error_code=error_code,
+                            error=error,
                         )
                     for event in pending_events:
                         yield event

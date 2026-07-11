@@ -17,8 +17,12 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
+    BuilderSession,
+    BuilderTurnLifecycle,
+    BuilderTurnState,
     ConversationMessage,
     SessionStatus,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -1440,7 +1444,10 @@ async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_di
             new_planning_state_version=2,
         )
 
-    planner.repo.refresh_session_send_lease.side_effect = refresh_fails
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_send_lease._refresh_session_send_lease",
+        refresh_fails,
+    )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
         wait_for_refresh_loss,
@@ -1514,7 +1521,7 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
 
 
 @pytest.mark.asyncio
-async def test_send_message_server_continuation_preserves_proposal_error_code(
+async def test_send_message_server_continuation_commits_the_exact_proposal_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     planner = _make_planner()
@@ -1544,13 +1551,18 @@ async def test_send_message_server_continuation_preserves_proposal_error_code(
             ),
         )
 
+    committed_error_event = build_ai_builder_error_event(
+        message="Invalid proposal",
+        code=AIBuilderErrorCode.PLANNER_REJECTED,
+        request_id="proposal-error-request",
+        diagnostic_context={"outcome_kind": "server_confirm_requirements"},
+        details={"quality_failure_codes": "missing_source_refs"},
+    )
+
     async def fake_propose_plan(
         **_: object,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        yield build_ai_builder_error_event(
-            message="Invalid proposal",
-            code=AIBuilderErrorCode.PLANNER_REJECTED,
-        )
+        yield committed_error_event
 
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
@@ -1563,8 +1575,8 @@ async def test_send_message_server_continuation_preserves_proposal_error_code(
     assert [event["event"] for event in events] == ["status", "error", "done"]
     planner.repo.complete_session_turn.assert_awaited_once()
     assert (
-        planner.repo.complete_session_turn.await_args.kwargs["error_code"]
-        is AIBuilderErrorCode.PLANNER_REJECTED
+        planner.repo.complete_session_turn.await_args.kwargs["error"]
+        == committed_error_event.data
     )
 
 
@@ -1606,7 +1618,10 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
         await asyncio.wait_for(refresh_attempted.wait(), timeout=12)
         yield build_text_event("proposal result")
 
-    planner.repo.refresh_session_send_lease.side_effect = refresh_fails
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_send_lease._refresh_session_send_lease",
+        refresh_fails,
+    )
     monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
 
     events = await _collect_send_message_events(planner, session_id=session_id)
@@ -1877,3 +1892,68 @@ async def test_send_message_rejects_closed_session_before_claiming_lock() -> Non
             pass
 
     planner.repo.claim_session_send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_message_replays_the_exact_committed_error_without_provider_work() -> (
+    None
+):
+    planner = _make_planner()
+    tenant_id = cast(UUID, planner.user.tenant_id)
+    committed_error = build_ai_builder_error_event(
+        message="The committed planner failure.",
+        code=AIBuilderErrorCode.PLANNER_REJECTED,
+        request_id="committed-request",
+        diagnostic_context={"outcome_kind": "server_confirm_requirements"},
+        details={"quality_failure_codes": "missing_source_refs"},
+    ).data
+    session = BuilderSession(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        space_id=uuid4(),
+        target_kind=TargetKind.CREATE,
+        latest_turn=BuilderTurnLifecycle(
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request=_test_request_snapshot("Build a flow"),
+            state=BuilderTurnState.COMMITTED,
+            user_message_id=uuid4(),
+            error=committed_error,
+        ),
+    )
+    preflight = SessionTurnPreflight(
+        session=session,
+        baseline=SessionTurnPreparationBaseline(
+            session_status=SessionStatus.CHATTING,
+            latest_plan_id=None,
+            planning_state_version=0,
+            latest_turn_id=_TEST_CLIENT_TURN_ID,
+            latest_turn_state=BuilderTurnState.COMMITTED,
+            attachment_file_ids=(),
+        ),
+        replayed=True,
+    )
+
+    events = [
+        encode_ai_builder_stream_event(event)
+        async for event in planner.send_message(
+            session_id=session.id,
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot("Build a flow"),
+            message="Build a flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            turn_preflight=preflight,
+        )
+    ]
+
+    assert events == [
+        {
+            "event": "error",
+            "data": committed_error.model_dump_json(exclude_none=True),
+        },
+        {"event": "done", "data": ""},
+    ]
+    planner.repo.accept_session_turn.assert_not_awaited()
+    planner.litellm_client.assert_not_awaited()

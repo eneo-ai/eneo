@@ -8816,7 +8816,7 @@ export interface components {
        * Format: uuid
        */
       user_message_id: string;
-      error_code?: components["schemas"]["AIBuilderErrorCode"] | null;
+      error?: components["schemas"]["AIBuilderPublicError"] | null;
       /** Requires Duplicate Provider Spend Acknowledgement */
       requires_duplicate_provider_spend_acknowledgement: boolean;
       retry_request: components["schemas"]["SendMessageRequest"];

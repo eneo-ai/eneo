@@ -4,9 +4,9 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from eneo.database.database import sessionmanager
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
     ConversationMessage,
@@ -14,7 +14,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderProviderOutcomeUnknownException,
+    AIBuilderPublicError,
 )
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -25,9 +27,6 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
-if TYPE_CHECKING:
-    from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-
 logger = get_logger(__name__)
 
 
@@ -37,6 +36,7 @@ class ClaimedSessionSendTurn:
     lease_lost_event: asyncio.Event
     user_message: ConversationMessage
     replayed: bool = False
+    committed_error: AIBuilderPublicError | None = None
 
 
 @asynccontextmanager
@@ -74,11 +74,11 @@ async def claim_ai_builder_send_turn(
             lease_lost_event=lease_lost_event,
             user_message=claim.user_message,
             replayed=True,
+            committed_error=claim.committed_error,
         )
         return
     lease_task = asyncio.create_task(
         _maintain_send_lock_lease(
-            repo=repo,
             session_id=session_id,
             tenant_id=tenant_id,
             lease=lease,
@@ -134,7 +134,6 @@ def _send_lock_refresh_interval_seconds() -> int:
 
 async def _maintain_send_lock_lease(
     *,
-    repo: "AIBuilderRepository",
     session_id: UUID,
     tenant_id: UUID,
     lease: SessionSendLease,
@@ -150,7 +149,7 @@ async def _maintain_send_lock_lease(
             return
         except asyncio.TimeoutError:
             try:
-                refreshed = await repo.refresh_session_send_lease(
+                refreshed = await _refresh_session_send_lease(
                     session_id=session_id,
                     tenant_id=tenant_id,
                     lease=lease,
@@ -178,3 +177,19 @@ async def _maintain_send_lock_lease(
                 )
                 lease_lost_event.set()
                 return
+
+
+async def _refresh_session_send_lease(
+    *,
+    session_id: UUID,
+    tenant_id: UUID,
+    lease: SessionSendLease,
+    lock_lease_seconds: int,
+) -> bool:
+    async with sessionmanager.session() as session:
+        return await AIBuilderRepository(session).refresh_session_send_lease(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+            lock_lease_seconds=lock_lease_seconds,
+        )

@@ -725,7 +725,7 @@ erDiagram
     jsonb latest_turn_request_jsonb "nullable"
     varchar latest_turn_state "nullable"
     uuid latest_turn_message_id "nullable"
-    varchar latest_turn_error_code "nullable"
+    jsonb latest_turn_error_jsonb "nullable"
     uuid id PK "required"
     timestamp created_at "required"
     timestamp updated_at "required"

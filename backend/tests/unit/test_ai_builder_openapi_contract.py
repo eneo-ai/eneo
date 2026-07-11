@@ -319,6 +319,10 @@ def test_openapi_ai_builder_turn_retry_contract_is_strict(
     assert lifecycle["properties"]["retry_request"] == {
         "$ref": "#/components/schemas/SendMessageRequest"
     }
+    assert lifecycle["properties"]["error"]["anyOf"][0] == {
+        "$ref": "#/components/schemas/AIBuilderPublicError"
+    }
+    assert "error_code" not in lifecycle["properties"]
     assert set(schemas["BuilderTurnState"]["enum"]) == {
         "open",
         "processing",

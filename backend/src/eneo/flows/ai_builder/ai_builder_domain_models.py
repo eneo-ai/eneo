@@ -19,7 +19,7 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditConfidence,
     FlowEditDiff,
 )
-from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -138,7 +138,7 @@ class BuilderTurnLifecycle(BaseModel):
     request: FlowPersistedJsonObject
     state: BuilderTurnState
     user_message_id: UUID
-    error_code: AIBuilderErrorCode | None = None
+    error: AIBuilderPublicError | None = None
 
 
 class BuilderSession(BaseModel):

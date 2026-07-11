@@ -88,6 +88,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_ERROR,
     SSE_EVENT_STATUS,
     SSE_EVENT_USAGE,
+    build_committed_turn_replay_events,
     build_done_event,
     build_usage_event,
     encode_ai_builder_stream_event,
@@ -492,7 +493,7 @@ def _to_session_response(
                 client_turn_id=session.latest_turn.client_turn_id,
                 state=session.latest_turn.state,
                 user_message_id=session.latest_turn.user_message_id,
-                error_code=session.latest_turn.error_code,
+                error=session.latest_turn.error,
                 requires_duplicate_provider_spend_acknowledgement=(
                     session.latest_turn.state
                     is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
@@ -824,11 +825,14 @@ async def send_message(
     async def event_stream() -> AsyncGenerator[ServerSentEvent, None]:
         try:
             if turn_preflight.replayed:
-                wire_done_event = encode_ai_builder_stream_event(build_done_event())
-                yield ServerSentEvent(
-                    data=wire_done_event["data"],
-                    event=wire_done_event["event"],
-                )
+                latest_turn = turn_preflight.session.latest_turn
+                replay_error = latest_turn.error if latest_turn is not None else None
+                for replay_event in build_committed_turn_replay_events(replay_error):
+                    wire_event = encode_ai_builder_stream_event(replay_event)
+                    yield ServerSentEvent(
+                        data=wire_event["data"],
+                        event=wire_event["event"],
+                    )
                 return
             try:
                 async with database_session.begin():
@@ -856,11 +860,18 @@ async def send_message(
                     ),
                 )
                 if replay_preflight.replayed:
-                    wire_done_event = encode_ai_builder_stream_event(build_done_event())
-                    yield ServerSentEvent(
-                        data=wire_done_event["data"],
-                        event=wire_done_event["event"],
+                    latest_turn = replay_preflight.session.latest_turn
+                    replay_error = (
+                        latest_turn.error if latest_turn is not None else None
                     )
+                    for replay_event in build_committed_turn_replay_events(
+                        replay_error
+                    ):
+                        wire_event = encode_ai_builder_stream_event(replay_event)
+                        yield ServerSentEvent(
+                            data=wire_event["data"],
+                            event=wire_event["event"],
+                        )
                     return
                 raise
             if (

@@ -5,6 +5,10 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorEvent,
+    AIBuilderPublicError,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
@@ -59,6 +63,14 @@ def build_done_event() -> AIBuilderDoneEvent:
     return AIBuilderDoneEvent()
 
 
+def build_committed_turn_replay_events(
+    error: AIBuilderPublicError | None,
+) -> tuple[AIBuilderStreamEvent, ...]:
+    if error is None:
+        return (build_done_event(),)
+    return (AIBuilderErrorEvent(data=error), build_done_event())
+
+
 def build_question_event(
     question_data: StructuredQuestionPayload,
 ) -> AIBuilderQuestionEvent:
@@ -94,6 +106,7 @@ __all__ = [
     "SSE_EVENT_TEXT",
     "SSE_EVENT_USAGE",
     "build_done_event",
+    "build_committed_turn_replay_events",
     "build_plan_event",
     "build_question_event",
     "build_requirements_summary_event",

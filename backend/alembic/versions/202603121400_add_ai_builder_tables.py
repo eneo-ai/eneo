@@ -123,8 +123,8 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "latest_turn_error_code",
-            sa.String(64),
+            "latest_turn_error_jsonb",
+            postgresql.JSONB(),
             nullable=True,
         ),
         sa.Column(
@@ -179,13 +179,17 @@ def upgrade() -> None:
             "AND latest_turn_request_jsonb IS NULL "
             "AND latest_turn_state IS NULL "
             "AND latest_turn_message_id IS NULL "
-            "AND latest_turn_error_code IS NULL) "
+            "AND latest_turn_error_jsonb IS NULL) "
             "OR (latest_turn_id IS NOT NULL "
             "AND latest_turn_request_fingerprint IS NOT NULL "
             "AND latest_turn_request_jsonb IS NOT NULL "
             "AND latest_turn_state IS NOT NULL "
             "AND latest_turn_message_id IS NOT NULL)",
             name="ck_builder_sessions_latest_turn_all_or_none",
+        ),
+        sa.CheckConstraint(
+            "latest_turn_error_jsonb IS NULL OR latest_turn_state = 'committed'",
+            name="ck_builder_sessions_latest_turn_error_committed",
         ),
         sa.CheckConstraint(
             "latest_turn_state IS NULL OR "

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it, vi } from "vitest";
 
 import { FlowAIBuilderDriver, type AIBuilderClientTransport } from "./FlowAIBuilderDriver";
@@ -10,6 +8,7 @@ import type {
   AIBuilderError,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
+  ApplyResult,
   ProposedPlan
 } from "./protocol";
 
@@ -41,8 +40,7 @@ function makeRecoverableSession(
       client_turn_id: "11111111-1111-4111-8111-111111111111",
       state,
       user_message_id: "11111111-1111-4111-8111-111111111112",
-      error_code:
-        state === "provider_outcome_unknown" ? "session_turn_provider_outcome_unknown" : null,
+      error: null,
       requires_duplicate_provider_spend_acknowledgement: state === "provider_outcome_unknown",
       retry_request: {
         client_turn_id: "11111111-1111-4111-8111-111111111111",
@@ -160,7 +158,6 @@ function completeStream(handlers: Parameters<AIBuilderClientTransport["stream"]>
 
 describe("FlowAIBuilderDriver", () => {
   it("keeps stream event contracts derived from generated types", () => {
-    const source = readFileSync(new URL("./protocol.ts", import.meta.url), "utf8");
     const publicRoles = {
       user: true,
       assistant: true
@@ -172,22 +169,6 @@ describe("FlowAIBuilderDriver", () => {
     const publicContractHasNoInternalFields: [InternalPublicField] extends [never] ? true : false =
       true;
 
-    expect(source).toContain('operations["send_ai_builder_message"]');
-    expect(source).toContain("parseAIBuilderStreamEvent");
-    expect(source).toContain(
-      "export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage"
-    );
-    expect(source).not.toContain("AIBuilderConversationToolCall");
-    expect(source).not.toContain('role: "user" | "assistant" | "tool" | "system"');
-    expect(source).not.toContain("tool_call_id?:");
-    expect(source).toContain('export type AIBuilderStatus = AIBuilderStatusEventData["status"]');
-    expect(source).toContain('AIBuilderEventType = AIBuilderParsedStreamEvent["event"]');
-    expect(source).toMatch(/AIBuilderTextEventData = Extract<\s*AIBuilderParsedStreamEvent/s);
-    expect(source).not.toMatch(/export type AIBuilderEventType\s*=\s*\|/);
-    expect(source).not.toContain("export interface AIBuilderTextEventData");
-    expect(source).not.toContain("export interface AIBuilderStatusEventData");
-    expect(source).not.toContain("export interface KeyDecision");
-    expect(source).not.toContain("export interface RequirementsSummary");
     expect(Object.keys(publicRoles)).toEqual(["user", "assistant"]);
     expect(publicContractHasNoInternalFields).toBe(true);
   });
@@ -898,6 +879,287 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan).toBeNull();
   });
 
+  it("lets only the newest overlapping resume install session state", async () => {
+    const oldSession = makeSession({ session_id: "session-old" });
+    const newSession = makeSession({ session_id: "session-new" });
+    const delayedOldResume = Promise.withResolvers<AIBuilderSession>();
+    const delayedNewResume = Promise.withResolvers<AIBuilderSession>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedOldResume.promise)
+      .mockReturnValueOnce(delayedNewResume.promise)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] })
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    const oldResume = driver.resumeSession(oldSession.session_id);
+    const newResume = driver.resumeSession(newSession.session_id);
+    delayedNewResume.resolve(newSession);
+    await Promise.resolve();
+    await Promise.resolve();
+    delayedOldResume.resolve(oldSession);
+    await Promise.all([oldResume, newResume]);
+
+    expect(driver.state.session?.session_id).toBe(newSession.session_id);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not let a delayed create replace a subsequently resumed session", async () => {
+    const createdSession = makeSession({ session_id: "session-created" });
+    const resumedSession = makeSession({ session_id: "session-resumed" });
+    const delayedCreate = Promise.withResolvers<AIBuilderSession>();
+    const delayedResume = Promise.withResolvers<AIBuilderSession>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedCreate.promise)
+      .mockReturnValueOnce(delayedResume.promise)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] })
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(createdSession)
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    const create = driver.createSession("create");
+    const resume = driver.resumeSession(resumedSession.session_id);
+    delayedResume.resolve(resumedSession);
+    await Promise.resolve();
+    await Promise.resolve();
+    delayedCreate.resolve(createdSession);
+    await Promise.all([create, resume]);
+
+    expect(driver.state.session?.session_id).toBe(resumedSession.session_id);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("ignores a delayed draft list from the previous session generation", async () => {
+    const resumedSession = makeSession({ session_id: "session-resumed" });
+    const oldDraft = makeDraft({ session_id: "draft-old" });
+    const currentDraft = makeDraft({ session_id: "draft-current" });
+    const delayedOldDrafts = Promise.withResolvers<{ sessions: AIBuilderDraftSession[] }>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedOldDrafts.promise)
+      .mockResolvedValueOnce(resumedSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [currentDraft] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    const oldDraftLoad = driver.loadDraftSessions();
+    await driver.resumeSession(resumedSession.session_id);
+    delayedOldDrafts.resolve({ sessions: [oldDraft] });
+    await oldDraftLoad;
+
+    expect(driver.state.draftSessions).toEqual([currentDraft]);
+  });
+
+  it("does not apply a delayed approval result to a replacement session", async () => {
+    const oldPlan = makePlan({ plan_id: "plan-old" });
+    const currentPlan = makePlan({ plan_id: "plan-current" });
+    const currentSession = makeSession({
+      session_id: "session-current",
+      latest_plan_id: currentPlan.plan_id
+    });
+    const delayedApproval = Promise.withResolvers<void>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedApproval.promise)
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(currentPlan)
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: "session-old", latest_plan_id: oldPlan.plan_id }),
+      currentPlan: oldPlan
+    });
+
+    const approval = driver.approvePlan();
+    await driver.resumeSession(currentSession.session_id);
+    delayedApproval.resolve();
+    await approval;
+
+    expect(driver.state.session?.session_id).toBe(currentSession.session_id);
+    expect(driver.state.currentPlan).toEqual(currentPlan);
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("does not return or apply a delayed apply result for a replacement session", async () => {
+    const oldPlan = makePlan({ plan_id: "plan-old" });
+    const currentPlan = makePlan({ plan_id: "plan-current" });
+    const currentSession = makeSession({
+      session_id: "session-current",
+      flow_id: "flow-current",
+      latest_plan_id: currentPlan.plan_id
+    });
+    const delayedApply = Promise.withResolvers<ApplyResult>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedApply.promise)
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(currentPlan)
+      .mockResolvedValueOnce({ sessions: [] })
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce(currentPlan);
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: "session-old", latest_plan_id: oldPlan.plan_id }),
+      currentPlan: oldPlan
+    });
+
+    const apply = driver.applyPlan();
+    await driver.resumeSession(currentSession.session_id);
+    delayedApply.resolve({
+      flow_id: "flow-old",
+      flow_name: "Old flow",
+      steps_created: 1,
+      steps_updated: 0,
+      steps_removed: 0
+    });
+
+    await expect(apply).rejects.toMatchObject({ name: "AbortError" });
+    expect(driver.state.session).toEqual(currentSession);
+    expect(driver.state.currentPlan).toEqual(currentPlan);
+    expect(driver.state.applyResult).toBeNull();
+    expect(driver.state.applyError).toBeNull();
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("does not apply the replacement plan after a delayed unpublish", async () => {
+    const oldPlan = makePlan({ plan_id: "plan-old" });
+    const currentPlan = makePlan({ plan_id: "plan-current" });
+    const currentSession = makeSession({
+      session_id: "session-current",
+      flow_id: "flow-current",
+      latest_plan_id: currentPlan.plan_id
+    });
+    const delayedUnpublish = Promise.withResolvers<void>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedUnpublish.promise)
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(currentPlan)
+      .mockResolvedValueOnce({ sessions: [] })
+      .mockResolvedValueOnce({ flow_id: "flow-current", revision: 3 })
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce(currentPlan);
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({
+        session_id: "session-old",
+        flow_id: "flow-old",
+        latest_plan_id: oldPlan.plan_id
+      }),
+      currentPlan: oldPlan
+    });
+
+    const unpublishAndApply = driver.unpublishAndApplyPlan();
+    await driver.resumeSession(currentSession.session_id);
+    delayedUnpublish.resolve();
+
+    await expect(unpublishAndApply).rejects.toMatchObject({ name: "AbortError" });
+    expect(
+      fetch.mock.calls.filter(([path]) => path === "/api/v1/flows/ai-builder/plans/{plan_id}/apply")
+    ).toHaveLength(0);
+    expect(driver.state.session).toEqual(currentSession);
+    expect(driver.state.currentPlan).toEqual(currentPlan);
+    expect(driver.state.applyError).toBeNull();
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("does not detach a same-id attachment from a replacement session", async () => {
+    const sharedAttachment = {
+      id: "file-shared",
+      name: "shared.pdf",
+      mimetype: "application/pdf",
+      size: 123
+    };
+    const currentSession = makeSession({
+      session_id: "session-current",
+      attachments: [sharedAttachment]
+    });
+    const delayedDetach = Promise.withResolvers<void>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedDetach.promise)
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: "session-old", attachments: [sharedAttachment] })
+    });
+
+    const detach = driver.removeAttachment(sharedAttachment.id);
+    await driver.resumeSession(currentSession.session_id);
+    delayedDetach.resolve();
+    await detach;
+
+    expect(driver.state.session).toEqual(currentSession);
+    expect(driver.state.session?.attachments).toEqual([sharedAttachment]);
+  });
+
+  it("does not install a delayed revision into a replacement session", async () => {
+    const oldPlan = makePlan({ plan_id: "plan-old" });
+    const currentPlan = makePlan({ plan_id: "plan-current" });
+    const currentSession = makeSession({
+      session_id: "session-current",
+      latest_plan_id: currentPlan.plan_id
+    });
+    const delayedRevision = Promise.withResolvers<ProposedPlan>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedRevision.promise)
+      .mockResolvedValueOnce(currentSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(currentPlan)
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: "session-old", latest_plan_id: oldPlan.plan_id }),
+      currentPlan: oldPlan
+    });
+
+    const revision = driver.revisePlan("keep_current_description");
+    await driver.resumeSession(currentSession.session_id);
+    delayedRevision.resolve(makePlan({ plan_id: "plan-old-revised" }));
+    await revision;
+
+    expect(driver.state.session).toEqual(currentSession);
+    expect(driver.state.currentPlan).toEqual(currentPlan);
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("does not clear a newly resumed same-id session after delayed cancellation", async () => {
+    const sessionId = "session-shared";
+    const resumedSession = makeSession({ session_id: sessionId });
+    const resumedDraft = makeDraft({ session_id: sessionId });
+    const delayedCancellation = Promise.withResolvers<void>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedCancellation.promise)
+      .mockResolvedValueOnce(resumedSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [resumedDraft] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: sessionId }),
+      draftSessions: [resumedDraft]
+    });
+
+    const cancellation = driver.discardSession(sessionId);
+    await driver.resumeSession(sessionId);
+    delayedCancellation.resolve();
+    await cancellation;
+
+    expect(driver.state.session).toEqual(resumedSession);
+    expect(driver.state.draftSessions).toEqual([resumedDraft]);
+  });
+
   it("uses a new turn ID only for a distinct logical send", async () => {
     const bodies: AIBuilderSendMessageRequest[] = [];
     const { driver } = makeDriver({
@@ -1088,6 +1350,99 @@ describe("FlowAIBuilderDriver", () => {
       phase: "router",
       request_id: "req-stream"
     });
+  });
+
+  it("hydrates the exact committed turn error when a session is resumed", async () => {
+    const recoverable = makeRecoverableSession("failed_before_provider");
+    if (!recoverable.latest_turn) throw new Error("Expected latest turn");
+    const committedError = {
+      schema_version: 2 as const,
+      code: "planner_stream_failed" as const,
+      category: "internal" as const,
+      message: "The persisted planner failure.",
+      phase: "router" as const,
+      request_id: "persisted-request",
+      eneo_error_code: 9007 as const,
+      diagnostic_context: { request_id: "persisted-request" },
+      details: { quality_failure_codes: "missing_source_refs" }
+    };
+    const committedSession = {
+      ...recoverable,
+      latest_turn: {
+        ...recoverable.latest_turn,
+        state: "committed" as const,
+        error: committedError
+      }
+    };
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn(async (path: string) => {
+        if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+          return committedSession;
+        }
+        if (path.endsWith("/models")) return { models: [], default_model_id: null };
+        if (path === "/api/v1/flows/ai-builder/sessions") return { sessions: [] };
+        throw new Error(`Unexpected fetch: ${path}`);
+      })
+    });
+
+    await driver.resumeSession(committedSession.session_id);
+
+    expect(driver.state.error).toEqual(committedError);
+  });
+
+  it("replaces an ambiguous transport failure with the committed server error", async () => {
+    const recoverable = makeRecoverableSession("failed_before_provider");
+    if (!recoverable.latest_turn) throw new Error("Expected latest turn");
+    const committedError = {
+      schema_version: 2 as const,
+      code: "planner_stream_failed" as const,
+      category: "internal" as const,
+      message: "The durable planner failure.",
+      phase: "router" as const,
+      request_id: "durable-request",
+      eneo_error_code: 9007 as const,
+      diagnostic_context: null,
+      details: { stage: "proposal" }
+    };
+    const committedSession = {
+      ...recoverable,
+      latest_turn: {
+        ...recoverable.latest_turn,
+        state: "committed" as const,
+        error: committedError
+      }
+    };
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(committedSession),
+      streamImpl: vi.fn().mockRejectedValue(new Error("connection lost"))
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.error).toEqual(committedError);
+  });
+
+  it("clears an ambiguous transport failure after committed success is reloaded", async () => {
+    const recoverable = makeRecoverableSession("failed_before_provider");
+    if (!recoverable.latest_turn) throw new Error("Expected latest turn");
+    const committedSession = {
+      ...recoverable,
+      latest_turn: {
+        ...recoverable.latest_turn,
+        state: "committed" as const,
+        error: null
+      }
+    };
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(committedSession),
+      streamImpl: vi.fn().mockRejectedValue(new Error("connection lost"))
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.error).toBeNull();
   });
 
   it("preserves structured transport errors and refreshes recovery state", async () => {

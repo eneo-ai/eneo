@@ -46,16 +46,9 @@ export type AIBuilderTurnRecoveryState = Extract<
   "failed_before_provider" | "provider_outcome_unknown"
 >;
 
-export type AIBuilderPlanEditScope = "whole_plan" | "step";
+export type AIBuilderPlanEditContext = NonNullable<AIBuilderSendMessageRequest["edit_context"]>;
 
-export interface AIBuilderPlanEditContext {
-  scope: AIBuilderPlanEditScope;
-  plan_id: string;
-  target_plan_step_ref?: string | null;
-  target_existing_step_ref?: string | null;
-  target_step_name?: string | null;
-  target_step_number?: number | null;
-}
+export type AIBuilderPlanEditScope = AIBuilderPlanEditContext["scope"];
 
 export interface AIBuilderSuggestChangeIntent {
   placeholder?: string;

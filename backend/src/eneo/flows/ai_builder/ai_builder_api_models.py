@@ -25,7 +25,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
@@ -48,7 +48,7 @@ AI_BUILDER_SESSION_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
         "client_turn_id": "00000000-0000-0000-0000-000000000703",
         "state": "committed",
         "user_message_id": "019db164-9eab-7843-baa1-229e595cde04",
-        "error_code": None,
+        "error": None,
         "requires_duplicate_provider_spend_acknowledgement": False,
         "retry_request": {
             "client_turn_id": "00000000-0000-0000-0000-000000000703",
@@ -361,7 +361,7 @@ class AIBuilderTurnLifecycleResponse(BaseModel):
     client_turn_id: UUID
     state: BuilderTurnState
     user_message_id: UUID
-    error_code: AIBuilderErrorCode | None = None
+    error: AIBuilderPublicError | None = None
     requires_duplicate_provider_spend_acknowledgement: bool
     retry_request: SendMessageRequest
 

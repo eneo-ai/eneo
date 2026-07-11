@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import AsyncGenerator
 from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.flows.ai_builder import ai_builder_send_lease
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
@@ -38,6 +42,7 @@ class _FakeSendLeaseRepo:
         self.claimed_lease: SessionSendLease | None = None
         self.released_lease: SessionSendLease | None = None
         self.refresh_result = False
+        self.fail_request_refresh = False
 
     async def accept_session_turn(
         self,
@@ -71,6 +76,10 @@ class _FakeSendLeaseRepo:
         lease: SessionSendLease,
         lock_lease_seconds: int,
     ) -> bool:
+        if self.fail_request_refresh:
+            raise AssertionError(
+                "The request repository must not refresh the heartbeat."
+            )
         self.events.append("refresh-start")
         self.refresh_started.set()
         await self.finish_refresh.wait()
@@ -92,6 +101,30 @@ class _FakeSendLeaseRepo:
         self.released_lease = lease
         assert session_id
         assert tenant_id
+
+
+class _FakeHeartbeatRepo:
+    def __init__(self, request_repo: _FakeSendLeaseRepo) -> None:
+        self.request_repo = request_repo
+
+    async def refresh_session_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        lease: SessionSendLease,
+        lock_lease_seconds: int,
+    ) -> bool:
+        request_repo = self.request_repo
+        request_repo.events.append("refresh-start")
+        request_repo.refresh_started.set()
+        await request_repo.finish_refresh.wait()
+        request_repo.events.append("refresh-end")
+        assert session_id
+        assert tenant_id
+        assert lease == request_repo.claimed_lease
+        assert lock_lease_seconds >= 30
+        return request_repo.refresh_result
 
 
 def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,14 +163,36 @@ async def test_claim_ai_builder_send_turn_raises_without_release_when_claim_fail
 
 
 @pytest.mark.asyncio
-async def test_claim_ai_builder_send_turn_waits_for_refresh_before_release(
+async def test_claim_ai_builder_send_turn_refreshes_with_independent_session_before_release(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_repo = _FakeSendLeaseRepo()
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.fail_request_refresh = True
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    heartbeat_session = cast(AsyncSession, object())
     _force_fast_send_lock_refresh(monkeypatch)
 
+    @contextlib.asynccontextmanager
+    async def heartbeat_session_scope() -> AsyncGenerator[AsyncSession, None]:
+        request_repo.events.append("heartbeat-session-open")
+        try:
+            yield heartbeat_session
+        finally:
+            request_repo.events.append("heartbeat-session-close")
+
+    monkeypatch.setattr(
+        ai_builder_send_lease.sessionmanager,
+        "session",
+        heartbeat_session_scope,
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "AIBuilderRepository",
+        lambda session: heartbeat_repo if session is heartbeat_session else None,
+    )
+
     async with claim_ai_builder_send_turn(
-        repo=cast(AIBuilderRepository, fake_repo),
+        repo=cast(AIBuilderRepository, request_repo),
         session_id=uuid4(),
         tenant_id=uuid4(),
         accepted_turn=_accepted_turn(uuid4()),
@@ -145,11 +200,18 @@ async def test_claim_ai_builder_send_turn_waits_for_refresh_before_release(
     ) as claimed:
         assert claimed.turn.base_planning_state_version == 11
         assert claimed.lease_lost_event.is_set() is False
-        await asyncio.wait_for(fake_repo.refresh_started.wait(), timeout=1)
-        fake_repo.finish_refresh.set()
+        await asyncio.wait_for(request_repo.refresh_started.wait(), timeout=1)
+        request_repo.finish_refresh.set()
 
-    assert fake_repo.events == ["claim", "refresh-start", "refresh-end", "release"]
-    assert fake_repo.released_lease == fake_repo.claimed_lease
+    assert request_repo.events == [
+        "claim",
+        "heartbeat-session-open",
+        "refresh-start",
+        "refresh-end",
+        "heartbeat-session-close",
+        "release",
+    ]
+    assert request_repo.released_lease == request_repo.claimed_lease
 
 
 def _accepted_turn(client_turn_id: UUID) -> SessionTurnAcceptance:

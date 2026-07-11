@@ -2167,8 +2167,8 @@ class BuilderSessions(BasePublic):
         nullable=True,
     )
     latest_turn_message_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
-    latest_turn_error_code: Mapped[Optional[str]] = mapped_column(
-        sa.String(64),
+    latest_turn_error_jsonb: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True),
         nullable=True,
     )
 
@@ -2222,13 +2222,17 @@ class BuilderSessions(BasePublic):
             "AND latest_turn_request_jsonb IS NULL "
             "AND latest_turn_state IS NULL "
             "AND latest_turn_message_id IS NULL "
-            "AND latest_turn_error_code IS NULL) "
+            "AND latest_turn_error_jsonb IS NULL) "
             "OR (latest_turn_id IS NOT NULL "
             "AND latest_turn_request_fingerprint IS NOT NULL "
             "AND latest_turn_request_jsonb IS NOT NULL "
             "AND latest_turn_state IS NOT NULL "
             "AND latest_turn_message_id IS NOT NULL)",
             name="ck_builder_sessions_latest_turn_all_or_none",
+        ),
+        CheckConstraint(
+            "latest_turn_error_jsonb IS NULL OR latest_turn_state = 'committed'",
+            name="ck_builder_sessions_latest_turn_error_committed",
         ),
         CheckConstraint(
             "latest_turn_state IS NULL OR "

@@ -25,7 +25,7 @@ TURN_COLUMNS = {
     "latest_turn_request_jsonb": ("jsonb", True, None),
     "latest_turn_state": ("character varying", True, 32),
     "latest_turn_message_id": ("uuid", True, None),
-    "latest_turn_error_code": ("character varying", True, 64),
+    "latest_turn_error_jsonb": ("jsonb", True, None),
 }
 
 
@@ -82,7 +82,14 @@ def test_fresh_chain_creates_strict_latest_turn_shape(fresh_chain_db) -> None:
     )
     assert "latest_turn_request_jsonb IS NULL" in all_or_none
     assert "latest_turn_request_jsonb IS NOT NULL" in all_or_none
-    assert "latest_turn_error_code IS NULL" in all_or_none
+    assert "latest_turn_error_jsonb IS NULL" in all_or_none
+    error_constraint = _constraint_definition(
+        conn,
+        "ck_builder_sessions_latest_turn_error_committed",
+    )
+    assert "latest_turn_error_jsonb IS NULL" in error_constraint
+    assert "latest_turn_state" in error_constraint
+    assert "'committed'" in error_constraint
     state_constraint = _constraint_definition(
         conn,
         "ck_builder_sessions_latest_turn_state",

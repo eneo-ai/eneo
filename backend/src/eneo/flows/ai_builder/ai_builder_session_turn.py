@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 
 
@@ -67,3 +68,4 @@ class SessionTurnClaim:
     disposition: SessionTurnClaimDisposition
     user_message: ConversationMessage
     base_planning_state_version: int
+    committed_error: AIBuilderPublicError | None = None

@@ -142,6 +142,13 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled AI Builder stream event: ${JSON.stringify(value)}`);
 }
 
+function supersededSessionOperation(): DOMException {
+  return new DOMException(
+    "The AI Builder session changed before the operation completed.",
+    "AbortError"
+  );
+}
+
 function isRecoverableDraftStatus(
   status: SessionStatus
 ): status is RecoverableAIBuilderDraftSession["status"] {
@@ -287,8 +294,10 @@ export class FlowAIBuilderDriver {
   }
 
   async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
+    ++this.#initGeneration;
     this.abort();
     this.#resetFlowState();
+    const sessionGeneration = this.#sessionGeneration;
     this.#state.error = null;
     this.#notify();
 
@@ -304,13 +313,23 @@ export class FlowAIBuilderDriver {
           }
         }
       })) as AIBuilderSession;
+      if (sessionGeneration !== this.#sessionGeneration) return;
       this.#state.session = result;
+      this.#applyCommittedTurnOutcome(result);
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
       this.#notify();
-      await this.#fetchModels();
-      await this.refreshSession();
-      await this.loadDraftSessions();
+      const owner: SessionOperationOwner = {
+        sessionId: result.session_id,
+        sessionGeneration,
+        abortController: this.#abortController
+      };
+      await this.#fetchModels(owner);
+      await this.#refreshSession(owner);
+      if (this.#ownsSession(owner)) {
+        await this.loadDraftSessions();
+      }
     } catch (e) {
+      if (sessionGeneration !== this.#sessionGeneration) return;
       this.#state.error = parseAIBuilderError({
         transport: "apply",
         payload: e,
@@ -326,11 +345,12 @@ export class FlowAIBuilderDriver {
     await this.createSession(targetKind, { forceNew: true });
   }
 
-  async loadDraftSessions(): Promise<void> {
+  async loadDraftSessions(expectedGeneration = this.#sessionGeneration): Promise<void> {
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
         method: "get"
       })) as { sessions: AIBuilderDraftSession[] };
+      if (expectedGeneration !== this.#sessionGeneration) return;
       this.#state.draftSessions = result.sessions;
       this.#notify();
     } catch {
@@ -352,6 +372,7 @@ export class FlowAIBuilderDriver {
     ++this.#initGeneration;
     this.abort();
     this.#resetFlowState();
+    const sessionGeneration = this.#sessionGeneration;
     this.#state.error = null;
     this.#notify();
 
@@ -359,36 +380,40 @@ export class FlowAIBuilderDriver {
       method: "get",
       params: { path: { session_id: sessionId } }
     })) as AIBuilderSession;
+    if (sessionGeneration !== this.#sessionGeneration) return;
     this.#state.session = result;
+    this.#applyCommittedTurnOutcome(result);
     this.#hydrateMessagesFromConversation(result.conversation ?? []);
     this.#notify();
     const owner: SessionOperationOwner = {
       sessionId: result.session_id,
-      sessionGeneration: this.#sessionGeneration,
+      sessionGeneration,
       abortController: this.#abortController
     };
-    await this.#fetchModels();
+    await this.#fetchModels(owner);
     await this.#syncPlanFromSession(owner);
     await this.loadDraftSessions();
   }
 
   async discardSession(sessionId: string): Promise<void> {
+    const sessionGeneration = this.#sessionGeneration;
+    const owner =
+      this.#state.session?.session_id === sessionId ? this.#currentSessionOwner() : null;
     await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionCancel, {
       method: "post",
       params: { path: { session_id: sessionId } }
     });
+    if (sessionGeneration !== this.#sessionGeneration) return;
+    if (owner && !this.#ownsSession(owner)) return;
 
-    this.#state.draftSessions = this.#state.draftSessions.filter(
+    const remainingDrafts = this.#state.draftSessions.filter(
       (session) => session.session_id !== sessionId
     );
-    if (this.#state.session?.session_id === sessionId) {
-      this.#state.session = null;
-      this.#state.messages = [];
-      this.#state.currentPlan = null;
-      this.#state.applyResult = null;
-      this.#state.isConflict = false;
-      this.#state.statusMessage = null;
+    if (owner) {
+      this.abort();
+      this.#resetFlowState();
     }
+    this.#state.draftSessions = remainingDrafts;
     this.#notify();
     await this.loadDraftSessions();
   }
@@ -421,6 +446,7 @@ export class FlowAIBuilderDriver {
         this.#authoritativeRefreshError = false;
       }
       this.#state.session = result;
+      this.#applyCommittedTurnOutcome(result);
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
       this.#notify();
       return this.#syncPlanFromSession(owner);
@@ -701,30 +727,37 @@ export class FlowAIBuilderDriver {
   }
 
   async approvePlan(): Promise<void> {
-    if (!this.#state.currentPlan) return;
+    const plan = this.#state.currentPlan;
+    const owner = this.#currentSessionOwner();
+    if (!plan || !owner) return;
     this.#state.error = null;
     this.#notify();
 
     try {
       await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planApprove, {
         method: "post",
-        params: { path: { plan_id: this.#state.currentPlan.plan_id } }
+        params: { path: { plan_id: plan.plan_id } }
       });
-      this.#state.currentPlan = { ...this.#state.currentPlan, status: "approved" };
+      if (!this.#ownsPlan(owner, plan.plan_id)) return;
+      this.#state.currentPlan = { ...plan, status: "approved" };
       this.#notify();
     } catch (e) {
-      this.#state.error = parseAIBuilderError({
-        transport: "apply",
-        payload: e,
-        fallbackMessage: "Failed to approve plan"
-      });
-      this.#notify();
+      if (this.#ownsPlan(owner, plan.plan_id)) {
+        this.#state.error = parseAIBuilderError({
+          transport: "apply",
+          payload: e,
+          fallbackMessage: "Failed to approve plan"
+        });
+        this.#notify();
+      }
       throw e;
     }
   }
 
   async applyPlan(expectedRevision?: number): Promise<ApplyResult> {
-    if (!this.#state.currentPlan) throw new Error("No plan to apply");
+    const plan = this.#state.currentPlan;
+    const owner = this.#currentSessionOwner();
+    if (!plan || !owner) throw new Error("No plan to apply");
 
     this.#state.error = null;
     this.#state.applyError = null;
@@ -734,17 +767,20 @@ export class FlowAIBuilderDriver {
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planApply, {
         method: "post",
-        params: { path: { plan_id: this.#state.currentPlan.plan_id } },
+        params: { path: { plan_id: plan.plan_id } },
         requestBody: {
           "application/json": {
             expected_revision: expectedRevision ?? null
           }
         }
       })) as ApplyResult;
+      if (!this.#ownsPlan(owner, plan.plan_id)) {
+        throw supersededSessionOperation();
+      }
       this.#flowId = result.flow_id;
       this.#state.applyResult = result;
       this.#state.applyError = null;
-      this.#state.currentPlan = { ...this.#state.currentPlan, status: "applied" };
+      this.#state.currentPlan = { ...plan, status: "applied" };
       if (this.#state.session) {
         this.#state.session = {
           ...this.#state.session,
@@ -752,9 +788,10 @@ export class FlowAIBuilderDriver {
         };
       }
       this.#notify();
-      await this.refreshSession();
+      await this.#refreshSession(owner);
       return result;
     } catch (e: unknown) {
+      if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
       const parsed = parseAIBuilderError({
         transport: "apply",
         payload: e,
@@ -764,13 +801,15 @@ export class FlowAIBuilderDriver {
       this.#state.isConflict = isStaleApplyError(parsed);
       this.#state.error = parsed.code === "unknown" || parsed.code === "network" ? parsed : null;
       this.#notify();
-      await this.refreshSession();
+      await this.#refreshSession(owner);
       throw e;
     }
   }
 
   async unpublishAndApplyPlan(expectedRevision?: number): Promise<ApplyResult> {
-    if (!this.#state.currentPlan) throw new Error("No plan to apply");
+    const plan = this.#state.currentPlan;
+    const owner = this.#currentSessionOwner();
+    if (!plan || !owner) throw new Error("No plan to apply");
     const flowId = this.#publishedApplyFlowId();
     if (!flowId) throw new Error("No published flow to unpublish");
 
@@ -782,10 +821,14 @@ export class FlowAIBuilderDriver {
         method: "post",
         params: { path: { id: flowId } }
       });
+      if (!this.#ownsPlan(owner, plan.plan_id)) {
+        throw supersededSessionOperation();
+      }
       this.#state.applyError = null;
       this.#state.isConflict = false;
       this.#notify();
     } catch (e) {
+      if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
       this.#state.error = parseAIBuilderError({
         transport: "apply",
         payload: e,
@@ -798,6 +841,7 @@ export class FlowAIBuilderDriver {
     try {
       return await this.applyPlan(expectedRevision);
     } catch (e) {
+      if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
       const parsedApplyError = parseAIBuilderError({
         transport: "apply",
         payload: e,
@@ -815,17 +859,21 @@ export class FlowAIBuilderDriver {
   }
 
   async removeAttachment(fileId: string): Promise<void> {
-    if (!this.#state.session) return;
+    const owner = this.#currentSessionOwner();
+    if (!owner) return;
 
     await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionAttachments, {
       method: "delete",
-      params: { path: { session_id: this.#state.session.session_id, file_id: fileId } }
+      params: { path: { session_id: owner.sessionId, file_id: fileId } }
     });
 
-    if (this.#state.session.attachments) {
-      this.#state.session.attachments = this.#state.session.attachments.filter(
-        (attachment) => attachment.id !== fileId
-      );
+    if (this.#ownsSession(owner) && this.#state.session?.attachments) {
+      this.#state.session = {
+        ...this.#state.session,
+        attachments: this.#state.session.attachments.filter(
+          (attachment) => attachment.id !== fileId
+        )
+      };
       this.#notify();
     }
   }
@@ -850,26 +898,31 @@ export class FlowAIBuilderDriver {
   }
 
   async revisePlan(type: PlanRevisionType): Promise<void> {
-    if (!this.#state.currentPlan) return;
+    const plan = this.#state.currentPlan;
+    const owner = this.#currentSessionOwner();
+    if (!plan || !owner) return;
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planRevise, {
         method: "post",
-        params: { path: { plan_id: this.#state.currentPlan.plan_id } },
+        params: { path: { plan_id: plan.plan_id } },
         requestBody: {
           "application/json": { type }
         }
       })) as IncomingProposedPlan;
 
+      if (!this.#ownsPlan(owner, plan.plan_id)) return;
       this.#state.currentPlan = this.#normalizePlan(result);
       this.#notify();
     } catch (e) {
-      this.#state.error = parseAIBuilderError({
-        transport: "apply",
-        payload: e,
-        fallbackMessage: "Failed to revise plan"
-      });
-      this.#notify();
+      if (this.#ownsPlan(owner, plan.plan_id)) {
+        this.#state.error = parseAIBuilderError({
+          transport: "apply",
+          payload: e,
+          fallbackMessage: "Failed to revise plan"
+        });
+        this.#notify();
+      }
     }
   }
 
@@ -993,6 +1046,20 @@ export class FlowAIBuilderDriver {
     );
   }
 
+  #currentSessionOwner(): SessionOperationOwner | null {
+    const session = this.#state.session;
+    if (!session) return null;
+    return {
+      sessionId: session.session_id,
+      sessionGeneration: this.#sessionGeneration,
+      abortController: this.#abortController
+    };
+  }
+
+  #ownsPlan(owner: SessionOperationOwner, planId: string): boolean {
+    return this.#ownsSession(owner) && this.#state.currentPlan?.plan_id === planId;
+  }
+
   #getLatestRequirementsSummary(): RequirementsSummary | null {
     for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
       const summary = this.#state.messages[index]?.requirementsSummary;
@@ -1003,14 +1070,16 @@ export class FlowAIBuilderDriver {
     return null;
   }
 
-  async #fetchModels(): Promise<void> {
+  async #fetchModels(owner: SessionOperationOwner): Promise<void> {
     if (!this.#state.session) return;
+    if (!this.#ownsSession(owner)) return;
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
         method: "get",
         params: { path: { session_id: this.#state.session.session_id } }
       })) as { models: AIBuilderModel[]; default_model_id: string | null };
+      if (!this.#ownsSession(owner)) return;
       this.#state.availableModels = result.models;
       this.#state.selectedModelId = result.default_model_id;
       this.#state.modelsLoaded = true;
@@ -1136,6 +1205,23 @@ export class FlowAIBuilderDriver {
     if (!timestamp) return Date.now();
     const parsed = Date.parse(timestamp);
     return Number.isNaN(parsed) ? Date.now() : parsed;
+  }
+
+  #applyCommittedTurnOutcome(session: AIBuilderSession): void {
+    const latestTurn = session.latest_turn;
+    if (latestTurn?.state !== "committed") return;
+
+    if (latestTurn.error === null || latestTurn.error === undefined) {
+      this.#state.error = null;
+      return;
+    }
+
+    const error = parseAIBuilderError({
+      transport: "sse",
+      payload: latestTurn.error,
+      fallbackMessage: "The AI Builder turn failed. Please try again."
+    });
+    this.#state.error = isSoftBlockAIBuilderError(error) ? null : error;
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {

@@ -100,13 +100,13 @@ from visible chat text.
 
 Retry behavior depends on the persisted turn state:
 
-| State                      | Client behavior                                                                                                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `open`                     | The request is durably accepted but provider work has not started. Wait and reload the session; do not create a second logical turn.                                                                             |
-| `failed_before_provider`   | Retry the exact `retry_request`. Provider work did not start.                                                                                                                                                    |
-| `provider_outcome_unknown` | Never retry automatically. Ask the user to acknowledge that the provider may repeat work or incur another charge, then send the exact `retry_request` with `acknowledge_duplicate_provider_spend` set to `true`. |
-| `processing`               | Wait and reload the session. Do not create a second logical turn.                                                                                                                                                |
-| `committed`                | Use the committed conversation and plan state returned by the session.                                                                                                                                           |
+| State                      | Client behavior                                                                                                                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `open`                     | The request is durably accepted but provider work has not started. Wait and reload the session; do not create a second logical turn.                                                                                |
+| `failed_before_provider`   | Retry the exact `retry_request`. Provider work did not start.                                                                                                                                                       |
+| `provider_outcome_unknown` | Never retry automatically. Ask the user to acknowledge that the provider may repeat work or incur another charge, then send the exact `retry_request` with `acknowledge_duplicate_provider_spend` set to `true`.    |
+| `processing`               | Wait and reload the session. Do not create a second logical turn.                                                                                                                                                   |
+| `committed`                | Use the committed conversation, plan state, and typed `latest_turn.error` (when present) returned by the session. A same-key replay returns that exact error and then completes without calling the provider again. |
 
 The deduplication horizon is intentionally bounded to the latest accepted turn
 for a session. A different accepted message receives a new `client_turn_id`.
