@@ -323,10 +323,19 @@ def _validate_form_field_placement(
         )
 
 
+# Input types a source-reader step can read directly. Audio (and any other
+# runtime input outside this set) has no reader pattern — callers must not
+# demand source-capture fields for those inputs, or assembly can never satisfy
+# the FlowAssemblyPlan invariant.
+SOURCE_READER_INPUT_TYPES: frozenset[InputType] = frozenset(
+    {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
+)
+
+
 def planned_step_is_source_reader(step: PlannedStep) -> bool:
     return (
         step.input_source == InputSource.FLOW_INPUT
-        and step.input_type in {InputType.DOCUMENT, InputType.FILE, InputType.TEXT}
+        and step.input_type in SOURCE_READER_INPUT_TYPES
         and step.output_type == OutputType.JSON
         and bool(step.output_fields)
     )

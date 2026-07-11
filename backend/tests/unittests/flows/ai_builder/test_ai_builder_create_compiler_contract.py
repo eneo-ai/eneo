@@ -286,6 +286,115 @@ def test_assembly_plan_value_error_becomes_typed_architecture_failure() -> None:
     )
 
 
+def test_audio_input_translates_source_reader_obligation_instead_of_dead_ending() -> (
+    None
+):
+    # A source reader only exists for document/file/text runtime input. When
+    # the slot classifier derives a capture obligation but the session's
+    # runtime input is audio, no step arrangement can ever satisfy the
+    # assembly invariant — the planner would burn every repair attempt on a
+    # constraint it does not control. The compiler must keep the flow
+    # buildable AND carry the obligation as server-owned terminal-step
+    # instructions, independent of how the model worded its intent.
+    # Mirrors the production failure: audio in, DOCX out, obligation
+    # "summary" from the planning state, and an intent that never mentions
+    # summarization.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Beslutsunderlag från möte",
+            "plan_rationale": "Transkribera och sammanställ.",
+            "steps": [
+                {
+                    "name": "Skriv beslutsunderlag",
+                    "instructions": "Sammanställ transkriptet till ett beslutsunderlag.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.DOCX,
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="summary",
+                    description="Kort sammanfattning grundad i källmaterialet.",
+                ),
+            ),
+        ),
+    )
+
+    # The exact production topology: transcribe → write → render DOCX.
+    assert [
+        (step.input_type, step.output_type, step.output_mode) for step in compiled.steps
+    ] == [
+        (InputType.AUDIO, OutputType.TEXT, OutputMode.TRANSCRIBE_ONLY),
+        (InputType.TEXT, OutputType.TEXT, OutputMode.PASS_THROUGH),
+        (InputType.TEXT, OutputType.DOCX, OutputMode.RENDER_VERBATIM),
+    ]
+    # The obligation survives as a deterministic server-owned instruction on
+    # the writer step even though the intent never mentioned a summary.
+    writer_step = compiled.steps[1]
+    assert "sammanfattning" in writer_step.assistant_spec.instructions.lower()
+    assert validate_spec(compiled).valid
+
+
+def test_translated_obligation_survives_dropped_terminal_render_helper() -> None:
+    # When the model's intent ends with an explicit "create the DOCX" helper,
+    # assembly drops that helper during normalization. The server-owned
+    # obligation must land on the RETAINED content producer — never on the
+    # helper that is about to disappear.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Beslutsunderlag från möte",
+            "plan_rationale": "Transkribera, sammanställ och skapa dokumentet.",
+            "steps": [
+                {
+                    "name": "Skriv beslutsunderlag",
+                    "instructions": "Sammanställ transkriptet till ett beslutsunderlag.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Skapa DOCX",
+                    "instructions": "Skapa DOCX-dokumentet.",
+                    "output_type": "docx",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="summary",
+                    description="Kort sammanfattning grundad i källmaterialet.",
+                ),
+            ),
+        ),
+    )
+
+    assert [
+        (step.input_type, step.output_type, step.output_mode) for step in compiled.steps
+    ] == [
+        (InputType.AUDIO, OutputType.TEXT, OutputMode.TRANSCRIBE_ONLY),
+        (InputType.TEXT, OutputType.TEXT, OutputMode.PASS_THROUGH),
+        (InputType.TEXT, OutputType.DOCX, OutputMode.RENDER_VERBATIM),
+    ]
+    writer_step = compiled.steps[1]
+    renderer_step = compiled.steps[2]
+    assert "sammanfattning" in writer_step.assistant_spec.instructions.lower()
+    assert "sammanfattning" not in renderer_step.assistant_spec.instructions.lower()
+    assert validate_spec(compiled).valid
+
+
 def test_missing_document_report_compose_topology_is_typed_architecture_failure() -> (
     None
 ):

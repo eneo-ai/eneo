@@ -248,6 +248,7 @@ def try_compile_create_intent_with_assembly(
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
+    terminal_obligation_instructions: str | None = None,
 ) -> FlowDraftSpecCore | CreateAssemblyRejection:
     try:
         plan = _assemble_create_intent(
@@ -266,6 +267,7 @@ def try_compile_create_intent_with_assembly(
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
+            terminal_obligation_instructions=terminal_obligation_instructions,
         )
         if isinstance(plan, CreateAssemblyRejection):
             return plan
@@ -291,6 +293,7 @@ def _assemble_create_intent(
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
+    terminal_obligation_instructions: str | None = None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if not _architecture_hints_are_supported(
         runtime_input_type=runtime_input_type,
@@ -379,6 +382,10 @@ def _assemble_create_intent(
         final_semantic_output_type=terminal_semantic_output_type,
         source_reader_required_fields=source_reader_required_fields,
         ui_language=ui_language,
+    )
+    semantic_steps = _semantic_steps_with_terminal_obligation(
+        semantic_steps,
+        terminal_obligation_instructions=terminal_obligation_instructions,
     )
     semantic_steps = _semantic_steps_with_terminal_text_fields_folded(
         semantic_steps,
@@ -579,6 +586,32 @@ def _assemble_create_intent(
         aggregation_intent=aggregation_intent,
         ui_language=ui_language,
     )
+
+
+def _semantic_steps_with_terminal_obligation(
+    steps: tuple[SemanticStepIntent, ...],
+    *,
+    terminal_obligation_instructions: str | None,
+) -> tuple[SemanticStepIntent, ...]:
+    """Attach a server-owned obligation to the retained content producer.
+
+    Runs after terminal-helper normalization so the sentence can never land on
+    a render helper the assembly is about to drop.
+    """
+    if not terminal_obligation_instructions or not steps:
+        return steps
+    terminal = steps[-1]
+    if terminal_obligation_instructions in terminal.instructions:
+        return steps
+    updated = terminal.model_copy(
+        update={
+            "instructions": (
+                f"{terminal.instructions.rstrip()}\n\n"
+                f"{terminal_obligation_instructions}"
+            )
+        }
+    )
+    return (*steps[:-1], updated)
 
 
 def _semantic_steps_without_terminal_document_render_helper(

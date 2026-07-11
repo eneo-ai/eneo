@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
     CreateAssemblyRejection,
     try_compile_create_intent_with_assembly,
 )
+from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -157,6 +158,16 @@ def compile_create_intent_to_spec(
     pattern_ids = context.pattern_ids if context is not None else ()
     chain_steps = context.pattern_chain_steps if context is not None else ()
     aggregation_intent = context.aggregation_intent if context is not None else "linear"
+    source_reader_required_fields, translated_capture_fields = (
+        _admitted_source_reader_required_fields(
+            context=context,
+            runtime_input_type=runtime_input_type,
+        )
+    )
+    terminal_obligation_instructions = _translated_capture_obligation_sentence(
+        translated_capture_fields,
+        ui_language=context.ui_language if context is not None else None,
+    )
     assembly_spec = try_compile_create_intent_with_assembly(
         intent_with_server_owned_field_placement,
         runtime_input_type=runtime_input_type,
@@ -167,9 +178,7 @@ def compile_create_intent_to_spec(
         chain_steps=chain_steps,
         aggregation_intent=aggregation_intent,
         terminal_output_schema=context.terminal_output_schema if context else None,
-        source_reader_required_fields=(
-            context.source_reader_required_fields if context is not None else ()
-        ),
+        source_reader_required_fields=source_reader_required_fields,
         result_contract_output_fields=(
             context.result_contract_output_fields if context is not None else ()
         ),
@@ -177,6 +186,7 @@ def compile_create_intent_to_spec(
         runtime_required=context.runtime_required if context is not None else True,
         runtime_max_files=context.runtime_max_files if context is not None else None,
         ui_language=context.ui_language if context is not None else None,
+        terminal_obligation_instructions=terminal_obligation_instructions,
     )
     if isinstance(assembly_spec, CreateAssemblyRejection):
         raise AIBuilderArchitectureError(
@@ -857,6 +867,68 @@ def _log_dropped_runtime_metadata_input_fields(
             "runtime_metadata_state": runtime_metadata_state,
         },
     )
+
+
+def _admitted_source_reader_required_fields(
+    *,
+    context: CreateCompileContext | None,
+    runtime_input_type: InputType,
+) -> tuple[tuple[SourceCaptureField, ...], tuple[SourceCaptureField, ...]]:
+    """Split capture fields into (admitted, translated) for this input type.
+
+    A source-reader step only exists for document/file/text runtime input.
+    Passing capture fields through for e.g. audio makes the FlowAssemblyPlan
+    invariant fail deterministically — the planner cannot repair a constraint
+    it does not control, so the whole proposal turn dies after exhausting
+    repairs. Fields that cannot be captured by a reader are returned in the
+    second tuple so the caller can translate the obligation into server-owned
+    terminal-step instructions instead of silently losing it.
+    """
+    if context is None or not context.source_reader_required_fields:
+        return (), ()
+    if runtime_input_type in SOURCE_READER_INPUT_TYPES:
+        return context.source_reader_required_fields, ()
+    logger.info(
+        "ai_builder_source_reader_fields_translated_for_input_type",
+        extra={
+            "field_names": sorted(
+                field.name for field in context.source_reader_required_fields
+            ),
+            "runtime_input_type": runtime_input_type.value,
+        },
+    )
+    return (), context.source_reader_required_fields
+
+
+def _translated_capture_obligation_sentence(
+    translated_fields: tuple[SourceCaptureField, ...],
+    *,
+    ui_language: str | None,
+) -> str | None:
+    """Render unreadable capture obligations as one server-owned sentence.
+
+    The assembly module appends it to the retained content producer after
+    terminal-helper normalization, so the planning state's obligation survives
+    regardless of how the model worded its steps.
+    """
+    if not translated_fields:
+        return None
+    is_swedish = ui_language is None or ui_language.casefold().startswith("sv")
+    sentences: list[str] = []
+    for field in translated_fields:
+        if field.name == "summary":
+            sentences.append(
+                "Resultatet ska innehålla en kort sammanfattning grundad i källmaterialet."
+                if is_swedish
+                else "The result must include a concise summary grounded in the source material."
+            )
+        elif field.description:
+            sentences.append(
+                f"Resultatet ska innehålla: {field.description}"
+                if is_swedish
+                else f"The result must include: {field.description}"
+            )
+    return " ".join(sentences) or None
 
 
 def _log_dropped_primary_input_shadow_fields(
