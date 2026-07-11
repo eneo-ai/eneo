@@ -187,6 +187,7 @@ export class FlowAIBuilderDriver {
   #initGeneration = 0;
   #sessionGeneration = 0;
   #pendingResumeOwner: Pick<SessionOperationOwner, "sessionId" | "sessionGeneration"> | null = null;
+  #draftLoadSequence = 0;
   #requiresAuthoritativeRefresh = false;
   #authoritativeRefreshError = false;
   #isRecoveringLatestTurn = false;
@@ -347,11 +348,17 @@ export class FlowAIBuilderDriver {
   }
 
   async loadDraftSessions(expectedGeneration = this.#sessionGeneration): Promise<void> {
+    const draftLoadSequence = ++this.#draftLoadSequence;
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
         method: "get"
       })) as { sessions: AIBuilderDraftSession[] };
-      if (expectedGeneration !== this.#sessionGeneration) return;
+      if (
+        expectedGeneration !== this.#sessionGeneration ||
+        draftLoadSequence !== this.#draftLoadSequence
+      ) {
+        return;
+      }
       this.#state.draftSessions = result.sessions;
       this.#notify();
     } catch {

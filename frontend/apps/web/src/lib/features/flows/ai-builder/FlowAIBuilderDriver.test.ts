@@ -1259,6 +1259,44 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.draftSessions).toEqual([replacementDraft]);
   });
 
+  it("keeps a newer cancellation draft list over an older same-generation resume load", async () => {
+    const cancelledSessionId = "session-cancelled";
+    const replacementSession = makeSession({ session_id: "session-replacement" });
+    const cancelledDraft = makeDraft({ session_id: cancelledSessionId });
+    const replacementDraft = makeDraft({ session_id: replacementSession.session_id });
+    const delayedCancellation = Promise.withResolvers<void>();
+    const delayedResumeDrafts = Promise.withResolvers<{ sessions: AIBuilderDraftSession[] }>();
+    const resumeDraftLoadStarted = Promise.withResolvers<void>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedCancellation.promise)
+      .mockResolvedValueOnce(replacementSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockImplementationOnce(() => {
+        resumeDraftLoadStarted.resolve();
+        return delayedResumeDrafts.promise;
+      })
+      .mockResolvedValueOnce({ sessions: [replacementDraft] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: cancelledSessionId }),
+      draftSessions: [cancelledDraft]
+    });
+
+    const cancellation = driver.discardSession(cancelledSessionId);
+    const resume = driver.resumeSession(replacementSession.session_id);
+    await resumeDraftLoadStarted.promise;
+    delayedCancellation.resolve();
+    await cancellation;
+    expect(driver.state.draftSessions).toEqual([replacementDraft]);
+
+    delayedResumeDrafts.resolve({ sessions: [cancelledDraft, replacementDraft] });
+    await resume;
+
+    expect(driver.state.session).toEqual(replacementSession);
+    expect(driver.state.draftSessions).toEqual([replacementDraft]);
+  });
+
   it("preserves a different replacement session after delayed cancellation", async () => {
     const cancelledSessionId = "session-cancelled";
     const replacementSession = makeSession({ session_id: "session-replacement" });
