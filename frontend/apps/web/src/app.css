@@ -254,8 +254,12 @@ html.dark {
   color-scheme: dark;
 }
 
+/* Placeholder contrast: the raw `--text-muted` shade fails at ~2.7:1; the
+   dedicated `--text-placeholder` token (packages/ui themes) meets ~4.5:1 in
+   both themes while staying visibly lighter than entered text. Placeholders
+   must never carry required information regardless. */
 *::placeholder {
-  color: var(--text-color-muted) !important;
+  color: var(--text-placeholder) !important;
 }
 
 /* ------------------------------------------------------------------ */

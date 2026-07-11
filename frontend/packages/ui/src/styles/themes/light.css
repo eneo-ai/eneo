@@ -33,7 +33,14 @@
 
   --text-primary: var(--color-black); /* Main text colour */
   --text-secondary: var(--color-ui-grey-500); /* Text colour for paragraphs with less emphasis */
-  --text-muted: var(--color-ui-grey-200); /* Text colour for e.g. placeholders */
+  --text-muted: var(
+    --color-ui-grey-200
+  ); /* Dim de-emphasis colour; fails AA for body text — placeholders use --text-placeholder */
+  /* Placeholder text. A dedicated step between grey-200 (2.7:1, fails every
+     text target) and grey-500 (6:1, indistinguishable from helper text):
+     ~4.65:1 against the white page background per the EN 301 549-oriented
+     review, while staying clearly lighter than entered input text. */
+  --text-placeholder: oklch(56% 0.005 78.28);
   --text-on-fill: var(--color-white); /* Text on a coloured background */
 
   --border-strongest: oklch(from var(--color-ui-grey-900) l c h / 45%);

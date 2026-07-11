@@ -697,7 +697,7 @@
   }
 
   .composer-textarea::placeholder {
-    color: var(--text-muted);
+    color: var(--text-placeholder);
   }
 
   .composer-textarea:disabled {

@@ -32,7 +32,7 @@
     {max}
     {min}
     on:input={validate}
-    class="border-stronger bg-primary ring-default placeholder:text-muted h-10 items-center
+    class="border-stronger bg-primary ring-default placeholder:text-placeholder h-10 items-center
   justify-between overflow-hidden rounded-lg border px-3 py-2 text-center shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 {inputClass}"
   />
 </div>

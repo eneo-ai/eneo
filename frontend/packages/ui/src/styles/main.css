@@ -20,6 +20,7 @@
   --text-color-primary: var(--text-primary);
   --text-color-secondary: var(--text-secondary);
   --text-color-muted: var(--text-muted);
+  --text-color-placeholder: var(--text-placeholder);
   --text-color-on-fill: var(--text-on-fill);
 
   /* Border colors */

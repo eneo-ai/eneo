@@ -48,7 +48,7 @@
       }}
       aria-required={required}
       bind:value
-      class="ult border-stronger bg-primary ring-default placeholder:text-muted
+      class="ult border-stronger bg-primary ring-default placeholder:text-placeholder
       mr-4 h-10 w-full items-center overflow-hidden rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 {inputClass}"
     />
     <input

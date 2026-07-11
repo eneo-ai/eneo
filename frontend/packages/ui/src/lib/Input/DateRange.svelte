@@ -125,7 +125,7 @@
     class="data-[invalid]:text-negative-default mt-0 flex items-center gap-1"
   >
     <div
-      class="border-default bg-primary ring-default placeholder:text-muted flex h-10 min-w-[220px] items-center justify-between gap-0.5 overflow-hidden rounded-lg border px-3 py-2 text-center font-mono shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+      class="border-default bg-primary ring-default placeholder:text-placeholder flex h-10 min-w-[220px] items-center justify-between gap-0.5 overflow-hidden rounded-lg border px-3 py-2 text-center font-mono shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
     >
       {#each $segmentContents.start as seg (seg)}
         <div {...$startSegment(seg.part)} use:startSegment>

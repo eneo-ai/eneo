@@ -35,7 +35,13 @@
 
   --text-primary: var(--color-ui-grey-100); /* Main text colour */
   --text-secondary: var(--color-ui-grey-200); /* Text colour for paragraphs with less emphasis */
-  --text-muted: var(--color-ui-grey-300); /* Text colour for e.g. placeholders */
+  --text-muted: var(
+    --color-ui-grey-300
+  ); /* Dim de-emphasis colour; placeholders use --text-placeholder */
+  /* Placeholder text: grey-300 already renders at ~4.9:1 on the soil-500
+     page background, so dark mode keeps the existing shade under the
+     dedicated token. */
+  --text-placeholder: var(--color-ui-grey-300);
   --text-on-fill: var(--color-ui-grey-50); /* Text on a coloured background */
 
   --border-strongest: oklch(from var(--color-soil-100) l c h / 55%);
