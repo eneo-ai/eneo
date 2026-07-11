@@ -415,16 +415,23 @@ async def _prefill_conversation_through_public_api(
 
 
 def _assert_one_accepted_user_message(
-    *, session: SessionResponse, expected_content: str
-) -> None:
+    *,
+    session: SessionResponse,
+    expected_content: str,
+    expected_message_id: UUID | None = None,
+) -> UUID:
     latest_turn = _latest_turn(session)
-    message_id = str(latest_turn.user_message_id)
+    message_id = latest_turn.user_message_id
+    if expected_message_id is not None:
+        assert message_id == expected_message_id
     matching_messages = [
-        message for message in session.conversation if message.message_id == message_id
+        message
+        for message in session.conversation
+        if message.role == "user" and message.content == expected_content
     ]
     assert len(matching_messages) == 1
-    assert matching_messages[0].role == "user"
-    assert matching_messages[0].content == expected_content
+    assert matching_messages[0].message_id == str(message_id)
+    return message_id
 
 
 @pytest.mark.integration
@@ -556,7 +563,7 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
         session_id=committed_session,
         expected_state=BuilderTurnState.COMMITTED,
     )
-    _assert_one_accepted_user_message(
+    committed_message_id = _assert_one_accepted_user_message(
         session=committed_reload,
         expected_content=committed_request.message,
     )
@@ -578,7 +585,7 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
     before_latest = _latest_turn(before_provider_reload)
     assert before_latest.requires_duplicate_provider_spend_acknowledgement is False
     assert before_latest.retry_request == before_provider_request
-    _assert_one_accepted_user_message(
+    before_provider_message_id = _assert_one_accepted_user_message(
         session=before_provider_reload,
         expected_content=before_provider_request.message,
     )
@@ -590,7 +597,7 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
     unknown_latest = _latest_turn(unknown_reload)
     assert unknown_latest.requires_duplicate_provider_spend_acknowledgement is True
     assert unknown_latest.retry_request == unknown_request
-    _assert_one_accepted_user_message(
+    unknown_message_id = _assert_one_accepted_user_message(
         session=unknown_reload,
         expected_content=unknown_request.message,
     )
@@ -640,6 +647,7 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
     _assert_one_accepted_user_message(
         session=unknown_committed,
         expected_content=unknown_request.message,
+        expected_message_id=unknown_message_id,
     )
 
     with _deterministic_provider(
@@ -664,11 +672,15 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
     _assert_one_accepted_user_message(
         session=before_provider_committed,
         expected_content=before_provider_request.message,
+        expected_message_id=before_provider_message_id,
     )
     assert len(before_provider_committed.conversation) <= MAX_SESSION_MESSAGES
     assert _latest_turn(before_provider_committed).retry_request == (
         before_provider_request
     )
+    assert [attachment.id for attachment in before_provider_committed.attachments] == [
+        UUID(file_id)
+    ]
 
     committed_provider_calls = _marker_count(marker_path, "provider_call:after_commit")
     with _provider_must_not_run():
@@ -678,22 +690,50 @@ async def test_ai_builder_turn_retry_survives_hard_process_failures(
             session_id=committed_session,
             request=committed_request,
         )
-        conflicting_request = committed_request.model_copy(
-            update={"message": "A changed request must conflict."}
-        )
+    assert replay.status_code == 200, replay.text
+    assert _event_names(replay) == ("done",)
+    replayed_reload = await _load_session(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=committed_session,
+    )
+    _assert_one_accepted_user_message(
+        session=replayed_reload,
+        expected_content=committed_request.message,
+        expected_message_id=committed_message_id,
+    )
+    assert replayed_reload.conversation == committed_reload.conversation
+    assert replayed_reload.latest_turn == committed_reload.latest_turn
+    assert replayed_reload.attachments == committed_reload.attachments
+
+    conflicting_request = committed_request.model_copy(
+        update={"message": "A changed request must conflict."}
+    )
+    with _provider_must_not_run():
         conflict = await _send_message(
             client=client,
             bearer_token=bearer_token,
             session_id=committed_session,
             request=conflicting_request,
         )
-    assert replay.status_code == 200, replay.text
-    assert _event_names(replay) == ("done",)
     assert conflict.status_code == 409, conflict.text
     assert (
         _PublicError.model_validate_json(conflict.content).code
         == "session_turn_idempotency_conflict"
     )
+    conflict_reload = await _load_session(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=committed_session,
+    )
+    _assert_one_accepted_user_message(
+        session=conflict_reload,
+        expected_content=committed_request.message,
+        expected_message_id=committed_message_id,
+    )
+    assert conflict_reload.conversation == committed_reload.conversation
+    assert conflict_reload.latest_turn == committed_reload.latest_turn
+    assert conflict_reload.attachments == committed_reload.attachments
     assert (
         _marker_count(marker_path, "provider_call:after_commit")
         == committed_provider_calls
