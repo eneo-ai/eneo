@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -54,6 +54,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -80,7 +81,14 @@ from eneo.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
 )
-from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendLease
+from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionTurnAcceptance,
+    SessionTurnClaim,
+    SessionTurnClaimDisposition,
+    SessionTurnPreflight,
+    SessionTurnPreparationBaseline,
+)
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -88,6 +96,7 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -101,6 +110,17 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
+
+_TEST_CLIENT_TURN_ID = UUID("11111111-1111-4111-8111-111111111111")
+_TEST_REQUEST_FINGERPRINT = "a" * 64
+
+
+def _test_request_snapshot(message: str) -> FlowPersistedJsonObject:
+    return {
+        "client_turn_id": str(_TEST_CLIENT_TURN_ID),
+        "message": message,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -223,6 +243,49 @@ def _make_service(
 ) -> AIBuilderService:
     if repo is None:
         repo = AsyncMock()
+
+    async def accept_turn(**kwargs: object) -> SessionTurnClaim:
+        acceptance = cast(SessionTurnAcceptance, kwargs["acceptance"])
+        session = repo.get_session.return_value
+        session.conversation = [*session.conversation, acceptance.user_message]
+        return SessionTurnClaim(
+            disposition=SessionTurnClaimDisposition.EXECUTE,
+            user_message=acceptance.user_message,
+            base_planning_state_version=session.planning_state_version,
+        )
+
+    async def preflight_turn(**_: object) -> SessionTurnPreflight:
+        session = repo.get_session.return_value
+        if session.status not in {
+            SessionStatus.CHATTING,
+            SessionStatus.AWAITING_APPROVAL,
+        }:
+            raise AIBuilderBadRequestException(
+                "Cannot send messages in this AI Builder session right now.",
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+            )
+        return SessionTurnPreflight(
+            session=session,
+            baseline=SessionTurnPreparationBaseline(
+                session_status=session.status,
+                latest_plan_id=session.latest_plan_id,
+                planning_state_version=session.planning_state_version,
+                latest_turn_id=(
+                    session.latest_turn.client_turn_id
+                    if session.latest_turn is not None
+                    else None
+                ),
+                latest_turn_state=(
+                    session.latest_turn.state
+                    if session.latest_turn is not None
+                    else None
+                ),
+                attachment_file_ids=(),
+            ),
+        )
+
+    repo.accept_session_turn.side_effect = accept_turn
+    repo.preflight_session_turn.side_effect = preflight_turn
     repo.list_session_file_ids.return_value = []
     repo.load_planning_state.return_value = None
     resolved_completion_service = completion_service or AsyncMock()
@@ -863,6 +926,9 @@ class TestServiceComposition:
     @pytest.mark.anyio
     async def test_send_message_delegates_to_planner(self):
         service = _make_service()
+        service.repo.get_session.return_value = _make_session(
+            tenant_id=service.user.tenant_id
+        )
 
         async def planner_events():
             yield build_done_event()
@@ -875,6 +941,9 @@ class TestServiceComposition:
             events = await _collect_events(
                 service.send_message(
                     session_id=uuid4(),
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Build a flow"),
                     message="Build a flow",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
@@ -1183,6 +1252,30 @@ class TestPlannerContextPreparation:
         completion_service._get_adapter.assert_not_awaited()
 
     @pytest.mark.anyio
+    async def test_resolve_planner_params_uses_provider_default_sampling_for_reasoning_model(
+        self,
+    ):
+        completion_service = MagicMock()
+        completion_service.resolve_litellm_params = MagicMock(
+            return_value=("openai/gpt-reasoning", {"api_key": "sk-sync"})
+        )
+        completion_service._get_adapter = AsyncMock()
+
+        service = _make_service(completion_service=completion_service)
+
+        model = _make_model()
+        model.reasoning = True
+        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
+
+        assert litellm_model == "openai/gpt-reasoning"
+        assert litellm_kwargs == {
+            "api_key": "sk-sync",
+            "additional_drop_params": ["temperature"],
+        }
+        completion_service.resolve_litellm_params.assert_called_once_with(model)
+        completion_service._get_adapter.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_resolve_planner_params_strips_provider_tool_call_controls(self):
         completion_service = MagicMock()
         completion_service.resolve_litellm_params = MagicMock(
@@ -1233,6 +1326,9 @@ class TestSendMessage:
             await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Hello"),
                     message="Hello",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
@@ -1266,6 +1362,9 @@ class TestSendMessage:
             await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Change step 2"),
                     message="Change step 2",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
@@ -1289,7 +1388,7 @@ class TestSendMessage:
         )
 
     @pytest.mark.anyio
-    async def test_llm_error_yields_error_event(self):
+    async def test_llm_error_preserves_provider_outcome_unknown(self):
         user = _make_user()
         repo = _make_repo_mock()
         session = _make_session(
@@ -1312,26 +1411,21 @@ class TestSendMessage:
 
         with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(side_effect=RuntimeError("API error"))
-            events = await _collect_events(
-                service.send_message(
-                    session_id=session.id,
-                    message="Hello",
-                    question_answer=_make_requirements_confirmation(),
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+            with pytest.raises(AIBuilderProviderOutcomeUnknownException):
+                await _collect_events(
+                    service.send_message(
+                        session_id=session.id,
+                        client_turn_id=_TEST_CLIENT_TURN_ID,
+                        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                        request_snapshot=_test_request_snapshot("Hello"),
+                        message="Hello",
+                        question_answer=_make_requirements_confirmation(),
+                        litellm_model="openai/gpt-4",
+                        litellm_kwargs={"api_key": "sk-test"},
+                    )
                 )
-            )
 
-        assert len(events) == 2
-        assert events[0]["event"] == SSE_EVENT_ERROR
-        error_payload = json.loads(events[0]["data"])
-        assert error_payload["schema_version"] == 2
-        assert error_payload["message"] == "The AI planner failed. Please try again."
-        assert error_payload["code"] == "planner_upstream_error"
-        assert error_payload["category"] == "upstream"
-        assert error_payload["phase"] == "planner"
-        assert error_payload["request_id"]
-        assert events[1]["event"] == SSE_EVENT_DONE
+        repo.mark_session_turn_processing.assert_awaited_once()
 
 
 class TestSendMessageToolCall:
@@ -1385,6 +1479,12 @@ class TestSendMessageToolCall:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot(
+                        "Jag vill ladda upp ett eller flera PDF-dokument, jämföra dem och skapa "
+                        "en DOCX-rapport."
+                    ),
                     message=(
                         "Jag vill ladda upp ett eller flera PDF-dokument, jämföra dem och skapa "
                         "en DOCX-rapport."
@@ -1520,6 +1620,9 @@ class TestSendMessageToolCall:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Build it"),
                     message="Build it",
                     question_answer=_make_requirements_confirmation(),
                     litellm_model="openai/gpt-4",
@@ -1568,6 +1671,9 @@ class TestSendMessageToolCall:
             await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Build it"),
                     message="Build it",
                     question_answer=_make_requirements_confirmation(),
                     litellm_model="openai/gpt-4",
@@ -1638,6 +1744,9 @@ class TestSendMessageToolCall:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Build it"),
                     message="Build it",
                     question_answer=_make_requirements_confirmation(),
                     litellm_model="openai/gpt-4",
@@ -1890,6 +1999,9 @@ class TestSendMessageStructuredQuestion:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("DOCX utan mall"),
                     message="DOCX utan mall",
                     question_answer={
                         "question_id": "final_output_format",
@@ -1951,6 +2063,11 @@ class TestSendMessageStructuredQuestion:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot(
+                        "Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten."
+                    ),
                     message="Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten.",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
@@ -2048,6 +2165,9 @@ class TestSendMessageStructuredQuestion:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Ett ärende åt gången"),
                     message="Ett ärende åt gången",
                     question_answer={
                         "question_id": "processing_scope",
@@ -2107,6 +2227,11 @@ class TestSendMessageStructuredQuestion:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot(
+                        "Bygg ett flöde som sammanfattar ett dokument."
+                    ),
                     message="Bygg ett flöde som sammanfattar ett dokument.",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
@@ -2345,7 +2470,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
 
 
 @pytest.mark.asyncio
-async def test_cancel_session_detaches_session_files_before_cancelling() -> None:
+async def test_cancel_session_delegates_atomic_cleanup_to_repository() -> None:
     user = _make_user()
     repo = AsyncMock()
     session = _make_session(actor_user_id=user.id)
@@ -2354,10 +2479,7 @@ async def test_cancel_session_detaches_session_files_before_cancelling() -> None
 
     await service.cancel_session(session.id)
 
-    repo.detach_session_files_for_sessions.assert_awaited_once_with(
-        session_ids=[session.id],
-        tenant_id=user.tenant_id,
-    )
+    repo.detach_session_files_for_sessions.assert_not_awaited()
     repo.cancel_session.assert_awaited_once()
 
 

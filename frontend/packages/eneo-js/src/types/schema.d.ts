@@ -4940,7 +4940,7 @@ export interface paths {
     put?: never;
     /**
      * Send AI Builder Message
-     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream.
+     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream. One caller-generated client turn ID identifies one logical send: retry the same payload with the same ID, while a changed payload conflicts. This protection covers the latest accepted turn until a different turn is accepted or the session is deleted. A failed-before-provider turn can be retried safely. A provider-outcome-unknown turn is never retried automatically and requires explicit acknowledgement that provider work and cost may be repeated. Reload the session and use latest_turn.retry_request to replay the exact accepted request.
      */
     post: operations["send_ai_builder_message"];
     delete?: never;
@@ -8687,6 +8687,8 @@ export interface components {
       | "session_latest_plan_update_conflict"
       | "session_send_in_progress"
       | "session_send_lease_lost"
+      | "session_turn_idempotency_conflict"
+      | "session_turn_provider_outcome_unknown"
       | "stale_plan_revision"
       | "stale_revision"
       | "transcription_model_required"
@@ -8800,6 +8802,24 @@ export interface components {
       details?: {
         [key: string]: string | number | boolean | null;
       } | null;
+    };
+    /** AIBuilderTurnLifecycleResponse */
+    AIBuilderTurnLifecycleResponse: {
+      /**
+       * Client Turn Id
+       * Format: uuid
+       */
+      client_turn_id: string;
+      state: components["schemas"]["BuilderTurnState"];
+      /**
+       * User Message Id
+       * Format: uuid
+       */
+      user_message_id: string;
+      error_code?: components["schemas"]["AIBuilderErrorCode"] | null;
+      /** Requires Duplicate Provider Spend Acknowledgement */
+      requires_duplicate_provider_spend_acknowledgement: boolean;
+      retry_request: components["schemas"]["SendMessageRequest"];
     };
     /**
      * ARQHealth
@@ -10982,6 +11002,12 @@ export interface components {
        */
       package_file: string;
     };
+    /**
+     * BuilderTurnState
+     * @enum {string}
+     */
+    BuilderTurnState:
+      "open" | "processing" | "committed" | "failed_before_provider" | "provider_outcome_unknown";
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -23059,6 +23085,8 @@ export interface components {
     /**
      * SendMessageRequest
      * @example {
+     *       "acknowledge_duplicate_provider_spend": false,
+     *       "client_turn_id": "00000000-0000-0000-0000-000000000703",
      *       "edit_context": {
      *         "plan_id": "00000000-0000-0000-0000-000000000702",
      *         "scope": "step",
@@ -23085,6 +23113,12 @@ export interface components {
      *     }
      */
     SendMessageRequest: {
+      /**
+       * Client Turn Id
+       * Format: uuid
+       * @description Caller-generated identity for the latest logical session turn. Reuse it only when retrying the same request payload.
+       */
+      client_turn_id: string;
       /** Message */
       message: string;
       /** Model Id */
@@ -23101,6 +23135,12 @@ export interface components {
       edit_context?: components["schemas"]["AIBuilderPlanEditContext"] | null;
       /** Ui Language */
       ui_language?: string | null;
+      /**
+       * Acknowledge Duplicate Provider Spend
+       * @description Explicitly acknowledges that retrying a provider-outcome-unknown turn can repeat provider work and cost.
+       * @default false
+       */
+      acknowledge_duplicate_provider_spend?: boolean;
     };
     /**
      * ServiceAccountAuthCallback
@@ -23502,6 +23542,17 @@ export interface components {
      *       ],
      *       "created_at": "2026-03-17T10:00:00Z",
      *       "latest_plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "latest_turn": {
+     *         "client_turn_id": "00000000-0000-0000-0000-000000000703",
+     *         "requires_duplicate_provider_spend_acknowledgement": false,
+     *         "retry_request": {
+     *           "client_turn_id": "00000000-0000-0000-0000-000000000703",
+     *           "message": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
+     *           "ui_language": "en"
+     *         },
+     *         "state": "committed",
+     *         "user_message_id": "019db164-9eab-7843-baa1-229e595cde04"
+     *       },
      *       "session_id": "00000000-0000-0000-0000-000000000701",
      *       "status": "chatting",
      *       "target_kind": "create",
@@ -23541,6 +23592,7 @@ export interface components {
       flow_id?: string | null;
       /** Latest Plan Id */
       latest_plan_id?: string | null;
+      latest_turn?: components["schemas"]["AIBuilderTurnLifecycleResponse"] | null;
       telemetry?: components["schemas"]["SessionTelemetrySummary"] | null;
       /** Conversation */
       conversation?: components["schemas"]["AIBuilderConversationMessage"][];
@@ -45242,6 +45294,32 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE",
            *         "error_code": "not_found",
            *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description The client turn ID conflicts with a different payload, another turn is active, or the provider outcome is unknown and requires explicit duplicate-spend acknowledgement before retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "session_turn_provider_outcome_unknown",
+           *       "category": "conflict",
+           *       "message": "The provider outcome is unknown. Explicitly acknowledge possible duplicate provider work before retrying this turn.",
+           *       "phase": "router",
+           *       "eneo_error_code": 9007,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "session_turn_provider_outcome_unknown",
+           *         "error_category": "conflict",
            *         "error_phase": "router"
            *       }
            *     }

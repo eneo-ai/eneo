@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -41,6 +41,11 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+    SessionTurnAcceptance,
+    SessionTurnClaim,
+    SessionTurnClaimDisposition,
+    SessionTurnPreflight,
+    SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
@@ -85,6 +90,36 @@ def _make_turn(
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         base_planning_state_version=base_planning_state_version,
     )
+
+
+def _configure_turn_acceptance(repo: AsyncMock) -> None:
+    async def accept_turn(**kwargs: object) -> SessionTurnClaim:
+        acceptance = cast(SessionTurnAcceptance, kwargs["acceptance"])
+        session = repo.get_session.return_value
+        session.conversation = [*session.conversation, acceptance.user_message]
+        return SessionTurnClaim(
+            disposition=SessionTurnClaimDisposition.EXECUTE,
+            user_message=acceptance.user_message,
+            base_planning_state_version=session.planning_state_version,
+        )
+
+    repo.accept_session_turn.side_effect = accept_turn
+
+    async def preflight_turn(**_: object) -> SessionTurnPreflight:
+        session = repo.get_session.return_value
+        return SessionTurnPreflight(
+            session=session,
+            baseline=SessionTurnPreparationBaseline(
+                session_status=SessionStatus(session.status),
+                latest_plan_id=None,
+                planning_state_version=session.planning_state_version,
+                latest_turn_id=None,
+                latest_turn_state=None,
+                attachment_file_ids=(),
+            ),
+        )
+
+    repo.preflight_session_turn.side_effect = preflight_turn
 
 
 def _resolved_slot(
@@ -3145,8 +3180,10 @@ class TestPlannerDiscoveryQuestionDispatch:
             id=session_id,
             status=SessionStatus.CHATTING,
             conversation=[],
+            planning_state_version=0,
         )
         repo.load_planning_state.return_value = None
+        _configure_turn_acceptance(repo)
 
         planner = AIBuilderPlanner(
             user=MagicMock(tenant_id=uuid4()),
@@ -3159,12 +3196,20 @@ class TestPlannerDiscoveryQuestionDispatch:
         )
 
         events: list[dict[str, str]] = []
+        client_turn_id = uuid4()
         with patch(
             "eneo.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
             return_value=MagicMock(max_input_tokens=128000),
         ):
             async for event in planner.send_message(
                 session_id=session_id,
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request_snapshot={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
+                    "ui_language": "sv",
+                },
                 message="Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
                 ui_language="sv",
                 litellm_model="openai/gpt-5.4",
@@ -3193,6 +3238,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             planning_state_version=0,
         )
         repo.load_planning_state.return_value = None
+        _configure_turn_acceptance(repo)
 
         planner = AIBuilderPlanner(
             user=MagicMock(tenant_id=uuid4()),
@@ -3205,12 +3251,23 @@ class TestPlannerDiscoveryQuestionDispatch:
         )
 
         events: list[dict[str, str]] = []
+        client_turn_id = uuid4()
         with patch(
             "eneo.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
             return_value=MagicMock(max_input_tokens=128000),
         ):
             async for event in planner.send_message(
                 session_id=session_id,
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request_snapshot={
+                    "client_turn_id": str(client_turn_id),
+                    "message": (
+                        "Create a flow that transcribes meeting audio, extracts ten "
+                        "topic sections, and produces a DOCX meeting report."
+                    ),
+                    "ui_language": "en",
+                },
                 message=(
                     "Create a flow that transcribes meeting audio, extracts ten "
                     "topic sections, and produces a DOCX meeting report."

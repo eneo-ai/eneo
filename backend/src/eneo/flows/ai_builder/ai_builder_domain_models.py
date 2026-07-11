@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditConfidence,
     FlowEditDiff,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -33,6 +34,14 @@ class SessionStatus(str, enum.Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     APPLIED = "applied"
     CANCELLED = "cancelled"
+
+
+class BuilderTurnState(enum.StrEnum):
+    OPEN = "open"
+    PROCESSING = "processing"
+    COMMITTED = "committed"
+    FAILED_BEFORE_PROVIDER = "failed_before_provider"
+    PROVIDER_OUTCOME_UNKNOWN = "provider_outcome_unknown"
 
 
 class PlanStatus(str, enum.Enum):
@@ -121,6 +130,17 @@ class ConversationMessage(BaseModel):
         return cls.model_validate(data)
 
 
+class BuilderTurnLifecycle(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    client_turn_id: UUID
+    request_fingerprint: str = Field(min_length=64, max_length=64)
+    request: FlowPersistedJsonObject
+    state: BuilderTurnState
+    user_message_id: UUID
+    error_code: AIBuilderErrorCode | None = None
+
+
 class BuilderSession(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,6 +160,7 @@ class BuilderSession(BaseModel):
     # through proposal submission and reject stale deltas without a second
     # repo round-trip. Fresh rows default to 0 per the DB `server_default`.
     planning_state_version: int = 0
+    latest_turn: BuilderTurnLifecycle | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

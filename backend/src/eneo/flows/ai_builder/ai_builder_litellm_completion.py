@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
@@ -64,6 +67,7 @@ async def call_proposal_completion(
     litellm_client: Any,
     request: ProposalCompletionRequest,
     usage_tracker: ProposalTurnTelemetry | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMCompletionResponse:
     provider_kwargs = dict(request.litellm_kwargs)
     provider_kwargs.pop("drop_params", None)
@@ -71,17 +75,24 @@ async def call_proposal_completion(
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
 
-    raw_response = await litellm_client.acompletion(
-        model=request.litellm_model,
-        messages=request.messages,
-        tools=request.tool_schemas,
-        tool_choice=request.tool_choice,
-        stream=False,
-        drop_params=True,
-        max_tokens=request.max_output_tokens,
-        temperature=request.temperature,
-        **provider_kwargs,
-    )
+    if before_provider_call is not None:
+        await before_provider_call()
+    try:
+        raw_response = await litellm_client.acompletion(
+            model=request.litellm_model,
+            messages=request.messages,
+            tools=request.tool_schemas,
+            tool_choice=request.tool_choice,
+            stream=False,
+            drop_params=True,
+            max_tokens=request.max_output_tokens,
+            temperature=request.temperature,
+            **provider_kwargs,
+        )
+    except Exception as error:
+        if before_provider_call is not None:
+            raise AIBuilderProviderOutcomeUnknownException() from error
+        raise
     response = normalize_litellm_completion_response(raw_response)
     if usage_tracker is not None:
         completion_text, finish_reason = _first_text_and_finish_reason(response)
@@ -104,6 +115,7 @@ def make_usage_tracked_proposal_completion(
     *,
     litellm_client: Any,
     usage_tracker: ProposalTurnTelemetry | None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> ProposalCompletionFn:
     async def _tracked_completion(
         request: ProposalCompletionRequest,
@@ -112,6 +124,7 @@ def make_usage_tracked_proposal_completion(
             litellm_client=litellm_client,
             request=request,
             usage_tracker=usage_tracker,
+            before_provider_call=before_provider_call,
         )
 
     return _tracked_completion

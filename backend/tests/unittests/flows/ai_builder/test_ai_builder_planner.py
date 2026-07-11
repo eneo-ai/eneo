@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
@@ -59,6 +60,12 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchResult,
     ServerDecisionProposalContinuation,
 )
+from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionTurnClaim,
+    SessionTurnClaimDisposition,
+    SessionTurnPreflight,
+    SessionTurnPreparationBaseline,
+)
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
@@ -77,6 +84,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -84,6 +92,16 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.main.exceptions import BadRequestException
+
+_TEST_CLIENT_TURN_ID = UUID("11111111-1111-4111-8111-111111111111")
+_TEST_REQUEST_FINGERPRINT = "a" * 64
+
+
+def _test_request_snapshot(message: str) -> FlowPersistedJsonObject:
+    return {
+        "client_turn_id": str(_TEST_CLIENT_TURN_ID),
+        "message": message,
+    }
 
 
 def _make_planner() -> AIBuilderPlanner:
@@ -96,7 +114,46 @@ def _make_planner() -> AIBuilderPlanner:
         forced_proposal_temperature=0.1,
         quality_retry_warning_codes=set(),
     )
-    planner.repo.claim_session_send.return_value = True
+
+    async def accept_turn(**kwargs: object) -> SessionTurnClaim:
+        acceptance = kwargs["acceptance"]
+        user_message = cast(
+            ConversationMessage,
+            getattr(acceptance, "user_message"),
+        )
+        session = planner.repo.get_session.return_value
+        if hasattr(session, "conversation"):
+            session.conversation = [*session.conversation, user_message]
+        return SessionTurnClaim(
+            disposition=SessionTurnClaimDisposition.EXECUTE,
+            user_message=user_message,
+            base_planning_state_version=getattr(session, "planning_state_version", 0),
+        )
+
+    async def preflight_turn(**_: object) -> SessionTurnPreflight:
+        session = planner.repo.get_session.return_value
+        if session.status not in {
+            SessionStatus.CHATTING,
+            SessionStatus.AWAITING_APPROVAL,
+        }:
+            raise AIBuilderBadRequestException(
+                "Cannot send messages in this AI Builder session right now.",
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+            )
+        return SessionTurnPreflight(
+            session=session,
+            baseline=SessionTurnPreparationBaseline(
+                session_status=SessionStatus(session.status),
+                latest_plan_id=getattr(session, "latest_plan_id", None),
+                planning_state_version=getattr(session, "planning_state_version", 0),
+                latest_turn_id=None,
+                latest_turn_state=None,
+                attachment_file_ids=(),
+            ),
+        )
+
+    planner.repo.accept_session_turn.side_effect = accept_turn
+    planner.repo.preflight_session_turn.side_effect = preflight_turn
     return planner
 
 
@@ -252,6 +309,22 @@ def _requirements_state_confirmed(
     )
 
 
+def _architecture_commit() -> ArchitectureCommit:
+    return ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_text"],
+        committed_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+
+
 def _budget_policy() -> AIBuilderBudgetPolicy:
     return AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=128,
@@ -307,10 +380,17 @@ async def _collect_send_message_events(
     *,
     session_id: UUID,
 ) -> list[dict[str, str]]:
+    client_turn_id = uuid4()
     return [
         encode_ai_builder_stream_event(event)
         async for event in planner.send_message(
             session_id=session_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            request_snapshot={
+                "client_turn_id": str(client_turn_id),
+                "message": "Build a flow",
+            },
             message="Build a flow",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1273,7 +1353,10 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
 @pytest.mark.asyncio
 async def test_send_message_rejects_when_another_send_is_already_in_progress() -> None:
     planner = _make_planner()
-    planner.repo.claim_session_send.return_value = False
+    planner.repo.accept_session_turn.side_effect = AIBuilderBadRequestException(
+        "Another AI Builder message is already being processed for this session.",
+        code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+    )
     planner.repo.get_session.return_value = SimpleNamespace(
         conversation=[],
         planning_state_version=0,
@@ -1283,6 +1366,9 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
     with pytest.raises(BadRequestException, match="already being processed"):
         async for _ in planner.send_message(
             session_id=uuid4(),
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot("Build a flow"),
             message="Build a flow",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1380,7 +1466,9 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
         replace(
             _server_output_prepared(),
             requirements_state=_requirements_state_confirmed(),
-            server_decision=ReviseArchitecture(architecture_commit=cast(Any, object())),
+            server_decision=ReviseArchitecture(
+                architecture_commit=_architecture_commit()
+            ),
             planning_state=continuation_state,
         ),
     )
@@ -1421,7 +1509,63 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
     assert captured["planning_state"] is continuation_state
     turn = cast(object, captured["turn"])
     assert getattr(turn, "base_planning_state_version") == 9
+    planner.repo.complete_session_turn.assert_awaited_once()
     planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_server_continuation_preserves_proposal_error_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    continuation_state = PlanningState.empty()
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        replace(
+            _server_output_prepared(),
+            requirements_state=_requirements_state_confirmed(),
+            server_decision=ReviseArchitecture(
+                architecture_commit=_architecture_commit()
+            ),
+            planning_state=continuation_state,
+        ),
+    )
+
+    async def fake_dispatch(
+        _: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        return ServerDecisionDispatchResult(
+            action_kind="revise_architecture",
+            events=(build_status_event(AIBuilderStatus.ARCHITECTURE_REVISED),),
+            new_planning_state_version=9,
+            proposal_continuation=ServerDecisionProposalContinuation(
+                planning_state=continuation_state
+            ),
+        )
+
+    async def fake_propose_plan(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        yield build_ai_builder_error_event(
+            message="Invalid proposal",
+            code=AIBuilderErrorCode.PLANNER_REJECTED,
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+
+    events = await _collect_send_message_events(planner, session_id=uuid4())
+
+    assert [event["event"] for event in events] == ["status", "error", "done"]
+    planner.repo.complete_session_turn.assert_awaited_once()
+    assert (
+        planner.repo.complete_session_turn.await_args.kwargs["error_code"]
+        is AIBuilderErrorCode.PLANNER_REJECTED
+    )
 
 
 @pytest.mark.asyncio
@@ -1473,7 +1617,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
 
 
 @pytest.mark.asyncio
-async def test_send_message_releases_lease_after_server_dispatch_exception(
+async def test_send_message_releases_pre_provider_dispatch_failure_for_safe_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     planner = _make_planner()
@@ -1490,10 +1634,10 @@ async def test_send_message_releases_lease_after_server_dispatch_exception(
         fail_dispatch,
     )
 
-    events = await _collect_send_message_events(planner, session_id=session_id)
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        await _collect_send_message_events(planner, session_id=session_id)
 
-    assert [event["event"] for event in events] == ["error", "done"]
-    assert json.loads(events[0]["data"])["code"] == "planner_upstream_error"
+    planner.repo.mark_session_turn_processing.assert_not_awaited()
     planner.repo.release_session_send.assert_awaited_once()
 
 
@@ -1523,6 +1667,9 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
     )
     stream = planner.send_message(
         session_id=session_id,
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Build a flow"),
         message="Build a flow",
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
@@ -1543,7 +1690,7 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
 
 
 @pytest.mark.asyncio
-async def test_send_message_releases_lease_when_stream_is_closed(
+async def test_send_message_releases_lease_when_stream_is_cancelled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     planner = _make_planner()
@@ -1568,15 +1715,21 @@ async def test_send_message_releases_lease_when_stream_is_closed(
         ),
     )
 
+    proposal_started = asyncio.Event()
+
     async def fake_propose_plan(
         **_: object,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        yield build_text_event("first chunk")
+        proposal_started.set()
         await asyncio.Event().wait()
+        yield build_text_event("unreachable")
 
     monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
     stream = planner.send_message(
         session_id=session_id,
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Build a flow"),
         message="Build a flow",
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
@@ -1590,10 +1743,12 @@ async def test_send_message_releases_lease_when_stream_is_closed(
         budget_policy=_budget_policy(),
     )
 
-    first = encode_ai_builder_stream_event(await anext(stream))
-    await asyncio.wait_for(stream.aclose(), timeout=1)
+    pending_event = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(proposal_started.wait(), timeout=1)
+    pending_event.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending_event
 
-    assert first == {"event": "text", "data": '{"text":"first chunk"}'}
     planner.repo.release_session_send.assert_awaited_once()
 
 
@@ -1662,6 +1817,9 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         encode_ai_builder_stream_event(event)
         async for event in planner.send_message(
             session_id=session_id,
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot("Revise the plan"),
             message="Revise the plan",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1697,6 +1855,9 @@ async def test_send_message_rejects_closed_session_before_claiming_lock() -> Non
     with pytest.raises(BadRequestException, match="Cannot send messages"):
         async for _ in planner.send_message(
             session_id=uuid4(),
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot("Build a flow"),
             message="Build a flow",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},

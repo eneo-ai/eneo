@@ -6,7 +6,7 @@ import json
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -71,6 +71,10 @@ from eneo.flows.ai_builder.ai_builder_router import (
 )
 from eneo.flows.ai_builder.ai_builder_router import (
     router as ai_builder_router,
+)
+from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionTurnPreflight,
+    SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
 from eneo.flows.flow_access_policy import FlowApiAction
@@ -274,6 +278,20 @@ def test_ai_builder_route_class_logs_raw_public_exception_fallback(
 # ---------------------------------------------------------------------------
 
 
+def _send_message_request(
+    message: str,
+    *,
+    file_ids: list[UUID] | None = None,
+    ui_language: str | None = None,
+) -> SendMessageRequest:
+    return SendMessageRequest(
+        client_turn_id=uuid4(),
+        message=message,
+        file_ids=file_ids,
+        ui_language=ui_language,
+    )
+
+
 def _make_container(
     *,
     user_id=None,
@@ -325,7 +343,32 @@ def _make_container(
         flow=None,
         assistant_snapshots=None,
         attachment_files=[],
+        session_attachment_file_ids=(),
     )
+
+    async def preflight_message_turn(**_: object) -> SessionTurnPreflight:
+        session = service.get_session.return_value
+        return SessionTurnPreflight(
+            session=session,
+            baseline=SessionTurnPreparationBaseline(
+                session_status=session.status,
+                latest_plan_id=session.latest_plan_id,
+                planning_state_version=session.planning_state_version,
+                latest_turn_id=(
+                    session.latest_turn.client_turn_id
+                    if session.latest_turn is not None
+                    else None
+                ),
+                latest_turn_state=(
+                    session.latest_turn.state
+                    if session.latest_turn is not None
+                    else None
+                ),
+                attachment_file_ids=(),
+            ),
+        )
+
+    service.preflight_message_turn.side_effect = preflight_message_turn
     container.ai_builder_service.return_value = service
     container.audit_service.return_value = AsyncMock()
 
@@ -1543,7 +1586,7 @@ class TestSendMessageEndpoint:
 
         service.send_message.return_value = mock_events()
 
-        body = SendMessageRequest(message="Build a flow")
+        body = _send_message_request("Build a flow")
         result = await send_message(
             request=MagicMock(),
             session_id=session.id,
@@ -1570,7 +1613,7 @@ class TestSendMessageEndpoint:
         response = await send_message(
             request=MagicMock(),
             session_id=session.id,
-            body=SendMessageRequest(message="Build a flow", file_ids=[file_id]),
+            body=_send_message_request("Build a flow", file_ids=[file_id]),
             container=container,
         )
         await _read_sse_events(response)
@@ -1626,7 +1669,7 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=MagicMock(),
             session_id=session.id,
-            body=SendMessageRequest(message="Build a flow"),
+            body=_send_message_request("Build a flow"),
             container=container,
         )
 
@@ -1691,7 +1734,7 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=MagicMock(),
             session_id=session.id,
-            body=SendMessageRequest(message="Build a flow"),
+            body=_send_message_request("Build a flow"),
             container=container,
         )
 
@@ -1719,7 +1762,7 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=MagicMock(),
             session_id=session.id,
-            body=SendMessageRequest(message="Build a flow"),
+            body=_send_message_request("Build a flow"),
             container=container,
         )
 
@@ -1734,7 +1777,7 @@ class TestSendMessageEndpoint:
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
-        body = SendMessageRequest(message="Hello")
+        body = _send_message_request("Hello")
         with pytest.raises(UnauthorizedException):
             await send_message(
                 request=MagicMock(),
@@ -1755,7 +1798,7 @@ class TestSendMessageEndpoint:
             await send_message(
                 request=MagicMock(),
                 session_id=session.id,
-                body=SendMessageRequest(message="Hello"),
+                body=_send_message_request("Hello"),
                 container=container,
             )
 
@@ -1813,6 +1856,7 @@ class TestSendMessageEndpoint:
             flow=flow,
             assistant_snapshots={},
             attachment_files=[],
+            session_attachment_file_ids=(),
         )
 
         async def mock_events(*args, **kwargs):
@@ -1820,13 +1864,14 @@ class TestSendMessageEndpoint:
 
         service.send_message.return_value = mock_events()
 
-        body = SendMessageRequest(message="Build it")
-        await send_message(
+        body = _send_message_request("Build it")
+        response = await send_message(
             request=MagicMock(),
             session_id=session.id,
             body=body,
             container=container,
         )
+        await _read_sse_events(response)
 
         # The EventSourceResponse is returned — service.send_message is called
         # lazily. The router should still reuse one authorized space load, but
@@ -1877,6 +1922,7 @@ class TestSendMessageEndpoint:
             flow=None,
             assistant_snapshots=None,
             attachment_files=[],
+            session_attachment_file_ids=(),
         )
 
         captured: dict = {}
@@ -1887,7 +1933,7 @@ class TestSendMessageEndpoint:
 
         service.send_message.side_effect = mock_events
 
-        body = SendMessageRequest(message="Build it")
+        body = _send_message_request("Build it")
         result = await send_message(
             request=MagicMock(),
             session_id=session.id,
@@ -1929,8 +1975,8 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=MagicMock(),
             session_id=session.id,
-            body=SendMessageRequest(
-                message="Bygg ett flöde",
+            body=_send_message_request(
+                "Bygg ett flöde",
                 ui_language="sv",
             ),
             container=container,
@@ -1963,7 +2009,7 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=request,
             session_id=session.id,
-            body=SendMessageRequest(message="Bygg ett flöde"),
+            body=_send_message_request("Bygg ett flöde"),
             container=container,
         )
 
@@ -2008,7 +2054,7 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=request,
             session_id=session.id,
-            body=SendMessageRequest(message="Bygg ett flöde"),
+            body=_send_message_request("Bygg ett flöde"),
             container=container,
         )
 
@@ -2055,7 +2101,7 @@ class TestSendMessageEndpoint:
         result = await send_message(
             request=request,
             session_id=session.id,
-            body=SendMessageRequest(message="Bygg ett flöde"),
+            body=_send_message_request("Bygg ett flöde"),
             container=container,
         )
 

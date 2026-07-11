@@ -36,10 +36,12 @@ REQUIRED_SCHEMAS = {
     "AIBuilderStatus",
     "AIBuilderStatusEvent",
     "AIBuilderTextEvent",
+    "AIBuilderTurnLifecycleResponse",
     "AIBuilderUsageEvent",
     "ApplyPlanRequest",
     "ApplyResultResponse",
     "CreateSessionRequest",
+    "BuilderTurnState",
     "FlowEditDiff",
     "FlowBuilderEditApproval",
     "FlowBuilderProposalContent",
@@ -286,6 +288,82 @@ def test_openapi_session_response_includes_telemetry_field(openapi_spec: dict) -
     session_response = schemas["SessionResponse"]
     telemetry_property = session_response["properties"].get("telemetry")
     assert telemetry_property is not None
+
+
+def test_openapi_ai_builder_turn_retry_contract_is_strict(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    request = schemas["SendMessageRequest"]
+    lifecycle = schemas["AIBuilderTurnLifecycleResponse"]
+
+    assert request["additionalProperties"] is False
+    assert set(request["required"]) == {"client_turn_id", "message"}
+    assert request["properties"]["file_ids"]["anyOf"][0]["maxItems"] == 100
+    assert request["properties"]["ui_language"]["anyOf"][0]["maxLength"] == 16
+    assert (
+        request["properties"]["acknowledge_duplicate_provider_spend"]["default"]
+        is False
+    )
+    structured_answer = schemas["StructuredQuestionAnswerMetadata"]
+    assert (
+        structured_answer["properties"]["selected_values"]["anyOf"][0]["maxItems"] == 20
+    )
+    assert (
+        structured_answer["properties"]["selected_values"]["anyOf"][0]["items"][
+            "anyOf"
+        ][0]["maxLength"]
+        == 500
+    )
+    assert lifecycle["additionalProperties"] is False
+    assert lifecycle["properties"]["retry_request"] == {
+        "$ref": "#/components/schemas/SendMessageRequest"
+    }
+    assert set(schemas["BuilderTurnState"]["enum"]) == {
+        "open",
+        "processing",
+        "committed",
+        "failed_before_provider",
+        "provider_outcome_unknown",
+    }
+    assert "#/components/schemas/AIBuilderTurnLifecycleResponse" in _schema_refs(
+        schemas["SessionResponse"]["properties"]["latest_turn"]
+    )
+    assert "request_fingerprint" not in request["properties"]
+    assert "request_fingerprint" not in lifecycle["properties"]
+
+
+def test_openapi_ai_builder_turn_retry_errors_and_recovery_are_documented(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    error_codes = set(schemas["AIBuilderErrorCode"]["enum"])
+    operation = openapi_spec["paths"][
+        "/api/v1/flows/ai-builder/sessions/{session_id}/messages"
+    ]["post"]
+    description = operation["description"]
+
+    assert {
+        "session_turn_idempotency_conflict",
+        "session_turn_provider_outcome_unknown",
+    }.issubset(error_codes)
+    for expected in (
+        "same ID",
+        "changed payload conflicts",
+        "latest accepted turn",
+        "failed-before-provider",
+        "provider-outcome-unknown",
+        "explicit acknowledgement",
+        "latest_turn.retry_request",
+    ):
+        assert expected in description
+
+    conflict_response = operation["responses"]["409"]
+    assert "client turn ID" in conflict_response["description"]
+    assert "provider outcome" in conflict_response["description"]
+    assert "#/components/schemas/AIBuilderPublicError" in _schema_refs(
+        conflict_response["content"]["application/json"]["schema"]
+    )
 
 
 def test_openapi_session_conversation_uses_public_projection(

@@ -7,6 +7,9 @@ from typing import Any, cast
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
 )
@@ -36,6 +39,7 @@ async def adjudicate_pending_question_answer(
     litellm_kwargs: dict[str, Any],
     conversation: list[ConversationMessage],
     user_message: str,
+    raise_provider_errors: bool = False,
 ) -> PendingQuestionResolution | None:
     pending = latest_pending_structured_question(conversation)
     if not isinstance(pending, dict):
@@ -95,6 +99,8 @@ async def adjudicate_pending_question_answer(
         )
     except Exception as error:
         logger.warning("Pending-question adjudication failed", exc_info=error)
+        if raise_provider_errors:
+            raise AIBuilderProviderOutcomeUnknownException() from error
         return None
 
     content = response.choices[0].message.content if response.choices else None

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 from uuid import UUID
@@ -112,6 +112,7 @@ class PlannerRequestPreparationInput:
     allow_discovery_semantic_adjudication: bool
     persisted_planning_state: PlanningState | None
     available_mcps: AIBuilderMCPResourceInput
+    before_provider_call: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +172,7 @@ async def prepare_planner_request(
         allow_semantic_adjudication=request.allow_discovery_semantic_adjudication,
         tenant_id=request.tenant_id,
         attachment_context=attachment_context_result,
+        before_provider_call=request.before_provider_call,
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state

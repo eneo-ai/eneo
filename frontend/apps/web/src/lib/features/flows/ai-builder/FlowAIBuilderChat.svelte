@@ -58,6 +58,50 @@
         })
       : null
   );
+  const turnRecoveryState = $derived(service.turnRecoveryState);
+  const turnIsActive = $derived(
+    service.latestTurnState === "open" || service.latestTurnState === "processing"
+  );
+  const turnRefreshFailed = $derived(service.authoritativeRefreshFailed && service.error !== null);
+  const turnRecoveryTitle = $derived(
+    turnRecoveryState === "failed_before_provider"
+      ? m.ai_builder_turn_failed_before_provider_title()
+      : turnRecoveryState === "provider_outcome_unknown"
+        ? m.ai_builder_turn_provider_outcome_unknown_title()
+        : turnIsActive
+          ? m.ai_builder_turn_active_title()
+          : null
+  );
+  const turnRecoveryDescription = $derived(
+    turnRecoveryState === "failed_before_provider"
+      ? m.ai_builder_turn_failed_before_provider_description()
+      : turnRecoveryState === "provider_outcome_unknown"
+        ? m.ai_builder_turn_provider_outcome_unknown_description()
+        : turnIsActive
+          ? m.ai_builder_turn_active_description()
+          : null
+  );
+  let isRefreshingTurn = $state(false);
+
+  async function handleTurnRetry() {
+    if (turnRecoveryState === "failed_before_provider") {
+      await service.retryLatestTurn();
+      return;
+    }
+    if (turnRecoveryState === "provider_outcome_unknown") {
+      await service.acknowledgeAndRetryLatestTurn();
+    }
+  }
+
+  async function handleTurnRefresh() {
+    if (isRefreshingTurn) return;
+    isRefreshingTurn = true;
+    try {
+      await service.refreshSession();
+    } finally {
+      isRefreshingTurn = false;
+    }
+  }
 
   function handleQuestionAnswer(answer: StructuredQuestionAnswerPayload) {
     service.sendMessage(answer.text, answer.questionAnswer, undefined, pendingEditContext);
@@ -165,12 +209,15 @@
   class:justify-center={showEmptyState}
   class:max-md:min-h-[calc(100dvh-var(--page-header-h,4rem))]={showEmptyState}
 >
-  {#if service.error}
+  {#if service.error || turnRecoveryState || turnIsActive}
     <div
       class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
       transition:fade={{ duration: 160 }}
     >
-      <Alert.Root variant="destructive" class="flex items-start gap-3 rounded-lg px-3.5 py-2.5">
+      <Alert.Root
+        variant={turnIsActive && !service.error ? "default" : "destructive"}
+        class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
+      >
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 20 20"
@@ -184,23 +231,73 @@
             clip-rule="evenodd"
           />
         </svg>
-        <Alert.Description class="min-w-0 flex-1 text-[0.8125rem] leading-relaxed">
-          {service.error.message}
-        </Alert.Description>
-        <FlowAIBuilderDiagnosticCopyButton
-          report={streamErrorDiagnosticReport}
-          variant="ghost"
-          size="xs"
-          class="text-destructive hover:bg-destructive/10 hover:text-destructive -mt-0.5 shrink-0 self-start"
-        />
-        <Button
-          variant="ghost"
-          size="xs"
-          class="text-destructive hover:bg-destructive/10 hover:text-destructive -mt-0.5 -mr-1 shrink-0 self-start"
-          onclick={() => service.clearError()}
-        >
-          {m.ai_builder_dismiss()}
-        </Button>
+        <div class="min-w-0">
+          {#if turnRecoveryTitle}
+            <Alert.Title class="text-sm leading-snug">{turnRecoveryTitle}</Alert.Title>
+          {/if}
+          <Alert.Description
+            id="ai-builder-turn-recovery-description"
+            class="text-[0.8125rem] leading-relaxed"
+          >
+            {turnRecoveryDescription ?? service.error?.message ?? ""}
+            {#if turnRecoveryDescription && turnRefreshFailed}
+              <span class="mt-1 block">{m.ai_builder_turn_refresh_failed()}</span>
+            {:else if turnRecoveryDescription && service.error}
+              <span class="mt-1 block">{service.error.message}</span>
+            {/if}
+          </Alert.Description>
+          <div
+            class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+            aria-busy={service.isStreaming || service.isRecoveringLatestTurn}
+          >
+            {#if turnRecoveryState}
+              <Button
+                variant={turnRecoveryState === "provider_outcome_unknown"
+                  ? "destructive"
+                  : "default"}
+                size="sm"
+                class="w-full whitespace-normal sm:w-auto"
+                disabled={service.isStreaming || service.isRecoveringLatestTurn}
+                aria-describedby="ai-builder-turn-recovery-description"
+                onclick={handleTurnRetry}
+              >
+                {service.isStreaming || service.isRecoveringLatestTurn
+                  ? m.ai_builder_turn_retrying()
+                  : turnRecoveryState === "provider_outcome_unknown"
+                    ? m.ai_builder_turn_retry_with_cost_acknowledgement()
+                    : m.ai_builder_turn_retry()}
+              </Button>
+            {:else if turnIsActive}
+              <Button
+                variant="default"
+                size="sm"
+                disabled={isRefreshingTurn}
+                aria-describedby="ai-builder-turn-recovery-description"
+                onclick={handleTurnRefresh}
+              >
+                {m.refresh()}
+              </Button>
+            {/if}
+            {#if streamErrorDiagnosticReport}
+              <FlowAIBuilderDiagnosticCopyButton
+                report={streamErrorDiagnosticReport}
+                variant="ghost"
+                size="xs"
+                class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              />
+            {/if}
+            {#if !turnRecoveryState && service.error}
+              <Button
+                variant="ghost"
+                size="xs"
+                class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onclick={() => service.clearError()}
+              >
+                {m.ai_builder_dismiss()}
+              </Button>
+            {/if}
+          </div>
+        </div>
       </Alert.Root>
     </div>
   {/if}
@@ -339,11 +436,10 @@
     width: 3rem;
     height: 3rem;
     border-radius: 0.875rem;
+    border: 1px solid var(--border-dimmer);
     background: var(--background-secondary);
     color: var(--accent-default);
-    box-shadow:
-      inset 0 0 0 1px var(--border-dimmer),
-      0 1px 2px oklch(from var(--color-black) l c h / 0.04);
+    box-shadow: var(--shadow-xs);
   }
 
   .welcome-glyph svg {
@@ -362,8 +458,8 @@
 
   .input-area-hero :global(.input-container) {
     box-shadow:
-      0 1px 3px oklch(from var(--color-black) l c h / 0.04),
-      inset 0 1px 2px oklch(from var(--color-black) l c h / 0.03);
+      var(--shadow-xs),
+      inset 0 1px 2px var(--shadow-default);
     min-height: 4.5rem;
   }
 
@@ -379,11 +475,9 @@
   }
 
   .generating-badge {
-    @apply inline-flex items-center gap-2.5 rounded-full px-3.5 py-2;
+    @apply border-accent-default/20 bg-accent-dimmer inline-flex items-center gap-2.5 rounded-full border px-3.5 py-2;
     width: fit-content;
-    background: oklch(from var(--accent-default) l c h / 0.1);
     color: var(--accent-stronger);
-    border: 1px solid oklch(from var(--accent-default) l c h / 0.16);
   }
 
   .generating-dots {

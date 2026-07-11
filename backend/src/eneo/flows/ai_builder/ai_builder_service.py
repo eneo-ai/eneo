@@ -73,8 +73,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
 )
+from eneo.flows.ai_builder.ai_builder_session_turn import SessionTurnPreflight
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
 )
@@ -113,6 +115,8 @@ configure_litellm_runtime(litellm)
 
 def _sanitize_ai_builder_litellm_kwargs(
     litellm_kwargs: dict[str, object],
+    *,
+    use_provider_default_sampling: bool = False,
 ) -> dict[str, object]:
     """Keep provider credentials separate from AI Builder tool-call control.
 
@@ -122,11 +126,31 @@ def _sanitize_ai_builder_litellm_kwargs(
     tool-call keys here prevents accidental provider/MCP tool execution during
     planner turns and avoids duplicate keyword conflicts in proposal calls.
     """
-    return {
+    sanitized = {
         key: value
         for key, value in litellm_kwargs.items()
         if key not in _AI_BUILDER_CONTROLLED_TOOL_KEYS
     }
+    if not use_provider_default_sampling:
+        return sanitized
+
+    configured_drop_params = sanitized.get("additional_drop_params")
+    if configured_drop_params is None:
+        drop_params: list[str] = []
+    elif isinstance(configured_drop_params, list):
+        drop_params = []
+        for param in cast(list[object], configured_drop_params):
+            if not isinstance(param, str):
+                raise TypeError(
+                    "LiteLLM additional_drop_params must be a list of strings"
+                )
+            drop_params.append(param)
+    else:
+        raise TypeError("LiteLLM additional_drop_params must be a list of strings")
+    if "temperature" not in drop_params:
+        drop_params.append("temperature")
+    sanitized["additional_drop_params"] = drop_params
+    return sanitized
 
 
 class _CredentialResolverProtocol(Protocol):
@@ -150,6 +174,7 @@ class PreparedMessageContext:
     flow: "Flow | None"
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
+    session_attachment_file_ids: tuple[UUID, ...]
 
 
 @dataclass(frozen=True)
@@ -262,6 +287,22 @@ class AIBuilderService:
             tenant_id=self.user.tenant_id,
         )
 
+    async def preflight_message_turn(
+        self,
+        *,
+        session_id: UUID,
+        client_turn_id: UUID,
+        request_fingerprint: str,
+        acknowledge_duplicate_provider_spend: bool,
+    ) -> SessionTurnPreflight:
+        return await self.repo.preflight_session_turn(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint=request_fingerprint,
+            acknowledge_duplicate_provider_spend=(acknowledge_duplicate_provider_spend),
+        )
+
     async def get_plan(self, plan_id: UUID) -> BuilderPlan:
         return await self.repo.get_plan(
             plan_id=plan_id,
@@ -298,10 +339,6 @@ class AIBuilderService:
 
     async def cancel_session(self, session_id: UUID) -> BuilderSession:
         await self.get_session(session_id)
-        await self.repo.detach_session_files_for_sessions(
-            session_ids=[session_id],
-            tenant_id=self.user.tenant_id,
-        )
         await self.repo.cancel_session(
             session_id=session_id,
             tenant_id=self.user.tenant_id,
@@ -331,7 +368,10 @@ class AIBuilderService:
                 litellm_model = resolved_tuple[0]
                 litellm_kwargs = cast(dict[str, object], resolved_tuple[1])
                 return litellm_model, _sanitize_ai_builder_litellm_kwargs(
-                    litellm_kwargs
+                    litellm_kwargs,
+                    use_provider_default_sampling=(
+                        getattr(model, "reasoning", False) is True
+                    ),
                 )
 
         adapter = cast(
@@ -356,7 +396,8 @@ class AIBuilderService:
                 litellm_kwargs[key] = value
 
         return adapter.litellm_model, _sanitize_ai_builder_litellm_kwargs(
-            litellm_kwargs
+            litellm_kwargs,
+            use_provider_default_sampling=(getattr(model, "reasoning", False) is True),
         )
 
     async def prepare_message_context(
@@ -438,6 +479,7 @@ class AIBuilderService:
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files,
+            session_attachment_file_ids=tuple(session_file_ids),
         )
 
     @staticmethod
@@ -452,6 +494,10 @@ class AIBuilderService:
         self,
         *,
         session_id: UUID,
+        client_turn_id: UUID,
+        request_fingerprint: str,
+        request_snapshot: FlowPersistedJsonObject,
+        acknowledge_duplicate_provider_spend: bool = False,
         message: str,
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
@@ -468,10 +514,24 @@ class AIBuilderService:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
+        turn_preflight: SessionTurnPreflight | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        if turn_preflight is None:
+            turn_preflight = await self.preflight_message_turn(
+                session_id=session_id,
+                client_turn_id=client_turn_id,
+                request_fingerprint=request_fingerprint,
+                acknowledge_duplicate_provider_spend=(
+                    acknowledge_duplicate_provider_spend
+                ),
+            )
         planner = self._build_planner()
         async for event in planner.send_message(
             session_id=session_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint=request_fingerprint,
+            request_snapshot=request_snapshot,
+            acknowledge_duplicate_provider_spend=(acknowledge_duplicate_provider_spend),
             message=message,
             question_answer=question_answer,
             edit_context=edit_context,
@@ -488,6 +548,7 @@ class AIBuilderService:
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             budget_policy=budget_policy,
+            turn_preflight=turn_preflight,
         ):
             yield event
 

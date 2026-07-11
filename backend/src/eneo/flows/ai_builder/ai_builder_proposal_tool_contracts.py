@@ -168,6 +168,7 @@ class ProposalTurnContext:
     usage_tracker: ProposalTurnTelemetry | None = None
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
+    before_provider_call: Callable[[], Awaitable[None]] | None = None
 
     @property
     def session_id(self) -> UUID:

@@ -83,6 +83,9 @@ SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
 
 JsonScalar: TypeAlias = str | int | float | bool | None
+QuestionAnswerId: TypeAlias = Annotated[str, Field(max_length=128)]
+QuestionAnswerStringValue: TypeAlias = Annotated[str, Field(max_length=500)]
+QuestionAnswerScalar: TypeAlias = QuestionAnswerStringValue | int | float | bool | None
 LLMResolvableSlotName: TypeAlias = Literal[
     "primary_runtime_input",
     "terminal_output",
@@ -94,6 +97,9 @@ LLMResolvableSlotName: TypeAlias = Literal[
 ]
 
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
+_MAX_QUESTION_ANSWER_SELECTIONS = 20
+_MAX_UI_LANGUAGE_LENGTH = 16
+_MAX_REQUIREMENTS_VERSION_LENGTH = 128
 
 
 class SlotClassificationEvidence(BaseModel):
@@ -386,14 +392,23 @@ class StructuredQuestionAnswerMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["structured_question_answer"] = "structured_question_answer"
-    question_id: str | None = None
-    selected_option_ids: list[str] | None = None
-    selected_values: list[JsonScalar] | None = None
-    selected_option_id: str | None = None
-    selected_value: JsonScalar = None
-    answer: JsonScalar = None
-    custom_value: str | None = None
-    ui_language: str | None = None
+    question_id: QuestionAnswerId | None = None
+    selected_option_ids: list[QuestionAnswerId] | None = Field(
+        default=None,
+        max_length=_MAX_QUESTION_ANSWER_SELECTIONS,
+    )
+    selected_values: list[QuestionAnswerScalar] | None = Field(
+        default=None,
+        max_length=_MAX_QUESTION_ANSWER_SELECTIONS,
+    )
+    selected_option_id: QuestionAnswerId | None = None
+    selected_value: QuestionAnswerScalar = None
+    answer: QuestionAnswerScalar = None
+    custom_value: str | None = Field(default=None, max_length=500)
+    ui_language: str | None = Field(
+        default=None,
+        max_length=_MAX_UI_LANGUAGE_LENGTH,
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -410,8 +425,14 @@ class RequirementsConfirmationMetadata(BaseModel):
 
     kind: Literal["requirements_confirmation"] = "requirements_confirmation"
     requirements_confirmed: Literal[True] = True
-    requirements_version: str | None = None
-    ui_language: str | None = None
+    requirements_version: str | None = Field(
+        default=None,
+        max_length=_MAX_REQUIREMENTS_VERSION_LENGTH,
+    )
+    ui_language: str | None = Field(
+        default=None,
+        max_length=_MAX_UI_LANGUAGE_LENGTH,
+    )
 
 
 AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[

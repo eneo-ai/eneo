@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -24,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderClassifierDiagnostic,
     AIBuilderClassifierDiagnosticsResponse,
     AIBuilderConversationMessage,
+    AIBuilderTurnLifecycleResponse,
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
@@ -57,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    BuilderTurnState,
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -113,7 +116,10 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 from eneo.server.exception_handlers import extract_request_id
 
 if TYPE_CHECKING:
@@ -213,6 +219,10 @@ router = APIRouter(
 
 EventStream = AsyncGenerator[AIBuilderStreamEvent, None]
 ContainerWithUserDep = Annotated[Container, Depends(get_container(with_user=True))]
+ContainerWithUserExplicitTransactionDep = Annotated[
+    Container,
+    Depends(get_container_for_explicit_transaction(with_user=True)),
+]
 
 
 @dataclass(frozen=True)
@@ -477,6 +487,23 @@ def _to_session_response(
         target_kind=session.target_kind,
         flow_id=session.flow_id,
         latest_plan_id=session.latest_plan_id,
+        latest_turn=(
+            AIBuilderTurnLifecycleResponse(
+                client_turn_id=session.latest_turn.client_turn_id,
+                state=session.latest_turn.state,
+                user_message_id=session.latest_turn.user_message_id,
+                error_code=session.latest_turn.error_code,
+                requires_duplicate_provider_spend_acknowledgement=(
+                    session.latest_turn.state
+                    is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+                ),
+                retry_request=SendMessageRequest.model_validate(
+                    session.latest_turn.request
+                ),
+            )
+            if session.latest_turn is not None
+            else None
+        ),
         telemetry=(
             SessionTelemetrySummary.model_validate(telemetry)
             if telemetry is not None
@@ -703,7 +730,14 @@ async def list_sessions(
     summary="Send AI Builder Message",
     description=(
         "Send a user message to an AI Builder session and receive planner events as "
-        "a server-sent event stream."
+        "a server-sent event stream. One caller-generated client turn ID identifies "
+        "one logical send: retry the same payload with the same ID, while a changed "
+        "payload conflicts. This protection covers the latest accepted turn until a "
+        "different turn is accepted or the session is deleted. A failed-before-provider "
+        "turn can be retried safely. A provider-outcome-unknown turn is never retried "
+        "automatically and requires explicit acknowledgement that provider work and cost "
+        "may be repeated. Reload the session and use latest_turn.retry_request to replay "
+        "the exact accepted request."
     ),
     responses={
         200: {
@@ -727,6 +761,18 @@ async def list_sessions(
             message="Cannot send messages in this AI Builder session right now.",
             code=AIBuilderErrorCode.BAD_REQUEST,
         ),
+        409: _ai_builder_error_response(
+            description=(
+                "The client turn ID conflicts with a different payload, another turn "
+                "is active, or the provider outcome is unknown and requires explicit "
+                "duplicate-spend acknowledgement before retry."
+            ),
+            message=(
+                "The provider outcome is unknown. Explicitly acknowledge possible "
+                "duplicate provider work before retrying this turn."
+            ),
+            code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
+        ),
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
@@ -749,34 +795,91 @@ async def send_message(
         ),
     ],
     body: SendMessageRequest,
-    container: ContainerWithUserDep,
+    container: ContainerWithUserExplicitTransactionDep,
 ):
     service = _get_ai_builder_service(container)
-    session: BuilderSession = await service.get_session(session_id)
-    authorization = await _authorize_ai_builder_request(
-        request,
-        container,
-        action=FlowApiAction.BUILDER_MESSAGE_SEND,
-        space_id=session.space_id,
-        session=session,
-        require_creator=True,
-    )
-    space = _authorized_space(authorization)
-    tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
-    prepared_context: PreparedMessageContext = await service.prepare_message_context(
-        session=session,
-        space=space,
-        model_id=body.model_id,
-        tenant_flow_settings=tenant.flow_settings if tenant else None,
-        message_file_ids=body.file_ids,
-        planner_params_resolver=lambda model: _resolve_litellm_params(service, model),
-    )
+    database_session = cast(AsyncSession, container.session())
+    async with database_session.begin():
+        session: BuilderSession = await service.get_session(session_id)
+        authorization = await _authorize_ai_builder_request(
+            request,
+            container,
+            action=FlowApiAction.BUILDER_MESSAGE_SEND,
+            space_id=session.space_id,
+            session=session,
+            require_creator=True,
+        )
+        space = _authorized_space(authorization)
+        tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
+        request_fingerprint = body.request_fingerprint()
+        turn_preflight = await service.preflight_message_turn(
+            session_id=session_id,
+            client_turn_id=body.client_turn_id,
+            request_fingerprint=request_fingerprint,
+            acknowledge_duplicate_provider_spend=(
+                body.acknowledge_duplicate_provider_spend
+            ),
+        )
 
     async def event_stream() -> AsyncGenerator[ServerSentEvent, None]:
         try:
+            if turn_preflight.replayed:
+                wire_done_event = encode_ai_builder_stream_event(build_done_event())
+                yield ServerSentEvent(
+                    data=wire_done_event["data"],
+                    event=wire_done_event["event"],
+                )
+                return
+            try:
+                async with database_session.begin():
+                    prepared_context: PreparedMessageContext = (
+                        await service.prepare_message_context(
+                            session=turn_preflight.session,
+                            space=space,
+                            model_id=body.model_id,
+                            tenant_flow_settings=(
+                                tenant.flow_settings if tenant else None
+                            ),
+                            message_file_ids=body.file_ids,
+                            planner_params_resolver=(
+                                lambda model: _resolve_litellm_params(service, model)
+                            ),
+                        )
+                    )
+            except Exception:
+                replay_preflight = await service.preflight_message_turn(
+                    session_id=session_id,
+                    client_turn_id=body.client_turn_id,
+                    request_fingerprint=request_fingerprint,
+                    acknowledge_duplicate_provider_spend=(
+                        body.acknowledge_duplicate_provider_spend
+                    ),
+                )
+                if replay_preflight.replayed:
+                    wire_done_event = encode_ai_builder_stream_event(build_done_event())
+                    yield ServerSentEvent(
+                        data=wire_done_event["data"],
+                        event=wire_done_event["event"],
+                    )
+                    return
+                raise
+            if (
+                prepared_context.session_attachment_file_ids
+                != turn_preflight.baseline.attachment_file_ids
+            ):
+                raise AIBuilderBadRequestException(
+                    "The AI Builder session attachments changed while this turn was being prepared. Reload and retry the same turn.",
+                    code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+                )
             stream = await _coerce_event_stream(
                 service.send_message(
                     session_id=session_id,
+                    client_turn_id=body.client_turn_id,
+                    request_fingerprint=request_fingerprint,
+                    request_snapshot=body.retry_snapshot(),
+                    acknowledge_duplicate_provider_spend=(
+                        body.acknowledge_duplicate_provider_spend
+                    ),
                     message=body.message,
                     file_ids=body.file_ids,
                     question_answer=body.question_answer,
@@ -784,15 +887,22 @@ async def send_message(
                     ui_language=body.ui_language,
                     litellm_model=prepared_context.litellm_model,
                     litellm_kwargs=prepared_context.litellm_kwargs,
-                    available_models=prepared_context.planner_context.available_models,
+                    available_models=(
+                        prepared_context.planner_context.available_models
+                    ),
                     available_kbs=prepared_context.planner_context.available_kbs,
                     available_mcps=prepared_context.planner_context.available_mcps,
                     flow=prepared_context.flow,
                     assistant_snapshots=prepared_context.assistant_snapshots,
                     attachment_files=prepared_context.attachment_files,
-                    max_input_tokens=prepared_context.planner_context.max_input_tokens,
-                    max_output_tokens=prepared_context.planner_context.max_output_tokens,
+                    max_input_tokens=(
+                        prepared_context.planner_context.max_input_tokens
+                    ),
+                    max_output_tokens=(
+                        prepared_context.planner_context.max_output_tokens
+                    ),
                     budget_policy=prepared_context.planner_context.budget_policy,
+                    turn_preflight=turn_preflight,
                 )
             )
 

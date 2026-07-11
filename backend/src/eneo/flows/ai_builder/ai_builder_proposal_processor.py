@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -123,6 +123,7 @@ class AIBuilderProposalProcessor:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        before_provider_call: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         """Run the server-selected plan proposal task.
 
@@ -191,6 +192,7 @@ class AIBuilderProposalProcessor:
             planning_state=planning_state,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
+            before_provider_call=before_provider_call,
         ):
             yield event
 

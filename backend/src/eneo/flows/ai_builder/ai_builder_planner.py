@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
 from uuid import UUID
@@ -17,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderErrorEvent,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import build_done_event
@@ -26,7 +28,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     resolve_plan_edit_context,
 )
 from eneo.flows.ai_builder.ai_builder_planner_failure_events import (
-    build_planner_upstream_error_event,
     build_session_send_lease_lost_event,
 )
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
@@ -50,6 +51,10 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionTelemetry,
     dispatch_server_decision,
 )
+from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionTurnAcceptance,
+    SessionTurnPreflight,
+)
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
@@ -58,9 +63,11 @@ from eneo.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
+    prepare_user_question_metadata,
     resolve_user_question_metadata,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
@@ -124,33 +131,52 @@ class AIBuilderPlanner:
         request_id: str,
         flow: "Flow | None",
         assistant_snapshots: AssistantAuthoringSnapshots | None,
+        before_provider_call: Callable[[], Awaitable[None]],
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        async for event in self.proposal_processor.propose_plan(
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            llm_messages=proposal_request.llm_messages,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            available_model_refs=proposal_request.resource_catalog.model_refs,
-            available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
-            resource_catalog=proposal_request.resource_catalog,
-            max_output_tokens=max_output_tokens,
-            proposal_temperature=self.planner_temperature,
-            request_id=request_id,
-            flow=flow,
-            assistant_snapshots=assistant_snapshots,
-            assistant_metadata=build_assistant_message_metadata(conversation),
-            planning_state=proposal_request.planning_state,
-            plan_edit_context=proposal_request.plan_edit_context,
-            prior_plan_for_revision=proposal_request.prior_plan_for_revision,
-        ):
+        events = [
+            event
+            async for event in self.proposal_processor.propose_plan(
+                turn=turn,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                llm_messages=proposal_request.llm_messages,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                available_model_refs=proposal_request.resource_catalog.model_refs,
+                available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
+                resource_catalog=proposal_request.resource_catalog,
+                max_output_tokens=max_output_tokens,
+                proposal_temperature=self.planner_temperature,
+                request_id=request_id,
+                flow=flow,
+                assistant_snapshots=assistant_snapshots,
+                assistant_metadata=build_assistant_message_metadata(conversation),
+                planning_state=proposal_request.planning_state,
+                plan_edit_context=proposal_request.plan_edit_context,
+                prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+                before_provider_call=before_provider_call,
+            )
+        ]
+        error_code = next(
+            (
+                event.data.code
+                for event in events
+                if isinstance(event, AIBuilderErrorEvent)
+            ),
+            None,
+        )
+        await self.repo.complete_session_turn(turn=turn, error_code=error_code)
+        for event in events:
             yield event
 
     async def send_message(
         self,
         *,
         session_id: UUID,
+        client_turn_id: UUID,
+        request_fingerprint: str,
+        request_snapshot: FlowPersistedJsonObject,
+        acknowledge_duplicate_provider_spend: bool = False,
         message: str,
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
@@ -167,47 +193,111 @@ class AIBuilderPlanner:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
+        turn_preflight: SessionTurnPreflight | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        if turn_preflight is None:
+            turn_preflight = await self.repo.preflight_session_turn(
+                session_id=session_id,
+                tenant_id=self.user.tenant_id,
+                client_turn_id=client_turn_id,
+                request_fingerprint=request_fingerprint,
+                acknowledge_duplicate_provider_spend=(
+                    acknowledge_duplicate_provider_spend
+                ),
+            )
+        if turn_preflight.replayed:
+            yield build_done_event()
+            return
+
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
-
         bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
         defaults = lookup_model_defaults(litellm_model, bare_name)
-
         if max_input_tokens is None:
             max_input_tokens = (
                 defaults.max_input_tokens if defaults else None
             ) or budget_policy.unknown_model_context_window_tokens
         if max_output_tokens is None:
             max_output_tokens = defaults.max_output_tokens if defaults else None
-
         if max_input_tokens is None or max_output_tokens is None:
             raise AIBuilderBadRequestException(
                 "AI Builder planner budget settings are missing.",
                 code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING,
             )
 
-        session = await self.repo.get_session(
-            session_id=session_id,
-            tenant_id=self.user.tenant_id,
-        )
+        session = turn_preflight.session
         session_status = _session_status_value(session.status)
-        if session_status not in _MESSAGE_ACCEPTING_SESSION_STATUSES:
-            raise AIBuilderBadRequestException(
-                f"Cannot send messages in session status '{session_status}'.",
-                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
-            )
-
+        conversation = list(session.conversation)
+        plan_edit_context, prior_plan_for_revision = await resolve_plan_edit_context(
+            repo=self.repo,
+            tenant_id=self.user.tenant_id,
+            session=session,
+            context=edit_context,
+        )
+        prepared_metadata = prepare_user_question_metadata(
+            conversation=conversation,
+            message=message,
+            question_answer=question_answer,
+            ui_language=ui_language,
+        )
+        initial_metadata = prepared_metadata.metadata
+        if plan_edit_context is not None:
+            initial_metadata = {
+                **(initial_metadata or {}),
+                **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
+            }
+        user_message_metadata = (
+            {
+                **(initial_metadata or {}),
+                **(metadata_for_user_message(file_ids=file_ids) or {}),
+            }
+            if initial_metadata or file_ids
+            else None
+        )
+        user_message = ConversationMessage(
+            role="user",
+            content=message,
+            metadata=user_message_metadata,
+        )
         async with claim_ai_builder_send_turn(
             repo=self.repo,
             session_id=session_id,
             tenant_id=self.user.tenant_id,
-            base_planning_state_version=session.planning_state_version,
+            accepted_turn=SessionTurnAcceptance(
+                client_turn_id=client_turn_id,
+                request_fingerprint=request_fingerprint,
+                request=request_snapshot,
+                user_message=user_message,
+                file_ids=tuple(file_ids or ()),
+                acknowledge_duplicate_provider_spend=(
+                    acknowledge_duplicate_provider_spend
+                ),
+            ),
+            preparation_baseline=turn_preflight.baseline,
         ) as claimed_turn:
+            if claimed_turn.replayed:
+                yield build_done_event()
+                return
+
             turn = claimed_turn.turn
             lease = turn.lease
             request_id = str(lease.request_id)
             lease_lost_event = claimed_turn.lease_lost_event
+            accepted_message = claimed_turn.user_message
+            accepted_session = await self.repo.get_session(
+                session_id=session_id,
+                tenant_id=self.user.tenant_id,
+            )
+            conversation = list(accepted_session.conversation)
+            new_messages_start = next(
+                index
+                for index, persisted_message in enumerate(conversation)
+                if persisted_message.message_id == accepted_message.message_id
+            )
+            user_message = conversation[new_messages_start]
+
+            async def mark_provider_work_started() -> None:
+                await self.repo.mark_session_turn_processing(turn=turn)
 
             if session_status == SessionStatus.AWAITING_APPROVAL.value:
                 await self.repo.update_session_status(
@@ -217,16 +307,6 @@ class AIBuilderPlanner:
                     lease=lease,
                 )
 
-            conversation = list(session.conversation)
-            (
-                plan_edit_context,
-                prior_plan_for_revision,
-            ) = await resolve_plan_edit_context(
-                repo=self.repo,
-                tenant_id=self.user.tenant_id,
-                session=session,
-                context=edit_context,
-            )
             persisted_planning_state = await self.repo.load_planning_state(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
@@ -239,6 +319,8 @@ class AIBuilderPlanner:
                 ui_language=ui_language,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
+                prepared=prepared_metadata,
+                before_provider_call=mark_provider_work_started,
             )
             metadata = metadata_resolution.metadata
             if plan_edit_context is not None:
@@ -246,20 +328,14 @@ class AIBuilderPlanner:
                     **(metadata or {}),
                     **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
                 }
-            user_message = ConversationMessage(
-                role="user",
-                content=message,
-                metadata=(
-                    {
-                        **(metadata or {}),
-                        **(metadata_for_user_message(file_ids=file_ids) or {}),
-                    }
-                    if metadata or file_ids
-                    else None
-                ),
+            user_message.metadata = (
+                {
+                    **(metadata or {}),
+                    **(metadata_for_user_message(file_ids=file_ids) or {}),
+                }
+                if metadata or file_ids
+                else None
             )
-            new_messages_start = len(conversation)
-            conversation.append(user_message)
             prepared_request = await prepare_planner_request(
                 PlannerRequestPreparationInput(
                     conversation=conversation,
@@ -282,8 +358,9 @@ class AIBuilderPlanner:
                         not metadata_resolution.used_auxiliary_llm
                     ),
                     persisted_planning_state=persisted_planning_state,
-                    base_planning_state_version=session.planning_state_version,
+                    base_planning_state_version=turn.base_planning_state_version,
                     tenant_id=self.user.tenant_id,
+                    before_provider_call=mark_provider_work_started,
                 )
             )
             requirements_state = prepared_request.requirements_state
@@ -291,6 +368,12 @@ class AIBuilderPlanner:
             user_message.metadata = metadata_with_slot_classification(
                 user_message.metadata,
                 prepared_request.slot_classification_metadata,
+            )
+            await self.repo.append_session_messages(
+                session_id=session_id,
+                tenant_id=self.user.tenant_id,
+                conversation=[user_message],
+                lease=lease,
             )
 
             match prepared_request:
@@ -308,6 +391,7 @@ class AIBuilderPlanner:
                         request_id=request_id,
                         flow=flow,
                         assistant_snapshots=assistant_snapshots,
+                        before_provider_call=mark_provider_work_started,
                     ):
                         yield event
                     yield build_done_event()
@@ -345,23 +429,12 @@ class AIBuilderPlanner:
                             yield build_done_event()
                             return
                         raise
-                    except Exception as error:
-                        logger.error(
-                            "AI Builder server decision dispatch failed",
-                            exc_info=error,
-                            extra={"request_id": request_id},
-                        )
-                        yield build_planner_upstream_error_event(request_id=request_id)
-                        yield build_done_event()
-                        return
-
                     if lease_lost_event.is_set():
                         yield build_session_send_lease_lost_event(request_id=request_id)
                         yield build_done_event()
                         return
 
-                    for event in dispatch_result.events:
-                        yield event
+                    pending_events = list(dispatch_result.events)
                     if dispatch_result.proposal_continuation is not None:
                         continuation_turn = replace(
                             turn,
@@ -391,19 +464,39 @@ class AIBuilderPlanner:
                             budget_policy=budget_policy,
                             attachment_file_count=len(attachment_files or []),
                         )
-                        async for event in self._stream_proposal_events(
-                            turn=continuation_turn,
-                            conversation=conversation,
-                            new_messages_start=len(conversation),
-                            proposal_request=proposal_request,
-                            litellm_model=litellm_model,
-                            litellm_kwargs=litellm_kwargs,
-                            max_output_tokens=max_output_tokens,
-                            request_id=request_id,
-                            flow=flow,
-                            assistant_snapshots=assistant_snapshots,
-                        ):
-                            yield event
+                        pending_events.extend(
+                            [
+                                event
+                                async for event in self._stream_proposal_events(
+                                    turn=continuation_turn,
+                                    conversation=conversation,
+                                    new_messages_start=len(conversation),
+                                    proposal_request=proposal_request,
+                                    litellm_model=litellm_model,
+                                    litellm_kwargs=litellm_kwargs,
+                                    max_output_tokens=max_output_tokens,
+                                    request_id=request_id,
+                                    flow=flow,
+                                    assistant_snapshots=assistant_snapshots,
+                                    before_provider_call=mark_provider_work_started,
+                                )
+                            ]
+                        )
+                    else:
+                        error_code = next(
+                            (
+                                event.data.code
+                                for event in pending_events
+                                if isinstance(event, AIBuilderErrorEvent)
+                            ),
+                            None,
+                        )
+                        await self.repo.complete_session_turn(
+                            turn=turn,
+                            error_code=error_code,
+                        )
+                    for event in pending_events:
+                        yield event
                     yield build_done_event()
                     return
                 case _:

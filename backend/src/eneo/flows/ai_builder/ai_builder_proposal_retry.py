@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorEvent,
     AIBuilderErrorPhase,
+    AIBuilderProviderOutcomeUnknownException,
     JsonScalar,
     build_ai_builder_error_event,
 )
@@ -537,6 +538,8 @@ async def _request_self_correction_events(
                     counts_as_repair=True,
                 )
             )
+        except AIBuilderProviderOutcomeUnknownException:
+            raise
         except Exception as error:
             logger.error("Self-correction LLM call failed", exc_info=error)
             _log_self_correction_failed_turn(
@@ -768,6 +771,8 @@ async def _execute_forced_tool_retry(
                 counts_as_repair=True,
             )
         )
+    except AIBuilderProviderOutcomeUnknownException:
+        raise
     except Exception as error:
         logger.error(
             "Forced proposal retry failed",

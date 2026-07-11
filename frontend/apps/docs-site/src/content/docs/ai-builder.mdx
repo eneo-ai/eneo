@@ -30,7 +30,7 @@ AI Builder separates semantic intent from Flow mechanics.
 | Layer            | Responsibility                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------- |
 | User             | Describes the outcome, constraints, source material, runtime fields, and external systems               |
-| AI Builder       | Proposes semantic fields, steps, and resource intent                                                     |
+| AI Builder       | Proposes semantic fields, steps, and resource intent                                                    |
 | Backend compiler | Turns the plan into Flow mechanics: step wiring, material bindings, validation, and assistant resources |
 | Human reviewer   | Approves, changes, or rejects the plan before it becomes a draft Flow                                   |
 
@@ -81,6 +81,39 @@ Resource names shown to AI Builder are prompt-visible aliases. The Builder resol
 6. Publish the Flow when the draft is ready to run.
 
 The review step matters. A plan can be valid but still not be the best workflow for your organization. Check the input contract, final output, external tool access, and evidence requirements before publishing.
+
+## Reliable message sends and retries
+
+Each message send has one `client_turn_id`. A client creates this UUID once and
+reuses it only when retrying that same message, attachment set, and request. The
+server rejects the key if a later request changes those inputs.
+
+The session response exposes the latest accepted turn in `latest_turn`. This
+record survives conversation compaction and includes the exact `retry_request`
+the server accepted. After a reload, use that request instead of rebuilding one
+from visible chat text.
+
+Retry behavior depends on the persisted turn state:
+
+| State                      | Client behavior                                                                                                                                                                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `open`                     | The request is durably accepted but provider work has not started. Wait and reload the session; do not create a second logical turn.                                                                            |
+| `failed_before_provider`   | Retry the exact `retry_request`. Provider work did not start.                                                                                                                                                    |
+| `provider_outcome_unknown` | Never retry automatically. Ask the user to acknowledge that the provider may repeat work or incur another charge, then send the exact `retry_request` with `acknowledge_duplicate_provider_spend` set to `true`. |
+| `processing`               | Wait and reload the session. Do not create a second logical turn.                                                                                                                                                |
+| `committed`                | Use the committed conversation and plan state returned by the session.                                                                                                                                           |
+
+The deduplication horizon is intentionally bounded to the latest accepted turn
+for a session. A different accepted message receives a new `client_turn_id`.
+Deleting the session also deletes this recovery record. These guarantees cover
+Eneo's local state; provider execution remains at-least-once and may have an
+unknown outcome if the connection fails after the provider accepts work.
+
+Handle HTTP `409` by its typed error code. A
+`session_turn_idempotency_conflict` means the key was reused with a different
+request and must not be retried. A `session_turn_provider_outcome_unknown`
+response requires a session reload and the explicit acknowledgement flow above;
+never turn it into an automatic transport retry.
 
 ## Plan proposal contract
 

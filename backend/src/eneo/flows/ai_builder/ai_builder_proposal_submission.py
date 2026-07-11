@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -28,8 +28,10 @@ from eneo.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
+    AIBuilderProviderOutcomeUnknownException,
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
@@ -196,6 +198,7 @@ class ProposalSubmissionOwner:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        before_provider_call: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
         tool_schemas = self._active_submission_tool_schemas(
@@ -227,6 +230,7 @@ class ProposalSubmissionOwner:
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
+            before_provider_call=before_provider_call,
         )
         try:
             response = await call_proposal_completion(
@@ -236,7 +240,10 @@ class ProposalSubmissionOwner:
                     temperature=proposal_temperature,
                     tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 ),
+                before_provider_call=before_provider_call,
             )
+        except (AIBuilderBadRequestException, AIBuilderProviderOutcomeUnknownException):
+            raise
         except Exception as error:
             logger.error("AI Builder proposal task failed", exc_info=error)
             log_proposal_failed_turn(
@@ -480,6 +487,7 @@ class ProposalSubmissionOwner:
             repair_completion=make_usage_tracked_proposal_completion(
                 litellm_client=self.litellm_client,
                 usage_tracker=ctx.usage_tracker,
+                before_provider_call=ctx.before_provider_call,
             ),
         )
 
@@ -610,6 +618,8 @@ class ProposalSubmissionOwner:
 
             for event in result.events:
                 yield event
+        except AIBuilderProviderOutcomeUnknownException:
+            raise
         except AIBuilderArchitectureError as error:
             if not is_create:
                 raise
@@ -627,33 +637,10 @@ class ProposalSubmissionOwner:
             )
             return
         except Exception as error:
-            yield self._build_internal_submission_error_event(ctx=ctx, error=error)
-
-    def _build_internal_submission_error_event(
-        self,
-        *,
-        ctx: ProposalTurnContext,
-        error: Exception,
-    ) -> AIBuilderStreamEvent:
-        logger.error(
-            "AI Builder proposal submission failed",
-            exc_info=error,
-            extra={"request_id": ctx.request_id},
-        )
-        if ctx.usage_tracker is not None:
-            log_proposal_failed_turn(
-                usage_tracker=ctx.usage_tracker,
-                session_id=ctx.session_id,
-                branch="internal_submission_error",
-                final_failure_kind="internal_error",
-                final_error_code=AIBuilderErrorCode.PLANNER_STREAM_FAILED.value,
-            )
-        return build_ai_builder_error_event(
-            message="The AI Builder proposal failed. Please try again.",
-            code=AIBuilderErrorCode.PLANNER_STREAM_FAILED,
-            phase=AIBuilderErrorPhase.PROPOSAL,
-            request_id=ctx.request_id,
-        )
+            # A proposal response already came back from the provider. If local
+            # compilation or persistence now fails, replay could repeat paid
+            # provider work, so the durable turn must remain outcome-unknown.
+            raise AIBuilderProviderOutcomeUnknownException() from error
 
     async def _retry_forced_proposal_after_text(
         self,
@@ -686,6 +673,7 @@ class ProposalSubmissionOwner:
                 repair_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
+                    before_provider_call=ctx.before_provider_call,
                 ),
                 truncation_error_phase=AIBuilderErrorPhase.PROPOSAL,
             )

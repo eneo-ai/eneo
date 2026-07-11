@@ -40,6 +40,15 @@ export type SessionStatus = components["schemas"]["SessionStatus"];
 
 export type PlanStatus = components["schemas"]["PlanStatus"];
 
+export type AIBuilderSendMessageRequest = components["schemas"]["SendMessageRequest"];
+
+export type AIBuilderTurnState = components["schemas"]["BuilderTurnState"];
+
+export type AIBuilderTurnRecoveryState = Extract<
+  AIBuilderTurnState,
+  "failed_before_provider" | "provider_outcome_unknown"
+>;
+
 export type AIBuilderPlanEditScope = "whole_plan" | "step";
 
 export interface AIBuilderPlanEditContext {

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    SessionStatus,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -15,12 +18,20 @@ from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_send_lease import (
     claim_ai_builder_send_turn,
 )
-from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendLease
+from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionTurnAcceptance,
+    SessionTurnClaim,
+    SessionTurnClaimDisposition,
+    SessionTurnPreparationBaseline,
+)
 
 
 class _FakeSendLeaseRepo:
-    def __init__(self, *, claim_result: bool = True) -> None:
-        self.claim_result = claim_result
+    def __init__(
+        self, *, claim_error: AIBuilderBadRequestException | None = None
+    ) -> None:
+        self.claim_error = claim_error
         self.events: list[str] = []
         self.refresh_started = asyncio.Event()
         self.finish_refresh = asyncio.Event()
@@ -28,20 +39,29 @@ class _FakeSendLeaseRepo:
         self.released_lease: SessionSendLease | None = None
         self.refresh_result = False
 
-    async def claim_session_send(
+    async def accept_session_turn(
         self,
         *,
         session_id: UUID,
         tenant_id: UUID,
         lease: SessionSendLease,
-        lock_expires_at: datetime,
-    ) -> bool:
+        lock_lease_seconds: int,
+        acceptance: SessionTurnAcceptance,
+        preparation_baseline: SessionTurnPreparationBaseline,
+    ) -> SessionTurnClaim:
         self.events.append("claim")
         self.claimed_lease = lease
         assert session_id
         assert tenant_id
-        assert lock_expires_at
-        return self.claim_result
+        assert lock_lease_seconds >= 30
+        assert preparation_baseline.session_status is SessionStatus.CHATTING
+        if self.claim_error is not None:
+            raise self.claim_error
+        return SessionTurnClaim(
+            disposition=SessionTurnClaimDisposition.EXECUTE,
+            user_message=acceptance.user_message,
+            base_planning_state_version=11,
+        )
 
     async def refresh_session_send_lease(
         self,
@@ -49,7 +69,7 @@ class _FakeSendLeaseRepo:
         session_id: UUID,
         tenant_id: UUID,
         lease: SessionSendLease,
-        lock_expires_at: datetime,
+        lock_lease_seconds: int,
     ) -> bool:
         self.events.append("refresh-start")
         self.refresh_started.set()
@@ -58,7 +78,7 @@ class _FakeSendLeaseRepo:
         assert session_id
         assert tenant_id
         assert lease == self.claimed_lease
-        assert lock_expires_at
+        assert lock_lease_seconds >= 30
         return self.refresh_result
 
     async def release_session_send(
@@ -86,14 +106,21 @@ def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_claim_ai_builder_send_turn_raises_without_release_when_claim_fails() -> (
     None
 ):
-    fake_repo = _FakeSendLeaseRepo(claim_result=False)
+    fake_repo = _FakeSendLeaseRepo(
+        claim_error=AIBuilderBadRequestException(
+            "already processing",
+            code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+        )
+    )
+    client_turn_id = uuid4()
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         async with claim_ai_builder_send_turn(
             repo=cast(AIBuilderRepository, fake_repo),
             session_id=uuid4(),
             tenant_id=uuid4(),
-            base_planning_state_version=7,
+            accepted_turn=_accepted_turn(client_turn_id),
+            preparation_baseline=_preparation_baseline(),
         ):
             pass
 
@@ -113,7 +140,8 @@ async def test_claim_ai_builder_send_turn_waits_for_refresh_before_release(
         repo=cast(AIBuilderRepository, fake_repo),
         session_id=uuid4(),
         tenant_id=uuid4(),
-        base_planning_state_version=11,
+        accepted_turn=_accepted_turn(uuid4()),
+        preparation_baseline=_preparation_baseline(),
     ) as claimed:
         assert claimed.turn.base_planning_state_version == 11
         assert claimed.lease_lost_event.is_set() is False
@@ -122,3 +150,28 @@ async def test_claim_ai_builder_send_turn_waits_for_refresh_before_release(
 
     assert fake_repo.events == ["claim", "refresh-start", "refresh-end", "release"]
     assert fake_repo.released_lease == fake_repo.claimed_lease
+
+
+def _accepted_turn(client_turn_id: UUID) -> SessionTurnAcceptance:
+    message = ConversationMessage(role="user", content="Build a flow")
+    return SessionTurnAcceptance(
+        client_turn_id=client_turn_id,
+        request_fingerprint="a" * 64,
+        request={
+            "client_turn_id": str(client_turn_id),
+            "message": message.content,
+        },
+        user_message=message,
+        file_ids=(),
+    )
+
+
+def _preparation_baseline() -> SessionTurnPreparationBaseline:
+    return SessionTurnPreparationBaseline(
+        session_status=SessionStatus.CHATTING,
+        latest_plan_id=None,
+        planning_state_version=11,
+        latest_turn_id=None,
+        latest_turn_state=None,
+        attachment_file_ids=(),
+    )

@@ -13,6 +13,8 @@ import type {
   AIBuilderPlanEditContext,
   AIBuilderPhase,
   AIBuilderSession,
+  AIBuilderTurnState,
+  AIBuilderTurnRecoveryState,
   ApplyError,
   ApplyResult,
   ChatMessage,
@@ -33,6 +35,7 @@ export class FlowAIBuilderService {
   canSendMessage = $derived(
     this.hasSession &&
       !this.#state.isStreaming &&
+      this.#canStartNewTurn &&
       (this.#state.session?.status === "chatting" ||
         this.#state.session?.status === "awaiting_approval")
   );
@@ -65,6 +68,10 @@ export class FlowAIBuilderService {
     // Svelte tracks Driver updates through this read; Service getters must use this accessor.
     void this.#stateVersion;
     return this.#driver.state;
+  }
+
+  get #canStartNewTurn(): boolean {
+    return this.#driver.canStartNewTurn;
   }
 
   // Keep "updating plan" copy stable while a re-plan stream briefly clears currentPlan.
@@ -147,6 +154,26 @@ export class FlowAIBuilderService {
     return this.#state.session?.status;
   }
 
+  get turnRecoveryState(): AIBuilderTurnRecoveryState | null {
+    void this.#state;
+    return this.#driver.turnRecoveryState;
+  }
+
+  get latestTurnState(): AIBuilderTurnState | null {
+    void this.#state;
+    return this.#driver.latestTurnState;
+  }
+
+  get authoritativeRefreshFailed(): boolean {
+    void this.#state;
+    return this.#driver.authoritativeRefreshFailed;
+  }
+
+  get isRecoveringLatestTurn(): boolean {
+    void this.#state;
+    return this.#driver.isRecoveringLatestTurn;
+  }
+
   phase: AIBuilderPhase = $derived.by(() => {
     void this.#state;
     return this.#driver.derivePhase();
@@ -203,6 +230,14 @@ export class FlowAIBuilderService {
     editContext?: AIBuilderPlanEditContext | null
   ): Promise<void> {
     await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
+  }
+
+  async retryLatestTurn(): Promise<void> {
+    await this.#driver.retryLatestTurn();
+  }
+
+  async acknowledgeAndRetryLatestTurn(): Promise<void> {
+    await this.#driver.acknowledgeAndRetryLatestTurn();
   }
 
   async approvePlan(): Promise<void> {

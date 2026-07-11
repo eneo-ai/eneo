@@ -156,6 +156,7 @@ async def store_plan_and_update_conversation(
             state=planning_state,
             base_version=turn.base_planning_state_version,
         )
+        await repo.complete_session_turn(turn=turn)
     return StoredPlanResult(
         plan=plan,
         proposal=proposal,

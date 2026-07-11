@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { FlowAIBuilderDriver } from "./FlowAIBuilderDriver";
+import { FlowAIBuilderDriver, type AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import { parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderDraftSession,
   AIBuilderError,
+  AIBuilderSendMessageRequest,
   AIBuilderSession,
   ProposedPlan
 } from "./protocol";
@@ -21,6 +22,36 @@ function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSessio
     conversation: [],
     ...overrides
   };
+}
+
+function makeRecoverableSession(
+  state: "failed_before_provider" | "provider_outcome_unknown"
+): AIBuilderSession {
+  return makeSession({
+    conversation: [
+      {
+        message_id: "user-turn-1",
+        role: "user",
+        content: "Build a flow",
+        timestamp: "2026-07-10T20:00:00Z"
+      }
+    ],
+    latest_turn: {
+      client_turn_id: "11111111-1111-4111-8111-111111111111",
+      state,
+      user_message_id: "11111111-1111-4111-8111-111111111112",
+      error_code:
+        state === "provider_outcome_unknown" ? "session_turn_provider_outcome_unknown" : null,
+      requires_duplicate_provider_spend_acknowledgement: state === "provider_outcome_unknown",
+      retry_request: {
+        client_turn_id: "11111111-1111-4111-8111-111111111111",
+        message: "Build a flow",
+        model_id: "11111111-1111-4111-8111-111111111113",
+        ui_language: "sv",
+        acknowledge_duplicate_provider_spend: false
+      }
+    }
+  });
 }
 
 function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
@@ -119,6 +150,11 @@ function makeDriver(
     fetch,
     stream
   };
+}
+
+function completeStream(handlers: Parameters<AIBuilderClientTransport["stream"]>[2]): void {
+  handlers.onMessage?.({ id: "", event: "done", data: "" }, new AbortController());
+  handlers.onClose?.();
 }
 
 describe("FlowAIBuilderDriver", () => {
@@ -256,7 +292,7 @@ describe("FlowAIBuilderDriver", () => {
           requirements_confirmed: true,
           requirements_version: "req-persisted"
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({
@@ -498,8 +534,314 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).toBeNull();
   });
 
+  it("retries a pre-provider failure with the exact persisted turn request", async () => {
+    const session = makeRecoverableSession("failed_before_provider");
+    const latestTurn = session.latest_turn;
+    if (!latestTurn) throw new Error("Expected recoverable latest turn");
+    const { driver, stream } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue({
+        ...session,
+        latest_turn: { ...latestTurn, state: "committed" }
+      }),
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({
+      session,
+      messages: [{ role: "user", content: "Build a flow", timestamp: 1 }]
+    });
+
+    await driver.retryLatestTurn();
+
+    expect(driver.turnRecoveryState).toBeNull();
+    expect(stream).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+      expect.objectContaining({
+        requestBody: {
+          "application/json": {
+            ...session.latest_turn?.retry_request,
+            acknowledge_duplicate_provider_spend: false
+          }
+        }
+      }),
+      expect.any(Object),
+      expect.any(AbortController)
+    );
+    expect(driver.state.messages).toHaveLength(1);
+  });
+
+  it("requires the named acknowledgement path for an unknown provider outcome", async () => {
+    const session = makeRecoverableSession("provider_outcome_unknown");
+    const { driver, stream } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({
+      session,
+      messages: [{ role: "user", content: "Build a flow", timestamp: 1 }]
+    });
+
+    await driver.retryLatestTurn();
+    expect(stream).not.toHaveBeenCalled();
+
+    await driver.acknowledgeAndRetryLatestTurn();
+
+    expect(stream).toHaveBeenCalledOnce();
+    expect(stream.mock.calls[0]?.[1].requestBody["application/json"]).toEqual({
+      ...session.latest_turn?.retry_request,
+      acknowledge_duplicate_provider_spend: true
+    });
+    expect(driver.state.messages).toHaveLength(1);
+  });
+
+  it("prevents concurrent retry transport calls", async () => {
+    let finishStream: (() => void) | undefined;
+    const { driver, stream } = makeDriver({
+      streamImpl: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishStream = resolve;
+          })
+      )
+    });
+    driver.seedState({ session: makeRecoverableSession("failed_before_provider") });
+
+    const firstRetry = driver.retryLatestTurn();
+    const secondRetry = driver.retryLatestTurn();
+
+    expect(stream).toHaveBeenCalledOnce();
+    finishStream?.();
+    await Promise.all([firstRetry, secondRetry]);
+  });
+
+  it("blocks another retry until the completed retry is authoritatively refreshed", async () => {
+    const session = makeRecoverableSession("failed_before_provider");
+    const latestTurn = session.latest_turn;
+    if (!latestTurn) throw new Error("Expected recoverable latest turn");
+    const fetchSession = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("session refresh unavailable"))
+      .mockResolvedValueOnce({
+        ...session,
+        latest_turn: { ...latestTurn, state: "committed" }
+      });
+    const { driver, stream } = makeDriver({
+      fetchImpl: fetchSession,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({ session });
+
+    await driver.retryLatestTurn();
+    expect(driver.state.error).not.toBeNull();
+
+    await driver.retryLatestTurn();
+
+    expect(stream).toHaveBeenCalledOnce();
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+    expect(driver.turnRecoveryState).toBeNull();
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("serializes a delayed recovery refresh before retrying provider work", async () => {
+    const session = makeRecoverableSession("failed_before_provider");
+    const latestTurn = session.latest_turn;
+    if (!latestTurn) throw new Error("Expected recoverable latest turn");
+    const delayedPreflight = Promise.withResolvers<AIBuilderSession>();
+    const committedSession = {
+      ...session,
+      latest_turn: { ...latestTurn, state: "committed" as const }
+    };
+    const fetchSession = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("session refresh unavailable"))
+      .mockReturnValueOnce(delayedPreflight.promise)
+      .mockResolvedValueOnce(committedSession);
+    const { driver, stream } = makeDriver({
+      fetchImpl: fetchSession,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({ session });
+
+    await driver.retryLatestTurn();
+    const firstRecovery = driver.retryLatestTurn();
+    const concurrentRecovery = driver.retryLatestTurn();
+
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+    expect(driver.isRecoveringLatestTurn).toBe(true);
+    delayedPreflight.resolve(session);
+    await Promise.all([firstRecovery, concurrentRecovery]);
+
+    expect(fetchSession).toHaveBeenCalledTimes(3);
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(driver.latestTurnState).toBe("committed");
+    expect(driver.isRecoveringLatestTurn).toBe(false);
+  });
+
+  it("ignores a delayed refresh response after the session is replaced", async () => {
+    const oldSession = makeRecoverableSession("failed_before_provider");
+    const newSession = makeSession({ session_id: "session-2" });
+    const delayedOldRefresh = Promise.withResolvers<AIBuilderSession>();
+    const fetchSession = vi
+      .fn()
+      .mockReturnValueOnce(delayedOldRefresh.promise)
+      .mockResolvedValueOnce(newSession)
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetchSession });
+    driver.seedState({ session: oldSession });
+
+    const oldRefresh = driver.refreshSession();
+    await driver.resumeSession(newSession.session_id);
+    delayedOldRefresh.resolve(oldSession);
+
+    expect(await oldRefresh).toBe(false);
+    expect(driver.state.session?.session_id).toBe(newSession.session_id);
+    expect(driver.latestTurnState).toBeNull();
+  });
+
+  it("uses a new turn ID only for a distinct logical send", async () => {
+    const bodies: AIBuilderSendMessageRequest[] = [];
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        bodies.push(init.requestBody["application/json"]);
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("First request");
+    await driver.sendMessage("Second request");
+
+    expect(bodies[0]?.client_turn_id).not.toBe(bodies[1]?.client_turn_id);
+  });
+
+  it.each(["open", "processing", "failed_before_provider", "provider_outcome_unknown"] as const)(
+    "blocks a new logical send while the latest turn is %s",
+    async (state) => {
+      const recoverable = makeRecoverableSession(
+        state === "provider_outcome_unknown" ? "provider_outcome_unknown" : "failed_before_provider"
+      );
+      const latestTurn = recoverable.latest_turn;
+      if (!latestTurn) throw new Error("Expected latest turn");
+      const { driver, stream } = makeDriver();
+      driver.seedState({
+        session: {
+          ...recoverable,
+          latest_turn: { ...latestTurn, state }
+        }
+      });
+
+      await driver.sendMessage("Start a different turn");
+
+      expect(driver.canStartNewTurn).toBe(false);
+      expect(stream).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refreshes authoritative turn state when a stream closes without done", async () => {
+    const activeSession = makeRecoverableSession("failed_before_provider");
+    if (!activeSession.latest_turn) throw new Error("Expected latest turn");
+    activeSession.latest_turn = { ...activeSession.latest_turn, state: "processing" };
+    const fetch = vi.fn().mockResolvedValue(activeSession);
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({ method: "get" })
+    );
+    expect(driver.latestTurnState).toBe("processing");
+    expect(driver.canStartNewTurn).toBe(false);
+  });
+
+  it("blocks new sends until an incomplete stream can be authoritatively refreshed", async () => {
+    const fetch = vi.fn().mockRejectedValueOnce(new Error("refresh unavailable"));
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onClose();
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+    await driver.sendMessage("Do not send yet");
+
+    expect(stream).toHaveBeenCalledOnce();
+    expect(driver.canStartNewTurn).toBe(false);
+
+    fetch.mockResolvedValueOnce(makeSession());
+    expect(await driver.refreshSession()).toBe(true);
+    expect(driver.canStartNewTurn).toBe(true);
+  });
+
+  it("does not carry an uncertain turn fence into a fresh authoritative session", async () => {
+    const freshSession = makeSession({
+      session_id: "session-fresh",
+      target_kind: "create",
+      flow_id: null
+    });
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return freshSession;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      if (path.endsWith("/models")) {
+        return { models: [], default_model_id: null };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        throw new Error("session refresh unavailable");
+      }
+      return {};
+    });
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+    expect(driver.canStartNewTurn).toBe(false);
+
+    await driver.startFreshSession("create");
+
+    expect(driver.state.session?.session_id).toBe("session-fresh");
+    expect(driver.canStartNewTurn).toBe(true);
+  });
+
+  it("keeps an active turn fenced and reports an authoritative refresh failure", async () => {
+    const activeSession = makeRecoverableSession("failed_before_provider");
+    if (!activeSession.latest_turn) throw new Error("Expected latest turn");
+    activeSession.latest_turn = { ...activeSession.latest_turn, state: "processing" };
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockRejectedValue(new Error("session refresh unavailable"))
+    });
+    driver.seedState({ session: activeSession });
+
+    expect(await driver.refreshSession()).toBe(false);
+
+    expect(driver.canStartNewTurn).toBe(false);
+    expect(driver.state.error).not.toBeNull();
+  });
+
   it("soft-block stream errors do not set visible error state", async () => {
     const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(makeSession()),
       streamImpl: vi.fn(async (_path, _init, handlers) => {
         handlers.onMessage({
           event: "error",
@@ -513,7 +855,7 @@ describe("FlowAIBuilderDriver", () => {
             eneo_error_code: 9007
           })
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -525,6 +867,7 @@ describe("FlowAIBuilderDriver", () => {
 
   it("stores structured stream errors", async () => {
     const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(makeSession()),
       streamImpl: vi.fn(async (_path, _init, handlers) => {
         handlers.onMessage({
           event: "error",
@@ -538,7 +881,7 @@ describe("FlowAIBuilderDriver", () => {
             eneo_error_code: 9024
           })
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -554,11 +897,52 @@ describe("FlowAIBuilderDriver", () => {
     });
   });
 
+  it("preserves structured transport errors and refreshes recovery state", async () => {
+    const unknownSession = makeRecoverableSession("provider_outcome_unknown");
+    const fetch = vi.fn().mockResolvedValueOnce(unknownSession);
+    const transportError = {
+      status: 409,
+      response: {
+        schema_version: 2,
+        code: "session_turn_provider_outcome_unknown",
+        category: "conflict",
+        message: "The provider outcome is unknown.",
+        phase: "router",
+        request_id: "request-1",
+        eneo_error_code: 9007,
+        diagnostic_context: null,
+        details: {}
+      }
+    };
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn().mockRejectedValue(transportError)
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.error).toMatchObject({
+      code: "session_turn_provider_outcome_unknown",
+      category: "conflict",
+      phase: "router",
+      request_id: "request-1"
+    });
+    expect(driver.turnRecoveryState).toBe("provider_outcome_unknown");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({
+        method: "get",
+        params: { path: { session_id: "session-1" } }
+      })
+    );
+  });
+
   it("sends the current UI language with AI Builder messages", async () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
         expect(init.requestBody["application/json"].ui_language).toBeTruthy();
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -588,7 +972,7 @@ describe("FlowAIBuilderDriver", () => {
             ]
           })
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -628,7 +1012,7 @@ describe("FlowAIBuilderDriver", () => {
             last_token_usage_estimated: false
           })
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -674,7 +1058,7 @@ describe("FlowAIBuilderDriver", () => {
           event: "plan",
           data: JSON.stringify(plan)
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -747,7 +1131,7 @@ describe("FlowAIBuilderDriver", () => {
           selected_option_ids: ["none"],
           selected_values: ["none"]
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -787,7 +1171,7 @@ describe("FlowAIBuilderDriver", () => {
             requires_confirm: false
           })
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -862,7 +1246,7 @@ describe("FlowAIBuilderDriver", () => {
             requires_confirm: false
           })
         });
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -885,7 +1269,7 @@ describe("FlowAIBuilderDriver", () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
         expect(init.requestBody["application/json"].file_ids).toEqual(["file-1", "file-2"]);
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -906,7 +1290,7 @@ describe("FlowAIBuilderDriver", () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
         expect(init.requestBody["application/json"].edit_context).toEqual(editContext);
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });
@@ -922,7 +1306,7 @@ describe("FlowAIBuilderDriver", () => {
     const { driver, stream } = makeDriver({
       fetchImpl: fetch,
       streamImpl: vi.fn(async (_path, _init, handlers) => {
-        handlers.onClose();
+        completeStream(handlers);
       })
     });
     driver.seedState({ session: makeSession() });

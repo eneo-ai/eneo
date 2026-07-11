@@ -7,7 +7,6 @@ import type {
   StructuredQuestionAnswerMetadata
 } from "./structuredQuestionAnswer";
 import {
-  buildClientAIBuilderError,
   buildUnpublishedApplyFailureError,
   isSoftBlockAIBuilderError,
   isStaleApplyError,
@@ -21,8 +20,11 @@ import type {
   AIBuilderModel,
   AIBuilderPhase,
   AIBuilderPlanEditContext,
+  AIBuilderSendMessageRequest,
   AIBuilderSession,
   AIBuilderStreamEvent,
+  AIBuilderTurnState,
+  AIBuilderTurnRecoveryState,
   AIBuilderUsageEventData,
   ApplyError,
   ApplyResult,
@@ -139,6 +141,10 @@ export class FlowAIBuilderDriver {
   #abortController: AbortController | null = null;
   #state: FlowAIBuilderState = createInitialFlowAIBuilderState();
   #initGeneration = 0;
+  #sessionGeneration = 0;
+  #requiresAuthoritativeRefresh = false;
+  #authoritativeRefreshError = false;
+  #isRecoveringLatestTurn = false;
 
   constructor(
     transport: AIBuilderClientTransport,
@@ -154,6 +160,34 @@ export class FlowAIBuilderDriver {
 
   get state(): Readonly<FlowAIBuilderState> {
     return this.#state;
+  }
+
+  get turnRecoveryState(): AIBuilderTurnRecoveryState | null {
+    const state = this.latestTurnState;
+    return state === "failed_before_provider" || state === "provider_outcome_unknown"
+      ? state
+      : null;
+  }
+
+  get latestTurnState(): AIBuilderTurnState | null {
+    return this.#state.session?.latest_turn?.state ?? null;
+  }
+
+  get canStartNewTurn(): boolean {
+    const state = this.latestTurnState;
+    return (
+      !this.#requiresAuthoritativeRefresh &&
+      !this.#isRecoveringLatestTurn &&
+      (state === null || state === "committed")
+    );
+  }
+
+  get authoritativeRefreshFailed(): boolean {
+    return this.#authoritativeRefreshError;
+  }
+
+  get isRecoveringLatestTurn(): boolean {
+    return this.#isRecoveringLatestTurn;
   }
 
   seedState(partial: Partial<FlowAIBuilderState>): void {
@@ -322,20 +356,54 @@ export class FlowAIBuilderDriver {
     await this.loadDraftSessions();
   }
 
-  async refreshSession(): Promise<void> {
-    if (!this.#state.session) return;
+  async refreshSession(): Promise<boolean> {
+    if (!this.#state.session) return false;
+    const sessionId = this.#state.session.session_id;
+    const sessionGeneration = this.#sessionGeneration;
+    const latestTurnState = this.latestTurnState;
+    const refreshIsRequired =
+      this.#requiresAuthoritativeRefresh ||
+      (latestTurnState !== null && latestTurnState !== "committed");
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
         method: "get",
-        params: { path: { session_id: this.#state.session.session_id } }
+        params: { path: { session_id: sessionId } }
       })) as AIBuilderSession;
+      if (
+        this.#sessionGeneration !== sessionGeneration ||
+        this.#state.session?.session_id !== sessionId
+      ) {
+        return false;
+      }
+      this.#requiresAuthoritativeRefresh = false;
+      if (this.#authoritativeRefreshError) {
+        this.#state.error = null;
+        this.#authoritativeRefreshError = false;
+      }
       this.#state.session = result;
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
       this.#notify();
       await this.#syncPlanFromSession();
-    } catch {
-      // Silently fail on refresh
+      return true;
+    } catch (error) {
+      if (
+        this.#sessionGeneration !== sessionGeneration ||
+        this.#state.session?.session_id !== sessionId
+      ) {
+        return false;
+      }
+      this.#requiresAuthoritativeRefresh = refreshIsRequired;
+      if (refreshIsRequired && this.#state.error === null) {
+        this.#authoritativeRefreshError = true;
+        this.#state.error = parseAIBuilderError({
+          transport: "apply",
+          payload: error,
+          fallbackMessage: "Failed to refresh the AI Builder session."
+        });
+        this.#notify();
+      }
+      return false;
     }
   }
 
@@ -345,13 +413,7 @@ export class FlowAIBuilderDriver {
     fileIds?: string[],
     editContext?: AIBuilderPlanEditContext | null
   ): Promise<void> {
-    if (!this.#state.session || this.#state.isStreaming) return;
-
-    this.#state.error = null;
-    this.#state.isConflict = false;
-    this.#state.isStreaming = true;
-    this.#abortController = new AbortController();
-    const abortController = this.#abortController;
+    if (!this.#state.session || this.#state.isStreaming || !this.canStartNewTurn) return;
 
     const userMsg: ChatMessage = {
       role: "user",
@@ -375,48 +437,104 @@ export class FlowAIBuilderDriver {
         edit_context: editContext
       };
     }
-    this.#state.messages = [...this.#state.messages, userMsg];
+    const requestBody: AIBuilderSendMessageRequest = {
+      client_turn_id: crypto.randomUUID(),
+      message,
+      ui_language: getLocale()
+    };
+    if (this.#state.selectedModelId) {
+      requestBody.model_id = this.#state.selectedModelId;
+    }
+    if (questionAnswer) {
+      requestBody.question_answer = questionAnswer;
+    }
+    if (fileIds && fileIds.length > 0) {
+      requestBody.file_ids = fileIds;
+    }
+    if (editContext) {
+      requestBody.edit_context = editContext;
+    }
 
+    await this.#streamMessageRequest(requestBody, userMsg);
+  }
+
+  async retryLatestTurn(): Promise<void> {
+    await this.#recoverLatestTurn("failed_before_provider", false);
+  }
+
+  async acknowledgeAndRetryLatestTurn(): Promise<void> {
+    await this.#recoverLatestTurn("provider_outcome_unknown", true);
+  }
+
+  async #recoverLatestTurn(
+    expectedState: AIBuilderTurnRecoveryState,
+    acknowledgeDuplicateProviderSpend: boolean
+  ): Promise<void> {
+    if (this.#state.isStreaming || this.#isRecoveringLatestTurn) return;
+    const sessionGeneration = this.#sessionGeneration;
+    this.#isRecoveringLatestTurn = true;
+    this.#notify();
+
+    try {
+      if (this.#requiresAuthoritativeRefresh && !(await this.refreshSession())) return;
+
+      const latestTurn = this.#state.session?.latest_turn;
+      if (latestTurn?.state !== expectedState) return;
+
+      await this.#streamMessageRequest(
+        {
+          ...latestTurn.retry_request,
+          acknowledge_duplicate_provider_spend: acknowledgeDuplicateProviderSpend
+        },
+        null
+      );
+    } finally {
+      if (this.#sessionGeneration === sessionGeneration) {
+        this.#isRecoveringLatestTurn = false;
+        this.#notify();
+      }
+    }
+  }
+
+  async #streamMessageRequest(
+    requestBody: AIBuilderSendMessageRequest,
+    optimisticUserMessage: ChatMessage | null
+  ): Promise<void> {
+    const session = this.#state.session;
+    if (!session || this.#state.isStreaming) return;
+    const isRetry = optimisticUserMessage === null;
+    if (isRetry) {
+      this.#requiresAuthoritativeRefresh = true;
+    }
+
+    this.#state.error = null;
+    this.#authoritativeRefreshError = false;
+    this.#state.isConflict = false;
+    this.#state.isStreaming = true;
+    this.#abortController = new AbortController();
+    const abortController = this.#abortController;
+
+    if (optimisticUserMessage) {
+      this.#state.messages = [...this.#state.messages, optimisticUserMessage];
+    }
     if (this.#state.currentPlan) {
       this.#state.currentPlan = null;
       this.#state.applyResult = null;
     }
-
     this.#notify();
 
     let assistantText = "";
     let receivedUsageEvent = false;
     let receivedDurableStreamEvent = false;
     let receivedStaleQuestionEvent = false;
+    let receivedStreamError = false;
+    let receivedDone = false;
 
     try {
-      const requestBody: {
-        message: string;
-        model_id?: string;
-        file_ids?: string[];
-        question_answer?: StructuredQuestionAnswerMetadata;
-        edit_context?: AIBuilderPlanEditContext;
-        ui_language?: string;
-      } = { message };
-
-      if (this.#state.selectedModelId) {
-        requestBody.model_id = this.#state.selectedModelId;
-      }
-      if (questionAnswer) {
-        requestBody.question_answer = questionAnswer;
-      }
-      if (fileIds && fileIds.length > 0) {
-        requestBody.file_ids = fileIds;
-      }
-      if (editContext) {
-        requestBody.edit_context = editContext;
-      }
-      requestBody.ui_language = getLocale();
-
       await this.#transport.stream(
         FLOW_AI_BUILDER_ROUTES.sessionMessages,
         {
-          params: { path: { session_id: this.#state.session.session_id } },
+          params: { path: { session_id: session.session_id } },
           requestBody: {
             "application/json": requestBody
           }
@@ -474,6 +592,7 @@ export class FlowAIBuilderDriver {
                 return;
               }
               case "error": {
+                receivedStreamError = true;
                 const data = parseAIBuilderError({
                   transport: "sse",
                   payload: event.data,
@@ -489,7 +608,7 @@ export class FlowAIBuilderDriver {
                 return;
               }
               case "done": {
-                this.#state.isStreaming = false;
+                receivedDone = true;
                 this.#state.statusMessage = null;
                 this.#notify();
                 return;
@@ -498,28 +617,36 @@ export class FlowAIBuilderDriver {
             assertNever(event);
           },
           onClose: () => {
-            this.#state.isStreaming = false;
             this.#notify();
           }
         },
         abortController
       );
 
+      if ((!receivedDone || receivedStreamError) && !abortController.signal.aborted) {
+        this.#requiresAuthoritativeRefresh = true;
+      }
       const shouldRefreshAfterStream =
-        (fileIds && fileIds.length > 0) ||
+        !receivedDone ||
+        isRetry ||
+        receivedStreamError ||
+        (requestBody.file_ids && requestBody.file_ids.length > 0) ||
         (!receivedUsageEvent && this.#state.currentPlan !== null) ||
-        (questionAnswer?.kind === "structured_question_answer" &&
+        (requestBody.question_answer?.kind === "structured_question_answer" &&
           (!receivedDurableStreamEvent || receivedStaleQuestionEvent));
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.refreshSession();
       }
     } catch (e) {
       if (!abortController.signal.aborted) {
-        this.#state.error = buildClientAIBuilderError(
-          e instanceof Error ? e.message : "Stream failed",
-          { code: "stream_failed" }
-        );
+        this.#requiresAuthoritativeRefresh = true;
+        this.#state.error = parseAIBuilderError({
+          transport: "apply",
+          payload: e,
+          fallbackMessage: "The AI Builder stream failed. Please try again."
+        });
         this.#notify();
+        await this.refreshSession();
       }
     } finally {
       this.#state.isStreaming = false;
@@ -876,6 +1003,10 @@ export class FlowAIBuilderDriver {
   }
 
   #resetFlowState(): void {
+    this.#sessionGeneration += 1;
+    this.#requiresAuthoritativeRefresh = false;
+    this.#authoritativeRefreshError = false;
+    this.#isRecoveringLatestTurn = false;
     this.#state = createInitialFlowAIBuilderState();
   }
 

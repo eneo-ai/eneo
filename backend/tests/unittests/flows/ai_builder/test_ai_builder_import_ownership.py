@@ -341,7 +341,9 @@ SEND_LEASE_PUBLIC_NAMES = frozenset(
 )
 USER_QUESTION_METADATA_PUBLIC_NAMES = frozenset(
     {
+        "PreparedUserQuestionMetadata",
         "UserQuestionMetadataResolution",
+        "prepare_user_question_metadata",
         "resolve_user_question_metadata",
     }
 )

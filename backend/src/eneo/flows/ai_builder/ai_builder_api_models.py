@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Literal, cast
 from uuid import UUID
@@ -7,6 +9,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.files.file_models import FilePublic
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AI_BUILDER_MAX_ATTACHMENTS,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerRequest,
     RequirementsConfirmationMetadata,
@@ -14,11 +19,13 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     StructuredQuestionAnswerMetadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderTurnState,
     FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
@@ -37,6 +44,18 @@ AI_BUILDER_SESSION_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "target_kind": "create",
     "flow_id": None,
     "latest_plan_id": "00000000-0000-0000-0000-000000000702",
+    "latest_turn": {
+        "client_turn_id": "00000000-0000-0000-0000-000000000703",
+        "state": "committed",
+        "user_message_id": "019db164-9eab-7843-baa1-229e595cde04",
+        "error_code": None,
+        "requires_duplicate_provider_spend_acknowledgement": False,
+        "retry_request": {
+            "client_turn_id": "00000000-0000-0000-0000-000000000703",
+            "message": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
+            "ui_language": "en",
+        },
+    },
     "telemetry": {
         "planner_request_count": 2,
         "clarification_question_count": 1,
@@ -238,8 +257,10 @@ class CreateSessionRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
+                "client_turn_id": "00000000-0000-0000-0000-000000000703",
                 "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
                 "model_id": "00000000-0000-0000-0000-000000000010",
                 "file_ids": ["00000000-0000-0000-0000-000000000099"],
@@ -257,16 +278,62 @@ class SendMessageRequest(BaseModel):
                     "target_step_number": 2,
                 },
                 "ui_language": "en",
+                "acknowledge_duplicate_provider_spend": False,
             }
-        }
+        },
     )
 
+    client_turn_id: UUID = Field(
+        description=(
+            "Caller-generated identity for the latest logical session turn. Reuse it "
+            "only when retrying the same request payload."
+        )
+    )
     message: str = Field(max_length=50_000)
     model_id: UUID | None = None
-    file_ids: list[UUID] | None = None
+    file_ids: list[UUID] | None = Field(
+        default=None,
+        max_length=AI_BUILDER_MAX_ATTACHMENTS,
+    )
     question_answer: AIBuilderQuestionAnswerRequest | None = None
     edit_context: AIBuilderPlanEditContext | None = None
-    ui_language: str | None = None
+    ui_language: str | None = Field(default=None, max_length=16)
+    acknowledge_duplicate_provider_spend: bool = Field(
+        default=False,
+        description=(
+            "Explicitly acknowledges that retrying a provider-outcome-unknown turn "
+            "can repeat provider work and cost."
+        ),
+    )
+
+    def request_fingerprint(self) -> str:
+        """Hash the stable caller-authored logical request, not mutable provider config."""
+        normalized = self.model_dump(
+            mode="json",
+            exclude={
+                "client_turn_id",
+                "acknowledge_duplicate_provider_spend",
+            },
+        )
+        normalized["request_fingerprint_algorithm_version"] = 1
+        normalized["file_ids"] = sorted(
+            str(file_id) for file_id in (self.file_ids or [])
+        )
+        payload = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def retry_snapshot(self) -> FlowPersistedJsonObject:
+        """Return the exact bounded request retained for latest-turn recovery."""
+        return self.model_dump(
+            mode="json",
+            exclude={"acknowledge_duplicate_provider_spend"},
+            exclude_none=True,
+        )
 
 
 class ApplyPlanRequest(BaseModel):
@@ -283,6 +350,17 @@ class RevisePlanRequest(BaseModel):
     type: Literal["keep_current_description"]
 
 
+class AIBuilderTurnLifecycleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_turn_id: UUID
+    state: BuilderTurnState
+    user_message_id: UUID
+    error_code: AIBuilderErrorCode | None = None
+    requires_duplicate_provider_spend_acknowledgement: bool
+    retry_request: SendMessageRequest
+
+
 class SessionResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": AI_BUILDER_SESSION_RESPONSE_EXAMPLE}
@@ -293,6 +371,7 @@ class SessionResponse(BaseModel):
     target_kind: TargetKind
     flow_id: UUID | None = None
     latest_plan_id: UUID | None = None
+    latest_turn: AIBuilderTurnLifecycleResponse | None = None
     telemetry: "SessionTelemetrySummary | None" = None
     conversation: list[AIBuilderConversationMessage] = Field(
         default_factory=_default_conversation

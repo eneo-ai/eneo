@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import cast
@@ -8,13 +10,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
+from dependency_injector import providers
 from pydantic import ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
+from sse_starlette import ServerSentEvent
+from starlette.requests import Request
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import TranscriptionModels
-from eneo.database.tables.flow_tables import BuilderPlans, BuilderSessions, Flows
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    BuilderPlans,
+    BuilderSessionFiles,
+    BuilderSessions,
+    Flows,
+)
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import (
     Spaces,
@@ -22,6 +35,7 @@ from eneo.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderEditApproval,
@@ -35,14 +49,20 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_router import send_message
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+    SessionTurnAcceptance,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
@@ -67,6 +87,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -184,21 +205,53 @@ async def _claim_session_send_turn(
     repo: AIBuilderRepository,
     session_id: UUID,
     tenant_id: UUID,
-    base_planning_state_version: int = 0,
+    lock_expires_at: datetime | None = None,
+    client_turn_id: UUID | None = None,
+    lease: SessionSendLease | None = None,
 ) -> SessionSendTurn:
-    turn = _make_session_send_turn(
+    resolved_lease = lease or SessionSendLease(
+        request_id=uuid4(),
+        lock_token=uuid4(),
+    )
+    resolved_turn_id = client_turn_id or uuid4()
+    message = ConversationMessage(role="user", content="Accepted turn")
+    preflight = await repo.preflight_session_turn(
         session_id=session_id,
         tenant_id=tenant_id,
-        base_planning_state_version=base_planning_state_version,
+        client_turn_id=resolved_turn_id,
+        request_fingerprint="a" * 64,
+        acknowledge_duplicate_provider_spend=False,
     )
-    claimed = await repo.claim_session_send(
+    requested_expiry = lock_expires_at or (
+        datetime.now(timezone.utc) + timedelta(seconds=30)
+    )
+    lock_lease_seconds = max(
+        -1,
+        int((requested_expiry - datetime.now(timezone.utc)).total_seconds()),
+    )
+    claim = await repo.accept_session_turn(
         session_id=session_id,
         tenant_id=tenant_id,
-        lease=turn.lease,
-        lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        lease=resolved_lease,
+        lock_lease_seconds=lock_lease_seconds,
+        acceptance=SessionTurnAcceptance(
+            client_turn_id=resolved_turn_id,
+            request_fingerprint="a" * 64,
+            request={
+                "client_turn_id": str(resolved_turn_id),
+                "message": message.content,
+            },
+            user_message=message,
+            file_ids=(),
+        ),
+        preparation_baseline=preflight.baseline,
     )
-    assert claimed is True
-    return turn
+    return SessionSendTurn(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        lease=resolved_lease,
+        base_planning_state_version=claim.base_planning_state_version,
+    )
 
 
 async def _load_session_send_lock(
@@ -344,13 +397,18 @@ async def _send_builder_message(
     bearer_token: str,
     session_id: str,
     message: str,
+    client_turn_id: UUID | None = None,
     file_ids: list[str] | None = None,
     question_answer: dict[str, object] | None = None,
+    acknowledge_duplicate_provider_spend: bool = False,
 ) -> list[dict[str, object]]:
     payload: dict[str, object] = {
+        "client_turn_id": str(client_turn_id or uuid4()),
         "message": message,
         "ui_language": "sv",
     }
+    if acknowledge_duplicate_provider_spend:
+        payload["acknowledge_duplicate_provider_spend"] = True
     if file_ids is not None:
         payload["file_ids"] = file_ids
     if question_answer is not None:
@@ -969,13 +1027,13 @@ async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
     stale_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        claimed = await repo.claim_session_send(
+        await _claim_session_send_turn(
+            repo=repo,
             session_id=session_id,
             tenant_id=tenant_id,
             lease=stale_lease,
             lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
-        assert claimed is True
 
     response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{old_plan_id}/revise",
@@ -992,7 +1050,7 @@ async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
             session_id=session_id,
             tenant_id=tenant_id,
             lease=stale_lease,
-            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+            lock_lease_seconds=30,
         )
         lock_row = (
             await repo.session.execute(
@@ -1013,7 +1071,7 @@ async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
+async def test_ai_builder_message_and_attachments_are_committed_before_first_provider_call(
     client,
     bearer_token,
     completion_model_factory,
@@ -1032,14 +1090,43 @@ async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
         filename="reference.txt",
         content=b"reference material",
     )
+    client_turn_id = uuid4()
+    session_id: str | None = None
+    provider_observation: dict[str, object] = {}
+
+    async def observe_durable_turn_before_provider(**_kwargs: object) -> MagicMock:
+        assert session_id is not None
+        if not provider_observation:
+            async with db_container() as container:
+                row = (
+                    await container.session().execute(
+                        select(
+                            BuilderSessions.conversation,
+                            BuilderSessions.latest_turn_id,
+                            BuilderSessions.latest_turn_request_fingerprint,
+                            BuilderSessions.latest_turn_request_jsonb,
+                            BuilderSessions.latest_turn_state,
+                        ).where(BuilderSessions.id == UUID(session_id))
+                    )
+                ).one()
+                repo = AIBuilderRepository(container.session())
+                attachment_ids = await repo.list_session_file_ids(
+                    session_id=UUID(session_id),
+                    tenant_id=container.user().tenant_id,
+                )
+            provider_observation.update(
+                conversation=row[0],
+                client_turn_id=row[1],
+                request_fingerprint=row[2],
+                request=row[3],
+                state=row[4],
+                attachment_ids=attachment_ids,
+            )
+        return _make_llm_response(content="Jag kan använda referensmaterialet.")
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=AsyncMock(
-            return_value=_make_llm_response(
-                content="Jag kan använda referensmaterialet."
-            )
-        ),
+        new=AsyncMock(side_effect=observe_durable_turn_before_provider),
     ):
         with patch(
             "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
@@ -1058,14 +1145,35 @@ async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
             assert before_response.status_code == 200, before_response.text
             assert before_response.json()["attachments"] == []
 
-            events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="Använd det bifogade referensmaterialet.",
-                file_ids=[file_id],
+            with patch(
+                "eneo.flows.ai_builder.ai_builder_router.logger.error"
+            ) as log_error:
+                events = await _send_builder_message(
+                    client=client,
+                    bearer_token=bearer_token,
+                    session_id=session_id,
+                    message="Använd det bifogade referensmaterialet.",
+                    client_turn_id=client_turn_id,
+                    file_ids=[file_id],
+                )
+            if log_error.called:
+                raise cast(Exception, log_error.call_args.kwargs["exc_info"])
+            assert any(event["event"] == "text" for event in events), events
+
+            persisted_messages = cast(
+                list[dict[str, object]], provider_observation["conversation"]
             )
-            assert any(event["event"] == "text" for event in events)
+            assert [message["role"] for message in persisted_messages] == ["user"]
+            assert provider_observation["client_turn_id"] == client_turn_id
+            assert provider_observation["request_fingerprint"] is not None
+            assert provider_observation["request"] == {
+                "client_turn_id": str(client_turn_id),
+                "file_ids": [file_id],
+                "message": "Använd det bifogade referensmaterialet.",
+                "ui_language": "sv",
+            }
+            assert provider_observation["state"] == "processing"
+            assert provider_observation["attachment_ids"] == [UUID(file_id)]
 
             after_response = await client.get(
                 f"/api/v1/flows/ai-builder/sessions/{session_id}",
@@ -1076,11 +1184,537 @@ async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
                 attachment["id"] for attachment in after_response.json()["attachments"]
             ]
             assert attachment_ids == [file_id]
+            assert after_response.json()["latest_turn"] == {
+                "client_turn_id": str(client_turn_id),
+                "state": "committed",
+                "user_message_id": persisted_messages[0]["message_id"],
+                "error_code": None,
+                "requires_duplicate_provider_spend_acknowledgement": False,
+                "retry_request": {
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Använd det bifogade referensmaterialet.",
+                    "model_id": None,
+                    "file_ids": [file_id],
+                    "question_answer": None,
+                    "edit_context": None,
+                    "ui_language": "sv",
+                    "acknowledge_duplicate_provider_spend": False,
+                },
+            }
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_ai_builder_repo_claim_session_send_can_reclaim_expired_lease(
+async def test_ai_builder_same_turn_key_replays_without_provider_or_duplicates(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Turn Replay",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    client_turn_id = uuid4()
+    completion = AsyncMock(
+        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            first_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+                client_turn_id=client_turn_id,
+            )
+            assert any(event["event"] == "text" for event in first_events)
+            calls_after_commit = completion.await_count
+
+            first_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert first_session.status_code == 200, first_session.text
+
+            replay_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+                client_turn_id=client_turn_id,
+            )
+            assert [event["event"] for event in replay_events] == ["done"]
+            assert completion.await_count == calls_after_commit
+
+            replayed_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert replayed_session.status_code == 200, replayed_session.text
+            assert (
+                replayed_session.json()["conversation"]
+                == first_session.json()["conversation"]
+            )
+            assert (
+                replayed_session.json()["latest_turn"]
+                == first_session.json()["latest_turn"]
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_disconnect_after_committed_event_replays_without_provider(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Committed Stream Disconnect",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    client_turn_id = uuid4()
+    completion = AsyncMock(
+        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            async with db_container() as identity_container:
+                route_user = identity_container.user()
+                route_tenant = identity_container.tenant()
+            async with sessionmanager.session() as database_session:
+                direct_container = Container(
+                    session=providers.Object(database_session),
+                    user=providers.Object(route_user),
+                    tenant=providers.Object(route_tenant),
+                )
+                response = await send_message(
+                    request=Request(
+                        {
+                            "type": "http",
+                            "method": "POST",
+                            "path": (
+                                f"/api/v1/flows/ai-builder/sessions/{session_id}/messages"
+                            ),
+                            "headers": [],
+                            "state": {},
+                        }
+                    ),
+                    session_id=UUID(session_id),
+                    body=SendMessageRequest(
+                        client_turn_id=client_turn_id,
+                        message="Hjälp mig bygga ett flöde.",
+                        ui_language="sv",
+                    ),
+                    container=direct_container,
+                )
+                stream = cast(
+                    AsyncGenerator[ServerSentEvent, None],
+                    response.body_iterator,
+                )
+                saw_durable_event = False
+                try:
+                    async for event in stream:
+                        if event.event == "text":
+                            saw_durable_event = True
+                            break
+                finally:
+                    await stream.aclose()
+
+            assert saw_durable_event
+            calls_after_disconnect = completion.await_count
+
+            persisted = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert persisted.status_code == 200, persisted.text
+            assert persisted.json()["latest_turn"]["state"] == "committed"
+
+            replay_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+                client_turn_id=client_turn_id,
+            )
+
+    assert [event["event"] for event in replay_events] == ["done"]
+    assert completion.await_count == calls_after_disconnect
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_latest_turn_replay_and_conflict_survive_compaction(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+        MAX_SESSION_MESSAGES,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Turn Compaction Replay",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    async with db_container() as container:
+        filler = [
+            ConversationMessage(role="user", content=f"filler {index}").model_dump(
+                mode="json"
+            )
+            for index in range(MAX_SESSION_MESSAGES + 5)
+        ]
+        await container.session().execute(
+            update(BuilderSessions)
+            .where(BuilderSessions.id == UUID(session_id))
+            .values(conversation=filler)
+        )
+
+    client_turn_id = uuid4()
+    completion = AsyncMock(
+        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+    )
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            first_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Bygg ett nytt flöde efter den långa historiken.",
+                client_turn_id=client_turn_id,
+            )
+            assert any(event["event"] == "text" for event in first_events)
+            calls_after_commit = completion.await_count
+
+            replay_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Bygg ett nytt flöde efter den långa historiken.",
+                client_turn_id=client_turn_id,
+            )
+            conflict_response = await client.post(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+                json={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Ändra den redan använda nyckeln.",
+                    "ui_language": "sv",
+                },
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+
+    assert [event["event"] for event in replay_events] == ["done"]
+    assert conflict_response.status_code == 409
+    assert conflict_response.json()["code"] == "session_turn_idempotency_conflict"
+    assert completion.await_count == calls_after_commit
+
+    persisted = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert persisted.status_code == 200, persisted.text
+    assert len(persisted.json()["conversation"]) <= MAX_SESSION_MESSAGES
+    assert persisted.json()["latest_turn"]["client_turn_id"] == str(client_turn_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_same_turn_key_rejects_different_request_before_provider(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Turn Conflict",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    client_turn_id = uuid4()
+    completion = AsyncMock(
+        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            first_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+                client_turn_id=client_turn_id,
+            )
+            assert any(event["event"] == "text" for event in first_events)
+            calls_after_commit = completion.await_count
+
+            conflict_response = await client.post(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+                json={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Bygg ett annat flöde.",
+                    "ui_language": "sv",
+                },
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+
+    assert completion.await_count == calls_after_commit
+    assert conflict_response.status_code == 409
+    conflict = cast(dict[str, object], conflict_response.json())
+    assert conflict["code"] == "session_turn_idempotency_conflict"
+    assert conflict["category"] == "conflict"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledgement(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Unknown Provider Outcome",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    client_turn_id = uuid4()
+    completion = AsyncMock(
+        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            with patch(
+                "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+                new=AsyncMock(side_effect=RuntimeError("fail after provider return")),
+            ):
+                failed_events = await _send_builder_message(
+                    client=client,
+                    bearer_token=bearer_token,
+                    session_id=session_id,
+                    message="Hjälp mig bygga ett flöde.",
+                    client_turn_id=client_turn_id,
+                )
+
+            calls_after_unknown_outcome = completion.await_count
+            assert calls_after_unknown_outcome > 0
+            failed_error = cast(dict[str, object], failed_events[0]["data"])
+            assert failed_error["code"] == "session_turn_provider_outcome_unknown"
+
+            unknown_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert unknown_session.status_code == 200, unknown_session.text
+            assert unknown_session.json()["latest_turn"]["state"] == (
+                "provider_outcome_unknown"
+            )
+            assert (
+                unknown_session.json()["latest_turn"][
+                    "requires_duplicate_provider_spend_acknowledgement"
+                ]
+                is True
+            )
+
+            blocked_response = await client.post(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+                json={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Hjälp mig bygga ett flöde.",
+                    "ui_language": "sv",
+                },
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert blocked_response.status_code == 409
+            blocked_error = cast(dict[str, object], blocked_response.json())
+            assert blocked_error["code"] == "session_turn_provider_outcome_unknown"
+            assert completion.await_count == calls_after_unknown_outcome
+
+            retry_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+                client_turn_id=client_turn_id,
+                acknowledge_duplicate_provider_spend=True,
+            )
+            assert any(event["event"] == "text" for event in retry_events)
+            assert completion.await_count > calls_after_unknown_outcome
+
+            committed_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert committed_session.status_code == 200, committed_session.text
+            assert committed_session.json()["latest_turn"]["state"] == "committed"
+            user_messages = [
+                message
+                for message in committed_session.json()["conversation"]
+                if message["role"] == "user"
+            ]
+            assert len(user_messages) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_pre_provider_failure_resumes_same_durable_turn(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Pre-provider Resume",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    client_turn_id = uuid4()
+    completion = AsyncMock(
+        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            with patch(
+                "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+                new=AsyncMock(side_effect=RuntimeError("fail before provider")),
+            ):
+                failed_events = await _send_builder_message(
+                    client=client,
+                    bearer_token=bearer_token,
+                    session_id=session_id,
+                    message="Hjälp mig bygga ett flöde.",
+                    client_turn_id=client_turn_id,
+                )
+
+            assert completion.await_count == 0
+            assert [event["event"] for event in failed_events] == ["error", "done"]
+            failed_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert failed_session.status_code == 200, failed_session.text
+            assert failed_session.json()["latest_turn"]["state"] == (
+                "failed_before_provider"
+            )
+
+            retry_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+                client_turn_id=client_turn_id,
+            )
+            assert any(event["event"] == "text" for event in retry_events)
+            assert completion.await_count > 0
+
+            committed_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert committed_session.status_code == 200, committed_session.text
+            assert committed_session.json()["latest_turn"]["state"] == "committed"
+            assert (
+                len(
+                    [
+                        message
+                        for message in committed_session.json()["conversation"]
+                        if message["role"] == "user"
+                    ]
+                )
+                == 1
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_accept_session_turn_can_reclaim_expired_open_lease(
     client,
     bearer_token,
     completion_model_factory,
@@ -1104,23 +1738,143 @@ async def test_ai_builder_repo_claim_session_send_can_reclaim_expired_lease(
             flow_id=None,
         )
 
-        first_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
-        first_claim = await repo.claim_session_send(
+        await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
-            lease=first_lease,
             lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
-        assert first_claim is True
 
         reclaimed_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
-        reclaimed = await repo.claim_session_send(
+        reclaimed = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=reclaimed_lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
-        assert reclaimed is True
+        assert reclaimed.lease == reclaimed_lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_session_reload_projects_expired_turn_recovery_state(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Expired Turn Recovery",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        open_session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        processing_session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=open_session.id,
+            tenant_id=user.tenant_id,
+            lock_expires_at=expired_at,
+        )
+        processing_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=processing_session.id,
+            tenant_id=user.tenant_id,
+            lock_expires_at=expired_at,
+        )
+        await repo.mark_session_turn_processing(turn=processing_turn)
+
+    open_response = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{open_session.id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    processing_response = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{processing_session.id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert open_response.status_code == 200, open_response.text
+    assert processing_response.status_code == 200, processing_response.text
+    assert open_response.json()["latest_turn"]["state"] == "failed_before_provider"
+    assert (
+        open_response.json()["latest_turn"][
+            "requires_duplicate_provider_spend_acknowledgement"
+        ]
+        is False
+    )
+    assert (
+        processing_response.json()["latest_turn"]["state"] == "provider_outcome_unknown"
+    )
+    assert (
+        processing_response.json()["latest_turn"][
+            "requires_duplicate_provider_spend_acknowledgement"
+        ]
+        is True
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_session_reload_uses_database_clock_for_turn_state(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Database Clock Projection",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_repo.datetime", wraps=datetime
+    ) as app_clock:
+        app_clock.now.return_value = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        response = await client.get(
+            f"/api/v1/flows/ai-builder/sessions/{session.id}",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["latest_turn"]["state"] == "open"
 
 
 @pytest.mark.integration
@@ -1187,13 +1941,13 @@ async def test_ai_builder_repo_send_lock_claim_refresh_release_preserves_invaria
         )
         lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
 
-        claimed = await repo.claim_session_send(
+        await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
-        assert claimed is True
         claimed_lock = await _load_session_send_lock(
             repo,
             session_id=session.id,
@@ -1208,7 +1962,7 @@ async def test_ai_builder_repo_send_lock_claim_refresh_release_preserves_invaria
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=lease,
-            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+            lock_lease_seconds=60,
         )
         assert refreshed is True
         refreshed_lock = await _load_session_send_lock(
@@ -1231,6 +1985,188 @@ async def test_ai_builder_repo_send_lock_claim_refresh_release_preserves_invaria
             session_id=session.id,
             tenant_id=user.tenant_id,
         ) == (None, None, None, None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_accept_lease_uses_database_time_after_row_lock_wait(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Accept Lease Clock",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        client_turn_id = uuid4()
+        preflight = await repo.preflight_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=False,
+        )
+        tenant_id = user.tenant_id
+
+    row_locked = asyncio.Event()
+    release_row = asyncio.Event()
+
+    async def hold_session_row() -> None:
+        async with db_container() as container:
+            await container.session().execute(
+                select(BuilderSessions.id)
+                .where(
+                    BuilderSessions.id == session.id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+            row_locked.set()
+            await release_row.wait()
+
+    async def accept_turn() -> None:
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            message = ConversationMessage(role="user", content="Accepted after wait")
+            await repo.accept_session_turn(
+                session_id=session.id,
+                tenant_id=tenant_id,
+                lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+                lock_lease_seconds=1,
+                acceptance=SessionTurnAcceptance(
+                    client_turn_id=client_turn_id,
+                    request_fingerprint="a" * 64,
+                    request={
+                        "client_turn_id": str(client_turn_id),
+                        "message": message.content,
+                    },
+                    user_message=message,
+                    file_ids=(),
+                ),
+                preparation_baseline=preflight.baseline,
+            )
+
+    holder = asyncio.create_task(hold_session_row())
+    await row_locked.wait()
+    accepter = asyncio.create_task(accept_turn())
+    try:
+        await asyncio.sleep(1.1)
+        assert not accepter.done()
+    finally:
+        release_row.set()
+    await asyncio.wait_for(holder, timeout=5)
+    await asyncio.wait_for(accepter, timeout=5)
+
+    async with db_container() as container:
+        lock_expires_at, database_now = (
+            await container.session().execute(
+                select(
+                    BuilderSessions.lock_expires_at,
+                    sa.func.clock_timestamp(),
+                ).where(BuilderSessions.id == session.id)
+            )
+        ).one()
+        assert lock_expires_at is not None
+        assert lock_expires_at > database_now + timedelta(milliseconds=500)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_refresh_lease_uses_database_time_after_row_lock_wait(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Refresh Lease Clock",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=lease,
+        )
+        tenant_id = user.tenant_id
+
+    row_locked = asyncio.Event()
+    release_row = asyncio.Event()
+
+    async def hold_session_row() -> None:
+        async with db_container() as container:
+            await container.session().execute(
+                select(BuilderSessions.id)
+                .where(
+                    BuilderSessions.id == session.id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+            row_locked.set()
+            await release_row.wait()
+
+    async def refresh_lease() -> None:
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            refreshed = await repo.refresh_session_send_lease(
+                session_id=session.id,
+                tenant_id=tenant_id,
+                lease=lease,
+                lock_lease_seconds=1,
+            )
+            assert refreshed is True
+
+    holder = asyncio.create_task(hold_session_row())
+    await row_locked.wait()
+    refresher = asyncio.create_task(refresh_lease())
+    try:
+        await asyncio.sleep(1.1)
+        assert not refresher.done()
+    finally:
+        release_row.set()
+    await asyncio.wait_for(holder, timeout=5)
+    await asyncio.wait_for(refresher, timeout=5)
+
+    async with db_container() as container:
+        lock_expires_at, database_now = (
+            await container.session().execute(
+                select(
+                    BuilderSessions.lock_expires_at,
+                    sa.func.clock_timestamp(),
+                ).where(BuilderSessions.id == session.id)
+            )
+        ).one()
+        assert lock_expires_at is not None
+        assert lock_expires_at > database_now + timedelta(milliseconds=500)
 
 
 @pytest.mark.integration
@@ -1259,13 +2195,13 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
             flow_id=None,
         )
         lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
-        claimed = await repo.claim_session_send(
+        await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
-        assert claimed is True
 
         await repo.release_session_send(
             session_id=session.id,
@@ -1274,13 +2210,15 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
         )
 
         next_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
-        still_locked = await repo.claim_session_send(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
-            lease=next_lease,
-            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
-        )
-        assert still_locked is False
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await _claim_session_send_turn(
+                repo=repo,
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                lease=next_lease,
+                lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+            )
+        assert exc_info.value.code is AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS
 
         await repo.release_session_send(
             session_id=session.id,
@@ -1289,13 +2227,14 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
         )
 
         released_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
-        released = await repo.claim_session_send(
+        released = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=released_lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
-        assert released is True
+        assert released.lease == released_lease
 
 
 @pytest.mark.integration
@@ -1336,6 +2275,167 @@ async def test_ai_builder_repo_cancel_session_clears_send_lock_fields(
             session_id=session.id,
             tenant_id=user.tenant_id,
         ) == (None, None, None, None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_cancel_serializes_attachment_cleanup_with_turn_acceptance(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Cancel Attachment Serialization",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        existing_file_id, accepted_file_id = (
+            (
+                await container.session().execute(
+                    insert(Files)
+                    .values(
+                        [
+                            {
+                                "name": "existing.txt",
+                                "text": "existing",
+                                "blob": None,
+                                "checksum": uuid4().hex,
+                                "size": 8,
+                                "mimetype": "text/plain",
+                                "file_type": "text",
+                                "transcription": None,
+                                "owner_type": "user",
+                                "owner_user_id": user.id,
+                                "owner_service_id": None,
+                                "tenant_id": user.tenant_id,
+                                "parent_file_id": None,
+                            },
+                            {
+                                "name": "accepted.txt",
+                                "text": "accepted",
+                                "blob": None,
+                                "checksum": uuid4().hex,
+                                "size": 8,
+                                "mimetype": "text/plain",
+                                "file_type": "text",
+                                "transcription": None,
+                                "owner_type": "user",
+                                "owner_user_id": user.id,
+                                "owner_service_id": None,
+                                "tenant_id": user.tenant_id,
+                                "parent_file_id": None,
+                            },
+                        ]
+                    )
+                    .returning(Files.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await container.session().execute(
+            insert(BuilderSessionFiles).values(
+                session_id=session.id,
+                file_id=existing_file_id,
+                tenant_id=user.tenant_id,
+            )
+        )
+        client_turn_id = uuid4()
+        preflight = await repo.preflight_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=False,
+        )
+        tenant_id = user.tenant_id
+
+    child_locked = asyncio.Event()
+    release_child = asyncio.Event()
+
+    async def hold_existing_membership() -> None:
+        async with db_container() as container:
+            await container.session().execute(
+                select(BuilderSessionFiles.file_id)
+                .where(
+                    BuilderSessionFiles.session_id == session.id,
+                    BuilderSessionFiles.file_id == existing_file_id,
+                )
+                .with_for_update()
+            )
+            child_locked.set()
+            await release_child.wait()
+
+    async def cancel() -> None:
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            await repo.cancel_session(session_id=session.id, tenant_id=tenant_id)
+
+    async def accept() -> None:
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            message = ConversationMessage(role="user", content="Accept with file")
+            await repo.accept_session_turn(
+                session_id=session.id,
+                tenant_id=tenant_id,
+                lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+                lock_lease_seconds=30,
+                acceptance=SessionTurnAcceptance(
+                    client_turn_id=client_turn_id,
+                    request_fingerprint="a" * 64,
+                    request={
+                        "client_turn_id": str(client_turn_id),
+                        "message": message.content,
+                        "file_ids": [str(accepted_file_id)],
+                    },
+                    user_message=message,
+                    file_ids=(accepted_file_id,),
+                ),
+                preparation_baseline=preflight.baseline,
+            )
+
+    holder = asyncio.create_task(hold_existing_membership())
+    await child_locked.wait()
+    canceller = asyncio.create_task(cancel())
+    await asyncio.sleep(0.1)
+    accepter = asyncio.create_task(accept())
+    try:
+        await asyncio.sleep(0.2)
+        assert not accepter.done()
+    finally:
+        release_child.set()
+    await asyncio.wait_for(holder, timeout=5)
+    await asyncio.wait_for(canceller, timeout=5)
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await asyncio.wait_for(accepter, timeout=5)
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_SESSION_TRANSITION
+
+    async with db_container() as container:
+        remaining_file_ids = (
+            (
+                await container.session().execute(
+                    select(BuilderSessionFiles.file_id).where(
+                        BuilderSessionFiles.session_id == session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert remaining_file_ids == []
 
 
 @pytest.mark.integration
@@ -1398,10 +2498,18 @@ async def test_send_message_status_jump_under_lock_uses_lease(
             litellm_client=AsyncMock(),
             quality_retry_warning_codes=set(),
         )
+        client_turn_id = uuid4()
 
         with pytest.raises(BadRequestException) as exc:
             async for _ in planner.send_message(
                 session_id=session.id,
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request_snapshot={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Bygg vidare.",
+                    "ui_language": "sv",
+                },
                 message="Bygg vidare.",
                 litellm_model="openai/gpt-4o-mini",
                 litellm_kwargs={"api_key": "sk-test"},
@@ -1430,7 +2538,7 @@ async def test_send_message_status_jump_under_lock_uses_lease(
         )
 
     assert fetched.status == SessionStatus.AWAITING_APPROVAL
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Bygg vidare."]
 
 
 @pytest.mark.integration
@@ -1894,9 +3002,10 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
             session_id=session.id, tenant_id=user.tenant_id
         )
 
-    assert len(fetched.conversation) == 1
-    assert fetched.conversation[0].role == "assistant"
-    assert fetched.conversation[0].content == "Hej"
+    assert [(message.role, message.content) for message in fetched.conversation] == [
+        ("user", "Accepted turn"),
+        ("assistant", "Hej"),
+    ]
     assert loaded is not None
     assert loaded.resolved_slots == {}
     assert "evidence" not in loaded.model_dump(mode="json")
@@ -1958,7 +3067,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
             session_id=session.id, tenant_id=user.tenant_id
         )
 
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
 
 
 @pytest.mark.integration
@@ -1992,7 +3101,8 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
             flow_id=None,
         )
         active_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
-        await repo.claim_session_send(
+        await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
             lease=active_lease,
@@ -2021,7 +3131,7 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
             session_id=session.id, tenant_id=user.tenant_id
         )
 
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded is None
 
 
@@ -2169,7 +3279,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
             session_id=session.id, tenant_id=user.tenant_id
         )
 
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded is None
 
 
@@ -2349,6 +3459,11 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
         )
         session_id = session.id
         tenant_id = user.tenant_id
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
 
     concurrent_state = _planning_state_fixture()
     async with db_container() as container:
@@ -2363,12 +3478,6 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        turn = await _claim_session_send_turn(
-            repo=repo,
-            session_id=session_id,
-            tenant_id=tenant_id,
-            base_planning_state_version=0,
-        )
         with pytest.raises(BadRequestException) as exc:
             await store_plan_and_update_conversation(
                 repo=repo,
@@ -2407,7 +3516,7 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
     assert plans == []
     assert fetched.latest_plan_id is None
     assert fetched.status == SessionStatus.CHATTING
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert version == 1
     assert loaded_state is not None
     assert loaded_state.resolved_slots["primary_runtime_input"].value == "documents"
@@ -2488,7 +3597,7 @@ async def test_store_plan_and_update_conversation_rejects_lost_session_send_leas
 
     assert plans == []
     assert fetched.latest_plan_id is None
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded_state is None
 
 
@@ -2503,6 +3612,7 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
     """Server-owned requirements persistence must reject a stale active-turn lease."""
     from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
         ServerDecisionDispatchRequest,
+        ServerDecisionTelemetry,
         dispatch_server_decision,
     )
     from eneo.flows.ai_builder.ai_builder_turn_controller import (
@@ -2557,12 +3667,14 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
                     conversation=[],
                     new_messages_start=0,
                     flow=None,
-                    discovery_analysis=None,
                     requirements_confirmed=False,
                     ui_language="sv",
-                    request_id="req-requirements-lost-lease",
-                    litellm_model="server",
-                    used_auxiliary_llm=False,
+                    telemetry=ServerDecisionTelemetry(
+                        request_id="req-requirements-lost-lease",
+                        litellm_model="server",
+                        used_auxiliary_llm=False,
+                    ),
+                    planning_state=PlanningState.empty(),
                 )
             )
 
@@ -2575,7 +3687,7 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
             session_id=session_id, tenant_id=tenant_id
         )
 
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded_state is None
 
 
@@ -2590,6 +3702,7 @@ async def test_server_question_with_lost_lease_rolls_back(
     """Server-owned backend questions must reject a stale active-turn lease."""
     from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
         ServerDecisionDispatchRequest,
+        ServerDecisionTelemetry,
         dispatch_server_decision,
     )
     from eneo.flows.ai_builder.ai_builder_turn_controller import (
@@ -2640,12 +3753,14 @@ async def test_server_question_with_lost_lease_rolls_back(
                     conversation=[],
                     new_messages_start=0,
                     flow=None,
-                    discovery_analysis=None,
                     requirements_confirmed=False,
                     ui_language="sv",
-                    request_id="req-question-lost-lease",
-                    litellm_model="server",
-                    used_auxiliary_llm=False,
+                    telemetry=ServerDecisionTelemetry(
+                        request_id="req-question-lost-lease",
+                        litellm_model="server",
+                        used_auxiliary_llm=False,
+                    ),
+                    planning_state=PlanningState.empty(),
                 )
             )
 
@@ -2658,7 +3773,7 @@ async def test_server_question_with_lost_lease_rolls_back(
             session_id=session_id, tenant_id=tenant_id
         )
 
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded_state is None
 
 
@@ -2750,6 +3865,10 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
             tenant_id=tenant_id,
             base_planning_state_version=0,
         )
+
+        async def mark_provider_work_started() -> None:
+            await repo.mark_session_turn_processing(turn=stale_turn)
+
         resource_catalog = build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
@@ -2773,10 +3892,12 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                     request_id="req-edit-lost-lease",
                     flow=flow,
                     assistant_snapshots=None,
+                    before_provider_call=mark_provider_work_started,
                 )
             ]
 
     assert exc.value.code == "session_send_lease_lost"
+    litellm_client.acompletion.assert_not_awaited()
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -2790,7 +3911,7 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
 
     assert plans == []
     assert fetched.latest_plan_id is None
-    assert fetched.conversation == []
+    assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded_state is None
 
 
@@ -3517,7 +4638,7 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         == "report_disposition"
         for event in first_events
     )
-    assert not any(event["event"] == "error" for event in second_events)
+    assert not any(event["event"] == "error" for event in second_events), second_events
     assert any(
         event["event"] in {"requirements_summary", "question"}
         for event in second_events
@@ -3752,9 +4873,34 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
                             "ui_language": "sv",
                         },
                     ),
+                    ConversationMessage(
+                        role="user",
+                        content="Sammanfatta underlaget",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "post_processing_goal",
+                                "selected_option_id": "summarize_or_overview",
+                                "answer": "summarize_or_overview",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="Inga extra fält",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "runtime_metadata_fields",
+                                "selected_option_id": "no_extra_metadata",
+                                "answer": "no_extra_metadata",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
                 ],
                 lease=turn.lease,
             )
+            await repo.complete_session_turn(turn=turn)
             await repo.release_session_send(
                 session_id=session.id,
                 tenant_id=session.tenant_id,
@@ -3767,7 +4913,7 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
             message="Bygg vidare",
         )
 
-    assert not any(event["event"] == "error" for event in second_events)
+    assert not any(event["event"] == "error" for event in second_events), second_events
     assert any(event["event"] == "requirements_summary" for event in second_events)
 
 

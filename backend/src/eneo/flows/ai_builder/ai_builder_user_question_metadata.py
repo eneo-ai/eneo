@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import NoReturn
 
@@ -45,16 +46,20 @@ class UserQuestionMetadataResolution:
     used_auxiliary_llm: bool
 
 
-async def resolve_user_question_metadata(
+@dataclass(frozen=True, slots=True)
+class PreparedUserQuestionMetadata:
+    metadata: FlowPersistedJsonObject | None
+    is_requirements_confirmation: bool
+    needs_auxiliary_llm: bool
+
+
+def prepare_user_question_metadata(
     *,
-    litellm_client: object,
     conversation: list[ConversationMessage],
     message: str,
     question_answer: AIBuilderQuestionAnswerInput | None,
     ui_language: str | None = None,
-    litellm_model: str,
-    litellm_kwargs: dict[str, object],
-) -> UserQuestionMetadataResolution:
+) -> PreparedUserQuestionMetadata:
     if ui_language is None and question_answer is not None:
         ui_language = ui_language_from_question_answer(question_answer)
 
@@ -70,24 +75,15 @@ async def resolve_user_question_metadata(
             question_answer=_validated_structured_question_answer(question_answer)
         )
 
-    used_auxiliary_llm = False
+    needs_auxiliary_llm = False
     if metadata is None and not is_requirements_confirmation:
         inferred_answer = infer_question_answer_from_freeform(conversation, message)
         if inferred_answer is not None:
             metadata = metadata_for_user_message(question_answer=inferred_answer)
-        elif latest_pending_structured_question(conversation) is not None:
-            adjudicated_answer = await adjudicate_pending_question_answer(
-                litellm_client=litellm_client,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                conversation=conversation,
-                user_message=message,
+        else:
+            needs_auxiliary_llm = (
+                latest_pending_structured_question(conversation) is not None
             )
-            if adjudicated_answer is not None:
-                metadata = metadata_for_user_message(
-                    question_answer=adjudicated_answer.to_question_answer()
-                )
-            used_auxiliary_llm = True
 
     if ui_language is not None:
         metadata = {
@@ -95,9 +91,59 @@ async def resolve_user_question_metadata(
             UI_LANGUAGE_METADATA_KEY: ui_language,
         }
 
-    return UserQuestionMetadataResolution(
+    return PreparedUserQuestionMetadata(
         metadata=metadata,
         is_requirements_confirmation=is_requirements_confirmation,
+        needs_auxiliary_llm=needs_auxiliary_llm,
+    )
+
+
+async def resolve_user_question_metadata(
+    *,
+    litellm_client: object,
+    conversation: list[ConversationMessage],
+    message: str,
+    question_answer: AIBuilderQuestionAnswerInput | None,
+    ui_language: str | None = None,
+    litellm_model: str,
+    litellm_kwargs: dict[str, object],
+    prepared: PreparedUserQuestionMetadata | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+) -> UserQuestionMetadataResolution:
+    prepared = prepared or prepare_user_question_metadata(
+        conversation=conversation,
+        message=message,
+        question_answer=question_answer,
+        ui_language=ui_language,
+    )
+    metadata = prepared.metadata
+    used_auxiliary_llm = False
+    if prepared.needs_auxiliary_llm:
+        if before_provider_call is not None:
+            await before_provider_call()
+        adjudicated_answer = await adjudicate_pending_question_answer(
+            litellm_client=litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            conversation=conversation,
+            user_message=message,
+            raise_provider_errors=before_provider_call is not None,
+        )
+        if adjudicated_answer is not None:
+            metadata = {
+                **(metadata or {}),
+                **(
+                    metadata_for_user_message(
+                        question_answer=adjudicated_answer.to_question_answer()
+                    )
+                    or {}
+                ),
+            }
+        used_auxiliary_llm = True
+
+    return UserQuestionMetadataResolution(
+        metadata=metadata,
+        is_requirements_confirmation=prepared.is_requirements_confirmation,
         used_auxiliary_llm=used_auxiliary_llm,
     )
 

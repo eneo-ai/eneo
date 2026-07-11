@@ -2086,6 +2086,13 @@ BUILDER_PLAN_STATUS_VALUES = (
     "superseded",
 )
 BUILDER_TARGET_KIND_VALUES = ("create", "edit")
+BUILDER_TURN_STATE_VALUES = (
+    "open",
+    "processing",
+    "committed",
+    "failed_before_provider",
+    "provider_outcome_unknown",
+)
 
 
 class BuilderSessions(BasePublic):
@@ -2146,6 +2153,24 @@ class BuilderSessions(BasePublic):
         nullable=False,
         server_default="0",
     )
+    latest_turn_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    latest_turn_request_fingerprint: Mapped[Optional[str]] = mapped_column(
+        sa.String(64),
+        nullable=True,
+    )
+    latest_turn_request_jsonb: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    latest_turn_state: Mapped[Optional[str]] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    latest_turn_message_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    latest_turn_error_code: Mapped[Optional[str]] = mapped_column(
+        sa.String(64),
+        nullable=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("id", "tenant_id", name="uq_builder_sessions_id_tenant_id"),
@@ -2190,6 +2215,30 @@ class BuilderSessions(BasePublic):
             "AND lock_expires_at IS NOT NULL"
             ")",
             name="ck_builder_sessions_send_lock_all_or_none",
+        ),
+        CheckConstraint(
+            "(latest_turn_id IS NULL "
+            "AND latest_turn_request_fingerprint IS NULL "
+            "AND latest_turn_request_jsonb IS NULL "
+            "AND latest_turn_state IS NULL "
+            "AND latest_turn_message_id IS NULL "
+            "AND latest_turn_error_code IS NULL) "
+            "OR (latest_turn_id IS NOT NULL "
+            "AND latest_turn_request_fingerprint IS NOT NULL "
+            "AND latest_turn_request_jsonb IS NOT NULL "
+            "AND latest_turn_state IS NOT NULL "
+            "AND latest_turn_message_id IS NOT NULL)",
+            name="ck_builder_sessions_latest_turn_all_or_none",
+        ),
+        CheckConstraint(
+            "latest_turn_state IS NULL OR "
+            f"latest_turn_state IN ({','.join(repr(v) for v in BUILDER_TURN_STATE_VALUES)})",
+            name="ck_builder_sessions_latest_turn_state",
+        ),
+        CheckConstraint(
+            "latest_turn_request_fingerprint IS NULL "
+            "OR char_length(latest_turn_request_fingerprint) = 64",
+            name="ck_builder_sessions_latest_turn_fingerprint_length",
         ),
     )
 

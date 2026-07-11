@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast, get_args
 from uuid import UUID
@@ -12,6 +12,9 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentCoverage,
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
@@ -142,6 +145,7 @@ async def classify_slots(
     tenant_id: UUID,
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> SlotClassificationResult | None:
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
     if not _classification_input_is_valid(classification_input):
@@ -187,6 +191,8 @@ async def classify_slots(
         **litellm_kwargs,
         "response_format": response_format,
     }
+    if before_provider_call is not None:
+        await before_provider_call()
     try:
         response = await litellm_client.acompletion(
             model=litellm_model,
@@ -197,7 +203,7 @@ async def classify_slots(
             temperature=0.0,
             **completion_kwargs,
         )
-    except Exception:
+    except Exception as error:
         logger.warning(
             "AI Builder slot classification failed",
             exc_info=True,
@@ -208,6 +214,8 @@ async def classify_slots(
                 cached=False,
             ),
         )
+        if before_provider_call is not None:
+            raise AIBuilderProviderOutcomeUnknownException() from error
         return None
 
     content = response.choices[0].message.content if response.choices else None

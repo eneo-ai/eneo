@@ -7,10 +7,11 @@ Revises: 579199d395dd
 Create Date: 2026-03-12 14:00:00.000000
 
 Pre-production note:
-The builder plan `rejected` status was removed from this unreleased migration
-on 2026-06-28. Development databases that already applied the older branch
-shape should reset/replay migrations instead of relying on a follow-up
-compatibility migration for never-shipped Flow AI Builder data.
+The builder plan `rejected` status was removed on 2026-06-28, and the accepted
+turn lifecycle fields were folded into this unreleased migration on 2026-07-10.
+Development databases that already applied an older branch shape must reset and
+replay migrations rather than rely on follow-up compatibility migrations for
+never-shipped Flow AI Builder data.
 
 """
 
@@ -39,6 +40,13 @@ BUILDER_PLAN_STATUS_VALUES = (
     "superseded",
 )
 BUILDER_TARGET_KIND_VALUES = ("create", "edit")
+BUILDER_TURN_STATE_VALUES = (
+    "open",
+    "processing",
+    "committed",
+    "failed_before_provider",
+    "provider_outcome_unknown",
+)
 
 
 def upgrade() -> None:
@@ -90,6 +98,36 @@ def upgrade() -> None:
             comment="Rolling conversation history as JSON array.",
         ),
         sa.Column(
+            "latest_turn_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "latest_turn_request_fingerprint",
+            sa.String(64),
+            nullable=True,
+        ),
+        sa.Column(
+            "latest_turn_request_jsonb",
+            postgresql.JSONB(),
+            nullable=True,
+        ),
+        sa.Column(
+            "latest_turn_state",
+            sa.String(32),
+            nullable=True,
+        ),
+        sa.Column(
+            "latest_turn_message_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "latest_turn_error_code",
+            sa.String(64),
+            nullable=True,
+        ),
+        sa.Column(
             "latest_plan_id",
             postgresql.UUID(as_uuid=True),
             nullable=True,
@@ -134,6 +172,30 @@ def upgrade() -> None:
         sa.CheckConstraint(
             f"status IN ({','.join(repr(v) for v in BUILDER_SESSION_STATUS_VALUES)})",
             name="ck_builder_sessions_status",
+        ),
+        sa.CheckConstraint(
+            "(latest_turn_id IS NULL "
+            "AND latest_turn_request_fingerprint IS NULL "
+            "AND latest_turn_request_jsonb IS NULL "
+            "AND latest_turn_state IS NULL "
+            "AND latest_turn_message_id IS NULL "
+            "AND latest_turn_error_code IS NULL) "
+            "OR (latest_turn_id IS NOT NULL "
+            "AND latest_turn_request_fingerprint IS NOT NULL "
+            "AND latest_turn_request_jsonb IS NOT NULL "
+            "AND latest_turn_state IS NOT NULL "
+            "AND latest_turn_message_id IS NOT NULL)",
+            name="ck_builder_sessions_latest_turn_all_or_none",
+        ),
+        sa.CheckConstraint(
+            "latest_turn_state IS NULL OR "
+            f"latest_turn_state IN ({','.join(repr(v) for v in BUILDER_TURN_STATE_VALUES)})",
+            name="ck_builder_sessions_latest_turn_state",
+        ),
+        sa.CheckConstraint(
+            "latest_turn_request_fingerprint IS NULL "
+            "OR char_length(latest_turn_request_fingerprint) = 64",
+            name="ck_builder_sessions_latest_turn_fingerprint_length",
         ),
     )
 
@@ -240,6 +302,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_builder_sessions_latest_plan", "builder_sessions", type_="foreignkey")
+    op.drop_constraint(
+        "fk_builder_sessions_latest_plan", "builder_sessions", type_="foreignkey"
+    )
     op.drop_table("builder_plans")
     op.drop_table("builder_sessions")

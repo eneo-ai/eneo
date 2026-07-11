@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
@@ -295,6 +295,7 @@ async def build_runtime_discovery_context(
     tenant_id: UUID,
     allow_classification: bool = True,
     attachment_context: AIBuilderAttachmentContext | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> RuntimeDiscoveryContext:
     state = build_planning_state_from_conversation(conversation, flow=flow)
     apply_attachment_file_roles_to_planning_state(state, attachment_context)
@@ -337,6 +338,7 @@ async def build_runtime_discovery_context(
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,
+        before_provider_call=before_provider_call,
     )
     if result is None:
         return RuntimeDiscoveryContext(planning_state=state)
@@ -385,6 +387,7 @@ async def build_discovery_runtime_result(
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
     attachment_context: AIBuilderAttachmentContext | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -396,6 +399,7 @@ async def build_discovery_runtime_result(
         tenant_id=tenant_id,
         allow_classification=allow_semantic_adjudication,
         attachment_context=attachment_context,
+        before_provider_call=before_provider_call,
     )
     analysis = analyze_discovery(
         conversation,

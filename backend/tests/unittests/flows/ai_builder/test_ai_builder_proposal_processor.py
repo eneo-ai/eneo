@@ -23,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStatus
 from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
@@ -294,7 +297,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_propose_plan_create_compile_bug_yields_internal_error_without_repair() -> (
+async def test_propose_plan_create_compile_bug_preserves_provider_outcome_unknown() -> (
     None
 ):
     processor = _make_processor()
@@ -322,44 +325,34 @@ async def test_propose_plan_create_compile_bug_yields_internal_error_without_rep
             new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
         ),
     ):
-        events = [
-            encode_ai_builder_stream_event(event)
-            async for event in processor.propose_plan(
-                turn=_make_turn(session_id=session_id),
-                conversation=[ConversationMessage(role="user", content="Build a flow")],
-                new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=_empty_catalog(),
-                max_output_tokens=4096,
-                proposal_temperature=0.2,
-                request_id="req-create-compile-bug",
-                flow=None,
-            )
-        ]
+        with pytest.raises(AIBuilderProviderOutcomeUnknownException):
+            _ = [
+                event
+                async for event in processor.propose_plan(
+                    turn=_make_turn(session_id=session_id),
+                    conversation=[
+                        ConversationMessage(role="user", content="Build a flow")
+                    ],
+                    new_messages_start=1,
+                    llm_messages=[{"role": "system", "content": "Prompt"}],
+                    litellm_model="openai/gpt-5.4",
+                    litellm_kwargs={},
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=_empty_catalog(),
+                    max_output_tokens=4096,
+                    proposal_temperature=0.2,
+                    request_id="req-create-compile-bug",
+                    flow=None,
+                )
+            ]
 
     repair.assert_not_called()
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "planner_stream_failed"
-    assert payload["phase"] == "proposal"
-    assert payload["request_id"] == "req-create-compile-bug"
-    assert "compiler exploded" not in events[0]["data"]
-    failed_payload = _single_failed_turn_payload(telemetry_records)
-    assert failed_payload["request_id"] == "req-create-compile-bug"
-    assert failed_payload["session_id"] == str(session_id)
-    assert failed_payload["target_kind"] == "create"
-    assert failed_payload["branch"] == "internal_submission_error"
-    assert failed_payload["repair_attempts"] == 0
-    assert failed_payload["final_failure_kind"] == "internal_error"
-    assert failed_payload["final_error_code"] == "planner_stream_failed"
+    assert _failed_turn_payloads(telemetry_records) == []
 
 
 @pytest.mark.asyncio
-async def test_propose_plan_edit_compile_bug_yields_internal_error_without_repair() -> (
+async def test_propose_plan_edit_compile_bug_preserves_provider_outcome_unknown() -> (
     None
 ):
     processor = _make_processor()
@@ -413,45 +406,36 @@ async def test_propose_plan_edit_compile_bug_yields_internal_error_without_repai
             new=AsyncMock(return_value=_make_response_with_tool_calls(edit_call)),
         ),
     ):
-        events = [
-            encode_ai_builder_stream_event(event)
-            async for event in processor.propose_plan(
-                turn=_make_turn(
-                    session_id=session_id,
-                    base_planning_state_version=flow.draft_revision,
-                ),
-                conversation=[
-                    ConversationMessage(role="user", content="Rename the first step")
-                ],
-                new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=_empty_catalog(),
-                max_output_tokens=4096,
-                proposal_temperature=0.2,
-                request_id="req-edit-compile-bug",
-                flow=flow,
-            )
-        ]
+        with pytest.raises(AIBuilderProviderOutcomeUnknownException):
+            _ = [
+                event
+                async for event in processor.propose_plan(
+                    turn=_make_turn(
+                        session_id=session_id,
+                        base_planning_state_version=flow.draft_revision,
+                    ),
+                    conversation=[
+                        ConversationMessage(
+                            role="user",
+                            content="Rename the first step",
+                        )
+                    ],
+                    new_messages_start=1,
+                    llm_messages=[{"role": "system", "content": "Prompt"}],
+                    litellm_model="openai/gpt-5.4",
+                    litellm_kwargs={},
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=_empty_catalog(),
+                    max_output_tokens=4096,
+                    proposal_temperature=0.2,
+                    request_id="req-edit-compile-bug",
+                    flow=flow,
+                )
+            ]
 
     repair.assert_not_called()
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "planner_stream_failed"
-    assert payload["phase"] == "proposal"
-    assert payload["request_id"] == "req-edit-compile-bug"
-    assert "compiler exploded" not in events[0]["data"]
-    failed_payload = _single_failed_turn_payload(telemetry_records)
-    assert failed_payload["request_id"] == "req-edit-compile-bug"
-    assert failed_payload["session_id"] == str(session_id)
-    assert failed_payload["target_kind"] == "edit"
-    assert failed_payload["branch"] == "internal_submission_error"
-    assert failed_payload["repair_attempts"] == 0
-    assert failed_payload["final_failure_kind"] == "internal_error"
-    assert failed_payload["final_error_code"] == "planner_stream_failed"
+    assert _failed_turn_payloads(telemetry_records) == []
 
 
 @pytest.mark.asyncio

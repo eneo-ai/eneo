@@ -211,6 +211,7 @@ async def _dispatch_architecture_commit(
         flow=request.flow,
         architecture_commit=finalize_architecture_commit(decision.architecture_commit),
         planning_state_overlay=request.planning_state,
+        complete_turn=False,
     )
     events: list[AIBuilderStreamEvent] = [build_status_event(status)]
 

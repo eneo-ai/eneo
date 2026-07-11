@@ -77,6 +77,8 @@ class AIBuilderErrorCode(StrEnum):
     SESSION_LATEST_PLAN_UPDATE_CONFLICT = "session_latest_plan_update_conflict"
     SESSION_SEND_IN_PROGRESS = "session_send_in_progress"
     SESSION_SEND_LEASE_LOST = "session_send_lease_lost"
+    SESSION_TURN_IDEMPOTENCY_CONFLICT = "session_turn_idempotency_conflict"
+    SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN = "session_turn_provider_outcome_unknown"
     STALE_PLAN_REVISION = "stale_plan_revision"
     STALE_REVISION = "stale_revision"
     TRANSCRIPTION_MODEL_REQUIRED = "transcription_model_required"
@@ -117,6 +119,14 @@ class AIBuilderBadRequestException(BadRequestException):
     ) -> None:
         super().__init__(message, code=code.value, context=context)
         self.code = code
+
+
+class AIBuilderProviderOutcomeUnknownException(AIBuilderBadRequestException):
+    def __init__(self) -> None:
+        super().__init__(
+            "The provider outcome is unknown. Explicitly acknowledge possible duplicate provider work before retrying this turn.",
+            code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
+        )
 
 
 class AIBuilderNotFoundException(NotFoundException):
@@ -447,6 +457,16 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             http_status=409,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.SESSION_TURN_IDEMPOTENCY_CONFLICT: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.STALE_PLAN_REVISION: _entry(
             category=AIBuilderErrorCategory.CONFLICT,

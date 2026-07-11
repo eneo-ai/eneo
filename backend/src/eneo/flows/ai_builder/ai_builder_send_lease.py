@@ -4,17 +4,23 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderTurnState,
+    ConversationMessage,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
-    AIBuilderErrorCode,
+    AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+    SessionTurnAcceptance,
+    SessionTurnClaimDisposition,
+    SessionTurnPreparationBaseline,
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
@@ -29,6 +35,8 @@ logger = get_logger(__name__)
 class ClaimedSessionSendTurn:
     turn: SessionSendTurn
     lease_lost_event: asyncio.Event
+    user_message: ConversationMessage
+    replayed: bool = False
 
 
 @asynccontextmanager
@@ -37,30 +45,37 @@ async def claim_ai_builder_send_turn(
     repo: "AIBuilderRepository",
     session_id: UUID,
     tenant_id: UUID,
-    base_planning_state_version: int,
+    accepted_turn: SessionTurnAcceptance,
+    preparation_baseline: SessionTurnPreparationBaseline,
 ) -> AsyncGenerator[ClaimedSessionSendTurn]:
     lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+    lease_stop_event = asyncio.Event()
+    lease_lost_event = asyncio.Event()
+
+    claim = await repo.accept_session_turn(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        lease=lease,
+        lock_lease_seconds=_send_lock_lease_seconds(),
+        acceptance=accepted_turn,
+        preparation_baseline=preparation_baseline,
+    )
     turn = SessionSendTurn(
         session_id=session_id,
         tenant_id=tenant_id,
         lease=lease,
-        base_planning_state_version=base_planning_state_version,
+        base_planning_state_version=claim.base_planning_state_version,
     )
-    lease_stop_event = asyncio.Event()
-    lease_lost_event = asyncio.Event()
-
-    claimed = await repo.claim_session_send(
-        session_id=session_id,
-        tenant_id=tenant_id,
-        lease=lease,
-        lock_expires_at=_next_send_lock_expiry(),
-    )
-    if not claimed:
-        raise AIBuilderBadRequestException(
-            "Another AI Builder message is already being processed for this session.",
-            code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+    if claim.disposition is SessionTurnClaimDisposition.PROVIDER_OUTCOME_UNKNOWN:
+        raise AIBuilderProviderOutcomeUnknownException()
+    if claim.disposition is SessionTurnClaimDisposition.REPLAY_COMMITTED:
+        yield ClaimedSessionSendTurn(
+            turn=turn,
+            lease_lost_event=lease_lost_event,
+            user_message=claim.user_message,
+            replayed=True,
         )
-
+        return
     lease_task = asyncio.create_task(
         _maintain_send_lock_lease(
             repo=repo,
@@ -71,8 +86,15 @@ async def claim_ai_builder_send_turn(
             lease_lost_event=lease_lost_event,
         )
     )
+    caught_error: Exception | None = None
     try:
-        yield ClaimedSessionSendTurn(turn=turn, lease_lost_event=lease_lost_event)
+        yield ClaimedSessionSendTurn(
+            turn=turn,
+            lease_lost_event=lease_lost_event,
+            user_message=claim.user_message,
+        )
+    except Exception as error:
+        caught_error = error
     finally:
         lease_stop_event.set()
         try:
@@ -88,19 +110,22 @@ async def claim_ai_builder_send_turn(
                     "request_id": str(lease.request_id),
                 },
             )
-        await repo.release_session_send(
+        released_state = await repo.release_session_send(
             session_id=session_id,
             tenant_id=tenant_id,
             lease=lease,
         )
+    if caught_error is not None:
+        if (
+            released_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+            and not isinstance(caught_error, AIBuilderBadRequestException)
+        ):
+            raise AIBuilderProviderOutcomeUnknownException() from caught_error
+        raise caught_error.with_traceback(caught_error.__traceback__)
 
 
 def _send_lock_lease_seconds() -> int:
     return max(30, int(get_settings().ai_builder_send_lock_lease_seconds))
-
-
-def _next_send_lock_expiry() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(seconds=_send_lock_lease_seconds())
 
 
 def _send_lock_refresh_interval_seconds() -> int:
@@ -129,7 +154,7 @@ async def _maintain_send_lock_lease(
                     session_id=session_id,
                     tenant_id=tenant_id,
                     lease=lease,
-                    lock_expires_at=_next_send_lock_expiry(),
+                    lock_lease_seconds=_send_lock_lease_seconds(),
                 )
             except Exception as error:
                 logger.warning(

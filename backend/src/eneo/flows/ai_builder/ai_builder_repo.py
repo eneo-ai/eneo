@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
@@ -28,6 +28,8 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    BuilderTurnLifecycle,
+    BuilderTurnState,
     ConversationMessage,
     FlowBuilderProposal,
     PlanStatus,
@@ -38,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderNotFoundException,
+    AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
@@ -45,6 +48,11 @@ from eneo.flows.ai_builder.ai_builder_session_transitions import (
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+    SessionTurnAcceptance,
+    SessionTurnClaim,
+    SessionTurnClaimDisposition,
+    SessionTurnPreflight,
+    SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -54,6 +62,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
@@ -78,6 +87,20 @@ def _session_send_lock_available_clause() -> sa.ColumnElement[bool]:
             BuilderSessions.lock_expires_at.is_not(None),
             BuilderSessions.lock_expires_at <= sa.func.now(),
         ),
+    )
+
+
+def _terminal_turn_state_after_lock_clear() -> sa.ColumnElement[str]:
+    return sa.case(
+        (
+            BuilderSessions.latest_turn_state == BuilderTurnState.OPEN.value,
+            BuilderTurnState.FAILED_BEFORE_PROVIDER.value,
+        ),
+        (
+            BuilderSessions.latest_turn_state == BuilderTurnState.PROCESSING.value,
+            BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN.value,
+        ),
+        else_=BuilderSessions.latest_turn_state,
     )
 
 
@@ -161,7 +184,7 @@ class AIBuilderRepository:
     ) -> BuilderSession | None:
         async with self._transaction():
             stmt = (
-                select(BuilderSessions)
+                select(BuilderSessions, sa.func.clock_timestamp())
                 .where(
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.actor_user_id == actor_user_id,
@@ -181,8 +204,14 @@ class AIBuilderRepository:
                     BuilderSessions.updated_at.desc(), BuilderSessions.created_at.desc()
                 )
             )
-            row = (await self.session.execute(stmt)).scalars().first()
-            return _session_from_row(row) if row is not None else None
+            result = (await self.session.execute(stmt)).first()
+            if result is None:
+                return None
+            row, database_now = result
+            return _session_from_row(
+                row,
+                database_now=cast(datetime, database_now),
+            )
 
     async def list_sessions_with_draft_titles(
         self,
@@ -196,7 +225,11 @@ class AIBuilderRepository:
                 _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY
             ].astext.label("draft_title")
             stmt = (
-                select(BuilderSessions, draft_title_label)
+                select(
+                    BuilderSessions,
+                    draft_title_label,
+                    sa.func.clock_timestamp(),
+                )
                 .outerjoin(
                     BuilderPlans,
                     sa.and_(
@@ -216,8 +249,14 @@ class AIBuilderRepository:
             )
             rows = (await self.session.execute(stmt)).all()
             return [
-                (_session_from_row(session_row), cast(str | None, draft_title_value))
-                for session_row, draft_title_value in rows
+                (
+                    _session_from_row(
+                        session_row,
+                        database_now=cast(datetime, database_now),
+                    ),
+                    cast(str | None, draft_title_value),
+                )
+                for session_row, draft_title_value, database_now in rows
             ]
 
     async def cancel_session(
@@ -227,6 +266,16 @@ class AIBuilderRepository:
         tenant_id: UUID,
     ) -> None:
         async with self._transaction():
+            session_row_id = await self.session.scalar(
+                select(BuilderSessions.id)
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+            if session_row_id is None:
+                return
             detach_stmt = sa.delete(BuilderSessionFiles).where(
                 BuilderSessionFiles.session_id == session_id,
                 BuilderSessionFiles.tenant_id == tenant_id,
@@ -244,6 +293,7 @@ class AIBuilderRepository:
                     lock_token=None,
                     locked_at=None,
                     lock_expires_at=None,
+                    latest_turn_state=_terminal_turn_state_after_lock_clear(),
                     updated_at=datetime.now(timezone.utc),
                 )
             )
@@ -259,33 +309,8 @@ class AIBuilderRepository:
         flow_id: UUID | None,
     ) -> list[UUID]:
         async with self._transaction():
-            session_ids_stmt = select(BuilderSessions.id).where(
-                BuilderSessions.tenant_id == tenant_id,
-                BuilderSessions.actor_user_id == actor_user_id,
-                BuilderSessions.space_id == space_id,
-                BuilderSessions.target_kind == target_kind.value,
-                BuilderSessions.status.in_(
-                    [
-                        SessionStatus.CHATTING.value,
-                        SessionStatus.AWAITING_APPROVAL.value,
-                    ]
-                ),
-                BuilderSessions.flow_id.is_(None)
-                if flow_id is None
-                else BuilderSessions.flow_id == flow_id,
-            )
-            session_ids = list(
-                (await self.session.execute(session_ids_stmt)).scalars().all()
-            )
-            if session_ids:
-                detach_stmt = sa.delete(BuilderSessionFiles).where(
-                    BuilderSessionFiles.session_id.in_(session_ids),
-                    BuilderSessionFiles.tenant_id == tenant_id,
-                )
-                await self.session.execute(detach_stmt)
-
-            stmt = (
-                update(BuilderSessions)
+            session_ids_stmt = (
+                select(BuilderSessions.id)
                 .where(
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.actor_user_id == actor_user_id,
@@ -301,12 +326,33 @@ class AIBuilderRepository:
                     if flow_id is None
                     else BuilderSessions.flow_id == flow_id,
                 )
+                .order_by(BuilderSessions.id)
+                .with_for_update()
+            )
+            session_ids = list(
+                (await self.session.execute(session_ids_stmt)).scalars().all()
+            )
+            if not session_ids:
+                return []
+            detach_stmt = sa.delete(BuilderSessionFiles).where(
+                BuilderSessionFiles.session_id.in_(session_ids),
+                BuilderSessionFiles.tenant_id == tenant_id,
+            )
+            await self.session.execute(detach_stmt)
+
+            stmt = (
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id.in_(session_ids),
+                    BuilderSessions.tenant_id == tenant_id,
+                )
                 .values(
                     status=SessionStatus.CANCELLED.value,
                     active_request_id=None,
                     lock_token=None,
                     locked_at=None,
                     lock_expires_at=None,
+                    latest_turn_state=_terminal_turn_state_after_lock_clear(),
                     updated_at=datetime.now(timezone.utc),
                 )
                 .returning(BuilderSessions.id)
@@ -321,17 +367,24 @@ class AIBuilderRepository:
         tenant_id: UUID,
     ) -> BuilderSession:
         async with self._transaction():
-            stmt = select(BuilderSessions).where(
+            stmt = select(
+                BuilderSessions,
+                sa.func.clock_timestamp(),
+            ).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
             )
-            row = (await self.session.execute(stmt)).scalar_one_or_none()
-            if row is None:
+            result = (await self.session.execute(stmt)).one_or_none()
+            if result is None:
                 raise AIBuilderNotFoundException(
                     "Builder session not found.",
                     code=AIBuilderErrorCode.NOT_FOUND,
                 )
-            return _session_from_row(row)
+            row, database_now = result
+            return _session_from_row(
+                row,
+                database_now=cast(datetime, database_now),
+            )
 
     async def list_session_file_ids(
         self,
@@ -359,6 +412,26 @@ class AIBuilderRepository:
         file_id: UUID,
     ) -> None:
         async with self._transaction():
+            session_row = (
+                await self.session.execute(
+                    select(BuilderSessions)
+                    .where(
+                        BuilderSessions.id == session_id,
+                        BuilderSessions.tenant_id == tenant_id,
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if session_row is None:
+                raise AIBuilderNotFoundException(
+                    "AI Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
+            if session_row.active_request_id is not None:
+                raise AIBuilderBadRequestException(
+                    "An active send is currently in progress for this session.",
+                    code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
+                )
             stmt = sa.delete(BuilderSessionFiles).where(
                 BuilderSessionFiles.session_id == session_id,
                 BuilderSessionFiles.tenant_id == tenant_id,
@@ -549,7 +622,9 @@ class AIBuilderRepository:
                 )
 
             existing = _session_from_row(row).conversation
-            compacted = compact_ai_builder_conversation([*existing, *conversation])
+            compacted = compact_ai_builder_conversation(
+                _merge_conversation_messages(existing, conversation)
+            )
             serialized = [msg.model_dump(mode="json") for msg in compacted]
             update_stmt = (
                 update(BuilderSessions)
@@ -732,43 +807,344 @@ class AIBuilderRepository:
             )
             await self.session.execute(stmt)
 
-    async def claim_session_send(
+    async def preflight_session_turn(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        client_turn_id: UUID,
+        request_fingerprint: str,
+        acknowledge_duplicate_provider_spend: bool,
+    ) -> SessionTurnPreflight:
+        """Resolve replay before fallible preparation and capture its CAS baseline."""
+        async with self._transaction():
+            row = (
+                await self.session.execute(
+                    select(BuilderSessions)
+                    .where(
+                        BuilderSessions.id == session_id,
+                        BuilderSessions.tenant_id == tenant_id,
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                raise AIBuilderNotFoundException(
+                    "AI Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
+            database_now = cast(
+                datetime,
+                await self.session.scalar(select(sa.func.clock_timestamp())),
+            )
+            if row.status not in {
+                SessionStatus.CHATTING.value,
+                SessionStatus.AWAITING_APPROVAL.value,
+            }:
+                raise AIBuilderBadRequestException(
+                    "The AI Builder session cannot accept another message.",
+                    code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+                )
+
+            lock_is_active = row.active_request_id is not None and (
+                row.lock_expires_at is None or row.lock_expires_at > database_now
+            )
+            stored_state = (
+                BuilderTurnState(row.latest_turn_state)
+                if row.latest_turn_state is not None
+                else None
+            )
+            effective_state = stored_state
+            if row.active_request_id is not None and not lock_is_active:
+                if stored_state is BuilderTurnState.OPEN:
+                    effective_state = BuilderTurnState.FAILED_BEFORE_PROVIDER
+                elif stored_state is BuilderTurnState.PROCESSING:
+                    effective_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+
+            same_turn = row.latest_turn_id == client_turn_id
+            if same_turn:
+                if row.latest_turn_request_fingerprint != request_fingerprint:
+                    raise AIBuilderBadRequestException(
+                        "The client turn ID was already used for a different request.",
+                        code=AIBuilderErrorCode.SESSION_TURN_IDEMPOTENCY_CONFLICT,
+                    )
+                if effective_state is BuilderTurnState.COMMITTED:
+                    return SessionTurnPreflight(
+                        session=_session_from_row(row, database_now=database_now),
+                        baseline=_turn_preparation_baseline(row, ()),
+                        replayed=True,
+                    )
+                if lock_is_active:
+                    raise AIBuilderBadRequestException(
+                        "This AI Builder turn is still being processed.",
+                        code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+                    )
+                if (
+                    effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+                    and not acknowledge_duplicate_provider_spend
+                ):
+                    raise AIBuilderProviderOutcomeUnknownException()
+            else:
+                if lock_is_active:
+                    raise AIBuilderBadRequestException(
+                        "Another AI Builder message is already being processed for this session.",
+                        code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+                    )
+                if effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN:
+                    raise AIBuilderProviderOutcomeUnknownException()
+
+            attachment_file_ids = tuple(
+                (
+                    await self.session.execute(
+                        select(BuilderSessionFiles.file_id)
+                        .where(
+                            BuilderSessionFiles.session_id == session_id,
+                            BuilderSessionFiles.tenant_id == tenant_id,
+                        )
+                        .order_by(BuilderSessionFiles.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return SessionTurnPreflight(
+                session=_session_from_row(row, database_now=database_now),
+                baseline=_turn_preparation_baseline(row, attachment_file_ids),
+            )
+
+    async def accept_session_turn(
         self,
         *,
         session_id: UUID,
         tenant_id: UUID,
         lease: SessionSendLease,
-        lock_expires_at: datetime,
-    ) -> bool:
+        lock_lease_seconds: int,
+        acceptance: SessionTurnAcceptance,
+        preparation_baseline: SessionTurnPreparationBaseline,
+    ) -> SessionTurnClaim:
         async with self._transaction():
-            now = datetime.now(timezone.utc)
+            row = (
+                await self.session.execute(
+                    select(BuilderSessions)
+                    .where(
+                        BuilderSessions.id == session_id,
+                        BuilderSessions.tenant_id == tenant_id,
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                raise AIBuilderNotFoundException(
+                    "AI Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
+            now = cast(
+                datetime,
+                await self.session.scalar(select(sa.func.clock_timestamp())),
+            )
+            if row.status not in {
+                SessionStatus.CHATTING.value,
+                SessionStatus.AWAITING_APPROVAL.value,
+            }:
+                raise AIBuilderBadRequestException(
+                    "The AI Builder session cannot accept another message.",
+                    code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+                )
+
+            lock_is_active = row.active_request_id is not None and (
+                row.lock_expires_at is None or row.lock_expires_at > now
+            )
+            stored_state = (
+                BuilderTurnState(row.latest_turn_state)
+                if row.latest_turn_state is not None
+                else None
+            )
+            effective_state = stored_state
+            if row.active_request_id is not None and not lock_is_active:
+                if stored_state is BuilderTurnState.OPEN:
+                    effective_state = BuilderTurnState.FAILED_BEFORE_PROVIDER
+                elif stored_state is BuilderTurnState.PROCESSING:
+                    effective_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+            same_turn = row.latest_turn_id == acceptance.client_turn_id
+            stored_message = acceptance.user_message
+            if same_turn:
+                if (
+                    row.latest_turn_request_fingerprint
+                    != acceptance.request_fingerprint
+                ):
+                    raise AIBuilderBadRequestException(
+                        "The client turn ID was already used for a different request.",
+                        code=AIBuilderErrorCode.SESSION_TURN_IDEMPOTENCY_CONFLICT,
+                    )
+                stored_message = _latest_turn_user_message(row)
+                if effective_state is BuilderTurnState.COMMITTED:
+                    return SessionTurnClaim(
+                        disposition=SessionTurnClaimDisposition.REPLAY_COMMITTED,
+                        user_message=stored_message,
+                        base_planning_state_version=row.planning_state_version,
+                    )
+                if lock_is_active:
+                    raise AIBuilderBadRequestException(
+                        "This AI Builder turn is still being processed.",
+                        code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+                    )
+                if (
+                    effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+                    and not acceptance.acknowledge_duplicate_provider_spend
+                ):
+                    return SessionTurnClaim(
+                        disposition=(
+                            SessionTurnClaimDisposition.PROVIDER_OUTCOME_UNKNOWN
+                        ),
+                        user_message=stored_message,
+                        base_planning_state_version=row.planning_state_version,
+                    )
+            else:
+                if lock_is_active:
+                    raise AIBuilderBadRequestException(
+                        "Another AI Builder message is already being processed for this session.",
+                        code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+                    )
+                if effective_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN:
+                    return SessionTurnClaim(
+                        disposition=(
+                            SessionTurnClaimDisposition.PROVIDER_OUTCOME_UNKNOWN
+                        ),
+                        user_message=_latest_turn_user_message(row),
+                        base_planning_state_version=row.planning_state_version,
+                    )
+
+            attachment_file_ids = tuple(
+                (
+                    await self.session.execute(
+                        select(BuilderSessionFiles.file_id)
+                        .where(
+                            BuilderSessionFiles.session_id == session_id,
+                            BuilderSessionFiles.tenant_id == tenant_id,
+                        )
+                        .order_by(BuilderSessionFiles.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if (
+                _turn_preparation_baseline(row, attachment_file_ids)
+                != preparation_baseline
+            ):
+                raise AIBuilderBadRequestException(
+                    "The AI Builder session changed while this turn was being prepared. Reload and retry the same turn.",
+                    code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+                )
+
+            if row.active_request_id is not None:
+                _clear_session_send_lock(row)
+
+            compacted = compact_ai_builder_conversation(
+                _merge_conversation_messages(
+                    _session_from_row(row).conversation,
+                    [stored_message],
+                )
+            )
+            row.conversation = [
+                message.model_dump(mode="json") for message in compacted
+            ]
+            row.active_request_id = lease.request_id
+            row.lock_token = lease.lock_token
+            row.locked_at = now
+            row.lock_expires_at = now + timedelta(seconds=lock_lease_seconds)
+            row.latest_turn_id = acceptance.client_turn_id
+            row.latest_turn_request_fingerprint = acceptance.request_fingerprint
+            row.latest_turn_request_jsonb = acceptance.request
+            row.latest_turn_state = BuilderTurnState.OPEN.value
+            row.latest_turn_message_id = UUID(stored_message.message_id)
+            row.latest_turn_error_code = None
+            row.updated_at = now
+            if acceptance.file_ids:
+                membership_stmt = pg_insert(BuilderSessionFiles).values(
+                    [
+                        {
+                            "session_id": session_id,
+                            "file_id": file_id,
+                            "tenant_id": tenant_id,
+                        }
+                        for file_id in dict.fromkeys(acceptance.file_ids)
+                    ]
+                )
+                await self.session.execute(
+                    membership_stmt.on_conflict_do_nothing(
+                        index_elements=["session_id", "file_id"]
+                    )
+                )
+            return SessionTurnClaim(
+                disposition=SessionTurnClaimDisposition.EXECUTE,
+                user_message=stored_message,
+                base_planning_state_version=row.planning_state_version,
+            )
+
+    async def mark_session_turn_processing(
+        self,
+        *,
+        turn: SessionSendTurn,
+    ) -> None:
+        async with self._transaction():
             stmt = (
                 update(BuilderSessions)
                 .where(
-                    BuilderSessions.id == session_id,
-                    BuilderSessions.tenant_id == tenant_id,
-                    sa.or_(
-                        BuilderSessions.active_request_id.is_(None),
-                        BuilderSessions.lock_expires_at <= sa.func.now(),
-                    ),
-                    BuilderSessions.status.in_(
+                    BuilderSessions.id == turn.session_id,
+                    BuilderSessions.tenant_id == turn.tenant_id,
+                    *_lease_filters(turn.lease),
+                    BuilderSessions.latest_turn_state.in_(
                         [
-                            SessionStatus.CHATTING.value,
-                            SessionStatus.AWAITING_APPROVAL.value,
+                            BuilderTurnState.OPEN.value,
+                            BuilderTurnState.PROCESSING.value,
                         ]
                     ),
                 )
                 .values(
-                    active_request_id=lease.request_id,
-                    lock_token=lease.lock_token,
-                    locked_at=now,
-                    lock_expires_at=lock_expires_at,
-                    updated_at=now,
+                    latest_turn_state=BuilderTurnState.PROCESSING.value,
+                    updated_at=datetime.now(timezone.utc),
                 )
-                .returning(BuilderSessions.id)
             )
-            result = await self.session.execute(stmt)
-            return result.scalar_one_or_none() is not None
+            updated_session_id = await self.session.scalar(
+                stmt.returning(BuilderSessions.id)
+            )
+            if updated_session_id is None:
+                raise AIBuilderBadRequestException(
+                    "The AI Builder session lease was lost before provider work.",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+                )
+
+    async def complete_session_turn(
+        self,
+        *,
+        turn: SessionSendTurn,
+        error_code: AIBuilderErrorCode | None = None,
+    ) -> None:
+        async with self._transaction():
+            stmt = (
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == turn.session_id,
+                    BuilderSessions.tenant_id == turn.tenant_id,
+                    *_lease_filters(turn.lease),
+                )
+                .values(
+                    latest_turn_state=BuilderTurnState.COMMITTED.value,
+                    latest_turn_error_code=(
+                        error_code.value if error_code is not None else None
+                    ),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            updated_session_id = await self.session.scalar(
+                stmt.returning(BuilderSessions.id)
+            )
+            if updated_session_id is None:
+                raise AIBuilderBadRequestException(
+                    "The AI Builder session lease was lost while completing the turn.",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+                )
 
     async def refresh_session_send_lease(
         self,
@@ -776,10 +1152,24 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         lease: SessionSendLease,
-        lock_expires_at: datetime,
+        lock_lease_seconds: int,
     ) -> bool:
         async with self._transaction():
-            now = datetime.now(timezone.utc)
+            locked_session_id = await self.session.scalar(
+                select(BuilderSessions.id)
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                    *_lease_filters(lease),
+                )
+                .with_for_update()
+            )
+            if locked_session_id is None:
+                return False
+            database_now = cast(
+                datetime,
+                await self.session.scalar(select(sa.func.clock_timestamp())),
+            )
             stmt = (
                 update(BuilderSessions)
                 .where(
@@ -788,9 +1178,10 @@ class AIBuilderRepository:
                     *_lease_filters(lease),
                 )
                 .values(
-                    locked_at=now,
-                    lock_expires_at=lock_expires_at,
-                    updated_at=now,
+                    locked_at=database_now,
+                    lock_expires_at=database_now
+                    + timedelta(seconds=lock_lease_seconds),
+                    updated_at=database_now,
                 )
                 .returning(BuilderSessions.id)
             )
@@ -803,7 +1194,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         lease: SessionSendLease,
-    ) -> None:
+    ) -> BuilderTurnState | None:
         async with self._transaction():
             stmt = (
                 update(BuilderSessions)
@@ -817,10 +1208,14 @@ class AIBuilderRepository:
                     lock_token=None,
                     locked_at=None,
                     lock_expires_at=None,
+                    latest_turn_state=_terminal_turn_state_after_lock_clear(),
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            await self.session.execute(stmt)
+            state = await self.session.scalar(
+                stmt.returning(BuilderSessions.latest_turn_state)
+            )
+            return BuilderTurnState(state) if state is not None else None
 
     # ---------------------------------------------------------------------------
     # Plans
@@ -1082,6 +1477,7 @@ class AIBuilderRepository:
         flow: "Flow | None" = None,
         architecture_commit: ArchitectureCommit | None = None,
         planning_state_overlay: PlanningState | None = None,
+        complete_turn: bool = True,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
 
@@ -1142,17 +1538,53 @@ class AIBuilderRepository:
                 prior_state,
                 attached_file_ids=attached_file_ids,
             )
-            return await self.save_planning_state(
+            new_version = await self.save_planning_state(
                 session_id=turn.session_id,
                 tenant_id=turn.tenant_id,
                 state=state,
                 base_version=turn.base_planning_state_version,
             )
+            if complete_turn:
+                await self.complete_session_turn(turn=turn)
+            return new_version
 
 
 # ---------------------------------------------------------------------------
 # Row → domain model converters
 # ---------------------------------------------------------------------------
+
+
+def _clear_session_send_lock(row: BuilderSessions) -> None:
+    row.active_request_id = None
+    row.lock_token = None
+    row.locked_at = None
+    row.lock_expires_at = None
+
+
+def _latest_turn_user_message(row: BuilderSessions) -> ConversationMessage:
+    message_id = row.latest_turn_message_id
+    if message_id is None:
+        raise ValueError("Persisted Builder latest turn has no user message ID.")
+    for message in _session_from_row(row).conversation:
+        if message.message_id == str(message_id):
+            return message
+    raise ValueError("Persisted Builder latest-turn user message is missing.")
+
+
+def _merge_conversation_messages(
+    existing: list[ConversationMessage],
+    incoming: list[ConversationMessage],
+) -> list[ConversationMessage]:
+    merged = list(existing)
+    positions = {message.message_id: index for index, message in enumerate(merged)}
+    for message in incoming:
+        index = positions.get(message.message_id)
+        if index is None:
+            positions[message.message_id] = len(merged)
+            merged.append(message)
+        else:
+            merged[index] = message
+    return merged
 
 
 def _lease_filters(lease: SessionSendLease) -> tuple[Any, Any]:
@@ -1172,8 +1604,15 @@ class _SessionRowData(TypedDict):
     actor_user_id: UUID
     conversation: list[object]
     active_request_id: UUID | None
+    lock_expires_at: datetime | None
     latest_plan_id: UUID | None
     planning_state_version: int
+    latest_turn_id: UUID | None
+    latest_turn_request_fingerprint: str | None
+    latest_turn_request_jsonb: FlowPersistedJsonObject | None
+    latest_turn_state: str | None
+    latest_turn_message_id: UUID | None
+    latest_turn_error_code: str | None
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -1203,9 +1642,28 @@ def _session_row_data(row: Any) -> _SessionRowData:
             "actor_user_id": cast(UUID, mapping["actor_user_id"]),
             "conversation": conversation,
             "active_request_id": cast(UUID | None, mapping.get("active_request_id")),
+            "lock_expires_at": cast(
+                datetime | None,
+                mapping.get("lock_expires_at"),
+            ),
             "latest_plan_id": cast(UUID | None, mapping.get("latest_plan_id")),
             "planning_state_version": int(
                 cast(int, mapping.get("planning_state_version") or 0)
+            ),
+            "latest_turn_id": cast(UUID | None, mapping.get("latest_turn_id")),
+            "latest_turn_request_fingerprint": cast(
+                str | None, mapping.get("latest_turn_request_fingerprint")
+            ),
+            "latest_turn_request_jsonb": cast(
+                FlowPersistedJsonObject | None,
+                mapping.get("latest_turn_request_jsonb"),
+            ),
+            "latest_turn_state": cast(str | None, mapping.get("latest_turn_state")),
+            "latest_turn_message_id": cast(
+                UUID | None, mapping.get("latest_turn_message_id")
+            ),
+            "latest_turn_error_code": cast(
+                str | None, mapping.get("latest_turn_error_code")
             ),
             "created_at": cast(datetime | None, mapping.get("created_at")),
             "updated_at": cast(datetime | None, mapping.get("updated_at")),
@@ -1221,10 +1679,22 @@ def _session_row_data(row: Any) -> _SessionRowData:
         "actor_user_id": cast(UUID, row.actor_user_id),
         "conversation": cast(list[object], row.conversation or []),
         "active_request_id": cast(UUID | None, row.active_request_id),
+        "lock_expires_at": cast(datetime | None, row.lock_expires_at),
         "latest_plan_id": cast(UUID | None, row.latest_plan_id),
         "planning_state_version": int(
             cast(int, getattr(row, "planning_state_version", 0) or 0)
         ),
+        "latest_turn_id": cast(UUID | None, row.latest_turn_id),
+        "latest_turn_request_fingerprint": cast(
+            str | None, row.latest_turn_request_fingerprint
+        ),
+        "latest_turn_request_jsonb": cast(
+            FlowPersistedJsonObject | None,
+            row.latest_turn_request_jsonb,
+        ),
+        "latest_turn_state": cast(str | None, row.latest_turn_state),
+        "latest_turn_message_id": cast(UUID | None, row.latest_turn_message_id),
+        "latest_turn_error_code": cast(str | None, row.latest_turn_error_code),
         "created_at": cast(datetime | None, row.created_at),
         "updated_at": cast(datetime | None, row.updated_at),
     }
@@ -1256,7 +1726,11 @@ def _plan_row_data(row: Any) -> _PlanRowData:
     }
 
 
-def _session_from_row(row: Any) -> BuilderSession:
+def _session_from_row(
+    row: Any,
+    *,
+    database_now: datetime | None = None,
+) -> BuilderSession:
     """Convert a DB row/mapping to a BuilderSession domain model."""
     data = _session_row_data(row)
 
@@ -1269,6 +1743,44 @@ def _session_from_row(row: Any) -> BuilderSession:
                 ConversationMessage.from_persisted(cast(dict[str, object], msg))
             )
 
+    latest_turn = None
+    if data["latest_turn_id"] is not None:
+        request_fingerprint = data["latest_turn_request_fingerprint"]
+        request = data["latest_turn_request_jsonb"]
+        state = data["latest_turn_state"]
+        message_id = data["latest_turn_message_id"]
+        if (
+            request_fingerprint is None
+            or request is None
+            or state is None
+            or message_id is None
+        ):
+            raise ValueError("Persisted Builder latest-turn fields are incomplete.")
+        effective_state = BuilderTurnState(state)
+        lock_expires_at = data["lock_expires_at"]
+        if (
+            database_now is not None
+            and data["active_request_id"] is not None
+            and lock_expires_at is not None
+            and lock_expires_at <= database_now
+        ):
+            if effective_state is BuilderTurnState.OPEN:
+                effective_state = BuilderTurnState.FAILED_BEFORE_PROVIDER
+            elif effective_state is BuilderTurnState.PROCESSING:
+                effective_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+        latest_turn = BuilderTurnLifecycle(
+            client_turn_id=data["latest_turn_id"],
+            request_fingerprint=request_fingerprint,
+            request=request,
+            state=effective_state,
+            user_message_id=message_id,
+            error_code=(
+                AIBuilderErrorCode(data["latest_turn_error_code"])
+                if data["latest_turn_error_code"] is not None
+                else None
+            ),
+        )
+
     return BuilderSession(
         id=data["id"],
         tenant_id=data["tenant_id"],
@@ -1280,8 +1792,27 @@ def _session_from_row(row: Any) -> BuilderSession:
         conversation=conversation,
         latest_plan_id=data["latest_plan_id"],
         planning_state_version=data["planning_state_version"],
+        latest_turn=latest_turn,
         created_at=data["created_at"],
         updated_at=data["updated_at"],
+    )
+
+
+def _turn_preparation_baseline(
+    row: BuilderSessions,
+    attachment_file_ids: tuple[UUID, ...],
+) -> SessionTurnPreparationBaseline:
+    return SessionTurnPreparationBaseline(
+        session_status=SessionStatus(row.status),
+        latest_plan_id=row.latest_plan_id,
+        planning_state_version=row.planning_state_version,
+        latest_turn_id=row.latest_turn_id,
+        latest_turn_state=(
+            BuilderTurnState(row.latest_turn_state)
+            if row.latest_turn_state is not None
+            else None
+        ),
+        attachment_file_ids=attachment_file_ids,
     )
 
 
