@@ -333,6 +333,44 @@ def test_openapi_ai_builder_turn_retry_contract_is_strict(
     assert "request_fingerprint" not in lifecycle["properties"]
 
 
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "CreateSessionRequest",
+        "SendMessageRequest",
+        "ApplyPlanRequest",
+        "RevisePlanRequest",
+    ],
+)
+def test_openapi_ai_builder_launch_requests_are_strict(
+    openapi_spec: dict,
+    schema_name: str,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+
+    assert schemas[schema_name]["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/flows/ai-builder/sessions",
+        "/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+        "/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+        "/api/v1/flows/ai-builder/plans/{plan_id}/revise",
+    ],
+)
+def test_openapi_ai_builder_launch_validation_uses_typed_error(
+    openapi_spec: dict,
+    path: str,
+) -> None:
+    response = openapi_spec["paths"][path]["post"]["responses"]["422"]
+
+    assert "#/components/schemas/GeneralError" in _schema_refs(
+        response["content"]["application/json"]["schema"]
+    )
+
+
 def test_openapi_ai_builder_turn_retry_errors_and_recovery_are_documented(
     openapi_spec: dict,
 ) -> None:

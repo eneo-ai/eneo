@@ -5,10 +5,10 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
-  import type { AIBuilderDraftSession } from "./protocol";
+  import type { RecoverableAIBuilderDraftSession } from "./protocol";
 
   interface Props {
-    drafts: AIBuilderDraftSession[];
+    drafts: RecoverableAIBuilderDraftSession[];
     onresume: (sessionId: string) => Promise<void> | void;
     onstartfresh: () => Promise<void> | void;
     ondiscard: (sessionId: string) => Promise<void> | void;
@@ -64,14 +64,14 @@
     });
   }
 
-  function stepBadge(status: AIBuilderDraftSession["status"]): {
+  function stepBadge(status: RecoverableAIBuilderDraftSession["status"]): {
     label: string;
     variant: "discovering" | "confirming" | "building" | "reviewing";
   } {
     switch (status) {
       case "awaiting_approval":
         return { label: m.ai_builder_draft_step_reviewing(), variant: "reviewing" };
-      default:
+      case "chatting":
         return { label: m.ai_builder_draft_step_discovering(), variant: "discovering" };
     }
   }

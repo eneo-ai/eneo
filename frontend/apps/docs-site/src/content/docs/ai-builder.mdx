@@ -82,6 +82,11 @@ Resource names shown to AI Builder are prompt-visible aliases. The Builder resol
 
 The review step matters. A plan can be valid but still not be the best workflow for your organization. Check the input contract, final output, external tool access, and evidence requirements before publishing.
 
+Public AI Builder request bodies are closed contracts. Build payloads from the
+OpenAPI schema or generated Eneo client: an unknown or misspelled property
+returns HTTP `422` with code `request_validation_error`. Correct the payload
+instead of retrying the same invalid request.
+
 ## Reliable message sends and retries
 
 Each message send has one `client_turn_id`. A client creates this UUID once and
@@ -97,7 +102,7 @@ Retry behavior depends on the persisted turn state:
 
 | State                      | Client behavior                                                                                                                                                                                                  |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `open`                     | The request is durably accepted but provider work has not started. Wait and reload the session; do not create a second logical turn.                                                                            |
+| `open`                     | The request is durably accepted but provider work has not started. Wait and reload the session; do not create a second logical turn.                                                                             |
 | `failed_before_provider`   | Retry the exact `retry_request`. Provider work did not start.                                                                                                                                                    |
 | `provider_outcome_unknown` | Never retry automatically. Ask the user to acknowledge that the provider may repeat work or incur another charge, then send the exact `retry_request` with `acknowledge_duplicate_provider_spend` set to `true`. |
 | `processing`               | Wait and reload the session. Do not create a second logical turn.                                                                                                                                                |

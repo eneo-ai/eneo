@@ -22,6 +22,7 @@ import type {
   AIBuilderPlanEditContext,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
+  AIBuilderStatus,
   AIBuilderStreamEvent,
   AIBuilderTurnState,
   AIBuilderTurnRecoveryState,
@@ -33,6 +34,8 @@ import type {
   PlanRevisionType,
   ProposedPlan,
   RequirementsSummary,
+  RecoverableAIBuilderDraftSession,
+  SessionStatus,
   TargetKind
 } from "./protocol";
 
@@ -65,7 +68,7 @@ export interface FlowAIBuilderState {
   applyError: ApplyError | null;
   applyResult: ApplyResult | null;
   isConflict: boolean;
-  statusMessage: string | null;
+  statusMessage: AIBuilderStatus | null;
   availableModels: AIBuilderModel[];
   selectedModelId: string | null;
   modelsLoaded: boolean;
@@ -113,7 +116,8 @@ function extractQuestionAnswer(
 }
 
 function toPersistedQuestionAnswerMetadata(
-  questionAnswer: StructuredQuestionAnswerMetadata
+  questionAnswer:
+    StructuredQuestionAnswerMetadata | NonNullable<AIBuilderConversationMessage["question_answer"]>
 ): PersistedStructuredQuestionAnswerMetadata | null {
   if (questionAnswer.kind !== "structured_question_answer") {
     return null;
@@ -122,13 +126,13 @@ function toPersistedQuestionAnswerMetadata(
   if (questionAnswer.question_id !== undefined) {
     metadata.question_id = questionAnswer.question_id;
   }
-  if (questionAnswer.selected_option_ids !== undefined) {
+  if (questionAnswer.selected_option_ids != null) {
     metadata.selected_option_ids = questionAnswer.selected_option_ids;
   }
-  if (questionAnswer.selected_values !== undefined) {
+  if (questionAnswer.selected_values != null) {
     metadata.selected_values = questionAnswer.selected_values;
   }
-  if (questionAnswer.custom_value !== undefined) {
+  if (questionAnswer.custom_value != null) {
     metadata.custom_value = questionAnswer.custom_value;
   }
   return metadata;
@@ -136,6 +140,33 @@ function toPersistedQuestionAnswerMetadata(
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled AI Builder stream event: ${JSON.stringify(value)}`);
+}
+
+function isRecoverableDraftStatus(
+  status: SessionStatus
+): status is RecoverableAIBuilderDraftSession["status"] {
+  switch (status) {
+    case "chatting":
+    case "awaiting_approval":
+      return true;
+    case "applied":
+    case "cancelled":
+      return false;
+  }
+  const unhandledStatus: never = status;
+  throw new Error(`Unhandled AI Builder session status: ${unhandledStatus}`);
+}
+
+function isRecoverableCreateDraft(
+  session: AIBuilderDraftSession,
+  spaceId: string
+): session is RecoverableAIBuilderDraftSession {
+  return (
+    session.space_id === spaceId &&
+    session.target_kind === "create" &&
+    session.flow_id === null &&
+    isRecoverableDraftStatus(session.status)
+  );
 }
 
 export class FlowAIBuilderDriver {
@@ -311,14 +342,9 @@ export class FlowAIBuilderDriver {
     return this.getRecoverableCreateDrafts().length > 0;
   }
 
-  getRecoverableCreateDrafts(): AIBuilderDraftSession[] {
-    return this.#state.draftSessions.filter(
-      (session) =>
-        session.space_id === this.#spaceId &&
-        session.target_kind === "create" &&
-        session.flow_id === null &&
-        session.status !== "applied" &&
-        session.status !== "cancelled"
+  getRecoverableCreateDrafts(): RecoverableAIBuilderDraftSession[] {
+    return this.#state.draftSessions.filter((session) =>
+      isRecoverableCreateDraft(session, this.#spaceId)
     );
   }
 
@@ -1049,10 +1075,7 @@ export class FlowAIBuilderDriver {
   #hydrateMessagesFromConversation(conversation: AIBuilderConversationMessage[]): void {
     const hydrated: ChatMessage[] = [];
 
-    for (let index = 0; index < conversation.length; index += 1) {
-      const message = conversation[index];
-      if (!message) continue;
-
+    for (const message of conversation) {
       if (message.role === "user") {
         hydrated.push({
           role: "user",
@@ -1073,52 +1096,12 @@ export class FlowAIBuilderDriver {
         timestamp: this.#parseTimestamp(message.timestamp)
       };
 
-      const publicRequirementsSummary = this.#parseRequirementsSummary(
-        message.requirements_summary
-      );
-      if (publicRequirementsSummary) {
-        assistantMessage.requirementsSummary = publicRequirementsSummary;
-      } else {
-        const metadataRequirementsSummary = this.#parseRequirementsSummaryFromMetadata(
-          message.metadata
-        );
-        if (metadataRequirementsSummary) {
-          assistantMessage.requirementsSummary = metadataRequirementsSummary;
-        }
+      if (message.requirements_summary) {
+        assistantMessage.requirementsSummary = message.requirements_summary;
       }
 
-      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-      const publicStructuredQuestion = this.#parseStructuredQuestion(message.question);
-      const structuredQuestionToolCall = publicStructuredQuestion
-        ? undefined
-        : toolCalls.find((toolCall) => toolCall?.name === "ask_structured_question");
-      const requirementsToolCall = toolCalls.find(
-        (toolCall) => toolCall?.name === "confirm_requirements"
-      );
-
-      const structuredQuestion =
-        publicStructuredQuestion ??
-        this.#parseStructuredQuestion(structuredQuestionToolCall?.arguments);
-      if (structuredQuestion) {
-        assistantMessage.question = structuredQuestion;
-      }
-
-      for (let toolIndex = index + 1; toolIndex < conversation.length; toolIndex += 1) {
-        const toolMessage = conversation[toolIndex];
-        if (toolMessage?.role !== "tool") {
-          break;
-        }
-
-        if (requirementsToolCall?.id && toolMessage.tool_call_id === requirementsToolCall.id) {
-          const requirementsSummary = this.#parseRequirementsSummaryFromMetadata(
-            toolMessage.metadata
-          );
-          if (requirementsSummary) {
-            assistantMessage.requirementsSummary = requirementsSummary;
-          }
-        }
-
-        index = toolIndex;
+      if (message.question) {
+        assistantMessage.question = message.question;
       }
 
       hydrated.push(assistantMessage);
@@ -1130,8 +1113,7 @@ export class FlowAIBuilderDriver {
   #metadataFromPublicUserMessage(
     message: AIBuilderConversationMessage
   ): ChatMessage["metadata"] | undefined {
-    const metadata =
-      message.metadata && typeof message.metadata === "object" ? { ...message.metadata } : {};
+    const metadata: Record<string, unknown> = {};
 
     if (message.question_answer?.kind === "structured_question_answer") {
       const questionAnswer = toPersistedQuestionAnswerMetadata(message.question_answer);
@@ -1148,90 +1130,6 @@ export class FlowAIBuilderDriver {
     }
 
     return Object.keys(metadata).length > 0 ? metadata : undefined;
-  }
-
-  #parseStructuredQuestion(payload: unknown): StructuredQuestion | undefined {
-    if (!payload || typeof payload !== "object") return undefined;
-
-    const question = payload as Record<string, unknown>;
-    if (
-      typeof question.question_id !== "string" ||
-      typeof question.question !== "string" ||
-      !Array.isArray(question.options) ||
-      (question.selection_mode !== "single" && question.selection_mode !== "multi") ||
-      typeof question.allow_custom !== "boolean"
-    ) {
-      return undefined;
-    }
-
-    return {
-      question_id: question.question_id,
-      question: question.question,
-      options: question.options.filter(
-        (option): option is StructuredQuestion["options"][number] => {
-          return typeof option === "object" && option !== null && typeof option.label === "string";
-        }
-      ),
-      selection_mode: question.selection_mode,
-      allow_custom: question.allow_custom,
-      requires_confirm: question.requires_confirm === true
-    };
-  }
-
-  #parseRequirementsSummary(payload: unknown): RequirementsSummary | undefined {
-    if (!payload || typeof payload !== "object") return undefined;
-
-    const summary = payload as Record<string, unknown>;
-    if (
-      typeof summary.summary !== "string" ||
-      !Array.isArray(summary.key_decisions) ||
-      typeof summary.input_description !== "string" ||
-      typeof summary.output_description !== "string"
-    ) {
-      return undefined;
-    }
-
-    return {
-      requirements_version:
-        typeof summary.requirements_version === "string" ? summary.requirements_version : null,
-      summary: summary.summary,
-      key_decisions: summary.key_decisions.filter(
-        (decision): decision is RequirementsSummary["key_decisions"][number] => {
-          return (
-            typeof decision === "object" &&
-            decision !== null &&
-            typeof decision.topic === "string" &&
-            typeof decision.decision === "string"
-          );
-        }
-      ),
-      input_description: summary.input_description,
-      output_description: summary.output_description,
-      assumptions: Array.isArray(summary.assumptions)
-        ? summary.assumptions.filter(
-            (assumption): assumption is string => typeof assumption === "string"
-          )
-        : [],
-      manual_setup_notes: Array.isArray(summary.manual_setup_notes)
-        ? summary.manual_setup_notes.filter((note): note is string => typeof note === "string")
-        : []
-    };
-  }
-
-  #parseRequirementsSummaryFromMetadata(
-    metadata: AIBuilderConversationMessage["metadata"] | undefined | null
-  ): RequirementsSummary | undefined {
-    if (!metadata || typeof metadata !== "object") return undefined;
-    const summaryPayload = metadata.requirements_summary;
-    if (!summaryPayload || typeof summaryPayload !== "object") {
-      return undefined;
-    }
-    const version = metadata.requirements_version;
-    const payload =
-      typeof version === "string" && !("requirements_version" in summaryPayload)
-        ? { ...summaryPayload, requirements_version: version }
-        : summaryPayload;
-    return this.#parseRequirementsSummary(payload);
   }
 
   #parseTimestamp(timestamp?: string | null): number {

@@ -12,7 +12,7 @@
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
-  import type { AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
+  import type { AIBuilderStatus, AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
   import {
     AIBuilderIssueKind,
     buildAIBuilderDiagnosticReport,
@@ -97,6 +97,25 @@
     }
     return service.applyError.message;
   });
+
+  function progressStatusLabel(status: AIBuilderStatus | null): string {
+    if (status === null) {
+      return service.hasSeenPlanInSession
+        ? m.ai_builder_updating_plan()
+        : m.ai_builder_generating();
+    }
+
+    switch (status) {
+      case "architecture_committed":
+        return service.hasSeenPlanInSession
+          ? m.ai_builder_updating_plan()
+          : m.ai_builder_generating();
+      case "architecture_revised":
+        return m.ai_builder_updating_plan();
+      case "repairing":
+        return m.ai_builder_status_repairing();
+    }
+  }
   const diagnosticSession = $derived.by(() =>
     buildAIBuilderDiagnosticReportSession(service.session)
   );
@@ -940,17 +959,7 @@
     <div class="flex flex-1 flex-col items-center justify-center px-4 text-center">
       <div class="progress-ring mb-4 size-10 rounded-full border-[3px]"></div>
       <p class="text-primary text-sm font-medium">
-        {#if service.statusMessage === "validating"}
-          {m.ai_builder_status_validating()}
-        {:else if service.statusMessage === "repairing"}
-          {m.ai_builder_status_repairing()}
-        {:else if service.statusMessage === "finalizing_plan"}
-          {m.ai_builder_status_finalizing_plan()}
-        {:else if service.hasSeenPlanInSession}
-          {m.ai_builder_updating_plan()}
-        {:else}
-          {m.ai_builder_generating()}
-        {/if}
+        {progressStatusLabel(service.statusMessage)}
       </p>
       <p class="text-muted mt-1 text-xs">{m.ai_builder_status_patience()}</p>
     </div>

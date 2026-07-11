@@ -88,8 +88,8 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException, NotFoundException
-from eneo.main.models import ModelId
+from eneo.main.exceptions import BadRequestException, ErrorCodes, NotFoundException
+from eneo.main.models import GeneralError, ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -600,6 +600,79 @@ async def _create_proposed_ai_builder_plan(
             lease=turn.lease,
         )
         return session_id, tenant_id, stored_plan.plan.id, turn.lease
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "misspelled_field"),
+    [
+        (
+            "/api/v1/flows/ai-builder/sessions",
+            {
+                "target_kind": "create",
+                "space_id": "00000000-0000-4000-8000-000000000001",
+                "force_neew": "invalid-field-value-must-not-be-echoed",
+            },
+            "force_neew",
+        ),
+        (
+            "/api/v1/flows/ai-builder/sessions/00000000-0000-4000-8000-000000000002/messages",
+            {
+                "client_turn_id": "00000000-0000-4000-8000-000000000003",
+                "message": "Build a flow.",
+                "model_iid": "invalid-field-value-must-not-be-echoed",
+            },
+            "model_iid",
+        ),
+        (
+            "/api/v1/flows/ai-builder/plans/00000000-0000-4000-8000-000000000004/apply",
+            {"expected_revison": "invalid-field-value-must-not-be-echoed"},
+            "expected_revison",
+        ),
+        (
+            "/api/v1/flows/ai-builder/plans/00000000-0000-4000-8000-000000000005/revise",
+            {
+                "type": "keep_current_description",
+                "revision_typo": "invalid-field-value-must-not-be-echoed",
+            },
+            "revision_typo",
+        ),
+    ],
+)
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_launch_requests_reject_misspelled_fields(
+    client,
+    bearer_token: str,
+    path: str,
+    payload: dict[str, object],
+    misspelled_field: str,
+) -> None:
+    request_id = f"ai-builder-strict-{misspelled_field}"
+
+    response = await client.post(
+        path,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {bearer_token}",
+            "X-Request-ID": request_id,
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    error = GeneralError.model_validate(response.json())
+    assert error.message == "Request validation failed."
+    assert error.eneo_error_code == ErrorCodes.VALIDATION_ERROR
+    assert error.code == "request_validation_error"
+    assert error.request_id == request_id
+    assert isinstance(error.details, dict)
+    errors = error.details.get("errors")
+    assert isinstance(errors, list)
+    assert {
+        "location": ["body", misspelled_field],
+        "message": "Extra inputs are not permitted",
+        "type": "extra_forbidden",
+    } in errors
+    assert "invalid-field-value-must-not-be-echoed" not in response.text
 
 
 @pytest.mark.integration

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FlowAIBuilderDriver, type AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import { parseAIBuilderStreamEvent } from "./protocol";
 import type {
+  AIBuilderConversationMessage,
   AIBuilderDraftSession,
   AIBuilderError,
   AIBuilderSendMessageRequest,
@@ -160,9 +161,26 @@ function completeStream(handlers: Parameters<AIBuilderClientTransport["stream"]>
 describe("FlowAIBuilderDriver", () => {
   it("keeps stream event contracts derived from generated types", () => {
     const source = readFileSync(new URL("./protocol.ts", import.meta.url), "utf8");
+    const publicRoles = {
+      user: true,
+      assistant: true
+    } satisfies Record<AIBuilderConversationMessage["role"], true>;
+    type InternalPublicField = Extract<
+      keyof AIBuilderConversationMessage,
+      "metadata" | "tool_calls" | "tool_call_id"
+    >;
+    const publicContractHasNoInternalFields: [InternalPublicField] extends [never] ? true : false =
+      true;
 
     expect(source).toContain('operations["send_ai_builder_message"]');
     expect(source).toContain("parseAIBuilderStreamEvent");
+    expect(source).toContain(
+      "export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage"
+    );
+    expect(source).not.toContain("AIBuilderConversationToolCall");
+    expect(source).not.toContain('role: "user" | "assistant" | "tool" | "system"');
+    expect(source).not.toContain("tool_call_id?:");
+    expect(source).toContain('export type AIBuilderStatus = AIBuilderStatusEventData["status"]');
     expect(source).toContain('AIBuilderEventType = AIBuilderParsedStreamEvent["event"]');
     expect(source).toMatch(/AIBuilderTextEventData = Extract<\s*AIBuilderParsedStreamEvent/s);
     expect(source).not.toMatch(/export type AIBuilderEventType\s*=\s*\|/);
@@ -170,6 +188,8 @@ describe("FlowAIBuilderDriver", () => {
     expect(source).not.toContain("export interface AIBuilderStatusEventData");
     expect(source).not.toContain("export interface KeyDecision");
     expect(source).not.toContain("export interface RequirementsSummary");
+    expect(Object.keys(publicRoles)).toEqual(["user", "assistant"]);
+    expect(publicContractHasNoInternalFields).toBe(true);
   });
 
   it("rejects unknown raw stream event names", () => {
@@ -489,7 +509,7 @@ describe("FlowAIBuilderDriver", () => {
       messages: [{ role: "assistant", content: "Old conversation", timestamp: 1 }],
       currentPlan: makePlan({ plan_id: "plan-old" }),
       error: makeAIBuilderError({ message: "Old error" }),
-      statusMessage: "Old status",
+      statusMessage: "architecture_revised",
       applyResult: {
         flow_id: "flow-1",
         flow_name: "Old flow",
@@ -1876,62 +1896,6 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan?.status).toBe("approved");
   });
 
-  it("hydrates stored conversation when resuming a draft session", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        makeSession({
-          session_id: "session-2",
-          status: "awaiting_approval",
-          latest_plan_id: "plan-9",
-          conversation: [
-            {
-              message_id: "legacy-user-1",
-              role: "user",
-              content: "Bygg ett ljudflöde",
-              timestamp: "2026-03-15T10:00:00Z"
-            },
-            {
-              message_id: "legacy-assistant-1",
-              role: "assistant",
-              content: "Jag behöver bekräfta kraven först.",
-              timestamp: "2026-03-15T10:00:05Z",
-              tool_calls: [{ id: "tool-1", name: "confirm_requirements", arguments: {} }]
-            },
-            {
-              message_id: "legacy-tool-1",
-              role: "tool",
-              tool_call_id: "tool-1",
-              metadata: {
-                requirements_summary: {
-                  summary: "Transkribera ljud och skriv rapport",
-                  key_decisions: [{ topic: "Språk", decision: "Turkiska" }],
-                  input_description: "Ljudfil",
-                  output_description: "Text",
-                  requirements_version: "req-1"
-                }
-              }
-            }
-          ]
-        })
-      )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
-      .mockResolvedValueOnce({ sessions: [] });
-    const { driver } = makeDriver({ fetchImpl: fetch });
-
-    await driver.resumeSession("session-2");
-
-    expect(driver.state.messages[0]).toMatchObject({
-      role: "user",
-      content: "Bygg ett ljudflöde"
-    });
-    expect(driver.state.messages[1]?.requirementsSummary?.summary).toBe(
-      "Transkribera ljud och skriv rapport"
-    );
-    expect(driver.state.currentPlan?.plan_id).toBe("plan-9");
-  });
-
   it("hydrates public conversation projection fields when resuming a draft session", async () => {
     const fetch = vi
       .fn()
@@ -2010,50 +1974,5 @@ describe("FlowAIBuilderDriver", () => {
       requirements_confirmed: true,
       requirements_version: "req-public"
     });
-  });
-
-  it("hydrates requirements summary stored on assistant metadata", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        makeSession({
-          session_id: "session-3",
-          status: "chatting",
-          conversation: [
-            {
-              message_id: "legacy-metadata-user-1",
-              role: "user",
-              content: "Bygg ett dokumentflöde",
-              timestamp: "2026-03-15T10:00:00Z"
-            },
-            {
-              message_id: "legacy-metadata-assistant-1",
-              role: "assistant",
-              content: "Jag har tillräckligt med information.",
-              timestamp: "2026-03-15T10:00:05Z",
-              metadata: {
-                requirements_summary: {
-                  summary: "Analysera dokument och skapa rapport",
-                  key_decisions: [{ topic: "Indata", decision: "PDF-dokument" }],
-                  input_description: "PDF-filer",
-                  output_description: "DOCX-rapport"
-                },
-                requirements_version: "req-2"
-              }
-            }
-          ]
-        })
-      )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce({ sessions: [] });
-    const { driver } = makeDriver({ fetchImpl: fetch });
-
-    await driver.resumeSession("session-3");
-
-    expect(driver.state.messages[1]?.requirementsSummary?.summary).toBe(
-      "Analysera dokument och skapa rapport"
-    );
-    expect(driver.state.messages[1]?.requirementsSummary?.requirements_version).toBe("req-2");
-    expect(driver.derivePhase()).toBe("confirming");
   });
 });

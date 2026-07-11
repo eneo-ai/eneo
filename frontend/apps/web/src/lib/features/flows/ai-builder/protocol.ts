@@ -13,10 +13,7 @@ import type {
   components,
   operations
 } from "@eneo/eneo-js";
-import type {
-  StructuredQuestion,
-  StructuredQuestionAnswerMetadata
-} from "./structuredQuestionAnswer";
+import type { StructuredQuestion } from "./structuredQuestionAnswer";
 
 type SendAIBuilderMessageOperation = operations["send_ai_builder_message"];
 type GeneratedAIBuilderParsedStreamEvent =
@@ -66,51 +63,19 @@ export interface AIBuilderSuggestChangeIntent {
   editContext?: AIBuilderPlanEditContext | null;
 }
 
-export interface AIBuilderConversationToolCall {
-  id?: string | null;
-  name?: string | null;
-  arguments?: Record<string, unknown> | null;
-}
-
-export interface AIBuilderRequirementsConfirmationMetadata {
-  kind?: "requirements_confirmation";
-  requirements_confirmed: true;
-  requirements_version?: string | null;
-  ui_language?: string | null;
-}
-
-export type AIBuilderConversationMessage = Omit<
-  GeneratedAIBuilderConversationMessage,
-  | "role"
-  | "metadata"
-  | "tool_calls"
-  | "tool_call_id"
-  | "question"
-  | "requirements_summary"
-  | "question_answer"
-  | "requirements_confirmation"
-> & {
-  role: "user" | "assistant" | "tool" | "system";
-  question?: StructuredQuestion | null;
-  requirements_summary?: RequirementsSummary | null;
-  question_answer?: StructuredQuestionAnswerMetadata | null;
-  requirements_confirmation?: AIBuilderRequirementsConfirmationMetadata | null;
-  metadata?: Record<string, unknown> | null;
-  tool_calls?: AIBuilderConversationToolCall[] | null;
-  tool_call_id?: string | null;
-};
+export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage;
 
 export type AIBuilderAttachmentFile = GeneratedAIBuilderAttachmentFile;
 
-export type AIBuilderSession = Omit<
-  GeneratedAIBuilderSessionResponse,
-  "conversation" | "telemetry"
-> & {
+export type AIBuilderSession = Omit<GeneratedAIBuilderSessionResponse, "telemetry"> & {
   telemetry?: AIBuilderTelemetrySummary | null;
-  conversation?: AIBuilderConversationMessage[];
 };
 
 export type AIBuilderDraftSession = GeneratedAIBuilderDraftSession;
+
+export type RecoverableAIBuilderDraftSession = AIBuilderDraftSession & {
+  status: Extract<SessionStatus, "chatting" | "awaiting_approval">;
+};
 
 export type StepSpec = GeneratedAIBuilderStepSpec;
 
@@ -215,6 +180,8 @@ export type AIBuilderStatusEventData = Extract<
   AIBuilderParsedStreamEvent,
   { event: "status" }
 >["data"];
+
+export type AIBuilderStatus = AIBuilderStatusEventData["status"];
 
 export type AIBuilderQuestionEventData = Extract<
   AIBuilderParsedStreamEvent,

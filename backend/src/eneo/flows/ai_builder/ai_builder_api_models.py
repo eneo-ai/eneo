@@ -240,13 +240,14 @@ class AIBuilderClassifierDiagnosticsResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "target_kind": "create",
                 "space_id": "00000000-0000-0000-0000-000000000001",
                 "force_new": False,
             }
-        }
+        },
     )
 
     target_kind: TargetKind
@@ -337,14 +338,18 @@ class SendMessageRequest(BaseModel):
 
 
 class ApplyPlanRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": {"expected_revision": 12}})
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"expected_revision": 12}},
+    )
 
     expected_revision: int | None = None
 
 
 class RevisePlanRequest(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": {"type": "keep_current_description"}}
+        extra="forbid",
+        json_schema_extra={"example": {"type": "keep_current_description"}},
     )
 
     type: Literal["keep_current_description"]

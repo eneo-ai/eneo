@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+
 import { cleanup, render, screen } from "@testing-library/svelte";
 import type { Space } from "@eneo/eneo-js";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
-import type { AIBuilderSession, ProposedPlan, StepSpec } from "./protocol";
+import type { AIBuilderSession, AIBuilderStatus, ProposedPlan, StepSpec } from "./protocol";
 import FlowAIBuilderPlanPaneHarness from "./test-harnesses/FlowAIBuilderPlanPaneHarness.svelte";
 
 afterEach(() => {
@@ -14,6 +16,35 @@ afterEach(() => {
 });
 
 describe("FlowAIBuilderPlanPane", () => {
+  it("contains no branches for statuses the public stream cannot emit", () => {
+    const source = readFileSync(
+      "src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte",
+      "utf8"
+    );
+
+    expect(source).not.toContain('statusMessage === "validating"');
+    expect(source).not.toContain('statusMessage === "finalizing_plan"');
+  });
+
+  it.each([
+    ["architecture_committed", m.ai_builder_generating()],
+    ["architecture_revised", m.ai_builder_updating_plan()],
+    ["repairing", m.ai_builder_status_repairing()]
+  ] satisfies ReadonlyArray<readonly [AIBuilderStatus, string]>)(
+    "renders the generated %s status",
+    (statusMessage, expectedLabel) => {
+      render(FlowAIBuilderPlanPaneHarness, {
+        currentSpace: makeSpace({ transcriptionModels: [] }),
+        state: {
+          isStreaming: true,
+          statusMessage
+        }
+      });
+
+      expect(screen.getByText(expectedLabel)).toBeTruthy();
+    }
+  );
+
   it("blocks applying a create audio plan until an accessible transcription model exists", () => {
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: false }] }),

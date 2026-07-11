@@ -13,6 +13,7 @@ import type {
   AIBuilderPlanEditContext,
   AIBuilderPhase,
   AIBuilderSession,
+  AIBuilderStatus,
   AIBuilderTurnState,
   AIBuilderTurnRecoveryState,
   ApplyError,
@@ -20,6 +21,7 @@ import type {
   ChatMessage,
   PlanRevisionType,
   ProposedPlan,
+  RecoverableAIBuilderDraftSession,
   RequirementsSummary,
   SessionStatus,
   TargetKind
@@ -121,7 +123,7 @@ export class FlowAIBuilderService {
     return this.#state.isConflict;
   }
 
-  get statusMessage(): string | null {
+  get statusMessage(): AIBuilderStatus | null {
     return this.#state.statusMessage;
   }
 
@@ -145,7 +147,7 @@ export class FlowAIBuilderService {
     return this.recoverableCreateDrafts.length > 0;
   }
 
-  get recoverableCreateDrafts(): AIBuilderDraftSession[] {
+  get recoverableCreateDrafts(): RecoverableAIBuilderDraftSession[] {
     void this.#state;
     return this.#driver.getRecoverableCreateDrafts();
   }

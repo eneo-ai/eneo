@@ -133,7 +133,7 @@ describe("FlowAIBuilderService", () => {
       applyError,
       applyResult,
       isConflict: true,
-      statusMessage: "Working",
+      statusMessage: "repairing",
       availableModels,
       selectedModelId: "model-1",
       modelsLoaded: true,
@@ -149,7 +149,7 @@ describe("FlowAIBuilderService", () => {
     expect(service.applyError).toBe(applyError);
     expect(service.applyResult).toBe(applyResult);
     expect(service.isConflict).toBe(true);
-    expect(service.statusMessage).toBe("Working");
+    expect(service.statusMessage).toBe("repairing");
     expect(service.availableModels).toBe(availableModels);
     expect(service.selectedModelId).toBe("model-1");
     expect(service.modelsLoaded).toBe(true);
@@ -185,6 +185,7 @@ describe("FlowAIBuilderService", () => {
         makeDraft({ session_id: "recoverable" }),
         makeDraft({ session_id: "wrong-space", space_id: "space-2" }),
         makeDraft({ session_id: "applied", status: "applied" }),
+        makeDraft({ session_id: "cancelled", status: "cancelled" }),
         makeDraft({ session_id: "edit", target_kind: "edit", flow_id: "flow-1" })
       ]
     });

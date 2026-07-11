@@ -1,4 +1,4 @@
-import type { TargetKind } from "./protocol";
+import type { AIBuilderStatus, TargetKind } from "./protocol";
 
 interface EditStartOverVisibilityInput {
   targetKind: TargetKind;
@@ -6,7 +6,7 @@ interface EditStartOverVisibilityInput {
   messageCount: number;
   hasPlan: boolean;
   isConflict: boolean;
-  statusMessage: string | null;
+  statusMessage: AIBuilderStatus | null;
   hasApplyError: boolean;
   hasApplyResult: boolean;
   isStreaming: boolean;
