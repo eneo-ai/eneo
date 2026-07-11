@@ -186,6 +186,7 @@ export class FlowAIBuilderDriver {
   #state: FlowAIBuilderState = createInitialFlowAIBuilderState();
   #initGeneration = 0;
   #sessionGeneration = 0;
+  #pendingResumeOwner: Pick<SessionOperationOwner, "sessionId" | "sessionGeneration"> | null = null;
   #requiresAuthoritativeRefresh = false;
   #authoritativeRefreshError = false;
   #isRecoveringLatestTurn = false;
@@ -373,6 +374,8 @@ export class FlowAIBuilderDriver {
     this.abort();
     this.#resetFlowState();
     const sessionGeneration = this.#sessionGeneration;
+    const pendingResumeOwner = { sessionId, sessionGeneration };
+    this.#pendingResumeOwner = pendingResumeOwner;
     this.#state.error = null;
     this.#notify();
 
@@ -385,6 +388,10 @@ export class FlowAIBuilderDriver {
     } catch (error) {
       if (sessionGeneration !== this.#sessionGeneration) return;
       throw error;
+    } finally {
+      if (this.#pendingResumeOwner === pendingResumeOwner) {
+        this.#pendingResumeOwner = null;
+      }
     }
     if (sessionGeneration !== this.#sessionGeneration) return;
     this.#state.session = result;
@@ -410,7 +417,10 @@ export class FlowAIBuilderDriver {
     const remainingDrafts = this.#state.draftSessions.filter(
       (session) => session.session_id !== sessionId
     );
-    if (this.#state.session?.session_id === sessionId) {
+    const cancelsPendingResume =
+      this.#pendingResumeOwner?.sessionId === sessionId &&
+      this.#pendingResumeOwner.sessionGeneration === this.#sessionGeneration;
+    if (this.#state.session?.session_id === sessionId || cancelsPendingResume) {
       this.abort();
       this.#resetFlowState();
     }
@@ -1126,6 +1136,7 @@ export class FlowAIBuilderDriver {
 
   #resetFlowState(): void {
     this.#sessionGeneration += 1;
+    this.#pendingResumeOwner = null;
     this.#requiresAuthoritativeRefresh = false;
     this.#authoritativeRefreshError = false;
     this.#isRecoveringLatestTurn = false;

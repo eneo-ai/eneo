@@ -1198,6 +1198,67 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.draftSessions).toEqual([]);
   });
 
+  it("keeps a successful cancellation authoritative over a pending same-session resume", async () => {
+    const sessionId = "session-shared";
+    const activeSnapshot = makeSession({ session_id: sessionId });
+    const recoverableDraft = makeDraft({ session_id: sessionId });
+    const delayedCancellation = Promise.withResolvers<void>();
+    const delayedResume = Promise.withResolvers<AIBuilderSession>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedCancellation.promise)
+      .mockReturnValueOnce(delayedResume.promise)
+      .mockResolvedValueOnce({ sessions: [] })
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: activeSnapshot,
+      draftSessions: [recoverableDraft]
+    });
+
+    const cancellation = driver.discardSession(sessionId);
+    const resume = driver.resumeSession(sessionId);
+    delayedCancellation.resolve();
+    await cancellation;
+    delayedResume.resolve(activeSnapshot);
+    await resume;
+
+    expect(driver.state.session).toBeNull();
+    expect(driver.state.draftSessions).toEqual([]);
+  });
+
+  it("does not let cancellation invalidate a pending different-session resume", async () => {
+    const cancelledSessionId = "session-cancelled";
+    const replacementSession = makeSession({ session_id: "session-replacement" });
+    const cancelledDraft = makeDraft({ session_id: cancelledSessionId });
+    const replacementDraft = makeDraft({ session_id: replacementSession.session_id });
+    const delayedCancellation = Promise.withResolvers<void>();
+    const delayedResume = Promise.withResolvers<AIBuilderSession>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(delayedCancellation.promise)
+      .mockReturnValueOnce(delayedResume.promise)
+      .mockResolvedValueOnce({ sessions: [replacementDraft] })
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [replacementDraft] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: cancelledSessionId }),
+      draftSessions: [cancelledDraft]
+    });
+
+    const cancellation = driver.discardSession(cancelledSessionId);
+    const resume = driver.resumeSession(replacementSession.session_id);
+    delayedCancellation.resolve();
+    await cancellation;
+    delayedResume.resolve(replacementSession);
+    await resume;
+
+    expect(driver.state.session).toEqual(replacementSession);
+    expect(driver.state.draftSessions).toEqual([replacementDraft]);
+  });
+
   it("preserves a different replacement session after delayed cancellation", async () => {
     const cancelledSessionId = "session-cancelled";
     const replacementSession = makeSession({ session_id: "session-replacement" });
