@@ -4,6 +4,7 @@ import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswe
 import {
   FlowAIBuilderDriver,
   type AIBuilderClientTransport,
+  type CreateFailureOutcome,
   type FlowAIBuilderState
 } from "./FlowAIBuilderDriver";
 import type {
@@ -34,19 +35,26 @@ export class FlowAIBuilderService {
 
   hasSession = $derived(this.#state.session !== null);
   hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
+  /** True while an atomic plan operation (creation) is running. Every
+   *  session-mutating control must render disabled while this holds; the
+   *  driver enforces the same lock at its command boundaries. */
+  isCreating = $derived(this.#state.pendingOperation?.kind === "creating");
   canSendMessage = $derived(
     this.hasSession &&
       !this.#state.isStreaming &&
+      this.#state.pendingOperation === null &&
       this.#canStartNewTurn &&
       (this.#state.session?.status === "chatting" ||
         this.#state.session?.status === "awaiting_approval")
   );
   canApprove = $derived(
-    this.#state.currentPlan?.status === "proposed" &&
+    this.#state.pendingOperation === null &&
+      this.#state.currentPlan?.status === "proposed" &&
       this.#state.session?.status === "awaiting_approval"
   );
   canApply = $derived(
-    this.#state.currentPlan?.status === "approved" &&
+    this.#state.pendingOperation === null &&
+      this.#state.currentPlan?.status === "approved" &&
       this.#state.session?.status === "awaiting_approval"
   );
   isApplied = $derived(this.#state.session?.status === "applied");
@@ -117,6 +125,10 @@ export class FlowAIBuilderService {
 
   get applyResult(): ApplyResult | null {
     return this.#state.applyResult;
+  }
+
+  get createFailureOutcome(): CreateFailureOutcome | null {
+    return this.#state.createFailureOutcome;
   }
 
   get isConflict(): boolean {
@@ -248,6 +260,10 @@ export class FlowAIBuilderService {
 
   async applyPlan(expectedRevision?: number): Promise<ApplyResult> {
     return await this.#driver.applyPlan(expectedRevision);
+  }
+
+  async createFlowFromPlan(): Promise<ApplyResult> {
+    return await this.#driver.createFlowFromPlan();
   }
 
   async unpublishAndApplyPlan(expectedRevision?: number): Promise<ApplyResult> {

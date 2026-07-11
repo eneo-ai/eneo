@@ -12,6 +12,8 @@ from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoring
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    BuilderTurnLifecycle,
+    BuilderTurnState,
     FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
@@ -370,7 +372,10 @@ class TestAIBuilderPlanLifecycle:
             description_override_manual=True,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         repo.create_plan.return_value = revised_plan
 
         lifecycle = AIBuilderPlanLifecycle(
@@ -449,7 +454,10 @@ class TestAIBuilderPlanLifecycle:
             description_override_manual=True,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(flow_id=flow_id)
 
         lifecycle = AIBuilderPlanLifecycle(
@@ -499,7 +507,10 @@ class TestAIBuilderPlanLifecycle:
             description_override_manual=True,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
 
         lifecycle = AIBuilderPlanLifecycle(
@@ -546,7 +557,10 @@ class TestAIBuilderPlanLifecycle:
             spec=spec,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(steps_created=3, steps_updated=0)
 
         lifecycle = AIBuilderPlanLifecycle(
@@ -600,7 +614,10 @@ class TestAIBuilderPlanLifecycle:
             ),
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(flow_id=flow_id, steps_removed=1)
 
         lifecycle = AIBuilderPlanLifecycle(
@@ -648,7 +665,10 @@ class TestAIBuilderPlanLifecycle:
             spec=spec,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -708,7 +728,10 @@ class TestAIBuilderPlanLifecycle:
             step_count=2,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -754,7 +777,10 @@ class TestAIBuilderPlanLifecycle:
             steps=[],
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -796,7 +822,10 @@ class TestAIBuilderPlanLifecycle:
             steps=[],
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -832,7 +861,10 @@ class TestAIBuilderPlanLifecycle:
         space.get_default_transcription_model.return_value = None
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -865,7 +897,10 @@ class TestAIBuilderPlanLifecycle:
             tenant_id=user.tenant_id,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service()
         authoring_service.apply_prepared.side_effect = RuntimeError("apply failed")
 
@@ -911,7 +946,10 @@ class TestAIBuilderPlanLifecycle:
             steps=[],
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(flow_id=flow_id)
         authoring_service.prepare.side_effect = RuntimeError("compile exploded")
 
@@ -959,7 +997,10 @@ class TestAIBuilderPlanLifecycle:
             edit=_make_plan_edit_approval(_make_spec()),
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service()
         authoring_service.prepare.side_effect = BadRequestException(
             "invalid compile",
@@ -1012,7 +1053,10 @@ class TestAIBuilderPlanLifecycle:
             steps=[],
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         changeset = FlowDraftChangeSet(
             flow_name="Flow",
             flow_description="Desc",
@@ -1114,7 +1158,10 @@ class TestAIBuilderPlanLifecycle:
             steps=[],
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(flow_id=flow_id)
         authoring_service.prepare.return_value = SimpleNamespace(
             changeset=FlowDraftChangeSet(
@@ -1196,7 +1243,10 @@ class TestAIBuilderPlanLifecycle:
         ]
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
         authoring_service = _make_authoring_service(
             flow_name="Flow",
             steps_created=1,
@@ -1249,7 +1299,10 @@ class TestAIBuilderPlanLifecycle:
         space.get_default_transcription_model.return_value = None
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -1304,7 +1357,10 @@ class TestAIBuilderPlanLifecycle:
         space.collections = []
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -1321,3 +1377,297 @@ class TestAIBuilderPlanLifecycle:
         assert exc_info.value.context["slot_kind"] == "model"
         assert exc_info.value.context["local_kind"] == "completion_model"
         repo.update_session_status_without_send_lease.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_approves_then_materializes(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        proposed = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.PROPOSED,
+        )
+        session.latest_plan_id = proposed.id
+        approved = proposed.model_copy(update={"status": PlanStatus.APPROVED})
+        repo.get_plan_for_update.return_value = proposed
+        repo.get_plan.return_value = approved
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        created_flow_id = uuid4()
+        authoring = _make_authoring_service(
+            flow_id=None,
+            flow_name="Created flow",
+            steps_created=1,
+            steps_updated=0,
+        )
+        authoring.apply_prepared.return_value = FlowAuthoringResult(
+            flow_id=created_flow_id,
+            flow_name="Created flow",
+            draft_revision=1,
+            steps_created=1,
+            steps_updated=0,
+            steps_removed=0,
+            command_spec_hash="spec-hash",
+        )
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring,
+        )
+
+        outcome = await lifecycle.approve_and_apply_create_plan(plan_id=proposed.id)
+
+        assert outcome.replayed is False
+        assert outcome.result.flow_id == created_flow_id
+        assert outcome.result.steps_created == 1
+        repo.update_plan_status_if.assert_awaited_once_with(
+            plan_id=proposed.id,
+            tenant_id=user.tenant_id,
+            expected_status=PlanStatus.PROPOSED,
+            status=PlanStatus.APPROVED,
+        )
+        repo.mark_plan_applied.assert_awaited_once_with(
+            plan_id=proposed.id,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            flow_id=created_flow_id,
+        )
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_skips_approve_for_approved_plan(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.APPROVED,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=_make_authoring_service(steps_created=1, steps_updated=0),
+        )
+
+        outcome = await lifecycle.approve_and_apply_create_plan(plan_id=plan.id)
+
+        assert outcome.replayed is False
+        assert outcome.result.flow_name == "Flow"
+        repo.update_plan_status_if.assert_not_awaited()
+        repo.mark_plan_applied.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_rejects_edit_sessions(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.PROPOSED,
+        )
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
+        authoring = _make_authoring_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.approve_and_apply_create_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "invalid_session_transition"
+        repo.update_plan_status_if.assert_not_awaited()
+        authoring.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_replays_applied_plan_without_side_effects(
+        self,
+    ):
+        user = _make_user()
+        repo = _make_repo_mock()
+        existing_flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=existing_flow_id,
+            target_kind=TargetKind.CREATE,
+            status=SessionStatus.APPLIED,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.APPLIED,
+        )
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
+        flow_service = AsyncMock()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=existing_flow_id, name="Created flow"
+        )
+        authoring = _make_authoring_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring,
+        )
+
+        outcome = await lifecycle.approve_and_apply_create_plan(plan_id=plan.id)
+
+        assert outcome.replayed is True
+        assert outcome.result.flow_id == existing_flow_id
+        assert outcome.result.flow_name == "Created flow"
+        assert outcome.result.steps_created == len(plan.spec.steps)
+        assert outcome.result.steps_updated == 0
+        assert outcome.result.steps_removed == 0
+        repo.update_plan_status_if.assert_not_awaited()
+        repo.mark_plan_applied.assert_not_awaited()
+        authoring.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_rejects_applied_plan_without_flow(
+        self,
+    ):
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+            status=SessionStatus.APPLIED,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.APPLIED,
+        )
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=_make_authoring_service(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.approve_and_apply_create_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "invalid_plan_status"
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_rejects_active_turn(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.PROPOSED,
+        )
+        session.latest_plan_id = plan.id
+        session.latest_turn = BuilderTurnLifecycle(
+            client_turn_id=uuid4(),
+            request_fingerprint="f" * 64,
+            request={},
+            state=BuilderTurnState.PROCESSING,
+            user_message_id=uuid4(),
+        )
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        authoring = _make_authoring_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.approve_and_apply_create_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "session_message_in_progress"
+        repo.update_plan_status_if.assert_not_awaited()
+        authoring.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_approve_and_apply_create_plan_rejects_superseded_plan(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.PROPOSED,
+        )
+        session.latest_plan_id = uuid4()  # a newer proposal superseded this plan
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        authoring = _make_authoring_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.approve_and_apply_create_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "plan_session_mismatch"
+        repo.update_plan_status_if.assert_not_awaited()
+        authoring.prepare.assert_not_awaited()

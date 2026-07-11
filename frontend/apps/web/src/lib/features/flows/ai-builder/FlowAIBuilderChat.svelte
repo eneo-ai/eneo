@@ -317,7 +317,12 @@
 
       {#if canStartOver}
         <div class="shrink-0 pr-4 max-sm:pr-3">
-          <Button variant="outline" size="sm" onclick={handleStartOver}>
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={handleStartOver}
+            disabled={service.isCreating}
+          >
             {m.ai_builder_start_fresh()}
           </Button>
         </div>
@@ -365,6 +370,7 @@
             content={message.content}
             isLast={i === service.messages.length - 1}
             isStreaming={service.isStreaming && i === service.messages.length - 1}
+            interactionDisabled={service.isCreating}
             question={message.question}
             questionAnswered={message.question
               ? service.isQuestionAnswered(message.question.question_id)

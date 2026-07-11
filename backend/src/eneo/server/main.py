@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.flows.ai_builder.ai_builder_router import (
+    AIBuilderEnvelopedError,
+    ai_builder_enveloped_error_handler,
+)
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
     FlowRuntimeProbe,
@@ -382,6 +386,12 @@ def get_application():
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
+
+    # AI Builder errors carry a prepared envelope; the route adapter re-raises
+    # them so the request transaction rolls back before this handler responds.
+    app.add_exception_handler(
+        AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
+    )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(

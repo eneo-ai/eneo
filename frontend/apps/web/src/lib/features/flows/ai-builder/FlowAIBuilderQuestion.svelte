@@ -1,4 +1,7 @@
 <script lang="ts">
+  /* eslint-disable eneo/no-raw-color -- the style block derives every colour
+     from theme tokens via relative oklch() syntax, which the rule cannot see
+     through */
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -19,10 +22,13 @@
   interface Props {
     question: StructuredQuestion;
     answered?: boolean;
+    /** Interaction lock projected from the service (e.g. while a flow is
+     *  being created) — controls must LOOK disabled, not silently no-op. */
+    disabled?: boolean;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
   }
 
-  let { question, answered = false, onanswer }: Props = $props();
+  let { question, answered = false, disabled = false, onanswer }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
@@ -43,7 +49,7 @@
   });
 
   function selectOption(option: StructuredQuestionOption) {
-    if (answered) return;
+    if (answered || disabled) return;
 
     // Leaving the custom-answer lane clears any partial text so stale input
     // never submits with a different selection.
@@ -73,7 +79,7 @@
   }
 
   function selectCustom() {
-    if (answered) return;
+    if (answered || disabled) return;
     customSelected = true;
     // Custom answers intentionally replace preset selections instead of mixing
     // both answer types in one payload.
@@ -82,7 +88,7 @@
   }
 
   function handleConfirm() {
-    if (!canConfirm) return;
+    if (!canConfirm || disabled) return;
     if (customSelected) {
       const trimmed = customText.trim();
       if (!trimmed) return;
@@ -134,6 +140,7 @@
           onclick={() => selectOption(option)}
           role={isSingle ? "radio" : "checkbox"}
           aria-checked={isSelected}
+          {disabled}
         >
           <span
             class="option-indicator"
@@ -168,6 +175,7 @@
           role={isSingle ? "radio" : "checkbox"}
           aria-checked={customSelected}
           aria-controls="{questionLabelId}-custom"
+          {disabled}
         >
           <span
             class="option-indicator"
@@ -205,6 +213,7 @@
               onkeydown={handleTextareaKeydown}
               class="resize-none"
               aria-label={m.ai_builder_question_custom()}
+              {disabled}
             />
           </div>
         {/if}
@@ -213,7 +222,12 @@
 
     {#if !isSingle || customSelected || requiresConfirm}
       <div class="actions-row">
-        <Button variant="default" size="sm" onclick={handleConfirm} disabled={!canConfirm}>
+        <Button
+          variant="default"
+          size="sm"
+          onclick={handleConfirm}
+          disabled={!canConfirm || disabled}
+        >
           {m.ai_builder_question_confirm()}
         </Button>
       </div>

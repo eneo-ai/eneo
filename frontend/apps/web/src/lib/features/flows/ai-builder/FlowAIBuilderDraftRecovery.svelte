@@ -146,7 +146,7 @@
               >
                 <button
                   type="button"
-                  class="text-muted hover:bg-negative-dimmer hover:text-negative-stronger flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-all duration-150 group-hover/draft-card:opacity-100 focus-visible:opacity-100 max-[480px]:opacity-100"
+                  class="text-muted hover:bg-negative-dimmer hover:text-negative-stronger flex size-7 shrink-0 items-center justify-center rounded-md transition-colors duration-150"
                   onclick={() => requestDiscard(draft.session_id)}
                   aria-label={m.ai_builder_discard_draft()}
                 >

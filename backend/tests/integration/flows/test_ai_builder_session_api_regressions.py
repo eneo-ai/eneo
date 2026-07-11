@@ -786,6 +786,11 @@ async def test_mark_plan_applied_rolls_back_plan_status_when_session_update_fail
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
         )
+        await repo.update_session_latest_plan_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            plan_id=plan.id,
+        )
 
         async def fail_session_status_update(
             *,
@@ -871,6 +876,11 @@ async def test_mark_plan_applied_rejects_active_send_and_rolls_back(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
+        )
+        await repo.update_session_latest_plan_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            plan_id=plan.id,
         )
         turn = await _claim_session_send_turn(
             repo=repo,
@@ -966,6 +976,11 @@ async def test_mark_plan_applied_terminalizes_an_expired_send_turn(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
+        )
+        await repo.update_session_latest_plan_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            plan_id=plan.id,
         )
         turn = await _claim_session_send_turn(
             repo=repo,
@@ -1140,10 +1155,10 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
     )
 
     assert response.status_code == 409, response.text
-    assert response.json()["code"] == "session_send_in_progress"
+    assert response.json()["code"] == "session_message_in_progress"
     assert (
         response.json()["message"]
-        == "An active send is currently in progress for this session."
+        == "Another AI Builder message is already being processed."
     )
 
     async with db_container() as container:
@@ -5710,6 +5725,11 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
             tenant_id=builder_session.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
         )
+        await repo.update_session_latest_plan_without_send_lease(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            plan_id=plan.id,
+        )
 
     apply_response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{plan.id}/apply",
@@ -6030,6 +6050,11 @@ async def test_ai_builder_api_create_mode_invalid_existing_step_ref_returns_type
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
         )
+        await repo.update_session_latest_plan_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            plan_id=plan.id,
+        )
 
     apply_response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{plan.id}/apply",
@@ -6106,3 +6131,293 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_w
     event_types = [event["event"] for event in events]
     assert "question" not in event_types
     assert "requirements_summary" in event_types
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_approve_and_create_rolls_back_everything_and_recovers_on_retry(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+) -> None:
+    """The combined create endpoint is atomic across approval, flow
+    materialization and terminalization: a failure injected after the flow has
+    been written (but before the plan is marked applied) must leave zero
+    flows, the plan still proposed and the session still awaiting approval —
+    and a retry of the same call must then create exactly one flow."""
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Combined Create Rollback",
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+
+    async def fail_terminalization(self, **_kwargs: object) -> None:
+        raise BadRequestException("forced create failure", code="forced_create_failure")
+
+    # Scoped patch context: the function-scoped `monkeypatch` fixture is shared
+    # with the auth fixtures, so undoing it wholesale would also remove the JWT
+    # patch and break the retry request.
+    with pytest.MonkeyPatch.context() as failure_patch:
+        failure_patch.setattr(
+            AIBuilderRepository,
+            "mark_plan_applied",
+            fail_terminalization,
+        )
+
+        failed_response = await client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+    assert failed_response.status_code == 400, failed_response.text
+    assert "forced create failure" in failed_response.text, failed_response.text
+
+    async with db_container() as container:
+        flow_count = (
+            await container.session().execute(
+                select(sa.func.count())
+                .select_from(Flows)
+                .where(Flows.space_id == UUID(space_id))
+            )
+        ).scalar_one()
+        persisted_plan_status = (
+            await container.session().execute(
+                select(BuilderPlans.status).where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        persisted_session_status = (
+            await container.session().execute(
+                select(BuilderSessions.status).where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+
+    assert (flow_count, persisted_plan_status, persisted_session_status) == (
+        0,
+        PlanStatus.PROPOSED.value,
+        SessionStatus.AWAITING_APPROVAL.value,
+    )
+
+    retry_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert retry_response.status_code == 200, retry_response.text
+    created_flow_id = retry_response.json()["flow_id"]
+
+    async with db_container() as container:
+        flow_ids = (
+            (
+                await container.session().execute(
+                    select(Flows.id).where(Flows.space_id == UUID(space_id))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [str(flow_id) for flow_id in flow_ids] == [created_flow_id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_approve_and_create_requests_materialize_one_flow(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+) -> None:
+    """Two simultaneous create requests for the same plan must not duplicate
+    the flow: the plan row is read FOR UPDATE, so the second transaction waits,
+    observes the applied plan, and replays the original outcome."""
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Concurrent Create",
+    )
+    _, _, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+
+    first, second = await asyncio.gather(
+        client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        ),
+        client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        ),
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["flow_id"] == second.json()["flow_id"]
+
+    async with db_container() as container:
+        flow_count = (
+            await container.session().execute(
+                select(sa.func.count())
+                .select_from(Flows)
+                .where(Flows.space_id == UUID(space_id))
+            )
+        ).scalar_one()
+    assert flow_count == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_create_and_legacy_approve_cannot_resurrect_applied_plan(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+) -> None:
+    """A stale legacy /approve racing the combined create must not rewrite the
+    terminal plan status: both commands lock session-then-plan, and approval
+    uses a conditional PROPOSED→APPROVED transition, so whichever loses the
+    race observes the committed state instead of clobbering it."""
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Create vs Approve Race",
+    )
+    _, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+
+    create_response, approve_response = await asyncio.gather(
+        client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        ),
+        client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        ),
+    )
+
+    assert create_response.status_code == 200, create_response.text
+    # The approval either landed first (200, then create applied it) or lost
+    # the race and was rejected — it must never overwrite APPLIED.
+    assert approve_response.status_code in (200, 400, 409), approve_response.text
+
+    async with db_container() as container:
+        persisted_plan_status = (
+            await container.session().execute(
+                select(BuilderPlans.status).where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        flow_count = (
+            await container.session().execute(
+                select(sa.func.count())
+                .select_from(Flows)
+                .where(Flows.space_id == UUID(space_id))
+            )
+        ).scalar_one()
+
+    assert persisted_plan_status == PlanStatus.APPLIED.value
+    assert flow_count == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_endpoint", ["approve", "apply", "create"])
+async def test_plan_transitions_reject_while_refinement_turn_is_active(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    legacy_endpoint: str,
+) -> None:
+    """The handoff requires approval/application to be unreachable while a
+    refinement turn is streaming. Locks only make competitors wait; the shared
+    post-lock validation must REJECT against the observed active turn."""
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name=f"AI Builder Active Turn Guard {legacy_endpoint}",
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+    if legacy_endpoint == "apply":
+        approve_response = await client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+        assert approve_response.status_code == 200, approve_response.text
+
+    # Claim a refinement turn and keep the lease open (state=open).
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    body = {} if legacy_endpoint == "apply" else None
+    response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/{legacy_endpoint}",
+        json=body,
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert "session_message_in_progress" in response.text
+
+    async with db_container() as container:
+        persisted_plan_status = (
+            await container.session().execute(
+                select(BuilderPlans.status).where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        flow_count = (
+            await container.session().execute(
+                select(sa.func.count())
+                .select_from(Flows)
+                .where(Flows.space_id == UUID(space_id))
+            )
+        ).scalar_one()
+
+    expected_status = (
+        PlanStatus.APPROVED.value
+        if legacy_endpoint == "apply"
+        else PlanStatus.PROPOSED.value
+    )
+    assert persisted_plan_status == expected_status
+    assert flow_count == 0

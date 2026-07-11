@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_api_models import (
@@ -16,6 +16,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    BuilderTurnState,
     FlowBuilderEditApproval,
     PlanStatus,
     SessionStatus,
@@ -57,6 +58,18 @@ if TYPE_CHECKING:
     from eneo.flows.application.flow_service import FlowService
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
+
+
+class CreateFromPlanOutcome(NamedTuple):
+    """Result of the atomic approve-and-create command.
+
+    ``replayed`` is True when the plan was already applied and the original
+    outcome was returned without side effects — callers must not emit another
+    creation audit event for a replay.
+    """
+
+    result: ApplyResultResponse
+    replayed: bool
 
 
 def _spec_has_assistant_resource_refs(spec: FlowDraftSpecCore) -> bool:
@@ -162,19 +175,78 @@ class AIBuilderPlanLifecycle:
         self.space_service = space_service
         self.authoring_service = authoring_service or FlowAuthoringCommandService()
 
+    async def _lock_session_then_plan(
+        self, plan_id: UUID
+    ) -> tuple[BuilderPlan, BuilderSession]:
+        """Lock the session row, then the plan row, and return fresh reads.
+
+        Every plan lifecycle transition goes through this so transitions
+        serialize against each other AND against message-turn preflight
+        (which locks the session row). The initial unlocked plan read only
+        resolves the session id; the locked plan re-read is authoritative.
+        """
+        plan_probe = await self._get_plan(plan_id)
+        session = await self.repo.get_session_for_update(
+            session_id=plan_probe.session_id,
+            tenant_id=self.user.tenant_id,
+        )
+        self._require_creator(session)
+        plan = await self.repo.get_plan_for_update(
+            plan_id=plan_id,
+            tenant_id=self.user.tenant_id,
+        )
+        return plan, session
+
+    @staticmethod
+    def _require_actionable_session(
+        *, session: BuilderSession, plan: BuilderPlan
+    ) -> None:
+        """Post-lock invariants shared by every non-replay plan transition.
+
+        Locking only makes a competing command WAIT; these checks make it
+        reject the authoritative state it observes after waiting. Without
+        them a legacy approve/apply could act on a superseded plan or run
+        while a refinement turn is streaming.
+        """
+        if session.status != SessionStatus.AWAITING_APPROVAL:
+            raise AIBuilderBadRequestException(
+                "The session is not awaiting approval.",
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+            )
+        if session.latest_plan_id != plan.id:
+            raise AIBuilderBadRequestException(
+                "The plan is no longer the session's latest proposal.",
+                code=AIBuilderErrorCode.PLAN_SESSION_MISMATCH,
+            )
+        latest_turn = session.latest_turn
+        if latest_turn is not None and latest_turn.state in (
+            BuilderTurnState.OPEN,
+            BuilderTurnState.PROCESSING,
+        ):
+            raise AIBuilderBadRequestException(
+                "Another AI Builder message is already being processed.",
+                code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
+            )
+
     async def approve_plan(self, *, plan_id: UUID) -> BuilderPlan:
-        plan = await self._get_plan(plan_id)
+        plan, session = await self._lock_session_then_plan(plan_id)
+        self._require_actionable_session(session=session, plan=plan)
         self._require_plan_status(
             plan=plan,
             expected_status=PlanStatus.PROPOSED,
             action="approve",
         )
-        await self._require_session_creator(plan.session_id)
-        await self.repo.update_plan_status(
+        transitioned = await self.repo.update_plan_status_if(
             plan_id=plan.id,
             tenant_id=self.user.tenant_id,
+            expected_status=PlanStatus.PROPOSED,
             status=PlanStatus.APPROVED,
         )
+        if not transitioned:
+            raise AIBuilderBadRequestException(
+                "Plan status changed before approval could be recorded.",
+                code=AIBuilderErrorCode.INVALID_PLAN_STATUS,
+            )
         return await self._get_plan(plan.id)
 
     async def revise_plan(
@@ -189,19 +261,13 @@ class AIBuilderPlanLifecycle:
                 code=AIBuilderErrorCode.UNSUPPORTED_REVISION_TYPE,
             )
 
-        plan = await self._get_plan(plan_id)
+        plan, session = await self._lock_session_then_plan(plan_id)
         if plan.status != PlanStatus.PROPOSED:
             raise AIBuilderBadRequestException(
                 "Can only revise proposed plans.",
                 code=AIBuilderErrorCode.PLAN_NOT_PROPOSED,
             )
-
-        session = await self._require_session_creator(plan.session_id)
-        if session.status != SessionStatus.AWAITING_APPROVAL:
-            raise AIBuilderBadRequestException(
-                "Can only revise plans when the session is awaiting approval.",
-                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
-            )
+        self._require_actionable_session(session=session, plan=plan)
 
         revised_content = plan.proposal.content.model_copy(
             update={"description_override_manual": True}
@@ -231,20 +297,107 @@ class AIBuilderPlanLifecycle:
 
         return new_plan
 
+    async def approve_and_apply_create_plan(
+        self, *, plan_id: UUID
+    ) -> CreateFromPlanOutcome:
+        """Approve and materialize a create-mode plan as one user action.
+
+        The whole call runs inside the request transaction, so the approval
+        transition and the flow materialization commit or roll back together —
+        on failure nothing is persisted and the client may truthfully say so.
+        The plan row is read under a FOR UPDATE lock, which serializes
+        concurrent create requests for the same plan: the loser waits, then
+        observes APPLIED and takes the replay branch instead of materializing
+        a duplicate flow. Replaying an already-applied plan returns the
+        original outcome (``replayed=True`` so the caller can skip duplicate
+        audit events). Edit sessions keep the explicit two-step approve/apply
+        lifecycle and are rejected here.
+        """
+        plan, session = await self._lock_session_then_plan(plan_id)
+        if session.target_kind != TargetKind.CREATE:
+            raise AIBuilderBadRequestException(
+                "Approve-and-create is only available for create sessions. "
+                "Edit plans require explicit approve and apply.",
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+            )
+        if plan.status == PlanStatus.APPLIED:
+            replayed = await self._replay_applied_create_result(
+                session=session, plan=plan
+            )
+            return CreateFromPlanOutcome(result=replayed, replayed=True)
+        self._require_actionable_session(session=session, plan=plan)
+        if plan.status == PlanStatus.PROPOSED:
+            transitioned = await self.repo.update_plan_status_if(
+                plan_id=plan.id,
+                tenant_id=self.user.tenant_id,
+                expected_status=PlanStatus.PROPOSED,
+                status=PlanStatus.APPROVED,
+            )
+            if not transitioned:
+                raise AIBuilderBadRequestException(
+                    "Plan status changed before approval could be recorded.",
+                    code=AIBuilderErrorCode.INVALID_PLAN_STATUS,
+                )
+            plan = await self._get_plan(plan.id)
+        self._require_plan_status(
+            plan=plan,
+            expected_status=PlanStatus.APPROVED,
+            action="apply",
+        )
+        result = await self._apply_approved_plan(
+            plan=plan,
+            session=session,
+            expected_revision=None,
+        )
+        return CreateFromPlanOutcome(result=result, replayed=False)
+
+    async def _replay_applied_create_result(
+        self,
+        *,
+        session: BuilderSession,
+        plan: BuilderPlan,
+    ) -> ApplyResultResponse:
+        flow_id = session.flow_id
+        if flow_id is None:
+            raise AIBuilderBadRequestException(
+                "Plan is applied but its session has no flow.",
+                code=AIBuilderErrorCode.INVALID_PLAN_STATUS,
+            )
+        flow = await self.flow_service.get_flow(flow_id)
+        return ApplyResultResponse(
+            flow_id=flow_id,
+            flow_name=flow.name,
+            steps_created=len(plan.spec.steps),
+            steps_updated=0,
+            steps_removed=0,
+        )
+
     async def apply_plan(
         self,
         *,
         plan_id: UUID,
         expected_revision: int | None = None,
     ) -> ApplyResultResponse:
-        plan = await self._get_plan(plan_id)
+        plan, session = await self._lock_session_then_plan(plan_id)
+        self._require_actionable_session(session=session, plan=plan)
         self._require_plan_status(
             plan=plan,
             expected_status=PlanStatus.APPROVED,
             action="apply",
         )
+        return await self._apply_approved_plan(
+            plan=plan,
+            session=session,
+            expected_revision=expected_revision,
+        )
 
-        session = await self._require_session_creator(plan.session_id)
+    async def _apply_approved_plan(
+        self,
+        *,
+        plan: BuilderPlan,
+        session: BuilderSession,
+        expected_revision: int | None,
+    ) -> ApplyResultResponse:
         canonical_expected_revision = _expected_revision_for_apply(
             session=session,
             plan=plan,
@@ -466,13 +619,16 @@ class AIBuilderPlanLifecycle:
             session_id=session_id,
             tenant_id=self.user.tenant_id,
         )
+        self._require_creator(session)
+        return session
+
+    def _require_creator(self, session: BuilderSession) -> None:
         if session.actor_user_id != self.user.id:
             raise AIBuilderUnauthorizedException(
                 "Only the session creator can manage plans.",
                 code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
                 context={"auth_layer": "session_creator"},
             )
-        return session
 
     @staticmethod
     def _require_plan_status(

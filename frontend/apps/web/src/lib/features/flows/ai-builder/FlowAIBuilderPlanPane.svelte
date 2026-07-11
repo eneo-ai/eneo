@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "svelte-sonner";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -43,6 +44,7 @@
   const service = getAIBuilderService();
   const userMode = getFlowUserMode();
   const isPowerUser = $derived($userMode === "power_user");
+  const isCreateMode = $derived(service.session?.target_kind === "create");
   let assumptionsOpen = $state(false);
   const {
     state: { currentSpace }
@@ -79,6 +81,8 @@
       !isPublishedError &&
       !isUnpublishedApplyFailure
   );
+  const createFailed = $derived(isGeneralApplyError && isCreateMode);
+  const createOutcomeUnknown = $derived(createFailed && service.createFailureOutcome === "unknown");
   const applyPrerequisites = $derived(
     getAIBuilderApplyPrerequisites({
       plan: service.currentPlan,
@@ -213,6 +217,19 @@
       // surfaced via service.applyError / service.isConflict
     } finally {
       isApproving = false;
+    }
+  }
+
+  // Create mode: one atomic action — the driver approves and materializes in a
+  // single backend call and owns the interaction lock (service.isCreating).
+  async function handleCreate() {
+    if (service.isCreating || applyBlockedByPrerequisites) return;
+    try {
+      const result = await service.createFlowFromPlan();
+      toast.success(m.ai_builder_created_toast());
+      onapplied?.({ flow_id: result.flow_id, focusStepIndex });
+    } catch {
+      // surfaced via service.applyError / service.createFailureOutcome
     }
   }
 
@@ -473,6 +490,7 @@
                     variant="outline"
                     size="sm"
                     onclick={() => service.revisePlan("keep_current_description")}
+                    disabled={service.isCreating}
                   >
                     {m.ai_builder_description_keep_current()}
                   </Button>
@@ -835,7 +853,41 @@
       </Alert.Root>
     {/if}
 
-    {#if isGeneralApplyError}
+    {#if isGeneralApplyError && isCreateMode}
+      <!-- Atomic creation failure (handoff 3c). The banner only EXPLAINS; the
+           sticky footer owns the single retry action. The "nothing was saved"
+           claim renders only when the driver confirmed it authoritatively; an
+           unknown outcome gets distinct copy that makes no persistence claims
+           (retrying is safe either way — the endpoint replays an applied
+           plan). -->
+      <Alert.Root
+        class="border-warning-default/40 bg-warning-dimmer shrink-0 rounded-none border-x-0 border-b-0"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+          <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
+            {createOutcomeUnknown
+              ? m.ai_builder_create_unknown_title()
+              : m.ai_builder_create_failed_title()}
+          </Alert.Title>
+          <Alert.Description class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
+            {#if createOutcomeUnknown}
+              {m.ai_builder_create_unknown_body()}
+            {:else}
+              {m.ai_builder_create_failed_body()}
+              {m.ai_builder_create_failed_retry_note()}
+            {/if}
+          </Alert.Description>
+          {#if !createOutcomeUnknown}
+            <p class="text-warning-stronger/80 mt-1 text-xs">{m.ai_builder_plan_unchanged()}</p>
+          {/if}
+          <div class="mt-2 flex flex-wrap gap-2">
+            <FlowAIBuilderDiagnosticCopyButton report={applyErrorDiagnosticReport} size="sm" />
+          </div>
+        </div>
+      </Alert.Root>
+    {:else if isGeneralApplyError}
       <Alert.Root
         class="border-warning-default/40 bg-warning-dimmer shrink-0 rounded-none border-x-0 border-b-0"
         role="status"
@@ -865,8 +917,20 @@
       class="plan-actions border-default bg-primary/85 supports-[not(backdrop-filter:blur(0))]:bg-primary relative shrink-0 border-t backdrop-blur-sm"
     >
       <div
-        class="mx-auto flex max-w-3xl flex-col-reverse items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-end md:px-6"
+        class="mx-auto flex max-w-3xl flex-col-reverse items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-center md:px-6"
       >
+        {#if !service.applyResult && (service.isCreating || !createFailed)}
+          <p
+            class="text-secondary mr-auto text-xs max-sm:text-center"
+            role="status"
+            aria-live="polite"
+          >
+            {service.isCreating
+              ? m.ai_builder_creating_status()
+              : m.ai_builder_nothing_created_yet()}
+          </p>
+        {/if}
+
         {#if !service.applyResult && service.canApprove}
           <Button
             variant="ghost"
@@ -880,7 +944,11 @@
                   plan_id: plan.plan_id
                 }
               })}
-            disabled={isApproving || isApplying || isUnpublishingAndApplying}
+            disabled={service.isCreating ||
+              createOutcomeUnknown ||
+              isApproving ||
+              isApplying ||
+              isUnpublishingAndApplying}
           >
             {m.ai_builder_plan_suggest_change()}
           </Button>
@@ -892,42 +960,62 @@
             size="sm"
             class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleModify}
-            disabled={isApproving || isApplying || isUnpublishingAndApplying}
+            disabled={service.isCreating ||
+              createOutcomeUnknown ||
+              isApproving ||
+              isApplying ||
+              isUnpublishingAndApplying}
           >
             {m.ai_builder_modify()}
           </Button>
         {/if}
 
-        {#if service.canApprove}
-          <Button
-            variant="default"
-            size="sm"
-            class="max-sm:min-h-11 max-sm:w-full"
-            onclick={handleApprove}
-            disabled={isApproving || isApplying || isUnpublishingAndApplying}
-          >
-            {isApproving
-              ? m.ai_builder_approving()
-              : service.session?.target_kind === "create"
-                ? m.ai_builder_approve_create()
-                : m.ai_builder_approve()}
-          </Button>
-        {/if}
+        {#if isCreateMode}
+          <!-- One creation action (handoff §4): approve+create is a single
+               atomic backend call; there is no separate apply step. -->
+          {#if !service.applyResult && (service.canApprove || service.canApply || service.isCreating || createFailed)}
+            <Button
+              variant="default"
+              size="sm"
+              class="max-sm:min-h-11 max-sm:w-full"
+              onclick={handleCreate}
+              disabled={service.isCreating || applyBlockedByPrerequisites}
+            >
+              {service.isCreating
+                ? m.ai_builder_creating()
+                : createFailed
+                  ? m.ai_builder_turn_retry()
+                  : m.ai_builder_approve_create()}
+            </Button>
+          {/if}
+        {:else}
+          {#if service.canApprove}
+            <Button
+              variant="default"
+              size="sm"
+              class="max-sm:min-h-11 max-sm:w-full"
+              onclick={handleApprove}
+              disabled={isApproving || isApplying || isUnpublishingAndApplying}
+            >
+              {isApproving ? m.ai_builder_approving() : m.ai_builder_approve()}
+            </Button>
+          {/if}
 
-        {#if service.canApply}
-          <Button
-            variant="default"
-            size="sm"
-            class="max-sm:min-h-11 max-sm:w-full"
-            onclick={handleApply}
-            disabled={isApproving ||
-              isApplying ||
-              isUnpublishingAndApplying ||
-              isPublishedError ||
-              applyBlockedByPrerequisites}
-          >
-            {isApplying ? m.ai_builder_applying() : m.ai_builder_apply()}
-          </Button>
+          {#if service.canApply}
+            <Button
+              variant="default"
+              size="sm"
+              class="max-sm:min-h-11 max-sm:w-full"
+              onclick={handleApply}
+              disabled={isApproving ||
+                isApplying ||
+                isUnpublishingAndApplying ||
+                isPublishedError ||
+                applyBlockedByPrerequisites}
+            >
+              {isApplying ? m.ai_builder_applying() : m.ai_builder_apply()}
+            </Button>
+          {/if}
         {/if}
       </div>
     </div>

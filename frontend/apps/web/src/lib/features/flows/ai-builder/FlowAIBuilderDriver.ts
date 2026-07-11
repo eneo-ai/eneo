@@ -54,9 +54,25 @@ const FLOW_AI_BUILDER_ROUTES = {
   plan: "/api/v1/flows/ai-builder/plans/{plan_id}",
   planApply: "/api/v1/flows/ai-builder/plans/{plan_id}/apply",
   planApprove: "/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+  planCreate: "/api/v1/flows/ai-builder/plans/{plan_id}/create",
   planRevise: "/api/v1/flows/ai-builder/plans/{plan_id}/revise",
   flowUnpublish: "/api/v1/flows/{id}/unpublish/"
 } as const;
+
+/** A session-mutating plan operation that must lock out all other inputs
+ *  while it runs. Owned by the session/plan it was started for so a
+ *  replacement session can never inherit (or clear) another one's lock. */
+export interface PendingPlanOperation {
+  kind: "creating";
+  sessionId: string;
+  planId: string;
+}
+
+/** Whether a failed create was authoritatively confirmed as not applied.
+ *  The truthful "nothing was saved" banner may only render for
+ *  "confirmed_not_applied"; an "unknown" outcome (refresh also failed)
+ *  must not claim anything about persistence. */
+export type CreateFailureOutcome = "confirmed_not_applied" | "unknown";
 
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
@@ -73,6 +89,8 @@ export interface FlowAIBuilderState {
   selectedModelId: string | null;
   modelsLoaded: boolean;
   draftSessions: AIBuilderDraftSession[];
+  pendingOperation: PendingPlanOperation | null;
+  createFailureOutcome: CreateFailureOutcome | null;
 }
 
 export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
@@ -90,7 +108,9 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     availableModels: [],
     selectedModelId: null,
     modelsLoaded: false,
-    draftSessions: []
+    draftSessions: [],
+    pendingOperation: null,
+    createFailureOutcome: null
   };
 }
 
@@ -296,6 +316,7 @@ export class FlowAIBuilderDriver {
   }
 
   async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
+    if (this.#state.pendingOperation) return;
     ++this.#initGeneration;
     this.abort();
     this.#resetFlowState();
@@ -344,6 +365,7 @@ export class FlowAIBuilderDriver {
   }
 
   async startFreshSession(targetKind: TargetKind): Promise<void> {
+    if (this.#state.pendingOperation) return;
     await this.createSession(targetKind, { forceNew: true });
   }
 
@@ -377,6 +399,7 @@ export class FlowAIBuilderDriver {
   }
 
   async resumeSession(sessionId: string): Promise<void> {
+    if (this.#state.pendingOperation) return;
     ++this.#initGeneration;
     this.abort();
     this.#resetFlowState();
@@ -416,6 +439,7 @@ export class FlowAIBuilderDriver {
   }
 
   async discardSession(sessionId: string): Promise<void> {
+    if (this.#state.pendingOperation) return;
     await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionCancel, {
       method: "post",
       params: { path: { session_id: sessionId } }
@@ -490,7 +514,14 @@ export class FlowAIBuilderDriver {
     fileIds?: string[],
     editContext?: AIBuilderPlanEditContext | null
   ): Promise<void> {
-    if (!this.#state.session || this.#state.isStreaming || !this.canStartNewTurn) return;
+    if (
+      !this.#state.session ||
+      this.#state.isStreaming ||
+      this.#state.pendingOperation !== null ||
+      !this.canStartNewTurn
+    ) {
+      return;
+    }
 
     const userMsg: ChatMessage = {
       role: "user",
@@ -536,10 +567,12 @@ export class FlowAIBuilderDriver {
   }
 
   async retryLatestTurn(): Promise<void> {
+    if (this.#state.pendingOperation) return;
     await this.#recoverLatestTurn("failed_before_provider", false);
   }
 
   async acknowledgeAndRetryLatestTurn(): Promise<void> {
+    if (this.#state.pendingOperation) return;
     await this.#recoverLatestTurn("provider_outcome_unknown", true);
   }
 
@@ -745,6 +778,7 @@ export class FlowAIBuilderDriver {
   }
 
   async approvePlan(): Promise<void> {
+    if (this.#state.pendingOperation) return;
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) return;
@@ -772,10 +806,107 @@ export class FlowAIBuilderDriver {
     }
   }
 
+  /** Approve and create in one atomic backend call (create mode only).
+   *
+   *  The endpoint replays an already-applied plan instead of failing, so a
+   *  committed-but-lost response is recovered here: refresh the session, and
+   *  if it reports the plan applied, one follow-up call returns the original
+   *  result. The "nothing was saved" failure banner may only render when
+   *  `createFailureOutcome` is "confirmed_not_applied".
+   */
+  async createFlowFromPlan(): Promise<ApplyResult> {
+    const plan = this.#state.currentPlan;
+    const owner = this.#currentSessionOwner();
+    if (!plan || !owner) throw new Error("No plan to create from");
+    if (this.#state.pendingOperation) {
+      throw new Error("A plan operation is already in progress");
+    }
+
+    this.#state.pendingOperation = {
+      kind: "creating",
+      sessionId: owner.sessionId,
+      planId: plan.plan_id
+    };
+    this.#state.error = null;
+    this.#state.applyError = null;
+    this.#state.createFailureOutcome = null;
+    this.#state.isConflict = false;
+    this.#notify();
+
+    try {
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planCreate, {
+        method: "post",
+        params: { path: { plan_id: plan.plan_id } }
+      })) as ApplyResult;
+      return await this.#adoptCreateResult(owner, plan, result);
+    } catch (initialError: unknown) {
+      if (!this.#ownsPlan(owner, plan.plan_id)) throw initialError;
+
+      const refreshed = await this.#refreshSession(owner);
+      const appliedAfterRefresh =
+        this.#state.session?.status === "applied" && this.#state.session.flow_id !== null;
+      if (refreshed && appliedAfterRefresh) {
+        try {
+          const replayed = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planCreate, {
+            method: "post",
+            params: { path: { plan_id: plan.plan_id } }
+          })) as ApplyResult;
+          return await this.#adoptCreateResult(owner, plan, replayed);
+        } catch {
+          // Fall through: report the original failure with an unknown outcome.
+        }
+      }
+
+      const parsed = parseAIBuilderError({
+        transport: "apply",
+        payload: initialError,
+        fallbackMessage: "Failed to create the flow"
+      });
+      this.#state.applyError = parsed;
+      this.#state.createFailureOutcome =
+        refreshed && !appliedAfterRefresh ? "confirmed_not_applied" : "unknown";
+      this.#notify();
+      throw initialError;
+    } finally {
+      const pending = this.#state.pendingOperation;
+      if (pending?.planId === plan.plan_id && pending.sessionId === owner.sessionId) {
+        this.#state.pendingOperation = null;
+        this.#notify();
+      }
+    }
+  }
+
+  async #adoptCreateResult(
+    owner: SessionOperationOwner,
+    plan: ProposedPlan,
+    result: ApplyResult
+  ): Promise<ApplyResult> {
+    if (!this.#ownsPlan(owner, plan.plan_id)) {
+      throw supersededSessionOperation();
+    }
+    this.#flowId = result.flow_id;
+    this.#state.applyResult = result;
+    this.#state.applyError = null;
+    this.#state.createFailureOutcome = null;
+    this.#state.currentPlan = { ...plan, status: "applied" };
+    if (this.#state.session) {
+      this.#state.session = {
+        ...this.#state.session,
+        flow_id: result.flow_id
+      };
+    }
+    this.#notify();
+    await this.#refreshSession(owner);
+    return result;
+  }
+
   async applyPlan(expectedRevision?: number): Promise<ApplyResult> {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to apply");
+    if (this.#state.pendingOperation) {
+      throw new Error("A plan operation is already in progress");
+    }
 
     this.#state.error = null;
     this.#state.applyError = null;
@@ -877,6 +1008,7 @@ export class FlowAIBuilderDriver {
   }
 
   async removeAttachment(fileId: string): Promise<void> {
+    if (this.#state.pendingOperation) return;
     const owner = this.#currentSessionOwner();
     if (!owner) return;
 
@@ -916,6 +1048,7 @@ export class FlowAIBuilderDriver {
   }
 
   async revisePlan(type: PlanRevisionType): Promise<void> {
+    if (this.#state.pendingOperation) return;
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) return;
@@ -946,10 +1079,12 @@ export class FlowAIBuilderDriver {
 
   dismissApplyError(): void {
     this.#state.applyError = null;
+    this.#state.createFailureOutcome = null;
     this.#notify();
   }
 
   async confirmRequirements(): Promise<void> {
+    if (this.#state.pendingOperation) return;
     const latestSummary = this.#getLatestRequirementsSummary();
     if (!latestSummary) return;
 
@@ -966,6 +1101,7 @@ export class FlowAIBuilderDriver {
   }
 
   async changeRequirements(feedback?: string): Promise<void> {
+    if (this.#state.pendingOperation) return;
     const message = feedback?.trim()
       ? m.ai_builder_requirements_change_message({ feedback: feedback.trim() })
       : m.ai_builder_requirements_change_message_empty();

@@ -52,10 +52,14 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     build_usage_event,
 )
+from eneo.flows.ai_builder.ai_builder_plan_lifecycle import CreateFromPlanOutcome
 from eneo.flows.ai_builder.ai_builder_router import (
+    AIBuilderEnvelopedError,
     AIBuilderPublicErrorRoute,
     _authorize_ai_builder_request,
+    ai_builder_enveloped_error_handler,
     apply_plan,
+    approve_and_apply_create_plan,
     approve_plan,
     cancel_session,
     create_session,
@@ -104,6 +108,9 @@ def test_ai_builder_openapi_errors_reference_public_error_contract() -> None:
 
 def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> None:
     app = FastAPI()
+    app.add_exception_handler(
+        AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
+    )
     test_router = APIRouter(route_class=AIBuilderPublicErrorRoute)
 
     @test_router.get("/busy")
@@ -244,6 +251,9 @@ def test_ai_builder_route_class_logs_raw_public_exception_fallback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     app = FastAPI()
+    app.add_exception_handler(
+        AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
+    )
     test_router = APIRouter(route_class=AIBuilderPublicErrorRoute)
 
     @test_router.get("/raw")
@@ -401,6 +411,9 @@ def _make_container(
 
 def _make_apply_plan_client(container: MagicMock) -> TestClient:
     app = FastAPI()
+    app.add_exception_handler(
+        AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
+    )
     app.include_router(ai_builder_router)
 
     async def override_container():
@@ -2442,3 +2455,65 @@ class TestRevisePlanEndpoint:
                 body=RevisePlanRequest(type="keep_current_description"),
                 container=container,
             )
+
+
+class TestCreatePlanEndpoint:
+    @pytest.mark.anyio
+    async def test_fresh_creation_logs_one_audit_event(self):
+        container = _make_container()
+        plan = _make_plan_domain(status=PlanStatus.PROPOSED)
+        session = _make_session_domain(target_kind=TargetKind.CREATE)
+        result = ApplyResultResponse(
+            flow_id=uuid4(),
+            flow_name="New Flow",
+            steps_created=2,
+            steps_updated=0,
+            steps_removed=0,
+        )
+
+        service = container.ai_builder_service.return_value
+        service.repo = AsyncMock()
+        service.repo.get_plan.return_value = plan
+        service.get_session.return_value = session
+        service.approve_and_apply_create_plan.return_value = CreateFromPlanOutcome(
+            result=result, replayed=False
+        )
+
+        response = await approve_and_apply_create_plan(
+            request=MagicMock(),
+            plan_id=plan.id,
+            container=container,
+        )
+
+        assert response.flow_id == result.flow_id
+        container.audit_service.return_value.log_async.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_replay_skips_creation_audit_event(self):
+        container = _make_container()
+        plan = _make_plan_domain(status=PlanStatus.APPLIED)
+        session = _make_session_domain(target_kind=TargetKind.CREATE)
+        result = ApplyResultResponse(
+            flow_id=uuid4(),
+            flow_name="New Flow",
+            steps_created=2,
+            steps_updated=0,
+            steps_removed=0,
+        )
+
+        service = container.ai_builder_service.return_value
+        service.repo = AsyncMock()
+        service.repo.get_plan.return_value = plan
+        service.get_session.return_value = session
+        service.approve_and_apply_create_plan.return_value = CreateFromPlanOutcome(
+            result=result, replayed=True
+        )
+
+        response = await approve_and_apply_create_plan(
+            request=MagicMock(),
+            plan_id=plan.id,
+            container=container,
+        )
+
+        assert response.flow_id == result.flow_id
+        container.audit_service.return_value.log_async.assert_not_awaited()

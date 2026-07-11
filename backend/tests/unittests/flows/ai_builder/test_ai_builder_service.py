@@ -1795,6 +1795,7 @@ class TestApprovePlan:
         session = _make_session(
             tenant_id=user.tenant_id,
             actor_user_id=user.id,
+            status=SessionStatus.AWAITING_APPROVAL,
         )
         plan = _make_plan(
             session_id=session.id,
@@ -1808,15 +1809,20 @@ class TestApprovePlan:
             tenant_id=user.tenant_id,
         )
         repo.get_plan.side_effect = [plan, approved_plan]
+        repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
+        repo.update_plan_status_if.return_value = True
 
         service = _make_service(user=user, repo=repo)
         result = await service.approve_plan(plan_id=plan.id)
 
         assert result.status == PlanStatus.APPROVED
-        repo.update_plan_status.assert_called_once_with(
+        repo.update_plan_status_if.assert_called_once_with(
             plan_id=plan.id,
             tenant_id=user.tenant_id,
+            expected_status=PlanStatus.PROPOSED,
             status=PlanStatus.APPROVED,
         )
 
@@ -1824,11 +1830,20 @@ class TestApprovePlan:
     async def test_approve_non_proposed_plan_raises(self):
         user = _make_user()
         repo = AsyncMock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
         plan = _make_plan(
+            session_id=session.id,
             status=PlanStatus.APPLIED,
             tenant_id=user.tenant_id,
         )
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
 
         service = _make_service(user=user, repo=repo)
         with pytest.raises(BadRequestException, match="Cannot approve plan"):
@@ -1838,11 +1853,20 @@ class TestApprovePlan:
     async def test_approve_already_approved_plan_raises(self):
         user = _make_user()
         repo = AsyncMock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
         plan = _make_plan(
+            session_id=session.id,
             status=PlanStatus.APPROVED,
             tenant_id=user.tenant_id,
         )
+        session.latest_plan_id = plan.id
         repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
 
         service = _make_service(user=user, repo=repo)
         with pytest.raises(BadRequestException, match="Cannot approve plan"):

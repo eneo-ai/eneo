@@ -10,6 +10,8 @@
     active?: boolean;
     onconfirm?: () => void;
     onchange?: () => void;
+    /** Interaction lock projected from the service (e.g. while creating). */
+    disabled?: boolean;
   }
 
   let {
@@ -18,7 +20,8 @@
     confirmed = false,
     active = true,
     onconfirm,
-    onchange
+    onchange,
+    disabled = false
   }: Props = $props();
 
   // Manual reveal after confirmation; before confirmation the summary stays expanded.
@@ -190,10 +193,10 @@
 
       {#if !confirmed && active && onconfirm && onchange}
         <div class="flex flex-wrap justify-end gap-2 pt-1">
-          <Button variant="outline" size="sm" onclick={onchange}>
+          <Button variant="outline" size="sm" onclick={onchange} {disabled}>
             {m.ai_builder_requirements_change()}
           </Button>
-          <Button variant="default" size="sm" onclick={onconfirm}>
+          <Button variant="default" size="sm" onclick={onconfirm} {disabled}>
             {m.ai_builder_requirements_confirm()}
           </Button>
         </div>

@@ -384,6 +384,42 @@ class AIBuilderRepository:
                 database_now=cast(datetime, database_now),
             )
 
+    async def get_session_for_update(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> BuilderSession:
+        """Read a session with a row lock held for the rest of the transaction.
+
+        Plan lifecycle transitions lock session-then-plan so they serialize
+        against each other AND against message-turn preflight (which locks the
+        session row). Keep that lock order everywhere to stay deadlock-free.
+        """
+        async with self._transaction():
+            stmt = (
+                select(
+                    BuilderSessions,
+                    sa.func.clock_timestamp(),
+                )
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+                .with_for_update(of=BuilderSessions)
+            )
+            result = (await self.session.execute(stmt)).one_or_none()
+            if result is None:
+                raise AIBuilderNotFoundException(
+                    "Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
+            row, database_now = result
+            return _session_from_row(
+                row,
+                database_now=cast(datetime, database_now),
+            )
+
     async def list_session_file_ids(
         self,
         *,
@@ -1219,6 +1255,36 @@ class AIBuilderRepository:
                 )
             return _plan_from_row(row)
 
+    async def get_plan_for_update(
+        self,
+        *,
+        plan_id: UUID,
+        tenant_id: UUID,
+    ) -> BuilderPlan:
+        """Read a plan with a row lock held for the rest of the transaction.
+
+        Serializes concurrent lifecycle transitions on the same plan: a second
+        transaction blocks here until the first commits, then observes the
+        committed status (e.g. APPLIED) instead of racing past the same
+        status check and materializing a duplicate flow.
+        """
+        async with self._transaction():
+            stmt = (
+                select(BuilderPlans)
+                .where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+            row = (await self.session.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                raise AIBuilderNotFoundException(
+                    "Builder plan not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
+            return _plan_from_row(row)
+
     async def list_session_plans(
         self,
         *,
@@ -1236,6 +1302,36 @@ class AIBuilderRepository:
             )
             rows = (await self.session.execute(stmt)).scalars().all()
             return [_plan_from_row(row) for row in rows]
+
+    async def update_plan_status_if(
+        self,
+        *,
+        plan_id: UUID,
+        tenant_id: UUID,
+        expected_status: PlanStatus,
+        status: PlanStatus,
+    ) -> bool:
+        """Transition the plan status only from the expected current status.
+
+        Returns False when the row was in a different status — a concurrent
+        transition won the race and the caller must re-read instead of
+        clobbering a terminal state.
+        """
+        async with self._transaction():
+            stmt = (
+                update(BuilderPlans)
+                .where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                    BuilderPlans.status == expected_status.value,
+                )
+                .values(
+                    status=status.value,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            result = cast(sa.CursorResult[Any], await self.session.execute(stmt))
+            return (result.rowcount or 0) > 0
 
     async def update_plan_status(
         self,

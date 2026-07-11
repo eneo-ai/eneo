@@ -66,7 +66,10 @@ from eneo.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceI
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
-from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
+from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
+    AIBuilderPlanLifecycle,
+    CreateFromPlanOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -574,6 +577,13 @@ class AIBuilderService:
 
     async def approve_plan(self, *, plan_id: UUID) -> BuilderPlan:
         return await self._build_plan_lifecycle().approve_plan(plan_id=plan_id)
+
+    async def approve_and_apply_create_plan(
+        self, *, plan_id: UUID
+    ) -> CreateFromPlanOutcome:
+        return await self._build_plan_lifecycle().approve_and_apply_create_plan(
+            plan_id=plan_id
+        )
 
     async def apply_plan(
         self,

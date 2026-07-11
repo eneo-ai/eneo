@@ -159,6 +159,27 @@ def _public_error_code_from_exception(
     return coerce_ai_builder_error_code(getattr(error, "code", None), default=default)
 
 
+class AIBuilderEnvelopedError(Exception):
+    """Carries a prepared AI Builder error response past the dependency stack.
+
+    The route adapter must RAISE (not return) on domain errors: only an
+    exception reaches FastAPI's dependency teardown, where the request
+    transaction rolls back. The app-level handler registered in server setup
+    then returns the prepared envelope unchanged.
+    """
+
+    def __init__(self, response: Response) -> None:
+        super().__init__("AI Builder request failed")
+        self.response = response
+
+
+def ai_builder_enveloped_error_handler(_request: Request, exc: Exception) -> Response:
+    """App-level handler for AIBuilderEnvelopedError — register in server setup."""
+    if not isinstance(exc, AIBuilderEnvelopedError):
+        raise exc
+    return exc.response
+
+
 class AIBuilderPublicErrorRoute(APIRoute):
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         original_route_handler = super().get_route_handler()
@@ -168,45 +189,51 @@ class AIBuilderPublicErrorRoute(APIRoute):
                 return await original_route_handler(request)
             except BadRequestException as error:
                 request_id = extract_request_id(request)
-                return _ai_builder_json_error_response(
-                    request=request,
-                    message=str(error)
-                    or "The AI Builder request could not be processed.",
-                    code=_public_error_code_from_exception(
-                        error,
-                        default=AIBuilderErrorCode.BAD_REQUEST,
-                        request_id=request_id,
-                        surface="route_bad_request",
-                    ),
-                    exception_context=error.context,
-                )
+                raise AIBuilderEnvelopedError(
+                    _ai_builder_json_error_response(
+                        request=request,
+                        message=str(error)
+                        or "The AI Builder request could not be processed.",
+                        code=_public_error_code_from_exception(
+                            error,
+                            default=AIBuilderErrorCode.BAD_REQUEST,
+                            request_id=request_id,
+                            surface="route_bad_request",
+                        ),
+                        exception_context=error.context,
+                    )
+                ) from error
             except UnauthorizedException as error:
                 request_id = extract_request_id(request)
-                return _ai_builder_json_error_response(
-                    request=request,
-                    message=str(error)
-                    or "You do not have permission to use this AI Builder resource.",
-                    code=_public_error_code_from_exception(
-                        error,
-                        default=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
-                        request_id=request_id,
-                        surface="route_unauthorized",
-                    ),
-                    exception_context=error.context,
-                )
+                raise AIBuilderEnvelopedError(
+                    _ai_builder_json_error_response(
+                        request=request,
+                        message=str(error)
+                        or "You do not have permission to use this AI Builder resource.",
+                        code=_public_error_code_from_exception(
+                            error,
+                            default=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
+                            request_id=request_id,
+                            surface="route_unauthorized",
+                        ),
+                        exception_context=error.context,
+                    )
+                ) from error
             except NotFoundException as error:
                 request_id = extract_request_id(request)
-                return _ai_builder_json_error_response(
-                    request=request,
-                    message=str(error) or "AI Builder resource not found.",
-                    code=_public_error_code_from_exception(
-                        error,
-                        default=AIBuilderErrorCode.NOT_FOUND,
-                        request_id=request_id,
-                        surface="route_not_found",
-                    ),
-                    exception_context=error.context,
-                )
+                raise AIBuilderEnvelopedError(
+                    _ai_builder_json_error_response(
+                        request=request,
+                        message=str(error) or "AI Builder resource not found.",
+                        code=_public_error_code_from_exception(
+                            error,
+                            default=AIBuilderErrorCode.NOT_FOUND,
+                            request_id=request_id,
+                            surface="route_not_found",
+                        ),
+                        exception_context=error.context,
+                    )
+                ) from error
 
         return ai_builder_route_handler
 
@@ -1540,6 +1567,97 @@ async def apply_plan(
             },
         ),
     )
+
+    return result
+
+
+@router.post(
+    "/plans/{plan_id}/create",
+    response_model=ApplyResultResponse,
+    operation_id="approve_and_apply_ai_builder_create_plan",
+    summary="Approve And Create Flow From AI Builder Plan",
+    description=(
+        "Approve a create-mode plan and materialize the flow in one atomic request. "
+        "The approval and the flow creation commit or roll back together. Retrying "
+        "an already-applied plan returns the original result instead of failing, so "
+        "a client that lost the response can recover safely. Edit-mode plans are "
+        "rejected; they keep the explicit approve and apply steps."
+    ),
+    responses={
+        200: {"description": "Flow created from the plan."},
+        400: _ai_builder_error_response(
+            description=(
+                "The plan cannot be created in one step. Representative machine-readable "
+                "codes include: invalid_session_transition (edit-mode plan), "
+                "invalid_plan_status, transcription_model_required."
+            ),
+            message="Approve-and-create is only available for create sessions.",
+            code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for the plan's session.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder plan not found.",
+            message="AI Builder plan not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        ),
+    },
+)
+async def approve_and_apply_create_plan(
+    request: Request,
+    plan_id: Annotated[
+        UUID,
+        Path(
+            description=(
+                "Identifier of the proposed or approved create-mode AI Builder plan "
+                "to approve and materialize."
+            )
+        ),
+    ],
+    container: ContainerWithUserDep,
+):
+    service = _get_ai_builder_service(container)
+
+    plan: BuilderPlan = await service.get_plan(plan_id)
+    session: BuilderSession = await service.get_session(plan.session_id)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_PLAN_APPLY,
+        space_id=session.space_id,
+        session=session,
+    )
+
+    outcome = await service.approve_and_apply_create_plan(plan_id=plan_id)
+    result = outcome.result
+
+    # Audit — a replay returns the original outcome without side effects, so
+    # it must not emit a second creation event.
+    if not outcome.replayed:
+        user = container.user()
+        audit_service = _get_audit_service(container)
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.AI_BUILDER_FLOW_APPLIED,
+            entity_type=EntityType.FLOW,
+            entity_id=result.flow_id,
+            description=f"Approved and created flow from AI builder plan: "
+            f"{result.steps_created} steps created",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=SimpleNamespace(id=result.flow_id, name=result.flow_name),
+                extra={
+                    "plan_id": str(plan_id),
+                    "combined_approve_and_apply": True,
+                    "steps_created": result.steps_created,
+                },
+            ),
+        )
 
     return result
 

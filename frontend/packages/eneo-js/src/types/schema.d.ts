@@ -5109,6 +5109,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/create": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve And Create Flow From AI Builder Plan
+     * @description Approve a create-mode plan and materialize the flow in one atomic request. The approval and the flow creation commit or roll back together. Retrying an already-applied plan returns the original result instead of failing, so a client that lost the response can recover safely. Edit-mode plans are rejected; they keep the explicit approve and apply steps.
+     */
+    post: operations["approve_and_apply_ai_builder_create_plan"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/ai-builder/plans/{plan_id}/revise": {
     parameters: {
       query?: never;
@@ -46261,6 +46281,119 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE",
            *         "error_code": "stale_revision",
            *         "error_category": "conflict",
+           *         "error_phase": "router"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  approve_and_apply_ai_builder_create_plan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the proposed or approved create-mode AI Builder plan to approve and materialize. */
+        plan_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Flow created from the plan. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplyResultResponse"];
+        };
+      };
+      /** @description The plan cannot be created in one step. Representative machine-readable codes include: invalid_session_transition (edit-mode plan), invalid_plan_status, transcription_model_required. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "invalid_session_transition",
+           *       "category": "conflict",
+           *       "message": "Approve-and-create is only available for create sessions.",
+           *       "phase": "router",
+           *       "eneo_error_code": 9007,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "invalid_session_transition",
+           *         "error_category": "conflict",
+           *         "error_phase": "router"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "eneo_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "not_found",
+           *       "category": "not_found",
+           *       "message": "AI Builder plan not found.",
+           *       "phase": "router",
+           *       "eneo_error_code": 9000,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
            *         "error_phase": "router"
            *       }
            *     }

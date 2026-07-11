@@ -2496,3 +2496,233 @@ describe("FlowAIBuilderDriver", () => {
     });
   });
 });
+
+describe("FlowAIBuilderDriver.createFlowFromPlan", () => {
+  const CREATE_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}/create";
+
+  function seedCreateSession(driver: ReturnType<typeof makeDriver>["driver"]) {
+    driver.seedState({
+      session: makeSession({
+        status: "awaiting_approval",
+        target_kind: "create",
+        flow_id: null,
+        latest_plan_id: "plan-1"
+      }),
+      currentPlan: makePlan({ status: "proposed" })
+    });
+  }
+
+  it("creates the flow with a single atomic call and no approve/apply requests", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        flow_id: "flow-1",
+        flow_name: "Flow",
+        steps_created: 1,
+        steps_updated: 0,
+        steps_removed: 0
+      })
+      .mockResolvedValueOnce(
+        makeSession({
+          status: "applied",
+          target_kind: "create",
+          flow_id: "flow-1",
+          latest_plan_id: "plan-1"
+        })
+      )
+      .mockResolvedValueOnce(makePlan({ status: "applied" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedCreateSession(driver);
+
+    const result = await driver.createFlowFromPlan();
+
+    expect(result.flow_id).toBe("flow-1");
+    expect(driver.state.applyResult?.flow_id).toBe("flow-1");
+    expect(driver.state.pendingOperation).toBeNull();
+    expect(driver.state.createFailureOutcome).toBeNull();
+    const calledRoutes = fetch.mock.calls.map((call) => call[0]);
+    expect(calledRoutes.filter((route) => route === CREATE_ROUTE)).toHaveLength(1);
+    expect(calledRoutes).not.toContain("/api/v1/flows/ai-builder/plans/{plan_id}/approve");
+    expect(calledRoutes).not.toContain("/api/v1/flows/ai-builder/plans/{plan_id}/apply");
+  });
+
+  it("recovers a committed-but-lost response by replaying the applied plan", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(
+        makeSession({
+          status: "applied",
+          target_kind: "create",
+          flow_id: "flow-1",
+          latest_plan_id: "plan-1"
+        })
+      )
+      .mockResolvedValueOnce(makePlan({ status: "applied" }))
+      .mockResolvedValueOnce({
+        flow_id: "flow-1",
+        flow_name: "Flow",
+        steps_created: 1,
+        steps_updated: 0,
+        steps_removed: 0
+      })
+      .mockResolvedValueOnce(
+        makeSession({
+          status: "applied",
+          target_kind: "create",
+          flow_id: "flow-1",
+          latest_plan_id: "plan-1"
+        })
+      )
+      .mockResolvedValueOnce(makePlan({ status: "applied" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedCreateSession(driver);
+
+    const result = await driver.createFlowFromPlan();
+
+    expect(result.flow_id).toBe("flow-1");
+    expect(driver.state.applyResult?.flow_id).toBe("flow-1");
+    expect(driver.state.applyError).toBeNull();
+    expect(driver.state.createFailureOutcome).toBeNull();
+    expect(driver.state.pendingOperation).toBeNull();
+    const createCalls = fetch.mock.calls.filter((call) => call[0] === CREATE_ROUTE);
+    expect(createCalls).toHaveLength(2);
+  });
+
+  it("confirms nothing was applied before allowing the truthful failure banner", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce({
+        status: 400,
+        response: { code: "architecture_materialization_failed", message: "boom" }
+      })
+      .mockResolvedValueOnce(
+        makeSession({
+          status: "awaiting_approval",
+          target_kind: "create",
+          flow_id: null,
+          latest_plan_id: "plan-1"
+        })
+      )
+      .mockResolvedValueOnce(makePlan({ status: "proposed" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedCreateSession(driver);
+
+    await expect(driver.createFlowFromPlan()).rejects.toBeTruthy();
+
+    expect(driver.state.applyError).not.toBeNull();
+    expect(driver.state.createFailureOutcome).toBe("confirmed_not_applied");
+    expect(driver.state.pendingOperation).toBeNull();
+    expect(driver.state.applyResult).toBeNull();
+    const createCalls = fetch.mock.calls.filter((call) => call[0] === CREATE_ROUTE);
+    expect(createCalls).toHaveLength(1);
+  });
+
+  it("keeps recovery possible when refresh proves applied but the replay call fails", async () => {
+    const appliedSession = makeSession({
+      status: "applied",
+      target_kind: "create",
+      flow_id: "flow-1",
+      latest_plan_id: "plan-1"
+    });
+    const fetch = vi
+      .fn()
+      // first attempt: response lost
+      .mockRejectedValueOnce(new Error("response lost"))
+      // authoritative refresh: the flow exists
+      .mockResolvedValueOnce(appliedSession)
+      .mockResolvedValueOnce(makePlan({ status: "applied" }))
+      // automatic replay also fails
+      .mockRejectedValueOnce(new Error("still flaky"))
+      // manual retry: replay returns the original outcome
+      .mockResolvedValueOnce({
+        flow_id: "flow-1",
+        flow_name: "Flow",
+        steps_created: 1,
+        steps_updated: 0,
+        steps_removed: 0
+      })
+      .mockResolvedValueOnce(appliedSession)
+      .mockResolvedValueOnce(makePlan({ status: "applied" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedCreateSession(driver);
+
+    await expect(driver.createFlowFromPlan()).rejects.toBeTruthy();
+    expect(driver.state.createFailureOutcome).toBe("unknown");
+    expect(driver.state.pendingOperation).toBeNull();
+
+    // The user must still have a working retry: the same command reconciles
+    // through the idempotent replay endpoint.
+    const result = await driver.createFlowFromPlan();
+    expect(result.flow_id).toBe("flow-1");
+    expect(driver.state.applyResult?.flow_id).toBe("flow-1");
+    expect(driver.state.createFailureOutcome).toBeNull();
+    expect(driver.state.applyError).toBeNull();
+  });
+
+  it("reports an unknown outcome when the authoritative refresh also fails", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockRejectedValueOnce(new Error("still down"));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedCreateSession(driver);
+
+    await expect(driver.createFlowFromPlan()).rejects.toBeTruthy();
+
+    expect(driver.state.createFailureOutcome).toBe("unknown");
+    expect(driver.state.pendingOperation).toBeNull();
+  });
+
+  it("locks every session-mutating command while creation is pending", async () => {
+    let resolveCreate: (value: unknown) => void = () => {};
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === CREATE_ROUTE) {
+        return new Promise((resolve) => {
+          resolveCreate = resolve;
+        });
+      }
+      return Promise.resolve(
+        makeSession({
+          status: "applied",
+          target_kind: "create",
+          flow_id: "flow-1",
+          latest_plan_id: null
+        })
+      );
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    seedCreateSession(driver);
+
+    const creating = driver.createFlowFromPlan();
+    expect(driver.state.pendingOperation?.kind).toBe("creating");
+
+    await driver.sendMessage("should be ignored");
+    await driver.confirmRequirements();
+    await driver.changeRequirements();
+    await driver.removeAttachment("file-1");
+    await driver.startFreshSession("create");
+    await driver.resumeSession("session-2");
+    await driver.discardSession("session-1");
+    await driver.createSession("create");
+    await driver.revisePlan("keep_current_description");
+    await driver.retryLatestTurn();
+    await driver.acknowledgeAndRetryLatestTurn();
+    await driver.approvePlan();
+    await expect(driver.applyPlan()).rejects.toThrow(/already in progress/);
+    await expect(driver.createFlowFromPlan()).rejects.toThrow(/already in progress/);
+    // The pending creation is the only request that ever reached the transport.
+    expect(fetch.mock.calls.filter((call) => call[0] === CREATE_ROUTE)).toHaveLength(1);
+    expect(fetch.mock.calls).toHaveLength(1);
+
+    resolveCreate({
+      flow_id: "flow-1",
+      flow_name: "Flow",
+      steps_created: 1,
+      steps_updated: 0,
+      steps_removed: 0
+    });
+    await creating;
+    expect(driver.state.pendingOperation).toBeNull();
+  });
+});

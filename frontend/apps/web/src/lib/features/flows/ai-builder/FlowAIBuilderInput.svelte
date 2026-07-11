@@ -363,6 +363,7 @@
                     class="model-pill"
                     aria-label={modelPillAccessibleLabel}
                     title={m.ai_builder_model_usage_hint()}
+                    disabled={service.isCreating}
                   >
                     <span class="model-pill-dot" aria-hidden="true"></span>
                     <span class="model-pill-name">{selectedOrDefaultModelName}</span>

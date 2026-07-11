@@ -1,4 +1,7 @@
 <script lang="ts">
+  /* eslint-disable eneo/no-raw-color -- the style block derives every colour
+     from theme tokens via relative oklch() syntax, which the rule cannot see
+     through */
   import { Markdown } from "@eneo/ui";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import FlowAIBuilderRequirementsSummary from "./FlowAIBuilderRequirementsSummary.svelte";
@@ -22,6 +25,8 @@
     onQuestionAnswer?: (answer: StructuredQuestionAnswerPayload) => void;
     onRequirementsConfirm?: () => void;
     onRequirementsChange?: () => void;
+    /** Locks question/requirements controls while a plan operation runs. */
+    interactionDisabled?: boolean;
   }
 
   let {
@@ -37,7 +42,8 @@
     requirementsActive = true,
     onQuestionAnswer = undefined,
     onRequirementsConfirm = undefined,
-    onRequirementsChange = undefined
+    onRequirementsChange = undefined,
+    interactionDisabled = false
   }: Props = $props();
 </script>
 
@@ -72,6 +78,7 @@
         <FlowAIBuilderQuestion
           {question}
           answered={questionAnswered}
+          disabled={interactionDisabled}
           onanswer={(payload) => onQuestionAnswer?.(payload)}
         />
       {/if}
@@ -81,6 +88,7 @@
           userRequest={requirementsUserRequest}
           confirmed={requirementsConfirmed}
           active={requirementsActive}
+          disabled={interactionDisabled}
           onconfirm={requirementsActive ? onRequirementsConfirm : undefined}
           onchange={requirementsActive ? onRequirementsChange : undefined}
         />
