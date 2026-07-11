@@ -410,11 +410,7 @@ class FlowTemplateAssets(BasePublic):
         nullable=False,
         index=True,
     )
-    file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
+    file_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     name: Mapped[str] = mapped_column(nullable=False)
     checksum: Mapped[str] = mapped_column(nullable=False)
     mimetype: Mapped[Optional[str]] = mapped_column(nullable=True)
@@ -445,6 +441,12 @@ class FlowTemplateAssets(BasePublic):
             ["flows.id", "flows.tenant_id"],
             ondelete="CASCADE",
             name="fk_flow_template_assets_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_template_assets_file_tenant",
         ),
         CheckConstraint(
             "status IN ('ready','needs_action','read_only','unavailable')",
@@ -539,10 +541,7 @@ class FlowResourceBindings(BasePublic):
 class FlowRuntimeUploadedFiles(BaseCrossReference):
     """Stores reusable runtime upload files. Writer: FlowRuntimeUploadRepository. Purpose: bind pre-run uploads to a Flow, step, tenant, and principal."""
 
-    file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
+    file_id: Mapped[UUID] = mapped_column(primary_key=True)
     flow_id: Mapped[UUID] = mapped_column(
         nullable=False,
         index=True,
@@ -583,6 +582,12 @@ class FlowRuntimeUploadedFiles(BaseCrossReference):
             ["flows.id", "flows.tenant_id"],
             ondelete="CASCADE",
             name="fk_flow_runtime_uploaded_files_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_runtime_uploaded_files_file_tenant",
         ),
         CheckConstraint(
             "owner_type IN ('user','service_key')",
@@ -1684,11 +1689,7 @@ class FlowRunStepResultFiles(BasePublic):
     step_id: Mapped[UUID] = mapped_column(nullable=False)
     step_order: Mapped[int] = mapped_column(nullable=False)
     attempt_no: Mapped[int] = mapped_column(nullable=False)
-    file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
+    file_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     ordinal: Mapped[int] = mapped_column(nullable=False)
     source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
 
@@ -1708,6 +1709,12 @@ class FlowRunStepResultFiles(BasePublic):
             ["flow_runs.id", "flow_runs.flow_id"],
             ondelete="CASCADE",
             name="fk_flow_run_step_result_files_run_flow",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_step_result_files_file_tenant",
         ),
         ForeignKeyConstraint(
             ["flow_run_id", "step_id", "attempt_no"],
@@ -2254,10 +2261,7 @@ class BuilderSessionFiles(BaseCrossReference):
         ForeignKey("builder_sessions.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
+    file_id: Mapped[UUID] = mapped_column(primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"),
         nullable=False,
@@ -2271,6 +2275,13 @@ class BuilderSessionFiles(BaseCrossReference):
             ondelete="CASCADE",
             name="fk_builder_session_files_session_tenant",
         ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_session_files_file_tenant",
+        ),
+        Index("ix_builder_session_files_file_id", "file_id"),
     )
 
 

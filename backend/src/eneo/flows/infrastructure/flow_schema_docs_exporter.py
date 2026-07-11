@@ -618,13 +618,13 @@ def _local_column_set_is_unique(
 ) -> bool:
     local_column_names = frozenset(column_names)
     primary_key_names = frozenset(column.name for column in table.primary_key.columns)
-    if primary_key_names and primary_key_names == local_column_names:
+    if primary_key_names and primary_key_names <= local_column_names:
         return True
 
     for constraint in table.constraints:
         if isinstance(constraint, sa.UniqueConstraint) and (
             frozenset(column.name for column in constraint.columns)
-            == local_column_names
+            <= local_column_names
         ):
             return True
 
@@ -635,7 +635,7 @@ def _local_column_set_is_unique(
         index_column_names = _index_column_names(index)
         if index_column_names is None:
             continue
-        if frozenset(index_column_names) == local_column_names:
+        if frozenset(index_column_names) <= local_column_names:
             return True
 
     return False

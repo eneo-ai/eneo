@@ -55,9 +55,25 @@ def test_step_input_files_enforce_positive_attempt_projection() -> None:
 
 
 def test_step_input_files_require_runtime_upload_binding() -> None:
-    assert "fk_flow_run_step_input_files_runtime_upload" in _foreign_key_names(
-        FlowRunStepInputFiles
+    constraint = next(
+        candidate
+        for candidate in FlowRunStepInputFiles.__table__.foreign_key_constraints
+        if candidate.name == "fk_flow_run_step_input_files_runtime_upload"
     )
+    assert tuple(column.name for column in constraint.columns) == (
+        "file_id",
+        "flow_id",
+        "tenant_id",
+    )
+    assert tuple(
+        (element.column.table.name, element.column.name)
+        for element in constraint.elements
+    ) == (
+        ("flow_runtime_uploaded_files", "file_id"),
+        ("flow_runtime_uploaded_files", "flow_id"),
+        ("flow_runtime_uploaded_files", "tenant_id"),
+    )
+    assert constraint.ondelete == "RESTRICT"
 
 
 def test_runtime_uploaded_files_expose_composite_fk_target() -> None:

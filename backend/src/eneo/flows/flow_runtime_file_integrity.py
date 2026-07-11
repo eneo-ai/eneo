@@ -10,7 +10,7 @@ RUNTIME_FILE_ATTACHMENT_CONSTRAINT_NAMES = frozenset(
         # Delete-time attachment detection intentionally includes the binding FK:
         # deleting the file cascades to the runtime upload row before this FK rejects it.
         RUNTIME_UPLOAD_BINDING_CONSTRAINT,
-        "fk_flow_run_step_result_files_file_id_files",
+        "fk_flow_run_step_result_files_file_tenant",
     }
 )
 

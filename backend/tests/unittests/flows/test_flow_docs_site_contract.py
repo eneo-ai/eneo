@@ -1328,8 +1328,28 @@ def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() ->
     )
     assert 'flow_steps }o--|| assistants : "assistant_id ondelete=RESTRICT"' in page
     assert (
-        'flows }o--o| flow_versions : "id, published_version ondelete=NO ACTION"'
+        'flows |o--o| flow_versions : "id, published_version ondelete=NO ACTION"'
         in page
+    )
+    assert (
+        'flow_template_assets }o--|| files : "file_id, tenant_id ondelete=RESTRICT"'
+        in page
+    )
+    assert (
+        "flow_runtime_uploaded_files |o--|| files : "
+        '"file_id, tenant_id ondelete=CASCADE"' in page
+    )
+    assert (
+        "flow_run_step_result_files }o--|| files : "
+        '"file_id, tenant_id ondelete=RESTRICT"' in page
+    )
+    assert (
+        "builder_session_files }o--|| files : "
+        '"file_id, tenant_id ondelete=CASCADE"' in page
+    )
+    assert (
+        "builder_sessions |o--o| builder_plans : "
+        '"latest_plan_id, id ondelete=NO ACTION"' in page
     )
 
 
@@ -1435,6 +1455,16 @@ def test_flow_schema_docs_relationship_labels_derive_fk_semantics() -> None:
             ondelete="SET NULL",
         ),
     )
+    subset_unique_child = sa.Table(
+        "subset_unique_child",
+        metadata,
+        sa.Column("parent_id", sa.Integer, primary_key=True),
+        sa.Column("tenant_id", sa.Integer, nullable=False),
+        sa.ForeignKeyConstraint(
+            ["parent_id", "tenant_id"],
+            [composite_parent.c.id, composite_parent.c.tenant_id],
+        ),
+    )
 
     required_relationship = _flow_schema_relationship_from_constraint(
         next(iter(required_child.foreign_key_constraints))
@@ -1462,6 +1492,11 @@ def test_flow_schema_docs_relationship_labels_derive_fk_semantics() -> None:
     assert composite_relationship.source_cardinality == "|o"
     assert composite_relationship.target_cardinality == "||"
     assert composite_relationship.label == "parent_id, tenant_id ondelete=SET NULL"
+
+    subset_unique_relationship = _flow_schema_relationship_from_constraint(
+        next(iter(subset_unique_child.foreign_key_constraints))
+    )
+    assert subset_unique_relationship.source_cardinality == "|o"
 
 
 def test_flow_docs_nextra_card_renderers_validate_link_scope() -> None:

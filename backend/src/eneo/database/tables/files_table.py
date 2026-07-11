@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -56,6 +56,7 @@ class Files(BasePublic):
             ")",
             name="ck_files_owner_identity",
         ),
+        UniqueConstraint("id", "tenant_id", name="uq_files_id_tenant_id"),
         Index(
             "ix_files_service_owner_created_at",
             "tenant_id",

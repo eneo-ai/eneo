@@ -35,7 +35,7 @@ from eneo.main.exceptions import (
 RUNTIME_ATTACHMENT_CONSTRAINTS = (
     "fk_flow_run_step_input_files_file_id_files",
     "fk_flow_run_step_input_files_runtime_upload",
-    "fk_flow_run_step_result_files_file_id_files",
+    "fk_flow_run_step_result_files_file_tenant",
 )
 
 
